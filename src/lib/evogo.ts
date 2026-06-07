@@ -70,15 +70,24 @@ export async function sendEvogoMedia({
   // We need to strip everything up to and including the comma
   const rawBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
 
-  // EvoGo expects {number, url (base64 or URL), caption, filename, type, delay}
-  const body = {
+  // EvoGo expects {number, url (base64 or URL), caption, type, delay}
+  // Passing 'filename' for an image often forces WhatsApp to send it as a document attachment.
+  const body: any = {
     number,
     url: rawBase64,
+    media: rawBase64, // fallback for older Evolution API
     caption,
-    filename: mediatype === 'audio' ? 'audio.ogg' : mediatype === 'image' ? 'image.jpg' : 'file',
     type: mediatype,
+    mediatype: mediatype, // fallback
+    mimetype: mediatype === 'audio' ? 'audio/ogg' : mediatype === 'image' ? 'image/jpeg' : mediatype === 'video' ? 'video/mp4' : 'application/pdf',
     delay,
   };
+
+  // Only pass filename for documents or audio
+  if (mediatype === 'document' || mediatype === 'audio') {
+    body.filename = mediatype === 'audio' ? 'audio.ogg' : 'document.pdf';
+    body.fileName = body.filename; // fallback
+  }
 
   const response = await fetch(url, {
     method: 'POST',
