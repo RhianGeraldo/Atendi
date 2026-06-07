@@ -5,11 +5,16 @@ import fs from 'fs';
 export async function handleEvogoWebhook(request: Request): Promise<Response> {
   try {
     const body = await request.json();
-    // Process in background so EvoGo gets 200 immediately (avoids timeout drops)
-    processEvogoWebhookBody(body).catch((err) => { console.error('Webhook background error:', err); fs.appendFileSync('webhook_logs.txt', new Date().toISOString() + ' BG ERROR: ' + String(err.stack || err) + '\n'); });
+    
+    // In serverless environments like Vercel, we MUST await the processing
+    // otherwise the function is killed the moment we return the Response.
+    // The previous timeout issue was largely due to blocking fs/console logging
+    // which has been removed.
+    await processEvogoWebhookBody(body);
+    
     return new Response('OK', { status: 200 });
   } catch (err) {
-    console.error('Webhook parse error:', err);
+    console.error('Webhook parse/process error:', err);
     return new Response('OK', { status: 200 });
   }
 }
