@@ -17,4 +17,7 @@ export default defineConfig({
       allowedHosts: true,
     },
   },
+  nitro: {
+    preset: 'vercel',
+  },
 });
