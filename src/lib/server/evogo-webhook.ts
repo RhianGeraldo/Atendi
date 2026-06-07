@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
-import fs from 'fs';
+
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
 export async function handleEvogoWebhook(request: Request): Promise<Response> {
@@ -25,7 +25,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
     const logBody = JSON.parse(JSON.stringify(body));
     if (logBody?.data?.Message?.base64) logBody.data.Message.base64 = `[base64 ~${Math.round(logBody.data.Message.base64.length / 1024)}kB omitted]`;
     if (logBody?.data?.base64) logBody.data.base64 = `[base64 ~${Math.round(logBody.data.base64.length / 1024)}kB omitted]`;
-    fs.appendFileSync('webhook_logs.txt', new Date().toISOString() + ' WEBHOOK IN: ' + JSON.stringify(logBody) + '\n');
+    console.log(new Date().toISOString() + ' WEBHOOK IN: ' + JSON.stringify(logBody) + '\n');
     console.log('EvoGo Webhook received:', JSON.stringify(logBody, null, 2));
 
     // Handle message.upsert (Baileys/Evolution API format) or Message (WhatsMeow/EvoGo format)
@@ -231,7 +231,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
          if (fallbackUnit) {
             unit_id = fallbackUnit.id;
          } else {
-            fs.appendFileSync('webhook_logs.txt', 'Instance has no unit_id: ' + instanceName + '\n');
+            console.log('Instance has no unit_id: ' + instanceName + '\n');
             console.error('Instance has no unit_id linked:', instanceName);
             return;
          }
@@ -367,7 +367,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
     return;
   } catch (err) {
-    fs.appendFileSync('webhook_logs.txt', new Date().toISOString() + ' ERROR: ' + String(err) + '\n');
+    console.log(new Date().toISOString() + ' ERROR: ' + String(err) + '\n');
     console.error('Webhook error:', err);
     // Return 200 to acknowledge receipt and prevent endless retries from EvoGo
     return;
