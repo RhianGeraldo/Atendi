@@ -14,10 +14,15 @@ export const Route = createFileRoute("/auth")({
 });
 
 function AuthPage() {
-  const { signIn, session, loading } = useAuth();
+  const { signIn, signUp, session, loading } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@demo.com");
-  const [password, setPassword] = useState("demo1234");
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const companyId = searchParams.get("company");
+  
+  const [isRegister, setIsRegister] = useState(!!companyId);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState(isRegister ? "" : "admin@demo.com");
+  const [password, setPassword] = useState(isRegister ? "" : "demo1234");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -27,10 +32,18 @@ function AuthPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    const { error } = await signIn(email, password);
-    setSubmitting(false);
-    if (error) toast.error("Falha no login", { description: error });
-    else toast.success("Bem-vindo!");
+    
+    if (isRegister) {
+      const { error } = await signUp(name, email, password, companyId);
+      setSubmitting(false);
+      if (error) toast.error("Falha no cadastro", { description: error });
+      else toast.success("Conta criada! Você já pode entrar.");
+    } else {
+      const { error } = await signIn(email, password);
+      setSubmitting(false);
+      if (error) toast.error("Falha no login", { description: error });
+      else toast.success("Bem-vindo!");
+    }
   }
 
   return (
@@ -61,12 +74,28 @@ function AuthPage() {
       <div className="flex items-center justify-center bg-background p-6">
         <Card className="w-full max-w-sm border-border p-8 shadow-sm">
           <div className="mb-6">
-            <h1 className="text-2xl font-semibold">Entrar na plataforma</h1>
+            <h1 className="text-2xl font-semibold">
+              {isRegister ? "Criar conta" : "Entrar na plataforma"}
+            </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Use suas credenciais para acessar.
+              {isRegister 
+                ? (companyId ? "Você foi convidado para participar de uma empresa." : "Crie sua conta para começar.")
+                : "Use suas credenciais para acessar."}
             </p>
           </div>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {isRegister && (
+              <div className="space-y-2">
+                <Label htmlFor="name">Nome completo</Label>
+                <Input
+                  id="name"
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="email">E-mail</Label>
               <Input
@@ -83,21 +112,35 @@ function AuthPage() {
               <Input
                 id="password"
                 type="password"
-                autoComplete="current-password"
+                autoComplete={isRegister ? "new-password" : "current-password"}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Entrando..." : "Entrar"}
+              {submitting ? "Aguarde..." : (isRegister ? "Cadastrar" : "Entrar")}
             </Button>
           </form>
-          <div className="mt-6 rounded-md bg-muted p-3 text-xs text-muted-foreground">
-            <strong className="text-foreground">Conta de demonstração:</strong>
-            <br />
-            admin@demo.com / demo1234
+
+          <div className="mt-6 text-center text-sm text-muted-foreground">
+            {isRegister ? "Já possui uma conta?" : "Ainda não tem uma conta?"}
+            <button
+              type="button"
+              onClick={() => setIsRegister(!isRegister)}
+              className="ml-1 font-medium text-primary hover:underline"
+            >
+              {isRegister ? "Faça login" : "Cadastre-se"}
+            </button>
           </div>
+
+          {!isRegister && (
+            <div className="mt-6 rounded-md bg-muted p-3 text-xs text-muted-foreground">
+              <strong className="text-foreground">Conta de demonstração:</strong>
+              <br />
+              admin@demo.com / demo1234
+            </div>
+          )}
         </Card>
       </div>
     </div>

@@ -23,9 +23,6 @@ export function AppHeader() {
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card px-6">
       <div className="flex items-center gap-3">
         <h1 className="text-base font-semibold">{title}</h1>
-        <Badge variant="secondary" className="font-normal">
-          Unidade São Paulo
-        </Badge>
       </div>
       <div className="flex items-center gap-3">
         <div className="relative hidden md:block">

@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag } from "lucide-react";
+import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
+import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction } from "@/lib/api/chat.functions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -17,6 +18,12 @@ import { StatusBadge } from "@/components/common/status-badge";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import { formatRelative, initials, formatPhone } from "@/lib/format";
+import { useUnit } from "@/lib/unit-context";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import EmojiPicker from "emoji-picker-react";
 
 export const Route = createFileRoute("/_authenticated/conversations")({
   component: ConversationsPage,
@@ -31,6 +38,8 @@ interface ConvRow {
   last_message_at: string;
   started_at: string;
   tags: string[];
+  unread_count?: number;
+  last_message_preview?: string | null;
   contact: { id: string; name: string; phone: string | null; email: string | null; tags: string[] };
   department: { name: string } | null;
 }
@@ -40,17 +49,24 @@ function ConversationsPage() {
   const [tab, setTab] = useState<Status>("waiting");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { selectedUnitId } = useUnit();
 
   const { data: conversations } = useQuery({
-    queryKey: ["conversations", tab],
+    queryKey: ["conversations", tab, selectedUnitId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("conversations")
         .select(
-          "id, channel, status, last_message_at, started_at, tags, contact:contacts(id,name,phone,email,tags), department:departments(name)"
+          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, contact:contacts(id,name,phone,email,tags), department:departments(name)"
         )
-        .eq("status", tab)
-        .order("last_message_at", { ascending: false });
+        .eq("status", tab);
+
+      if (selectedUnitId) {
+        query = query.eq("unit_id", selectedUnitId);
+      }
+      // Se for nulo (Sede/Empresa Mãe), não filtra por unit_id. O RLS garante que verá todas da empresa.
+
+      const { data, error } = await query.order("last_message_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as unknown as ConvRow[];
     },
@@ -63,7 +79,7 @@ function ConversationsPage() {
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => {
         qc.invalidateQueries({ queryKey: ["conversations"] });
       })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, () => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => {
         qc.invalidateQueries({ queryKey: ["messages"] });
         qc.invalidateQueries({ queryKey: ["conversations"] });
       })
@@ -83,18 +99,24 @@ function ConversationsPage() {
   const selected = filtered.find((c) => c.id === selectedId) ?? null;
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       {/* List */}
       <aside className="flex w-[360px] shrink-0 flex-col border-r border-border bg-card">
         <div className="border-b border-border p-3">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Buscar nome ou número"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-9 pl-8"
-            />
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar nome ou número"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-9 pl-8"
+              />
+            </div>
+            <NewConversationDialog onCreated={(id) => {
+              setTab("active");
+              setSelectedId(id);
+            }} />
           </div>
           <Tabs value={tab} onValueChange={(v) => setTab(v as Status)} className="mt-3">
             <TabsList className="grid w-full grid-cols-3">
@@ -129,6 +151,124 @@ function ConversationsPage() {
   );
 }
 
+function NewConversationDialog({ onCreated }: { onCreated: (id: string) => void }) {
+  const qc = useQueryClient();
+  const { profile } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [phone, setPhone] = useState("");
+  const [text, setText] = useState("");
+  const [instanceName, setInstanceName] = useState("");
+
+  const { data: instances } = useQuery({
+    queryKey: ["whatsapp_instances"],
+    queryFn: async () => {
+      if (!profile?.company_id) return [];
+      const { data, error } = await supabase
+        .from("whatsapp_instances")
+        .select("instance_name")
+        .eq("company_id", profile.company_id);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!profile?.company_id,
+  });
+
+  const send = useMutation({
+    mutationFn: async () => {
+      if (!profile?.company_id) throw new Error("Usuário sem empresa");
+      const res = await sendProactiveMessageAction({
+        data: {
+          phone,
+          text,
+          instanceName,
+          companyId: profile.company_id,
+        }
+      });
+      return res;
+    },
+    onSuccess: (res) => {
+      if (res.conversationId) {
+        onCreated(res.conversationId);
+      }
+      setOpen(false);
+      setPhone("");
+      setText("");
+      setInstanceName("");
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      toast.success("Mensagem enviada com sucesso!");
+    },
+    onError: (e) => {
+      toast.error("Erro ao enviar mensagem", { description: (e as Error).message });
+    }
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="icon" variant="outline" className="h-9 w-9 shrink-0">
+          <MessageSquarePlus className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nova Conversa</DialogTitle>
+          <DialogDescription>
+            Inicie um atendimento enviando uma mensagem ativa para o cliente.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Instância (Remetente)</Label>
+            <Select value={instanceName} onValueChange={setInstanceName}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione a instância" />
+              </SelectTrigger>
+              <SelectContent>
+                {instances?.map((inst) => (
+                  <SelectItem key={inst.instance_name} value={inst.instance_name}>
+                    {inst.instance_name}
+                  </SelectItem>
+                ))}
+                {!instances?.length && (
+                  <SelectItem value="none" disabled>Nenhuma instância encontrada</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Número do Cliente</Label>
+            <Input 
+              placeholder="Ex: 5511999999999" 
+              value={phone} 
+              onChange={e => setPhone(e.target.value)} 
+            />
+            <p className="text-[10px] text-muted-foreground">Inclua o DDI (55) e o DDD.</p>
+          </div>
+          <div className="space-y-2">
+            <Label>Mensagem</Label>
+            <Textarea 
+              placeholder="Digite a primeira mensagem..." 
+              value={text} 
+              onChange={e => setText(e.target.value)} 
+              rows={3}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+          <Button 
+            onClick={() => send.mutate()} 
+            disabled={!phone || !text || !instanceName || send.isPending}
+          >
+            {send.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+            Enviar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ConversationItem({
   conv,
   selected,
@@ -154,12 +294,17 @@ function ConversationItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <ChannelIcon channel={conv.channel} className="h-4 w-4" />
-          <span className="truncate text-sm font-medium">{conv.contact?.name}</span>
-          <span className="ml-auto whitespace-nowrap text-[11px] text-muted-foreground">
+          <span className={cn("truncate text-sm font-medium", conv.unread_count && conv.unread_count > 0 && "font-bold text-foreground")}>{conv.contact?.name}</span>
+          <span className={cn("ml-auto whitespace-nowrap text-[11px]", conv.unread_count && conv.unread_count > 0 ? "font-bold text-success" : "text-muted-foreground")}>
             {formatRelative(conv.last_message_at)}
           </span>
         </div>
-        <div className="mt-1 flex items-center gap-1.5">
+        {conv.last_message_preview && (
+          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+            {conv.last_message_preview}
+          </div>
+        )}
+        <div className="mt-1.5 flex items-center gap-1.5">
           {conv.department?.name && (
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
               {conv.department.name}
@@ -170,6 +315,11 @@ function ConversationItem({
               {t}
             </Badge>
           ))}
+          {conv.unread_count && conv.unread_count > 0 ? (
+            <Badge className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-success px-1.5 py-0 text-[10px] font-bold hover:bg-success">
+              {conv.unread_count}
+            </Badge>
+          ) : null}
         </div>
       </div>
     </button>
@@ -196,21 +346,33 @@ interface MessageRow {
   sender_type: "agent" | "contact" | "system";
   content: string | null;
   media_type: "text" | "image" | "audio" | "video" | "document";
+  media_url?: string | null;
   created_at: string;
+  quoted_content?: string | null;
+  is_edited?: boolean;
+  is_deleted?: boolean;
+  reactions?: Record<string, number>;
+  isOptimistic?: boolean;
 }
 
 function ChatPanel({ conv }: { conv: ConvRow }) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [text, setText] = useState("");
+  const [selectedFile, setSelectedFile] = useState<{ file: File; base64: string; type: string } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const { data: messages } = useQuery({
     queryKey: ["messages", conv.id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("messages")
-        .select("id, conversation_id, sender_type, content, media_type, created_at")
+        .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions")
         .eq("conversation_id", conv.id)
         .order("created_at", { ascending: true });
       if (error) throw error;
@@ -220,31 +382,167 @@ function ChatPanel({ conv }: { conv: ConvRow }) {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages?.length, conv.id]);
+    
+    // Reset unread count when chat is opened
+    if (conv.id && conv.unread_count && conv.unread_count > 0) {
+      supabase.rpc('reset_unread_count', { conv_id: conv.id }).then(() => {
+        qc.invalidateQueries({ queryKey: ["conversations"] });
+      });
+    }
+  }, [messages?.length, conv.id, conv.unread_count, qc]);
 
   const send = useMutation({
-    mutationFn: async (content: string) => {
-      const now = new Date().toISOString();
-      const { error: msgErr } = await supabase.from("messages").insert({
+    mutationFn: async (payload: { content: string; mediaType?: "text"|"image"|"video"|"audio"|"document"; mediaBase64?: string }) => {
+      await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64 } });
+    },
+    onMutate: async (payload) => {
+      await qc.cancelQueries({ queryKey: ["messages", conv.id] });
+      const previousMessages = qc.getQueryData(["messages", conv.id]);
+      
+      const optimisticMsg: MessageRow = {
+        id: crypto.randomUUID(),
         conversation_id: conv.id,
         sender_type: "agent",
-        sender_id: user?.id,
-        content,
-        media_type: "text",
-      });
-      if (msgErr) throw msgErr;
-      await supabase
-        .from("conversations")
-        .update({ last_message_at: now, status: conv.status === "waiting" ? "active" : conv.status, assigned_agent_id: user?.id })
-        .eq("id", conv.id);
-    },
-    onSuccess: () => {
+        content: payload.content,
+        media_type: payload.mediaType || "text",
+        media_url: payload.mediaBase64 || null,
+        created_at: new Date().toISOString(),
+        isOptimistic: true
+      };
+
+      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
       setText("");
+      setSelectedFile(null);
+      
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+      }, 50);
+
+      return { previousMessages, content: payload.content };
+    },
+    onError: (e, variables, context) => {
+      if (context?.previousMessages) {
+        qc.setQueryData(["messages", conv.id], context.previousMessages);
+      }
+      setText(context?.content || "");
+      toast.error("Erro ao enviar", { description: (e as Error).message });
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["messages", conv.id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
-    onError: (e) => toast.error("Erro ao enviar", { description: (e as Error).message }),
   });
+
+  const react = useMutation({
+    mutationFn: async ({ messageId, emoji }: { messageId: string, emoji: string }) => {
+      await reactToMessageAction({ data: { conversationId: conv.id, messageId, emoji } });
+    },
+    onMutate: async ({ messageId, emoji }) => {
+      await qc.cancelQueries({ queryKey: ["messages", conv.id] });
+      const previousMessages = qc.getQueryData(["messages", conv.id]);
+      
+      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
+        if (!old) return old;
+        return old.map(m => m.id === messageId ? { ...m, reactions: emoji ? { [emoji]: 1 } : {} } : m);
+      });
+      return { previousMessages };
+    },
+    onError: (e, v, context) => {
+      if (context?.previousMessages) qc.setQueryData(["messages", conv.id], context.previousMessages);
+      toast.error("Erro ao reagir", { description: (e as Error).message });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["messages", conv.id] });
+    }
+  });
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      let type = "document";
+      if (file.type.startsWith("image/")) type = "image";
+      else if (file.type.startsWith("video/")) type = "video";
+      else if (file.type.startsWith("audio/")) type = "audio";
+      
+      setSelectedFile({ file, base64, type });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = ""; // reset
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64data = reader.result as string;
+          send.mutate({ content: "", mediaType: "audio", mediaBase64: base64data });
+        };
+        reader.readAsDataURL(audioBlob);
+        
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      toast.error("Erro ao acessar microfone", { description: String(err) });
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    }
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      // prevent onstop from sending
+      mediaRecorderRef.current.onstop = null;
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+      setIsRecording(false);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    }
+  };
+
+  const handleSend = () => {
+    if (selectedFile) {
+      send.mutate({ content: text.trim(), mediaType: selectedFile.type as any, mediaBase64: selectedFile.base64 });
+    } else if (text.trim()) {
+      send.mutate({ content: text.trim() });
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   const resolve = useMutation({
     mutationFn: async () => {
@@ -299,38 +597,107 @@ function ChatPanel({ conv }: { conv: ConvRow }) {
           ref={scrollRef}
           className="flex-1 space-y-3 overflow-y-auto bg-muted/30 px-6 py-4"
         >
-          {messages?.map((m) => <MessageBubble key={m.id} m={m} />)}
+          {messages?.map((m) => (
+            <MessageBubble 
+              key={m.id} 
+              m={m} 
+              onReact={(emoji) => react.mutate({ messageId: m.id, emoji })} 
+            />
+          ))}
         </div>
 
         {/* Input */}
-        <div className="border-t border-border bg-card p-3">
+        <div className="border-t border-border bg-card p-3 flex flex-col gap-2">
+          {selectedFile && (
+            <div className="flex items-center gap-3 p-2 border border-border rounded-md bg-muted/50 w-fit relative pr-8">
+              <button 
+                onClick={() => setSelectedFile(null)} 
+                className="absolute top-1 right-1 p-0.5 rounded-full bg-background border border-border hover:bg-accent text-muted-foreground"
+              >
+                <X className="h-3 w-3" />
+              </button>
+              {selectedFile.type === 'image' ? (
+                <img src={selectedFile.base64} alt="preview" className="h-12 w-12 object-cover rounded-md" />
+              ) : (
+                <div className="h-12 w-12 bg-muted rounded-md flex items-center justify-center">
+                  <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                </div>
+              )}
+              <div className="text-xs truncate max-w-[150px]">
+                {selectedFile.file.name}
+              </div>
+            </div>
+          )}
+          
           <div className="flex items-end gap-2">
-            <button className="rounded p-2 text-muted-foreground hover:bg-accent">
-              <Paperclip className="h-4 w-4" />
-            </button>
-            <button className="rounded p-2 text-muted-foreground hover:bg-accent">
-              <Smile className="h-4 w-4" />
-            </button>
-            <Textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (text.trim()) send.mutate(text.trim());
-                }
-              }}
-              placeholder="Digite uma mensagem..."
-              rows={1}
-              className="min-h-[40px] flex-1 resize-none"
-            />
-            <Button
-              size="icon"
-              onClick={() => text.trim() && send.mutate(text.trim())}
-              disabled={!text.trim() || send.isPending}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+            {!isRecording ? (
+              <>
+                <input type="file" id="file-upload" hidden onChange={handleFileChange} />
+                <label htmlFor="file-upload" className="rounded p-2 text-muted-foreground hover:bg-accent cursor-pointer">
+                  <Paperclip className="h-4 w-4" />
+                </label>
+                
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button className="rounded p-2 text-muted-foreground hover:bg-accent">
+                      <Smile className="h-4 w-4" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" align="start" className="p-0 border-none w-auto shadow-xl">
+                    <EmojiPicker onEmojiClick={(e) => setText(prev => prev + e.emoji)} />
+                  </PopoverContent>
+                </Popover>
+                
+                <Textarea
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Digite uma mensagem..."
+                  rows={1}
+                  className="min-h-[40px] flex-1 resize-none"
+                />
+                
+                {(text.trim() || selectedFile) ? (
+                  <Button
+                    size="icon"
+                    onClick={handleSend}
+                    disabled={send.isPending}
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                ) : (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={startRecording}
+                  >
+                    <Mic className="h-4 w-4" />
+                  </Button>
+                )}
+              </>
+            ) : (
+              <div className="flex items-center justify-between flex-1 bg-destructive/10 text-destructive px-4 py-2 rounded-md border border-destructive/20 h-[40px]">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-destructive animate-pulse"></span>
+                  <span className="text-sm font-medium">{formatTime(recordingTime)}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="ghost" className="h-7 px-2 hover:bg-destructive/20 hover:text-destructive text-destructive/80" onClick={cancelRecording}>
+                    Cancelar
+                  </Button>
+                  <Button size="sm" className="h-7 px-3 bg-destructive hover:bg-destructive/90 text-white" onClick={stopRecording}>
+                    <Send className="h-3 w-3 mr-1" />
+                    Enviar
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -398,27 +765,110 @@ function Field({
   );
 }
 
-function MessageBubble({ m }: { m: MessageRow }) {
+const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+function MessageBubble({ m, onReact }: { m: MessageRow, onReact?: (emoji: string) => void }) {
   const mine = m.sender_type === "agent";
   return (
-    <div className={cn("flex", mine ? "justify-end" : "justify-start")}>
+    <div className={cn("flex relative", mine ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[70%] rounded-2xl px-3.5 py-2 text-sm shadow-sm",
+          "max-w-[70%] rounded-2xl px-3.5 py-2 text-sm shadow-sm relative group",
           mine
             ? "rounded-br-sm bg-primary text-primary-foreground"
             : "rounded-bl-sm bg-card text-foreground border border-border",
+          m.is_deleted && "opacity-60",
+          m.isOptimistic && "opacity-70"
         )}
       >
-        {m.content}
+        {onReact && !m.isOptimistic && !m.is_deleted && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button className={cn(
+                "absolute top-1 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-background border border-border shadow-sm text-muted-foreground hover:text-foreground z-10",
+                mine ? "-left-10" : "-right-10"
+              )}>
+                <SmilePlus className="h-4 w-4" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" className="w-auto p-2 flex gap-1 rounded-full shadow-lg border-border">
+              {QUICK_EMOJIS.map(e => (
+                <button 
+                  key={e} 
+                  onClick={() => onReact(e)} 
+                  className="hover:bg-accent rounded-full p-2 text-xl transition-transform hover:scale-125"
+                >
+                  {e}
+                </button>
+              ))}
+            </PopoverContent>
+          </Popover>
+        )}
+
+        {m.quoted_content && !m.is_deleted && (
+          <div className="mb-2 rounded bg-black/10 dark:bg-white/10 p-2 text-xs border-l-4 opacity-90 border-l-current">
+            <span className="font-semibold block mb-0.5 text-[10px] uppercase opacity-70">Mensagem Respondida</span>
+            <span className="line-clamp-3 opacity-90">{m.quoted_content}</span>
+          </div>
+        )}
+
+        {m.is_deleted ? (
+          <div className="flex items-center gap-1.5 italic">
+            <span className="text-[16px]">🚫</span>
+            Mensagem apagada
+          </div>
+        ) : m.media_type === "image" && m.media_url ? (
+          <div className="mb-2">
+            <Dialog>
+              <DialogTrigger asChild>
+                <img 
+                  src={m.media_url} 
+                  alt={m.content || "Imagem recebida"} 
+                  className="max-w-[200px] cursor-pointer rounded-lg hover:opacity-90 transition-opacity" 
+                />
+              </DialogTrigger>
+              <DialogContent className="max-w-4xl p-1 bg-transparent border-none shadow-none flex justify-center items-center">
+                <img 
+                  src={m.media_url} 
+                  alt={m.content || "Imagem recebida"} 
+                  className="max-h-[85vh] w-auto rounded-md object-contain" 
+                />
+              </DialogContent>
+            </Dialog>
+            {m.content && m.content !== "📷 Imagem" && (
+              <div className="mt-2">{m.content}</div>
+            )}
+          </div>
+        ) : m.media_type === "audio" && m.media_url ? (
+          <div className="mb-2 flex flex-col gap-1">
+            <audio controls src={m.media_url} className="h-10 w-48" />
+            {m.content && m.content !== "🎵 Áudio" && <div className="text-xs">{m.content}</div>}
+          </div>
+        ) : m.media_type === "video" && m.media_url ? (
+          <div className="mb-2 flex flex-col gap-1">
+            <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
+            {m.content && m.content !== "🎥 Vídeo" && <div className="text-xs">{m.content}</div>}
+          </div>
+        ) : (
+          m.content
+        )}
         <div
           className={cn(
-            "mt-1 text-[10px]",
+            "mt-1 flex items-center justify-end gap-1.5 text-[10px]",
             mine ? "text-primary-foreground/70" : "text-muted-foreground",
           )}
         >
-          {formatRelative(m.created_at)}
+          {m.is_edited && <span className="italic">Editado</span>}
+          <span>{formatRelative(m.created_at)}</span>
         </div>
+        
+        {m.reactions && Object.keys(m.reactions).length > 0 && (
+          <div className="absolute -bottom-3 right-2 flex gap-1 bg-background border border-border rounded-full px-1.5 py-0.5 text-xs shadow-sm">
+            {Object.entries(m.reactions).map(([emoji, count]) => (
+              <span key={emoji}>{emoji} {count > 1 ? count : ''}</span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

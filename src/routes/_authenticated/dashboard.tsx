@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { formatRelative, initials } from "@/lib/format";
+import { useUnit } from "@/lib/unit-context";
 import { ChannelIcon } from "@/components/common/channel-icon";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -25,19 +26,34 @@ interface Metrics {
 }
 
 function DashboardPage() {
+  const { selectedUnitId } = useUnit();
+
   const { data: metrics } = useQuery<Metrics>({
-    queryKey: ["dashboard-metrics"],
+    queryKey: ["dashboard-metrics", selectedUnitId],
     queryFn: async () => {
+      let qWaiting = supabase.from("conversations").select("*", { count: "exact", head: true }).eq("status", "waiting");
+      let qActive = supabase.from("conversations").select("*", { count: "exact", head: true }).eq("status", "active");
+      let qResolved = supabase.from("conversations").select("*", { count: "exact", head: true })
+        .eq("status", "resolved")
+        .gte("resolved_at", new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
+      
+      if (selectedUnitId) {
+        qWaiting = qWaiting.eq("unit_id", selectedUnitId);
+        qActive = qActive.eq("unit_id", selectedUnitId);
+        qResolved = qResolved.eq("unit_id", selectedUnitId);
+      } else {
+        qWaiting = qWaiting.is("unit_id", null);
+        qActive = qActive.is("unit_id", null);
+        qResolved = qResolved.is("unit_id", null);
+      }
+
       const [waiting, active, resolved, agents] = await Promise.all([
-        supabase.from("conversations").select("*", { count: "exact", head: true }).eq("status", "waiting"),
-        supabase.from("conversations").select("*", { count: "exact", head: true }).eq("status", "active"),
-        supabase
-          .from("conversations")
-          .select("*", { count: "exact", head: true })
-          .eq("status", "resolved")
-          .gte("resolved_at", new Date(new Date().setHours(0, 0, 0, 0)).toISOString()),
+        qWaiting,
+        qActive,
+        qResolved,
         supabase.from("profiles").select("*", { count: "exact", head: true }).eq("online", true),
       ]);
+      
       return {
         waiting: waiting.count ?? 0,
         active: active.count ?? 0,
@@ -48,13 +64,16 @@ function DashboardPage() {
   });
 
   const { data: chartData } = useQuery({
-    queryKey: ["dashboard-chart"],
+    queryKey: ["dashboard-chart", selectedUnitId],
     queryFn: async () => {
       const since = subDays(new Date(), 6);
-      const { data } = await supabase
-        .from("conversations")
-        .select("started_at")
-        .gte("started_at", since.toISOString());
+      
+      let qChart = supabase.from("conversations").select("started_at").gte("started_at", since.toISOString());
+      if (selectedUnitId) qChart = qChart.eq("unit_id", selectedUnitId);
+      else qChart = qChart.is("unit_id", null);
+
+      const { data } = await qChart;
+      
       const days = Array.from({ length: 7 }).map((_, i) => {
         const d = subDays(new Date(), 6 - i);
         return { day: format(d, "EEE", { locale: ptBR }), date: format(d, "yyyy-MM-dd"), total: 0 };
@@ -69,29 +88,39 @@ function DashboardPage() {
   });
 
   const { data: oldestWaiting } = useQuery({
-    queryKey: ["oldest-waiting"],
+    queryKey: ["oldest-waiting", selectedUnitId],
     queryFn: async () => {
-      const { data } = await supabase
+      let qOldest = supabase
         .from("conversations")
         .select("id, started_at, channel, contact:contacts(name)")
         .eq("status", "waiting")
         .order("started_at", { ascending: true })
         .limit(5);
+
+      if (selectedUnitId) qOldest = qOldest.eq("unit_id", selectedUnitId);
+      else qOldest = qOldest.is("unit_id", null);
+
+      const { data } = await qOldest;
       return data ?? [];
     },
   });
 
   const { data: myTasks } = useQuery({
-    queryKey: ["my-tasks-today"],
+    queryKey: ["my-tasks-today", selectedUnitId],
     queryFn: async () => {
       const end = new Date(); end.setHours(23, 59, 59, 999);
-      const { data } = await supabase
+      let qTasks = supabase
         .from("tasks")
         .select("id,title,due_date,priority,status")
         .eq("status", "pending")
         .lte("due_date", end.toISOString())
         .order("due_date", { ascending: true })
         .limit(6);
+
+      if (selectedUnitId) qTasks = qTasks.eq("unit_id", selectedUnitId);
+      else qTasks = qTasks.is("unit_id", null);
+
+      const { data } = await qTasks;
       return data ?? [];
     },
   });

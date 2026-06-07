@@ -30,3 +30,22 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment variables
+.env
+.env.*
+
+# Temporary test scripts and logs
+test_*.js
+check_*.js
+fix_*.js
+fix_*.py
+run_*.js
+setup_*.js
+list_*.js
+start_*.sh
+fix_*.sh
+clear_*.js
+*.txt
+*.jpg
+*.png

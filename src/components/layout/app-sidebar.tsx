@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
@@ -12,11 +13,24 @@ import {
   ChevronRight,
   LogOut,
   Building2,
+  ChevronsUpDown,
+  MapPin,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
+import { useUnit } from "@/lib/unit-context";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { initials } from "@/lib/format";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 
 const items = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -26,8 +40,9 @@ const items = [
   { to: "/tasks", label: "Tarefas", icon: CheckSquare },
   { to: "/campaigns", label: "Campanhas", icon: Megaphone },
   { to: "/reports", label: "Relatórios", icon: BarChart3 },
+  { to: "/units", label: "Gestão de Unidades", icon: Building2, globalOnly: true },
   { to: "/settings", label: "Configurações", icon: Settings },
-] as const;
+];
 
 interface Props {
   collapsed: boolean;
@@ -37,6 +52,44 @@ interface Props {
 export function AppSidebar({ collapsed, onToggle }: Props) {
   const { profile, signOut } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  const { data: companyName } = useQuery({
+    queryKey: ["company-name", profile?.company_id],
+    enabled: !!profile?.company_id,
+    queryFn: async () => {
+      const { data } = await supabase.from("companies").select("name").eq("id", profile!.company_id!).single();
+      return data?.name || "Minha Empresa";
+    }
+  });
+
+  const { selectedUnitId, setSelectedUnitId } = useUnit();
+
+  const { data: units } = useQuery({
+    queryKey: ["sidebar-units", profile?.company_id, profile?.id],
+    enabled: !!profile?.company_id && !!profile?.id,
+    queryFn: async () => {
+      const { data: allUnits } = await supabase.from("units").select("id, name").eq("company_id", profile!.company_id!).order("created_at", { ascending: true });
+      
+      if (profile!.role === 'admin_company') {
+        return allUnits || [];
+      }
+
+      // Busca as unidades vinculadas ao usuário
+      const { data: userUnits } = await supabase.from("user_units").select("unit_id").eq("user_id", profile!.id);
+      const allowedIds = userUnits?.map(u => u.unit_id) || [];
+      
+      return (allUnits || []).filter(u => allowedIds.includes(u.id));
+    }
+  });
+
+  useEffect(() => {
+    if (!selectedUnitId && profile && profile.role !== 'admin_company' && units && units.length > 0) {
+      // Idealmente verificaria has_matriz_access, mas como está removido temporariamente, força a primeira unidade
+      setSelectedUnitId(units[0].id);
+    }
+  }, [selectedUnitId, profile, units, setSelectedUnitId]);
+
+  const selectedUnit = units?.find(u => u.id === selectedUnitId);
 
   return (
     <aside
@@ -59,7 +112,7 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold">Omni</div>
             <div className="truncate text-xs text-sidebar-foreground/60">
-              Grupo Exemplo
+              Painel de Gestão
             </div>
           </div>
         )}
@@ -68,16 +121,54 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
       {/* Unit selector */}
       {!collapsed && (
         <div className="px-3 pt-4">
-          <div className="flex items-center gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/40 px-3 py-2 text-xs">
-            <Building2 className="h-3.5 w-3.5 text-sidebar-foreground/60" />
-            <span className="font-medium">Unidade São Paulo</span>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex w-full items-center justify-between gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/40 px-3 py-2 text-left text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  {selectedUnit ? <MapPin className="h-4 w-4 shrink-0" /> : <Building2 className="h-4 w-4 shrink-0" />}
+                  <span className="font-medium truncate">
+                    {selectedUnit ? selectedUnit.name : (companyName || "Empresa Mãe")}
+                  </span>
+                </div>
+                <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-[216px]" align="start" alignOffset={-12}>
+              <DropdownMenuLabel className="text-xs text-muted-foreground">Alternar Contexto</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {(profile?.role === 'admin_company' || profile?.has_matriz_access) && (
+                <DropdownMenuItem 
+                  onClick={() => setSelectedUnitId(null)}
+                  className={cn("cursor-pointer", !selectedUnitId && "bg-accent text-accent-foreground")}
+                >
+                  <Building2 className="mr-2 h-4 w-4" />
+                  <span className="truncate">{companyName || "Empresa Mãe"} (Sede)</span>
+                </DropdownMenuItem>
+              )}
+              {units && units.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">Unidades / Filiais</DropdownMenuLabel>
+                  {units.map(unit => (
+                    <DropdownMenuItem 
+                      key={unit.id}
+                      onClick={() => setSelectedUnitId(unit.id)}
+                      className={cn("cursor-pointer", selectedUnitId === unit.id && "bg-accent text-accent-foreground")}
+                    >
+                      <MapPin className="mr-2 h-4 w-4" />
+                      <span className="truncate">{unit.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
 
       {/* Nav */}
       <nav className="mt-4 flex-1 space-y-0.5 px-2">
-        {items.map((item) => {
+        {items.filter(item => !item.globalOnly || !selectedUnitId).map((item) => {
           const active = pathname.startsWith(item.to);
           const Icon = item.icon;
           return (

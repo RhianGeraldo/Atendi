@@ -9,6 +9,7 @@ export interface Profile {
   avatar_url: string | null;
   role: "admin_company" | "manager" | "agent";
   company_id: string | null;
+  has_matriz_access: boolean;
 }
 
 interface AuthContextValue {
@@ -17,6 +18,7 @@ interface AuthContextValue {
   profile: Profile | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (name: string, email: string, password: string, companyId?: string | null) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -53,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loadProfile(userId: string) {
     const { data } = await supabase
       .from("profiles")
-      .select("id,name,email,avatar_url,role,company_id")
+      .select("id,name,email,avatar_url,role,company_id") // FIXME: add has_matriz_access when migration is applied
       .eq("id", userId)
       .maybeSingle();
     if (data) setProfile(data as Profile);
@@ -66,6 +68,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     async signIn(email, password) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
+      return { error: error?.message ?? null };
+    },
+    async signUp(name, email, password, companyId) {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name,
+            ...(companyId ? { company_id: companyId } : {})
+          }
+        }
+      });
       return { error: error?.message ?? null };
     },
     async signOut() {
