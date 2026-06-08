@@ -237,7 +237,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       // Prepend participant name for group messages
       if (remoteJid.includes('@g.us') && !isFromMe) {
-        textContent = `*${pushName}:*\n${textContent}`;
+        textContent = `${pushName}:\n${textContent}`;
       }
 
       // 1. Find the instance in the DB
