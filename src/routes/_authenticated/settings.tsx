@@ -29,6 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { DepartmentsTab } from "@/components/settings/departments-tab";
 import { UsersTab } from "@/components/settings/users-tab";
+import { LabelsTab } from "@/components/settings/labels-tab";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
@@ -270,6 +271,7 @@ function SettingsPage() {
           <TabsTrigger value="profile">Meu Perfil</TabsTrigger>
           <TabsTrigger value="departments">Departamentos</TabsTrigger>
           <TabsTrigger value="users">Equipe e Acessos</TabsTrigger>
+          <TabsTrigger value="labels">Etiquetas</TabsTrigger>
         </TabsList>
         
         <TabsContent value="general" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -458,6 +460,10 @@ function SettingsPage() {
 
         <TabsContent value="users">
           <UsersTab />
+        </TabsContent>
+
+        <TabsContent value="labels">
+          <LabelsTab />
         </TabsContent>
       </Tabs>
 
