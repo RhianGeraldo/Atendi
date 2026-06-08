@@ -330,53 +330,46 @@ export const fetchContactInfoAction = createServerFn({ method: "POST" })
 
 export const syncLabelsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({ unitId: z.string().uuid() }))
+  .handler(async ({ data, context }) => {
+    // Legacy endpoint: now labels are local, we just return success
+    return { success: true, count: 0 };
+  });
+
+export const createLabelAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
-    unitId: z.string().uuid()
+    unitId: z.string().uuid(),
+    name: z.string().min(1),
+    color: z.string().optional()
   }))
   .handler(async ({ data, context }) => {
     const { supabase } = context;
 
     const { data: instance } = await supabaseAdmin
       .from("whatsapp_instances")
-      .select("instance_name, evogo_api_key, company_id, companies(evogo_host)")
+      .select("company_id")
       .eq("unit_id", data.unitId)
       .limit(1)
       .maybeSingle();
 
-    if (!instance || !instance.evogo_api_key || !instance.companies?.evogo_host) return { success: false };
+    if (!instance?.company_id) return { success: false, error: "Empresa não encontrada" };
 
-    const host = instance.companies.evogo_host;
-    const token = instance.evogo_api_key;
-    const instanceName = instance.instance_name;
+    const randomColor = `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+    const newLabel = {
+      company_id: instance.company_id,
+      name: data.name,
+      color: data.color || randomColor,
+      external_id: crypto.randomUUID() // using local UUID as external_id for consistency
+    };
 
-    try {
-      const url = `${host}/label/list`;
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': token
-        }
-      });
-      if (response.ok) {
-        const labelsData = await response.json();
-        const labels = Array.isArray(labelsData) ? labelsData : [];
-        
-        for (const label of labels) {
-          if (!label.id || !label.name) continue;
-          await supabaseAdmin.from('labels').upsert({
-            external_id: label.id,
-            company_id: instance.company_id,
-            name: label.name,
-            color: label.color ? String(label.color) : null,
-          }, { onConflict: 'company_id, external_id' });
-        }
-        return { success: true, count: labels.length };
-      }
-    } catch (e) {
-      console.warn("Failed to sync labels:", e);
+    const { data: label, error } = await supabaseAdmin.from('labels').insert(newLabel).select().single();
+    if (error) {
+      console.error("Failed to create label:", error);
+      return { success: false, error: "Falha ao criar etiqueta" };
     }
-    return { success: false };
+
+    return { success: true, label };
   });
 
 export const toggleContactLabelAction = createServerFn({ method: "POST" })
@@ -388,31 +381,7 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
     action: z.enum(["add", "remove"])
   }))
   .handler(async ({ data, context }) => {
-    const { supabase } = context;
-
-    // Get instance
-    const { data: instance } = await supabaseAdmin
-      .from("whatsapp_instances")
-      .select("instance_name, evogo_api_key, company_id, companies(evogo_host)")
-      .eq("unit_id", data.unitId)
-      .limit(1)
-      .maybeSingle();
-
-    if (!instance || !instance.evogo_api_key || !instance.companies?.evogo_host) return { success: false };
-
-    // Get label
-    const { data: label } = await supabaseAdmin.from('labels').select('external_id').eq('id', data.labelId).single();
-    if (!label?.external_id) return { success: false };
-
-    // Get contact
-    const { data: contact } = await supabaseAdmin.from('contacts').select('phone').eq('id', data.contactId).single();
-    if (!contact?.phone) return { success: false };
-
-    const host = instance.companies.evogo_host;
-    const token = instance.evogo_api_key;
-    const instanceName = instance.instance_name;
-
-    // Always update local database first so it shows up in UI
+    // Local system labels management
     if (data.action === 'add') {
       const { error } = await supabaseAdmin.from('contact_labels').upsert({ contact_id: data.contactId, label_id: data.labelId }, { onConflict: 'contact_id, label_id' });
       if (error) {
@@ -425,26 +394,6 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
         console.error("Failed to delete contact_label locally:", error);
         return { success: false };
       }
-    }
-
-    try {
-      const endpoint = data.action === 'add' ? '/label/chat' : '/unlabel/chat';
-      const url = `${host}${endpoint}`;
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': token
-        },
-        body: JSON.stringify({ jid: `${contact.phone}@s.whatsapp.net`, labelId: label.external_id })
-      });
-
-      if (!response.ok) {
-        console.warn(`EvoGo rejected label ${data.action} action, status:`, response.status);
-      }
-    } catch (e) {
-      console.warn("Failed to toggle label in EvoGo, but saved locally:", e);
     }
 
     return { success: true };

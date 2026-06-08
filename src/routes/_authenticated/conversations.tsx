@@ -5,7 +5,7 @@ import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mai
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, syncLabelsAction } from "@/lib/api/chat.functions";
+import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, toggleContactLabelAction, createLabelAction } from "@/lib/api/chat.functions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -180,6 +180,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
   const qc = useQueryClient();
   const { selectedUnitId } = useUnit();
   const { profile } = useAuth();
+  const [searchLabel, setSearchLabel] = useState("");
 
   const { data: allLabels } = useQuery({
     queryKey: ["labels", profile?.company_id],
@@ -204,16 +205,21 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
     onError: (e) => toast.error(e.message)
   });
 
-  const sync = useMutation({
-    mutationFn: async () => {
+  const createLabel = useMutation({
+    mutationFn: async (name: string) => {
       if (!selectedUnitId) return;
-      const res = await syncLabelsAction({ data: { unitId: selectedUnitId } });
-      if (!res.success) throw new Error("Falha ao sincronizar etiquetas");
-      return res;
+      const res = await createLabelAction({ data: { unitId: selectedUnitId, name } });
+      if (!res?.success || !res.label) throw new Error(res?.error || "Falha ao criar etiqueta");
+      return res.label;
     },
-    onSuccess: (data) => {
-      toast.success(`${data?.count || 0} etiquetas sincronizadas`);
-      qc.invalidateQueries({ queryKey: ["conversations"] });
+    onSuccess: async (label) => {
+      qc.invalidateQueries({ queryKey: ["labels", profile?.company_id] });
+      // Auto assign the newly created label
+      if (conv.contact?.id && selectedUnitId) {
+        toggleLabel.mutate({ labelId: label.id, action: "add" });
+      }
+      setSearchLabel("");
+      toast.success("Etiqueta criada!");
     },
     onError: (e) => toast.error((e as Error).message)
   });
@@ -254,44 +260,37 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-6">
           <div className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-              <Tag className="h-3 w-3" />
-              Etiquetas
-            </h4>
-            <div className="flex flex-wrap gap-2">
-              {conv.contact?.contact_labels?.map((cl) => {
-                const label = cl.labels;
-                if (!label) return null;
-                const hexColor = label.color || "#6b7280";
-                return (
-                  <Badge 
-                    key={label.id} 
-                    variant="outline" 
-                    style={{ 
-                      backgroundColor: `${hexColor}1a`, 
-                      color: hexColor, 
-                      borderColor: `${hexColor}33` 
-                    }}
-                  >
-                    {label.name}
-                  </Badge>
-                );
-              })}
-              {!conv.contact?.contact_labels?.length && (
-                <span className="text-xs text-muted-foreground">Nenhuma etiqueta</span>
-              )}
-              
+            <div className="flex items-center justify-between pb-2">
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <Tag className="h-3 w-3 inline mr-1" /> Etiquetas
+              </h4>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-6 text-[10px] border-dashed">
-                    <Plus className="h-3 w-3 mr-1" /> Adicionar
+                  <Button variant="outline" size="sm" className="h-6 text-xs px-2 gap-1 rounded-full">
+                    <Plus className="h-3 w-3" /> Adicionar
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="p-0 w-48" align="start">
+                <PopoverContent className="p-0 w-48" align="end">
                   <Command>
-                    <CommandInput placeholder="Buscar etiqueta..." className="h-8" />
+                    <CommandInput 
+                      placeholder="Buscar etiqueta..." 
+                      className="h-8" 
+                      value={searchLabel}
+                      onValueChange={setSearchLabel}
+                    />
                     <CommandList>
-                      <CommandEmpty>Nenhuma etiqueta encontrada.</CommandEmpty>
+                      <CommandEmpty>
+                        {searchLabel.length > 0 ? (
+                          <Button 
+                            variant="ghost" 
+                            className="w-full justify-start text-sm h-8 font-normal"
+                            onClick={() => createLabel.mutate(searchLabel)}
+                            disabled={createLabel.isPending}
+                          >
+                            Criar "{searchLabel}"
+                          </Button>
+                        ) : "Nenhuma etiqueta encontrada."}
+                      </CommandEmpty>
                       <CommandGroup>
                         {allLabels?.map(label => {
                           const isSelected = conv.contact?.contact_labels?.some(cl => cl.labels?.id === label.id);
@@ -316,17 +315,32 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
                   </Command>
                 </PopoverContent>
               </Popover>
+            </div>
 
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-6 w-6" 
-                title="Sincronizar etiquetas"
-                onClick={() => sync.mutate()}
-                disabled={sync.isPending}
-              >
-                <Loader2 className={cn("h-3 w-3", sync.isPending && "animate-spin")} />
-              </Button>
+            <div className="flex flex-wrap gap-2">
+              {conv.contact?.contact_labels?.map((cl) => {
+                const label = cl.labels;
+                if (!label) return null;
+                const hexColor = label.color || "#6b7280";
+                return (
+                  <Badge 
+                    key={label.id} 
+                    variant="outline" 
+                    style={{ 
+                      backgroundColor: `${hexColor}1a`, 
+                      color: hexColor, 
+                      borderColor: `${hexColor}33` 
+                    }}
+                  >
+                    {label.name}
+                  </Badge>
+                );
+              })}
+              {!conv.contact?.contact_labels?.length && (
+                <span className="text-xs text-muted-foreground">Nenhuma etiqueta</span>
+              )}
+            </div>
+
             </div>
           </div>
 
