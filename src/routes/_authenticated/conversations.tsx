@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight } from "lucide-react";
+import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -32,6 +32,7 @@ export const Route = createFileRoute("/_authenticated/conversations")({
 });
 
 type Status = "waiting" | "active" | "resolved";
+type TabType = Status | "groups";
 
 interface ConvRow {
   id: string;
@@ -55,7 +56,7 @@ interface ConvRow {
 
 function ConversationsPage() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Status>("waiting");
+  const [tab, setTab] = useState<TabType>("waiting");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -68,8 +69,13 @@ function ConversationsPage() {
         .from("conversations")
         .select(
           "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name)"
-        )
-        .eq("status", tab);
+        );
+
+      if (tab === "groups") {
+        // Fetch all statuses for groups
+      } else {
+        query = query.eq("status", tab);
+      }
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
@@ -78,7 +84,15 @@ function ConversationsPage() {
 
       const { data, error } = await query.order("last_message_at", { ascending: false });
       if (error) throw error;
-      return (data ?? []) as unknown as ConvRow[];
+      
+      const allConvs = (data ?? []) as unknown as ConvRow[];
+      
+      // Filter out groups from main tabs, or keep only groups for the "groups" tab
+      return allConvs.filter(c => {
+        const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'));
+        if (tab === "groups") return isGroup;
+        return !isGroup;
+      });
     },
   });
 
@@ -128,11 +142,12 @@ function ConversationsPage() {
               setSelectedId(id);
             }} />
           </div>
-          <Tabs value={tab} onValueChange={(v) => setTab(v as Status)} className="mt-3">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="waiting">Aguard.</TabsTrigger>
-              <TabsTrigger value="active">Andamento</TabsTrigger>
-              <TabsTrigger value="resolved">Resolvidos</TabsTrigger>
+          <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)} className="mt-3">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="waiting" className="px-1 text-xs">Aguard.</TabsTrigger>
+              <TabsTrigger value="active" className="px-1 text-xs">Andamento</TabsTrigger>
+              <TabsTrigger value="resolved" className="px-1 text-xs">Resolvidos</TabsTrigger>
+              <TabsTrigger value="groups" className="px-1 text-xs">Grupos</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -234,6 +249,9 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
     staleTime: 1000 * 60 * 60, // 1 hour
   });
 
+  const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
+  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex justify-end p-2 pb-0">
@@ -246,14 +264,14 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
           {profilePictureUrl ? (
             <img src={profilePictureUrl} alt={conv.contact?.name} className="object-cover" />
           ) : (
-            <AvatarFallback className="text-xl bg-primary/10 text-primary">
-              {initials(conv.contact?.name)}
+            <AvatarFallback className={cn("text-xl", isGroup ? "bg-primary/20 text-primary" : "bg-primary/10 text-primary")}>
+              {isGroup ? <Users className="h-8 w-8" /> : initials(conv.contact?.name)}
             </AvatarFallback>
           )}
         </Avatar>
         <div className="text-center">
-          <h3 className="font-semibold text-lg">{conv.contact?.name || "Desconhecido"}</h3>
-          <p className="text-sm text-muted-foreground">{formatPhone(conv.contact?.phone)}</p>
+          <h3 className="font-semibold text-lg">{contactName || "Desconhecido"}</h3>
+          <p className="text-sm text-muted-foreground">{isGroup ? "Múltiplos Participantes" : formatPhone(conv.contact?.phone)}</p>
         </div>
       </div>
 
@@ -494,6 +512,9 @@ function ConversationItem({
   selected: boolean;
   onClick: () => void;
 }) {
+  const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
+  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+
   return (
     <button
       onClick={onClick}
@@ -503,14 +524,16 @@ function ConversationItem({
       )}
     >
       <Avatar className="h-10 w-10">
-        <AvatarFallback className="bg-muted text-xs">
-          {initials(conv.contact?.name)}
+        <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
+          {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
         </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <ChannelIcon channel={conv.channel} className="h-4 w-4" />
-          <span className={cn("truncate text-sm font-medium", conv.unread_count && conv.unread_count > 0 && "font-bold text-foreground")}>{conv.contact?.name}</span>
+          <span className={cn("truncate text-sm font-medium", conv.unread_count && conv.unread_count > 0 && "font-bold text-foreground")}>
+            {contactName}
+          </span>
           <span className={cn("ml-auto whitespace-nowrap text-[11px]", conv.unread_count && conv.unread_count > 0 ? "font-bold text-success" : "text-muted-foreground")}>
             {formatRelative(conv.last_message_at)}
           </span>
@@ -781,6 +804,9 @@ function ChatPanel({
     },
   });
 
+  const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
+  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+
   return (
     <div className="flex h-full min-w-0">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -788,13 +814,13 @@ function ChatPanel({
         <header className="flex items-center justify-between border-b border-border bg-card px-5 py-3">
           <div className="flex items-center gap-3">
             <Avatar className="h-10 w-10">
-              <AvatarFallback className="bg-muted text-xs">
-                {initials(conv.contact?.name)}
+              <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
+                {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
               </AvatarFallback>
             </Avatar>
             <div>
               <div className="flex items-center gap-2 text-sm font-semibold">
-                {conv.contact?.name}
+                {contactName}
                 <ChannelIcon channel={conv.channel} className="h-4 w-4" />
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
