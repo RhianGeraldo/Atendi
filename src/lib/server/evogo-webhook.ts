@@ -521,25 +521,48 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
          }
       }
       
-      // 2. Upsert Contact
-      const { data: contact } = await supabaseAdmin
+      // 2. Find or create Contact
+      let contactId;
+      const { data: existingContacts } = await supabaseAdmin
         .from('contacts')
-        .upsert({
-          company_id: company_id,
-          phone: phoneNumber,
-          name: groupName,
-        }, { onConflict: 'company_id,phone' })
-        .select()
-        .single();
+        .select('id, name')
+        .eq('company_id', company_id)
+        .eq('phone', phoneNumber)
+        .limit(1);
+
+      if (existingContacts && existingContacts.length > 0) {
+        contactId = existingContacts[0].id;
         
-      if (!contact) return;
+        if (groupName && existingContacts[0].name !== groupName) {
+          await supabaseAdmin
+            .from('contacts')
+            .update({ name: groupName })
+            .eq('id', contactId);
+        }
+      } else {
+        const { data: newContact, error: contactErr } = await supabaseAdmin
+          .from('contacts')
+          .insert({
+            company_id: company_id,
+            phone: phoneNumber,
+            name: groupName || 'Grupo do WhatsApp',
+          })
+          .select()
+          .single();
+          
+        if (contactErr || !newContact) {
+          console.error("Failed to create contact for JoinedGroup", contactErr);
+          return;
+        }
+        contactId = newContact.id;
+      }
       
       // 3. Find or create waiting conversation
       const { data: activeConvs } = await supabaseAdmin
         .from('conversations')
         .select('id')
         .eq('unit_id', unit_id)
-        .eq('contact_id', contact.id)
+        .eq('contact_id', contactId)
         .in('status', ['waiting', 'active'])
         .limit(1);
 
@@ -548,7 +571,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           .from('conversations')
           .insert({
             unit_id: unit_id,
-            contact_id: contact.id,
+            contact_id: contactId,
             channel: 'whatsapp',
             status: 'waiting',
             last_message_at: new Date().toISOString()
