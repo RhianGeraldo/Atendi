@@ -96,18 +96,58 @@ function ConversationsPage() {
     },
   });
 
+  const { data: unreadCounts } = useQuery({
+    queryKey: ["unread-counts", selectedUnitId],
+    queryFn: async () => {
+      let query = supabase
+        .from("conversations")
+        .select("status, unread_count, contact:contacts(phone)")
+        .gt("unread_count", 0);
+
+      if (selectedUnitId) {
+        query = query.eq("unit_id", selectedUnitId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      
+      const counts = { waiting: 0, active: 0, resolved: 0, groups: 0 };
+      
+      data.forEach(c => {
+        const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'));
+        if (isGroup) {
+          counts.groups += c.unread_count || 0; // Ou contar conversas: counts.groups++ dependendo se quer total de msgs ou total de conversas. A imagem mostra 1 na bolinha de contato. Para as abas, geralmente mostramos a quantidade de conversas com mensagens não lidas.
+        } else {
+          if (c.status === 'waiting') counts.waiting++;
+          if (c.status === 'active') counts.active++;
+          if (c.status === 'resolved') counts.resolved++;
+        }
+      });
+      
+      return counts;
+    }
+  });
+
   // Realtime
   useEffect(() => {
+    // Usando um ID aleatório para o canal para evitar problemas de desconexão silenciosa no Vite HMR
+    const channelId = `conversations-rt-${Math.random()}`;
     const ch = supabase
-      .channel("conversations-rt")
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => {
-        qc.invalidateQueries({ queryKey: ["conversations"] });
+      .channel(channelId)
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, (payload) => {
+        console.log("Realtime: conversations updated", payload);
+        qc.refetchQueries({ queryKey: ["conversations"] });
+        qc.refetchQueries({ queryKey: ["unread-counts"] });
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => {
-        qc.invalidateQueries({ queryKey: ["messages"] });
-        qc.invalidateQueries({ queryKey: ["conversations"] });
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, (payload) => {
+        console.log("Realtime: messages updated", payload);
+        qc.refetchQueries({ queryKey: ["messages"] });
+        qc.refetchQueries({ queryKey: ["conversations"] });
+        qc.refetchQueries({ queryKey: ["unread-counts"] });
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log("Realtime subscription status:", status);
+      });
     return () => { supabase.removeChannel(ch); };
   }, [qc]);
 
@@ -143,11 +183,39 @@ function ConversationsPage() {
             }} />
           </div>
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)} className="mt-3">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="waiting" className="px-1 text-xs">Aguard.</TabsTrigger>
-              <TabsTrigger value="active" className="px-1 text-xs">Andamento</TabsTrigger>
-              <TabsTrigger value="resolved" className="px-1 text-xs">Resolvidos</TabsTrigger>
-              <TabsTrigger value="groups" className="px-1 text-xs">Grupos</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-4 h-auto py-1">
+              <TabsTrigger value="waiting" className="px-1 py-1.5 text-xs relative">
+                Aguard.
+                {unreadCounts && unreadCounts.waiting > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white">
+                    {unreadCounts.waiting}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="active" className="px-1 py-1.5 text-xs relative">
+                Andamento
+                {unreadCounts && unreadCounts.active > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white">
+                    {unreadCounts.active}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="resolved" className="px-1 py-1.5 text-xs relative">
+                Resolvidos
+                {unreadCounts && unreadCounts.resolved > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white">
+                    {unreadCounts.resolved}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="groups" className="px-1 py-1.5 text-xs relative">
+                Grupos
+                {unreadCounts && unreadCounts.groups > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white">
+                    {unreadCounts.groups}
+                  </span>
+                )}
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -519,7 +587,7 @@ function ConversationItem({
     <button
       onClick={onClick}
       className={cn(
-        "flex w-full items-start gap-3 border-b border-border px-3 py-3 text-left transition-colors hover:bg-accent/40",
+        "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border px-3 py-3 text-left transition-colors hover:bg-accent/40",
         selected && "bg-accent/60",
       )}
     >
@@ -528,13 +596,13 @@ function ConversationItem({
           {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
         </AvatarFallback>
       </Avatar>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 grid">
         <div className="flex items-center gap-2">
-          <ChannelIcon channel={conv.channel} className="h-4 w-4" />
-          <span className={cn("truncate text-sm font-medium", conv.unread_count && conv.unread_count > 0 && "font-bold text-foreground")}>
+          <ChannelIcon channel={conv.channel} className="h-4 w-4 shrink-0" />
+          <span className={cn("truncate text-sm font-medium flex-1", conv.unread_count && conv.unread_count > 0 && "font-bold text-foreground")}>
             {contactName}
           </span>
-          <span className={cn("ml-auto whitespace-nowrap text-[11px]", conv.unread_count && conv.unread_count > 0 ? "font-bold text-success" : "text-muted-foreground")}>
+          <span className={cn("whitespace-nowrap shrink-0 text-[11px]", conv.unread_count && conv.unread_count > 0 ? "font-bold text-success" : "text-muted-foreground")}>
             {formatRelative(conv.last_message_at)}
           </span>
         </div>
@@ -634,6 +702,7 @@ function ChatPanel({
     if (conv.id && conv.unread_count && conv.unread_count > 0) {
       supabase.rpc('reset_unread_count', { conv_id: conv.id }).then(() => {
         qc.invalidateQueries({ queryKey: ["conversations"] });
+        qc.invalidateQueries({ queryKey: ["unread-counts"] });
       });
     }
   }, [messages?.length, conv.id, conv.unread_count, qc]);
@@ -858,6 +927,7 @@ function ChatPanel({
             <MessageBubble 
               key={m.id} 
               m={m} 
+              isGroup={isGroup}
               onReact={(emoji) => react.mutate({ messageId: m.id, emoji })} 
             />
           ))}
@@ -1040,13 +1110,25 @@ function FormattedText({ text }: { text: string }) {
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
-function MessageBubble({ m, onReact }: { m: MessageRow, onReact?: (emoji: string) => void }) {
+function MessageBubble({ m, isGroup, onReact }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void }) {
   const mine = m.sender_type === "agent";
+  
+  let senderName = null;
+  let displayContent = m.content || "";
+
+  if (isGroup && m.sender_type === "contact") {
+    const match = displayContent.match(/^(.+?):\n([\s\S]*)$/);
+    if (match) {
+      senderName = match[1];
+      displayContent = match[2];
+    }
+  }
+
   return (
     <div className={cn("flex relative", mine ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[70%] rounded-2xl px-3.5 py-2 text-sm shadow-sm relative group",
+          "max-w-[70%] flex flex-col rounded-2xl px-3.5 py-2 text-sm shadow-sm relative group",
           mine
             ? "rounded-br-sm bg-primary text-primary-foreground"
             : "rounded-bl-sm bg-card text-foreground border border-border",
@@ -1054,6 +1136,11 @@ function MessageBubble({ m, onReact }: { m: MessageRow, onReact?: (emoji: string
           m.isOptimistic && "opacity-70"
         )}
       >
+        {senderName && (
+          <div className="mb-1 text-xs font-bold text-primary/80 dark:text-primary/90">
+            {senderName}
+          </div>
+        )}
         {onReact && !m.isOptimistic && !m.is_deleted && (
           <Popover>
             <PopoverTrigger asChild>
@@ -1096,34 +1183,34 @@ function MessageBubble({ m, onReact }: { m: MessageRow, onReact?: (emoji: string
               <DialogTrigger asChild>
                 <img 
                   src={m.media_url} 
-                  alt={m.content || "Imagem recebida"} 
+                  alt={displayContent || "Imagem recebida"} 
                   className="max-w-[200px] cursor-pointer rounded-lg hover:opacity-90 transition-opacity" 
                 />
               </DialogTrigger>
               <DialogContent className="max-w-4xl p-1 bg-transparent border-none shadow-none flex justify-center items-center">
                 <img 
                   src={m.media_url} 
-                  alt={m.content || "Imagem recebida"} 
+                  alt={displayContent || "Imagem recebida"} 
                   className="max-h-[85vh] w-auto rounded-md object-contain" 
                 />
               </DialogContent>
             </Dialog>
-            {m.content && m.content !== "📷 Imagem" && (
-              <div className="mt-2"><FormattedText text={m.content} /></div>
+            {displayContent && displayContent !== "📷 Imagem" && (
+              <div className="mt-2"><FormattedText text={displayContent} /></div>
             )}
           </div>
         ) : m.media_type === "audio" && m.media_url ? (
           <div className="mb-2 flex flex-col gap-1">
             <audio controls src={m.media_url} className="h-10 w-48" />
-            {m.content && m.content !== "🎵 Áudio" && <div className="text-xs"><FormattedText text={m.content} /></div>}
+            {displayContent && displayContent !== "🎵 Áudio" && <div className="text-xs"><FormattedText text={displayContent} /></div>}
           </div>
         ) : m.media_type === "video" && m.media_url ? (
           <div className="mb-2 flex flex-col gap-1">
             <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
-            {m.content && m.content !== "🎥 Vídeo" && <div className="text-xs"><FormattedText text={m.content} /></div>}
+            {displayContent && displayContent !== "🎥 Vídeo" && <div className="text-xs"><FormattedText text={displayContent} /></div>}
           </div>
         ) : (
-          <FormattedText text={m.content || ""} />
+          <FormattedText text={displayContent} />
         )}
         <div
           className={cn(
