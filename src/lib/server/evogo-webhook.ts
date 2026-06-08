@@ -505,20 +505,55 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       // 1. Find the instance in the DB
       const { data: instance } = await supabaseAdmin
         .from('whatsapp_instances')
-        .select('company_id')
+        .select('company_id, unit_id')
         .eq('instance_name', instanceName)
         .single();
         
       if (!instance) return;
       
+      let { company_id, unit_id } = instance;
+      if (!unit_id) {
+         const { data: fallbackUnit } = await supabaseAdmin.from('units').select('id').eq('company_id', company_id).order('created_at').limit(1).maybeSingle();
+         if (fallbackUnit) {
+            unit_id = fallbackUnit.id;
+         } else {
+            return;
+         }
+      }
+      
       // 2. Upsert Contact
-      await supabaseAdmin
+      const { data: contact } = await supabaseAdmin
         .from('contacts')
         .upsert({
-          company_id: instance.company_id,
+          company_id: company_id,
           phone: phoneNumber,
           name: groupName,
-        }, { onConflict: 'company_id,phone' });
+        }, { onConflict: 'company_id,phone' })
+        .select()
+        .single();
+        
+      if (!contact) return;
+      
+      // 3. Find or create waiting conversation
+      const { data: activeConvs } = await supabaseAdmin
+        .from('conversations')
+        .select('id')
+        .eq('unit_id', unit_id)
+        .eq('contact_id', contact.id)
+        .in('status', ['waiting', 'active'])
+        .limit(1);
+
+      if (!activeConvs || activeConvs.length === 0) {
+        await supabaseAdmin
+          .from('conversations')
+          .insert({
+            unit_id: unit_id,
+            contact_id: contact.id,
+            channel: 'whatsapp',
+            status: 'waiting',
+            last_message_at: new Date().toISOString()
+          });
+      }
         
       return;
     }
