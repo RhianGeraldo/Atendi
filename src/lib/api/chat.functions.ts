@@ -414,9 +414,17 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
 
     // Always update local database first so it shows up in UI
     if (data.action === 'add') {
-      await supabaseAdmin.from('contact_labels').upsert({ contact_id: data.contactId, label_id: data.labelId });
+      const { error } = await supabaseAdmin.from('contact_labels').upsert({ contact_id: data.contactId, label_id: data.labelId }, { onConflict: 'contact_id, label_id' });
+      if (error) {
+        console.error("Failed to insert contact_label locally:", error);
+        return { success: false };
+      }
     } else {
-      await supabaseAdmin.from('contact_labels').delete().eq('contact_id', data.contactId).eq('label_id', data.labelId);
+      const { error } = await supabaseAdmin.from('contact_labels').delete().eq('contact_id', data.contactId).eq('label_id', data.labelId);
+      if (error) {
+        console.error("Failed to delete contact_label locally:", error);
+        return { success: false };
+      }
     }
 
     try {
