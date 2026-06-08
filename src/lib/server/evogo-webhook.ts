@@ -54,19 +54,23 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         isFromMe = info.IsFromMe;
         
         const getPhone = (jids: (string | undefined)[]) => {
+          const group = jids.find(j => j && j.includes('@g.us'));
+          if (group) return group.split('@')[0];
+
           const real = jids.find(j => j && j.includes('@s.whatsapp.net'));
           if (real) return real.split('@')[0];
+          
           const fallback = jids.find(j => j && j.trim() !== '');
           if (fallback) return fallback.split('@')[0];
           return null;
         };
 
         if (isFromMe) {
-          remoteJid = info.RecipientAlt || info.Chat;
-          phoneNumber = getPhone([info.RecipientAlt, info.Chat]);
+          remoteJid = info.Chat || info.RecipientAlt;
+          phoneNumber = getPhone([info.Chat, info.RecipientAlt]);
         } else {
-          remoteJid = info.Sender || info.SenderAlt || info.Chat;
-          phoneNumber = getPhone([info.Sender, info.SenderAlt, info.Chat]);
+          remoteJid = info.Chat || info.Sender || info.SenderAlt;
+          phoneNumber = getPhone([info.Chat, info.Sender, info.SenderAlt]);
         }
         pushName = info.PushName || 'Desconhecido';
         remoteMsgId = info.ID;
@@ -138,7 +142,12 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         isFromMe = messageData.key?.fromMe || false;
         remoteJid = messageData.key?.remoteJid || '';
         pushName = messageData.pushName || 'Desconhecido';
-        phoneNumber = remoteJid ? remoteJid.split('@')[0] : null;
+        
+        if (remoteJid.includes('@g.us')) {
+          phoneNumber = remoteJid.split('@')[0];
+        } else {
+          phoneNumber = remoteJid ? remoteJid.split('@')[0] : null;
+        }
         remoteMsgId = messageData.key?.id || null;
 
         const msgType = messageData.message;
@@ -204,12 +213,17 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         return;
       }
 
-      if (!phoneNumber || remoteJid.includes('@g.us')) {
+      if (!phoneNumber) {
         return;
       }
       
       if (!textContent) {
         textContent = '[Mídia/Mensagem não suportada]';
+      }
+
+      // Prepend participant name for group messages
+      if (remoteJid.includes('@g.us') && !isFromMe) {
+        textContent = `*${pushName}:*\n${textContent}`;
       }
 
       // 1. Find the instance in the DB
@@ -248,13 +262,21 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       if (existingContacts && existingContacts.length > 0) {
         contactId = existingContacts[0].id;
+        
+        // Update contact name only if it's not a group, to prevent overwriting group names with participant names
+        if (!remoteJid.includes('@g.us') && pushName && pushName !== 'Desconhecido') {
+          await supabaseAdmin
+            .from('contacts')
+            .update({ name: pushName })
+            .eq('id', contactId);
+        }
       } else {
         // Create new contact
         const { data: newContact, error: contactErr } = await supabaseAdmin
           .from('contacts')
           .insert({
             company_id: company_id,
-            name: pushName,
+            name: remoteJid.includes('@g.us') ? 'Grupo do WhatsApp' : pushName,
             phone: phoneNumber,
           })
           .select()
