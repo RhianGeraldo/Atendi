@@ -543,7 +543,7 @@ function ConversationItem({
             {conv.last_message_preview}
           </div>
         )}
-        <div className="mt-1.5 flex items-center gap-1.5">
+        <div className="mt-1.5 flex min-h-[20px] items-center gap-1.5">
           {conv.department?.name && (
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
               {conv.department.name}
