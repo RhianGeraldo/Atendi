@@ -493,6 +493,36 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       return;
     }
 
+    if (body.event === 'JoinedGroup') {
+      const instanceName = body.instance || body.instanceName;
+      const jid = body.data?.JID;
+      const groupName = body.data?.Name;
+      
+      if (!instanceName || !jid || !groupName) return;
+      
+      const phoneNumber = jid.split('@')[0];
+      
+      // 1. Find the instance in the DB
+      const { data: instance } = await supabaseAdmin
+        .from('whatsapp_instances')
+        .select('company_id')
+        .eq('instance_name', instanceName)
+        .single();
+        
+      if (!instance) return;
+      
+      // 2. Upsert Contact
+      await supabaseAdmin
+        .from('contacts')
+        .upsert({
+          company_id: instance.company_id,
+          phone: phoneNumber,
+          name: groupName,
+        }, { onConflict: 'company_id,phone' });
+        
+      return;
+    }
+
     return;
   } catch (err) {
     console.log(new Date().toISOString() + ' ERROR: ' + String(err) + '\n');
