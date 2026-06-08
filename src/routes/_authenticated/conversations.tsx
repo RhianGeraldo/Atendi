@@ -538,31 +538,28 @@ function ConversationItem({
             {formatRelative(conv.last_message_at)}
           </span>
         </div>
-        <div className="mt-0.5 flex items-center gap-2">
-          <div className="truncate text-xs text-muted-foreground flex-1">
-            {conv.last_message_preview || " "}
-          </div>
-          {Boolean(conv.unread_count && conv.unread_count > 0) && (
-            <Badge className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-success px-1.5 py-0 text-[10px] font-bold text-success-foreground hover:bg-success">
-              {conv.unread_count}
-            </Badge>
-          )}
-        </div>
-        
-        {Boolean(conv.department?.name || (conv.tags && conv.tags.length > 0)) && (
-          <div className="mt-1.5 flex items-center gap-1.5">
-            {conv.department?.name && (
-              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
-                {conv.department.name}
-              </Badge>
-            )}
-            {conv.tags?.map((t) => (
-              <Badge key={t} variant="outline" className="px-1.5 py-0 text-[10px] font-normal">
-                {t}
-              </Badge>
-            ))}
+        {conv.last_message_preview && (
+          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+            {conv.last_message_preview}
           </div>
         )}
+        <div className="mt-1.5 flex items-center gap-1.5">
+          {conv.department?.name && (
+            <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
+              {conv.department.name}
+            </Badge>
+          )}
+          {conv.tags?.map((t) => (
+            <Badge key={t} variant="outline" className="px-1.5 py-0 text-[10px] font-normal">
+              {t}
+            </Badge>
+          ))}
+          {conv.unread_count && conv.unread_count > 0 ? (
+            <Badge className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-success px-1.5 py-0 text-[10px] font-bold hover:bg-success">
+              {conv.unread_count}
+            </Badge>
+          ) : null}
+        </div>
       </div>
     </button>
   );
