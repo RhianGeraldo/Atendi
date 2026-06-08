@@ -19,6 +19,8 @@ export async function handleEvogoWebhook(request: Request): Promise<Response> {
   }
 }
 
+import * as fs from 'fs';
+
 export async function processEvogoWebhookBody(body: any): Promise<void> {
   try {
     // Log webhook without base64 to avoid blocking Node.js with huge strings
@@ -27,6 +29,13 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
     if (logBody?.data?.base64) logBody.data.base64 = `[base64 ~${Math.round(logBody.data.base64.length / 1024)}kB omitted]`;
     console.log(new Date().toISOString() + ' WEBHOOK IN: ' + JSON.stringify(logBody) + '\n');
     console.log('EvoGo Webhook received:', JSON.stringify(logBody, null, 2));
+    
+    // Dump to file for debugging
+    try {
+      fs.writeFileSync('webhook-debug.json', JSON.stringify(logBody, null, 2));
+    } catch (e) {
+      console.error("Failed to write webhook-debug.json", e);
+    }
 
     // Handle message.upsert (Baileys/Evolution API format) or Message (WhatsMeow/EvoGo format)
     if (body.event === 'messages.upsert' || body.event === 'messages.update' || body.event === 'Message') {
@@ -43,6 +52,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       let remoteMsgId: string | null = null;
       let quotedStanzaId: string | null = null;
       let quotedContent: string | null = null;
+      let actualGroupName: string | null = null;
 
       if (body.event === 'Message') {
         // WhatsMeow / EvoGo native format
@@ -74,6 +84,10 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         }
         pushName = info.PushName || 'Desconhecido';
         remoteMsgId = info.ID;
+        
+        if (body.data?.groupData?.Name) {
+          actualGroupName = body.data.groupData.Name;
+        }
 
         // Parse quoted messages
         if (body.data?.isQuoted && body.data?.quoted) {
@@ -255,7 +269,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       let contactId;
       const { data: existingContacts } = await supabaseAdmin
         .from('contacts')
-        .select('id')
+        .select('id, name')
         .eq('company_id', company_id)
         .eq('phone', phoneNumber)
         .limit(1);
@@ -263,8 +277,17 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       if (existingContacts && existingContacts.length > 0) {
         contactId = existingContacts[0].id;
         
-        // Update contact name only if it's not a group, to prevent overwriting group names with participant names
-        if (!remoteJid.includes('@g.us') && pushName && pushName !== 'Desconhecido') {
+        // Update contact name
+        if (remoteJid.includes('@g.us')) {
+          // If it's a group and we got the actual name, update it if it differs
+          if (actualGroupName && existingContacts[0].name !== actualGroupName) {
+            await supabaseAdmin
+              .from('contacts')
+              .update({ name: actualGroupName })
+              .eq('id', contactId);
+          }
+        } else if (pushName && pushName !== 'Desconhecido' && existingContacts[0].name !== pushName) {
+          // If it's a direct contact, update the person's name
           await supabaseAdmin
             .from('contacts')
             .update({ name: pushName })
@@ -272,11 +295,12 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         }
       } else {
         // Create new contact
+        const groupDefaultName = actualGroupName || 'Grupo do WhatsApp';
         const { data: newContact, error: contactErr } = await supabaseAdmin
           .from('contacts')
           .insert({
             company_id: company_id,
-            name: remoteJid.includes('@g.us') ? 'Grupo do WhatsApp' : pushName,
+            name: remoteJid.includes('@g.us') ? groupDefaultName : pushName,
             phone: phoneNumber,
           })
           .select()
