@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus } from "lucide-react";
+import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction } from "@/lib/api/chat.functions";
+import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, syncLabelsAction } from "@/lib/api/chat.functions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -17,13 +17,15 @@ import { ChannelIcon } from "@/components/common/channel-icon";
 import { StatusBadge } from "@/components/common/status-badge";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
-import { formatRelative, initials, formatPhone } from "@/lib/format";
+import { formatRelative, initials, formatPhone, formatMessageTime } from "@/lib/format";
 import { useUnit } from "@/lib/unit-context";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import EmojiPicker from "emoji-picker-react";
+import TextareaAutosize from "react-textarea-autosize";
 
 export const Route = createFileRoute("/_authenticated/conversations")({
   component: ConversationsPage,
@@ -40,7 +42,14 @@ interface ConvRow {
   tags: string[];
   unread_count?: number;
   last_message_preview?: string | null;
-  contact: { id: string; name: string; phone: string | null; email: string | null; tags: string[] };
+  contact: { 
+    id: string; 
+    name: string; 
+    phone: string | null; 
+    email: string | null; 
+    tags: string[];
+    contact_labels?: { labels: { id: string; name: string; color: string | null } }[];
+  };
   department: { name: string } | null;
 }
 
@@ -49,6 +58,7 @@ function ConversationsPage() {
   const [tab, setTab] = useState<Status>("waiting");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showSidebar, setShowSidebar] = useState(true);
   const { selectedUnitId } = useUnit();
 
   const { data: conversations } = useQuery({
@@ -57,7 +67,7 @@ function ConversationsPage() {
       let query = supabase
         .from("conversations")
         .select(
-          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, contact:contacts(id,name,phone,email,tags), department:departments(name)"
+          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name)"
         )
         .eq("status", tab);
 
@@ -145,8 +155,202 @@ function ConversationsPage() {
 
       {/* Chat */}
       <section className="flex min-w-0 flex-1 flex-col bg-background">
-        {selected ? <ChatPanel conv={selected} /> : <EmptyChat />}
+        {selected ? (
+          <ChatPanel 
+            conv={selected} 
+            showSidebar={showSidebar}
+            onToggleSidebar={() => setShowSidebar(!showSidebar)}
+          />
+        ) : (
+          <EmptyChat />
+        )}
       </section>
+
+      {/* Contact Info Sidebar */}
+      {selected && showSidebar && (
+        <aside className="hidden w-[280px] shrink-0 flex-col border-l border-border bg-card lg:flex xl:w-[320px]">
+          <ContactSidebar conv={selected} onClose={() => setShowSidebar(false)} />
+        </aside>
+      )}
+    </div>
+  );
+}
+
+function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void }) {
+  const qc = useQueryClient();
+  const { selectedUnitId } = useUnit();
+  const { profile } = useAuth();
+
+  const { data: allLabels } = useQuery({
+    queryKey: ["labels", profile?.company_id],
+    queryFn: async () => {
+      if (!profile?.company_id) return [];
+      const { data } = await supabase.from('labels').select('*').eq('company_id', profile.company_id);
+      return data || [];
+    },
+    enabled: !!profile?.company_id
+  });
+
+  const toggleLabel = useMutation({
+    mutationFn: async ({ labelId, action }: { labelId: string, action: "add" | "remove" }) => {
+      if (!selectedUnitId || !conv.contact?.id) return;
+      const res = await toggleContactLabelAction({ data: { unitId: selectedUnitId, contactId: conv.contact.id, labelId, action } });
+      if (!res?.success) throw new Error("Falha na API do WhatsApp. O EvoGo rejeitou a ação.");
+      return res;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e) => toast.error(e.message)
+  });
+
+  const sync = useMutation({
+    mutationFn: async () => {
+      if (!selectedUnitId) return;
+      const res = await syncLabelsAction({ data: { unitId: selectedUnitId } });
+      if (!res.success) throw new Error("Falha ao sincronizar etiquetas");
+      return res;
+    },
+    onSuccess: (data) => {
+      toast.success(`${data?.count || 0} etiquetas sincronizadas`);
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e) => toast.error((e as Error).message)
+  });
+  
+  const { data: profilePictureUrl } = useQuery({
+    queryKey: ["contact-profile-pic", conv.contact?.id, selectedUnitId],
+    queryFn: async () => {
+      if (!conv.contact?.id || !selectedUnitId) return null;
+      return await fetchContactInfoAction({ data: { contactId: conv.contact.id, unitId: selectedUnitId } });
+    },
+    enabled: !!conv.contact?.id && !!selectedUnitId,
+    staleTime: 1000 * 60 * 60, // 1 hour
+  });
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex justify-end p-2 pb-0">
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="border-b border-border p-4 pt-0 flex flex-col items-center justify-center space-y-3">
+        <Avatar className="h-24 w-24 border">
+          {profilePictureUrl ? (
+            <img src={profilePictureUrl} alt={conv.contact?.name} className="object-cover" />
+          ) : (
+            <AvatarFallback className="text-xl bg-primary/10 text-primary">
+              {initials(conv.contact?.name)}
+            </AvatarFallback>
+          )}
+        </Avatar>
+        <div className="text-center">
+          <h3 className="font-semibold text-lg">{conv.contact?.name || "Desconhecido"}</h3>
+          <p className="text-sm text-muted-foreground">{formatPhone(conv.contact?.phone)}</p>
+        </div>
+      </div>
+
+      <ScrollArea className="flex-1 p-4">
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Tag className="h-3 w-3" />
+              Etiquetas
+            </h4>
+            <div className="flex flex-wrap gap-2">
+              {conv.contact?.contact_labels?.map((cl) => {
+                const label = cl.labels;
+                if (!label) return null;
+                const hexColor = label.color || "#6b7280";
+                return (
+                  <Badge 
+                    key={label.id} 
+                    variant="outline" 
+                    style={{ 
+                      backgroundColor: `${hexColor}1a`, 
+                      color: hexColor, 
+                      borderColor: `${hexColor}33` 
+                    }}
+                  >
+                    {label.name}
+                  </Badge>
+                );
+              })}
+              {!conv.contact?.contact_labels?.length && (
+                <span className="text-xs text-muted-foreground">Nenhuma etiqueta</span>
+              )}
+              
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-6 text-[10px] border-dashed">
+                    <Plus className="h-3 w-3 mr-1" /> Adicionar
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="p-0 w-48" align="start">
+                  <Command>
+                    <CommandInput placeholder="Buscar etiqueta..." className="h-8" />
+                    <CommandList>
+                      <CommandEmpty>Nenhuma etiqueta encontrada.</CommandEmpty>
+                      <CommandGroup>
+                        {allLabels?.map(label => {
+                          const isSelected = conv.contact?.contact_labels?.some(cl => cl.labels?.id === label.id);
+                          return (
+                            <CommandItem
+                              key={label.id}
+                              onSelect={() => {
+                                toggleLabel.mutate({ labelId: label.id, action: isSelected ? "remove" : "add" });
+                              }}
+                            >
+                              <div 
+                                className="w-2 h-2 rounded-full mr-2" 
+                                style={{ backgroundColor: label.color || "#6b7280" }}
+                              />
+                              <span className="flex-1 text-xs">{label.name}</span>
+                              {isSelected && <Square className="h-3 w-3 opacity-50 bg-primary/20" />}
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6" 
+                title="Sincronizar etiquetas"
+                onClick={() => sync.mutate()}
+                disabled={sync.isPending}
+              >
+                <Loader2 className={cn("h-3 w-3", sync.isPending && "animate-spin")} />
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Detalhes
+            </h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between border-b pb-1">
+                <span className="text-muted-foreground">E-mail</span>
+                <span>{conv.contact?.email || "—"}</span>
+              </div>
+              <div className="flex justify-between border-b pb-1">
+                <span className="text-muted-foreground">Departamento</span>
+                <span>{conv.department?.name || "—"}</span>
+              </div>
+              <div className="flex justify-between border-b pb-1">
+                <span className="text-muted-foreground">Criado em</span>
+                <span>{new Date(conv.started_at).toLocaleDateString()}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </ScrollArea>
     </div>
   );
 }
@@ -355,7 +559,15 @@ interface MessageRow {
   isOptimistic?: boolean;
 }
 
-function ChatPanel({ conv }: { conv: ConvRow }) {
+function ChatPanel({ 
+  conv,
+  showSidebar,
+  onToggleSidebar
+}: { 
+  conv: ConvRow;
+  showSidebar?: boolean;
+  onToggleSidebar?: () => void;
+}) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [text, setText] = useState("");
@@ -586,6 +798,13 @@ function ChatPanel({ conv }: { conv: ConvRow }) {
                 Encerrar
               </Button>
             )}
+            <button 
+              className={cn("rounded p-2 text-muted-foreground hover:bg-accent", showSidebar && "bg-accent")}
+              onClick={onToggleSidebar}
+              title="Informações do Contato"
+            >
+              <PanelRight className="h-4 w-4" />
+            </button>
             <button className="rounded p-2 text-muted-foreground hover:bg-accent">
               <MoreVertical className="h-4 w-4" />
             </button>
@@ -648,7 +867,7 @@ function ChatPanel({ conv }: { conv: ConvRow }) {
                   </PopoverContent>
                 </Popover>
                 
-                <Textarea
+                <TextareaAutosize
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   onKeyDown={(e) => {
@@ -658,8 +877,9 @@ function ChatPanel({ conv }: { conv: ConvRow }) {
                     }
                   }}
                   placeholder="Digite uma mensagem..."
-                  rows={1}
-                  className="min-h-[40px] flex-1 resize-none"
+                  minRows={1}
+                  maxRows={6}
+                  className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
                 />
                 
                 {(text.trim() || selectedFile) ? (
@@ -765,6 +985,21 @@ function Field({
   );
 }
 
+function FormattedText({ text }: { text: string }) {
+  if (!text) return null;
+  const parts = text.split(/(\*[^*]+\*|_{1}[^_]+_{1}|~[^~]+~)/g);
+  return (
+    <div className="whitespace-pre-wrap break-words">
+      {parts.map((part, i) => {
+        if (part.startsWith('*') && part.endsWith('*')) return <strong key={i}>{part.slice(1, -1)}</strong>;
+        if (part.startsWith('_') && part.endsWith('_')) return <em key={i}>{part.slice(1, -1)}</em>;
+        if (part.startsWith('~') && part.endsWith('~')) return <del key={i}>{part.slice(1, -1)}</del>;
+        return <span key={i}>{part}</span>;
+      })}
+    </div>
+  );
+}
+
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
 function MessageBubble({ m, onReact }: { m: MessageRow, onReact?: (emoji: string) => void }) {
@@ -836,21 +1071,21 @@ function MessageBubble({ m, onReact }: { m: MessageRow, onReact?: (emoji: string
               </DialogContent>
             </Dialog>
             {m.content && m.content !== "📷 Imagem" && (
-              <div className="mt-2">{m.content}</div>
+              <div className="mt-2"><FormattedText text={m.content} /></div>
             )}
           </div>
         ) : m.media_type === "audio" && m.media_url ? (
           <div className="mb-2 flex flex-col gap-1">
             <audio controls src={m.media_url} className="h-10 w-48" />
-            {m.content && m.content !== "🎵 Áudio" && <div className="text-xs">{m.content}</div>}
+            {m.content && m.content !== "🎵 Áudio" && <div className="text-xs"><FormattedText text={m.content} /></div>}
           </div>
         ) : m.media_type === "video" && m.media_url ? (
           <div className="mb-2 flex flex-col gap-1">
             <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
-            {m.content && m.content !== "🎥 Vídeo" && <div className="text-xs">{m.content}</div>}
+            {m.content && m.content !== "🎥 Vídeo" && <div className="text-xs"><FormattedText text={m.content} /></div>}
           </div>
         ) : (
-          m.content
+          <FormattedText text={m.content || ""} />
         )}
         <div
           className={cn(
@@ -859,7 +1094,7 @@ function MessageBubble({ m, onReact }: { m: MessageRow, onReact?: (emoji: string
           )}
         >
           {m.is_edited && <span className="italic">Editado</span>}
-          <span>{formatRelative(m.created_at)}</span>
+          <span>{formatMessageTime(m.created_at)}</span>
         </div>
         
         {m.reactions && Object.keys(m.reactions).length > 0 && (

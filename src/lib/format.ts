@@ -1,10 +1,23 @@
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export function formatRelative(date: string | Date | null | undefined): string {
   if (!date) return "—";
   const d = typeof date === "string" ? new Date(date) : date;
   return formatDistanceToNow(d, { addSuffix: true, locale: ptBR });
+}
+
+export function formatMessageTime(date: string | Date | null | undefined): string {
+  if (!date) return "—";
+  const d = typeof date === "string" ? new Date(date) : date;
+  
+  if (isToday(d)) {
+    return format(d, "HH:mm");
+  } else if (isYesterday(d)) {
+    return `Ontem ${format(d, "HH:mm")}`;
+  } else {
+    return format(d, "dd/MM/yyyy HH:mm");
+  }
 }
 
 export function formatPhone(phone?: string | null): string {

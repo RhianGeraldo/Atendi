@@ -38,6 +38,39 @@ export type Database = {
         }
         Relationships: []
       }
+      contact_labels: {
+        Row: {
+          contact_id: string
+          created_at: string | null
+          label_id: string
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string | null
+          label_id: string
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string | null
+          label_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_labels_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_labels_label_id_fkey"
+            columns: ["label_id"]
+            isOneToOne: false
+            referencedRelation: "labels"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
           company_id: string
@@ -184,6 +217,41 @@ export type Database = {
             columns: ["unit_id"]
             isOneToOne: false
             referencedRelation: "units"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      labels: {
+        Row: {
+          color: string | null
+          company_id: string
+          created_at: string | null
+          external_id: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          color?: string | null
+          company_id: string
+          created_at?: string | null
+          external_id?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          color?: string | null
+          company_id?: string
+          created_at?: string | null
+          external_id?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "labels_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -353,6 +421,7 @@ export type Database = {
           name: string
           online: boolean
           role: Database["public"]["Enums"]["app_role"]
+          use_signature: boolean | null
         }
         Insert: {
           active?: boolean
@@ -364,6 +433,7 @@ export type Database = {
           name: string
           online?: boolean
           role?: Database["public"]["Enums"]["app_role"]
+          use_signature?: boolean | null
         }
         Update: {
           active?: boolean
@@ -375,6 +445,7 @@ export type Database = {
           name?: string
           online?: boolean
           role?: Database["public"]["Enums"]["app_role"]
+          use_signature?: boolean | null
         }
         Relationships: [
           {

@@ -97,7 +97,48 @@ export class EvoGoClient {
     });
   }
 
-  // --- Messaging ---
+  // --- Messaging & Chat ---
+
+  async fetchProfilePictureUrl(number: string, instanceToken: string) {
+    try {
+      const result = await this.request('/chat/fetchProfilePictureUrl', {
+        method: 'POST',
+        body: JSON.stringify({ number })
+      }, instanceToken) as any;
+      return result?.profilePictureUrl || null;
+    } catch (e) {
+      console.warn("Failed to fetch profile picture for", number, e);
+      return null;
+    }
+  }
+
+  // --- Labels ---
+
+  async getLabels(instanceToken: string) {
+    try {
+      const result = await this.request('/label/list', {
+        method: 'GET'
+      }, instanceToken) as any;
+      return result || [];
+    } catch (e) {
+      console.warn("Failed to fetch labels", e);
+      return [];
+    }
+  }
+
+  async addLabelToContact(number: string, labelId: string, instanceToken: string) {
+    return this.request('/label/add', {
+      method: 'POST',
+      body: JSON.stringify({ number, labelId })
+    }, instanceToken);
+  }
+
+  async removeLabelFromContact(number: string, labelId: string, instanceToken: string) {
+    return this.request('/label/remove', {
+      method: 'DELETE',
+      body: JSON.stringify({ number, labelId })
+    }, instanceToken);
+  }
 
   async sendText(number: string, text: string, instanceToken: string, delay = 1000) {
     return this.request('/send/text', {

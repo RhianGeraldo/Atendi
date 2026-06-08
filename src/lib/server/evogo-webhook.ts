@@ -365,6 +365,88 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       return;
     }
 
+    // --- Handle Labels Webhooks ---
+    if (body.event === 'labels.edit' || body.event === 'labels.upsert' || body.event === 'labels.update') {
+      const instanceName = body.instance || body.instanceName;
+      if (!instanceName) return;
+
+      const { data: instance } = await supabaseAdmin
+        .from('whatsapp_instances')
+        .select('company_id')
+        .eq('instance_name', instanceName)
+        .single();
+      
+      if (!instance) return;
+
+      const labelsData = Array.isArray(body.data) ? body.data : [body.data];
+      
+      for (const label of labelsData) {
+        if (!label.id || !label.name) continue;
+        
+        // Upsert label
+        await supabaseAdmin.from('labels').upsert({
+          external_id: label.id,
+          company_id: instance.company_id,
+          name: label.name,
+          color: label.color ? String(label.color) : null,
+        }, { onConflict: 'company_id, external_id' }).select('id').maybeSingle();
+      }
+      return;
+    }
+
+    if (body.event === 'labels.association' || body.event === 'labels.add') {
+      const instanceName = body.instance || body.instanceName;
+      if (!instanceName) return;
+      
+      const { data: instance } = await supabaseAdmin
+        .from('whatsapp_instances')
+        .select('company_id')
+        .eq('instance_name', instanceName)
+        .single();
+        
+      if (!instance) return;
+
+      const association = body.data;
+      if (!association?.labelId || !association?.number) return;
+      
+      const phone = association.number.split('@')[0];
+      
+      // 1. Find Label
+      const { data: labelInfo } = await supabaseAdmin
+        .from('labels')
+        .select('id')
+        .eq('external_id', association.labelId)
+        .eq('company_id', instance.company_id)
+        .maybeSingle();
+        
+      if (!labelInfo) return; // Label not sync'd yet
+      
+      // 2. Find Contact
+      const { data: contactInfo } = await supabaseAdmin
+        .from('contacts')
+        .select('id')
+        .eq('phone', phone)
+        .eq('company_id', instance.company_id)
+        .maybeSingle();
+        
+      if (!contactInfo) return;
+
+      // 3. Insert association
+      if (association.action === 'add' || body.event === 'labels.association') {
+        await supabaseAdmin.from('contact_labels').upsert({
+          contact_id: contactInfo.id,
+          label_id: labelInfo.id
+        }, { onConflict: 'contact_id, label_id' });
+      } else if (association.action === 'remove') {
+        await supabaseAdmin.from('contact_labels')
+          .delete()
+          .eq('contact_id', contactInfo.id)
+          .eq('label_id', labelInfo.id);
+      }
+      
+      return;
+    }
+
     return;
   } catch (err) {
     console.log(new Date().toISOString() + ' ERROR: ' + String(err) + '\n');

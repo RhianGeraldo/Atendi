@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building } from "lucide-react";
+import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import { DepartmentsTab } from "@/components/settings/departments-tab";
 import { UsersTab } from "@/components/settings/users-tab";
 
@@ -40,6 +41,7 @@ function SettingsPage() {
   const [instanceName, setInstanceName] = useState("");
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
+  const [useSignature, setUseSignature] = useState(profile?.use_signature || false);
 
   const [newCompanyName, setNewCompanyName] = useState("");
   
@@ -120,6 +122,27 @@ function SettingsPage() {
       qc.invalidateQueries({ queryKey: ["company-name", profile?.company_id] }); // Update sidebar
     },
     onError: (e) => toast.error("Erro ao atualizar", { description: (e as Error).message })
+  });
+
+  const toggleSignature = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      if (!profile?.id) throw new Error("Sem usuário ativo");
+      const { error } = await supabase
+        .from("profiles")
+        .update({ use_signature: enabled })
+        .eq("id", profile.id);
+      if (error) throw error;
+      return enabled;
+    },
+    onSuccess: (enabled) => {
+      setUseSignature(enabled);
+      toast.success(enabled ? "Assinatura ativada!" : "Assinatura desativada!");
+      // window.location.reload() or refresh auth context if needed, but setUseSignature handles local state
+    },
+    onError: (e) => {
+      setUseSignature(!useSignature); // Revert on error
+      toast.error("Erro ao alterar assinatura", { description: (e as Error).message });
+    }
   });
 
   const { data: instances, isLoading: isLoadingInstances } = useQuery({
@@ -244,6 +267,7 @@ function SettingsPage() {
       <Tabs defaultValue="general" className="space-y-6">
         <TabsList>
           <TabsTrigger value="general">Geral e Integrações</TabsTrigger>
+          <TabsTrigger value="profile">Meu Perfil</TabsTrigger>
           <TabsTrigger value="departments">Departamentos</TabsTrigger>
           <TabsTrigger value="users">Equipe e Acessos</TabsTrigger>
         </TabsList>
@@ -397,6 +421,35 @@ function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+        </TabsContent>
+
+        <TabsContent value="profile" className="grid gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <User className="h-5 w-5" />
+                Preferências de Atendimento
+              </CardTitle>
+              <CardDescription>
+                Configure como suas mensagens serão enviadas.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between space-x-2 border rounded-lg p-4">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-medium">Assinatura de Mensagem</label>
+                  <p className="text-xs text-muted-foreground">
+                    Adicionar automaticamente seu nome ao final das mensagens enviadas.
+                  </p>
+                </div>
+                <Switch
+                  checked={useSignature}
+                  onCheckedChange={(v) => toggleSignature.mutate(v)}
+                  disabled={toggleSignature.isPending}
+                />
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="departments">

@@ -73,7 +73,19 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       throw new Error("EvoGo is not configured for this unit/company.");
     }
 
-    // 3. Send message via EvoGo
+    // 3. Get user profile for signature
+    const { data: userProfile } = await supabase
+      .from("profiles")
+      .select("name, use_signature")
+      .eq("id", userId)
+      .single();
+
+    let textToSend = data.text || '';
+    if (userProfile?.use_signature && userProfile?.name) {
+      textToSend = textToSend.trim() ? `*${userProfile.name}*:\n${textToSend}` : `*${userProfile.name}*:`;
+    }
+
+    // 4. Send message via EvoGo
     let evogoResponse;
     if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
       evogoResponse = await sendEvogoMedia({
@@ -83,7 +95,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         number: phone,
         base64: data.mediaBase64,
         mediatype: data.mediaType as any,
-        caption: data.text || '',
+        caption: textToSend,
       });
     } else {
       evogoResponse = await sendEvogoText({
@@ -91,7 +103,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         token,
         instanceName,
         number: phone,
-        text: data.text || '',
+        text: textToSend,
       });
     }
 
@@ -105,7 +117,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         conversation_id: data.conversationId,
         sender_type: "agent",
         sender_id: userId,
-        content: data.text || null,
+        content: textToSend || null,
         media_type: data.mediaType || "text",
         media_url: data.mediaBase64 || null,
         remote_msg_id: remoteMsgId,
@@ -169,13 +181,25 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     let rawPhone = data.phone.replace(/\D/g, "");
     if (!rawPhone.startsWith("55")) rawPhone = "55" + rawPhone; // basic br fallback
 
-    // 3. Send message via EvoGo
+    // 3. Get user profile for signature
+    const { data: userProfile } = await supabase
+      .from("profiles")
+      .select("name, use_signature")
+      .eq("id", userId)
+      .single();
+
+    let textToSend = data.text;
+    if (userProfile?.use_signature && userProfile?.name) {
+      textToSend = textToSend?.trim() ? `*${userProfile.name}*:\n${textToSend}` : `*${userProfile.name}*:`;
+    }
+
+    // 4. Send message via EvoGo
     await sendEvogoText({
       host,
       token,
       instanceName,
       number: rawPhone,
-      text: data.text,
+      text: textToSend,
     });
 
     // 4. Find or create Contact
@@ -241,7 +265,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
         conversation_id: conversationId,
         sender_type: "agent",
         sender_id: userId,
-        content: data.text,
+        content: textToSend,
         media_type: "text"
       });
 
@@ -255,6 +279,167 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     }
 
     return { success: true, conversationId };
+  });
+
+export const fetchContactInfoAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    contactId: z.string().uuid(),
+    unitId: z.string().uuid()
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    
+    // Get contact phone
+    const { data: contact } = await supabase.from('contacts').select('phone').eq('id', data.contactId).single();
+    if (!contact?.phone) return null;
+
+    // Get instance for unit
+    const { data: instance } = await supabaseAdmin
+      .from("whatsapp_instances")
+      .select("instance_name, evogo_api_key, companies(evogo_host)")
+      .eq("unit_id", data.unitId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!instance || !instance.evogo_api_key || !instance.companies?.evogo_host) return null;
+
+    const host = instance.companies.evogo_host;
+    const token = instance.evogo_api_key;
+    const instanceName = instance.instance_name;
+
+    try {
+      const url = `${host}/chat/fetchProfilePictureUrl/${instanceName}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': token
+        },
+        body: JSON.stringify({ number: contact.phone })
+      });
+      if (response.ok) {
+        const json = await response.json();
+        return json.profilePictureUrl || null;
+      }
+    } catch (e) {
+      console.warn("Failed to fetch profile picture:", e);
+    }
+    return null;
+  });
+
+export const syncLabelsAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    unitId: z.string().uuid()
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    const { data: instance } = await supabaseAdmin
+      .from("whatsapp_instances")
+      .select("instance_name, evogo_api_key, company_id, companies(evogo_host)")
+      .eq("unit_id", data.unitId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!instance || !instance.evogo_api_key || !instance.companies?.evogo_host) return { success: false };
+
+    const host = instance.companies.evogo_host;
+    const token = instance.evogo_api_key;
+    const instanceName = instance.instance_name;
+
+    try {
+      const url = `${host}/label/list/${instanceName}`;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': token
+        }
+      });
+      if (response.ok) {
+        const labelsData = await response.json();
+        const labels = Array.isArray(labelsData) ? labelsData : [];
+        
+        for (const label of labels) {
+          if (!label.id || !label.name) continue;
+          await supabaseAdmin.from('labels').upsert({
+            external_id: label.id,
+            company_id: instance.company_id,
+            name: label.name,
+            color: label.color ? String(label.color) : null,
+          }, { onConflict: 'company_id, external_id' });
+        }
+        return { success: true, count: labels.length };
+      }
+    } catch (e) {
+      console.warn("Failed to sync labels:", e);
+    }
+    return { success: false };
+  });
+
+export const toggleContactLabelAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    unitId: z.string().uuid(),
+    contactId: z.string().uuid(),
+    labelId: z.string().uuid(),
+    action: z.enum(["add", "remove"])
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    // Get instance
+    const { data: instance } = await supabaseAdmin
+      .from("whatsapp_instances")
+      .select("instance_name, evogo_api_key, company_id, companies(evogo_host)")
+      .eq("unit_id", data.unitId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!instance || !instance.evogo_api_key || !instance.companies?.evogo_host) return { success: false };
+
+    // Get label
+    const { data: label } = await supabaseAdmin.from('labels').select('external_id').eq('id', data.labelId).single();
+    if (!label?.external_id) return { success: false };
+
+    // Get contact
+    const { data: contact } = await supabaseAdmin.from('contacts').select('phone').eq('id', data.contactId).single();
+    if (!contact?.phone) return { success: false };
+
+    const host = instance.companies.evogo_host;
+    const token = instance.evogo_api_key;
+    const instanceName = instance.instance_name;
+
+    // Always update local database first so it shows up in UI
+    if (data.action === 'add') {
+      await supabaseAdmin.from('contact_labels').upsert({ contact_id: data.contactId, label_id: data.labelId });
+    } else {
+      await supabaseAdmin.from('contact_labels').delete().eq('contact_id', data.contactId).eq('label_id', data.labelId);
+    }
+
+    try {
+      const endpoint = data.action === 'add' ? '/label/add' : '/label/remove';
+      const url = `${host}${endpoint}/${instanceName}`;
+      
+      const response = await fetch(url, {
+        method: data.action === 'add' ? 'POST' : 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': token
+        },
+        body: JSON.stringify({ number: contact.phone, labelId: label.external_id })
+      });
+
+      if (!response.ok) {
+        console.warn(`EvoGo rejected label ${data.action} action, status:`, response.status);
+      }
+    } catch (e) {
+      console.warn("Failed to toggle label in EvoGo, but saved locally:", e);
+    }
+
+    return { success: true };
   });
 
 export const reactToMessageAction = createServerFn({ method: "POST" })
