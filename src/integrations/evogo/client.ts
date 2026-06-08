@@ -101,11 +101,11 @@ export class EvoGoClient {
 
   async fetchProfilePictureUrl(number: string, instanceToken: string) {
     try {
-      const result = await this.request('/chat/fetchProfilePictureUrl', {
+      const result = await this.request('/user/avatar', {
         method: 'POST',
-        body: JSON.stringify({ number })
+        body: JSON.stringify({ number, preview: false })
       }, instanceToken) as any;
-      return result?.profilePictureUrl || null;
+      return result?.url || result?.profilePictureUrl || null;
     } catch (e) {
       console.warn("Failed to fetch profile picture for", number, e);
       return null;
@@ -127,16 +127,16 @@ export class EvoGoClient {
   }
 
   async addLabelToContact(number: string, labelId: string, instanceToken: string) {
-    return this.request('/label/add', {
+    return this.request('/label/chat', {
       method: 'POST',
-      body: JSON.stringify({ number, labelId })
+      body: JSON.stringify({ jid: `${number}@s.whatsapp.net`, labelId })
     }, instanceToken);
   }
 
   async removeLabelFromContact(number: string, labelId: string, instanceToken: string) {
-    return this.request('/label/remove', {
-      method: 'DELETE',
-      body: JSON.stringify({ number, labelId })
+    return this.request('/unlabel/chat', {
+      method: 'POST',
+      body: JSON.stringify({ jid: `${number}@s.whatsapp.net`, labelId })
     }, instanceToken);
   }
 

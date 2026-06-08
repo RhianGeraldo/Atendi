@@ -309,18 +309,18 @@ export const fetchContactInfoAction = createServerFn({ method: "POST" })
     const instanceName = instance.instance_name;
 
     try {
-      const url = `${host}/chat/fetchProfilePictureUrl/${instanceName}`;
+      const url = `${host}/user/avatar`;
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'apikey': token
         },
-        body: JSON.stringify({ number: contact.phone })
+        body: JSON.stringify({ number: contact.phone, preview: false })
       });
       if (response.ok) {
         const json = await response.json();
-        return json.profilePictureUrl || null;
+        return json.url || json.profilePictureUrl || null;
       }
     } catch (e) {
       console.warn("Failed to fetch profile picture:", e);
@@ -350,7 +350,7 @@ export const syncLabelsAction = createServerFn({ method: "POST" })
     const instanceName = instance.instance_name;
 
     try {
-      const url = `${host}/label/list/${instanceName}`;
+      const url = `${host}/label/list`;
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -420,16 +420,16 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
     }
 
     try {
-      const endpoint = data.action === 'add' ? '/label/add' : '/label/remove';
-      const url = `${host}${endpoint}/${instanceName}`;
+      const endpoint = data.action === 'add' ? '/label/chat' : '/unlabel/chat';
+      const url = `${host}${endpoint}`;
       
       const response = await fetch(url, {
-        method: data.action === 'add' ? 'POST' : 'DELETE',
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'apikey': token
         },
-        body: JSON.stringify({ number: contact.phone, labelId: label.external_id })
+        body: JSON.stringify({ jid: `${contact.phone}@s.whatsapp.net`, labelId: label.external_id })
       });
 
       if (!response.ok) {
