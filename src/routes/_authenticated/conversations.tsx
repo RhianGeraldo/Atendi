@@ -340,8 +340,6 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
                 <span className="text-xs text-muted-foreground">Nenhuma etiqueta</span>
               )}
             </div>
-
-            </div>
           </div>
 
           <div className="space-y-3">
