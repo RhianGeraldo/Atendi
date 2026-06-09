@@ -379,8 +379,12 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
   const handleDelete = async (instance: any) => {
     try {
       if (instance.evogo_instance_id) {
-        const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
-        await client.deleteInstance(instance.evogo_instance_id);
+        try {
+          const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
+          await client.deleteInstance(instance.evogo_instance_id);
+        } catch (evogoError: any) {
+          console.warn("Falha ao deletar na EvoGo (pode já estar deletada):", evogoError.message);
+        }
       }
       await supabase.from("whatsapp_instances").delete().eq("id", instance.id);
       toast.success("Instância deletada.");

@@ -49,3 +49,4 @@ clear_*.js
 *.txt
 *.jpg
 *.png
+.vercel
