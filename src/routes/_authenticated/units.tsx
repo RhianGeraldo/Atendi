@@ -349,7 +349,7 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
         const evoRes: any = await client.createInstance(technicalName, data.evogo_api_key);
         const evogoId = evoRes?.data?.id || evoRes?.id;
         if (evogoId) {
-          const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/evogo-webhook`;
+          const webhookUrl = `${window.location.origin}/api/evogo/webhook`;
           await supabase.from("whatsapp_instances").update({ evogo_instance_id: evogoId, webhook_url: webhookUrl }).eq("id", data.id);
           await client.connectInstance(webhookUrl, data.evogo_api_key).catch(console.error);
           await client.updateAdvancedSettings(evogoId, { rejectCalls: false, readMessages: false, readStatus: false, alwaysOnline: false }, data.evogo_api_key).catch(console.error);
