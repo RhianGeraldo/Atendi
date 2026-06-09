@@ -261,32 +261,32 @@ function ConversationsPage() {
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)} className="mt-3">
             <TabsList className="grid w-full grid-cols-4 h-auto py-1">
               <TabsTrigger value="waiting" className="px-1 py-1.5 text-xs relative">
-                Aguard. {unreadCounts?.waiting.total || 0}
-                {unreadCounts && unreadCounts.waiting.unread > 0 && (
+                Aguard. {unreadCounts?.waiting?.total || 0}
+                {unreadCounts && unreadCounts.waiting?.unread > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
                     {unreadCounts.waiting.unread}
                   </span>
                 )}
               </TabsTrigger>
               <TabsTrigger value="active" className="px-1 py-1.5 text-xs relative">
-                Andam. {unreadCounts?.active.total || 0}
-                {unreadCounts && unreadCounts.active.unread > 0 && (
+                Andam. {unreadCounts?.active?.total || 0}
+                {unreadCounts && unreadCounts.active?.unread > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
                     {unreadCounts.active.unread}
                   </span>
                 )}
               </TabsTrigger>
               <TabsTrigger value="resolved" className="px-1 py-1.5 text-xs relative">
-                Resolv. {unreadCounts?.resolved.total || 0}
-                {unreadCounts && unreadCounts.resolved.unread > 0 && (
+                Resolv. {unreadCounts?.resolved?.total || 0}
+                {unreadCounts && unreadCounts.resolved?.unread > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
                     {unreadCounts.resolved.unread}
                   </span>
                 )}
               </TabsTrigger>
               <TabsTrigger value="groups" className="px-1 py-1.5 text-xs relative">
-                Grupos {unreadCounts?.groups.total || 0}
-                {unreadCounts && unreadCounts.groups.unread > 0 && (
+                Grupos {unreadCounts?.groups?.total || 0}
+                {unreadCounts && unreadCounts.groups?.unread > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
                     {unreadCounts.groups.unread}
                   </span>

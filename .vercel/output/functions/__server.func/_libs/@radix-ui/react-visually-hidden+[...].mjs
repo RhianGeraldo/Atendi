@@ -27,6 +27,8 @@ var VisuallyHidden = reactExports.forwardRef(
   }
 );
 VisuallyHidden.displayName = NAME;
+var Root = VisuallyHidden;
 export {
+  Root as R,
   VISUALLY_HIDDEN_STYLES as V
 };

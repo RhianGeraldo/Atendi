@@ -1,0 +1,1 @@
+import{u as n,j as e,N as t}from"./index-DzLc2TWI.js";function o(){const{loading:r,session:s}=n();return r?e.jsx("div",{className:"flex min-h-screen items-center justify-center bg-background",children:e.jsx("div",{className:"h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"})}):e.jsx(t,{to:s?"/dashboard":"/auth",replace:!0})}export{o as component};

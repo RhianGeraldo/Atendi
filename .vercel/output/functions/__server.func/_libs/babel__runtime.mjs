@@ -1,3 +1,12 @@
+function _extends$1() {
+  return _extends$1 = Object.assign ? Object.assign.bind() : function(n) {
+    for (var e = 1; e < arguments.length; e++) {
+      var t = arguments[e];
+      for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]);
+    }
+    return n;
+  }, _extends$1.apply(null, arguments);
+}
 var _extends = { exports: {} };
 var hasRequired_extends;
 function require_extends() {
@@ -37,6 +46,7 @@ function requireObjectWithoutPropertiesLoose() {
   return objectWithoutPropertiesLoose.exports;
 }
 export {
+  _extends$1 as _,
   requireObjectWithoutPropertiesLoose as a,
   require_extends as r
 };

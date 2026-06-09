@@ -202,6 +202,17 @@ async function processEvogoWebhookBody(body) {
           }
         } else if (msg.albumMessage) {
           return;
+        } else if (msg.protocolMessage && (msg.protocolMessage.type === 14 || msg.protocolMessage.type === "MESSAGE_EDIT")) {
+          const editedMsg = msg.protocolMessage.editedMessage;
+          if (editedMsg) {
+            textContent = editedMsg.conversation || editedMsg.extendedTextMessage?.text || "[Mensagem Editada]";
+            textContent = `✏️ *Editado:* ${textContent}`;
+          } else {
+            return;
+          }
+        } else if (msg.secretEncryptedMessage || info && info.Edit === "1" && !msg.conversation && !msg.extendedTextMessage) {
+          console.log("[evogo-webhook] Ignoring secretEncryptedMessage/Edit without decrypted content");
+          return;
         }
       } else {
         const messageData2 = body.data?.message || body.message || body;
@@ -267,6 +278,17 @@ async function processEvogoWebhookBody(body) {
             if (targetId) {
               return await handleReaction(targetId, emoji);
             }
+          } else if (msgType.protocolMessage && (msgType.protocolMessage.type === 14 || msgType.protocolMessage.type === "MESSAGE_EDIT")) {
+            const editedMsg = msgType.protocolMessage.editedMessage;
+            if (editedMsg) {
+              textContent = editedMsg.conversation || editedMsg.extendedTextMessage?.text || "[Mensagem Editada]";
+              textContent = `✏️ *Editado:* ${textContent}`;
+            } else {
+              return;
+            }
+          } else if (msgType.secretEncryptedMessage) {
+            console.log("[evogo-webhook] Ignoring secretEncryptedMessage/Edit without decrypted content");
+            return;
           }
         }
       }
@@ -280,40 +302,29 @@ async function processEvogoWebhookBody(body) {
         textContent = "[Mídia/Mensagem não suportada]";
       }
       if (remoteJid.includes("@g.us") && !isFromMe) {
-        textContent = `*${pushName}:*
+        textContent = `${pushName}:
 ${textContent}`;
       }
-      const { data: instance, error: instanceErr } = await supabaseAdmin.from("whatsapp_instances").select("unit_id, company_id").eq("instance_name", instanceName).single();
+      const { data: instance, error: instanceErr } = await supabaseAdmin.from("whatsapp_instances").select("id, unit_id, company_id").eq("instance_name", instanceName).single();
       if (instanceErr || !instance) {
         console.error("Instance not found for webhook:", instanceName);
         return;
       }
-      let { company_id, unit_id } = instance;
-      if (!unit_id) {
-        const { data: fallbackUnit } = await supabaseAdmin.from("units").select("id").eq("company_id", company_id).order("created_at").limit(1).maybeSingle();
-        if (fallbackUnit) {
-          unit_id = fallbackUnit.id;
-        } else {
-          console.log("Instance has no unit_id: " + instanceName + "\n");
-          console.error("Instance has no unit_id linked:", instanceName);
-          return;
-        }
-      }
+      let { id: instance_id, company_id, unit_id } = instance;
       let contactId;
       const { data: existingContacts } = await supabaseAdmin.from("contacts").select("id, name").eq("company_id", company_id).eq("phone", phoneNumber).limit(1);
       if (existingContacts && existingContacts.length > 0) {
         contactId = existingContacts[0].id;
         if (remoteJid.includes("@g.us")) {
-          if (actualGroupName && existingContacts[0].name !== actualGroupName) {
+          if (actualGroupName && existingContacts[0].name !== actualGroupName && existingContacts[0].name === "Grupo do WhatsApp") {
             await supabaseAdmin.from("contacts").update({ name: actualGroupName }).eq("id", contactId);
           }
-        } else if (pushName && pushName !== "Desconhecido" && existingContacts[0].name !== pushName) {
-          await supabaseAdmin.from("contacts").update({ name: pushName }).eq("id", contactId);
         }
       } else {
         const groupDefaultName = actualGroupName || "Grupo do WhatsApp";
         const { data: newContact, error: contactErr } = await supabaseAdmin.from("contacts").insert({
           company_id,
+          unit_id,
           name: remoteJid.includes("@g.us") ? groupDefaultName : pushName,
           phone: phoneNumber
         }).select().single();
@@ -321,16 +332,33 @@ ${textContent}`;
         contactId = newContact.id;
       }
       let conversationId;
-      const { data: activeConvs } = await supabaseAdmin.from("conversations").select("id, status").eq("unit_id", unit_id).eq("contact_id", contactId).in("status", ["waiting", "active"]).limit(1);
-      if (activeConvs && activeConvs.length > 0) {
-        conversationId = activeConvs[0].id;
-        await supabaseAdmin.from("conversations").update({ last_message_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", conversationId);
+      let convQuery = supabaseAdmin.from("conversations").select("id, status").eq("contact_id", contactId).eq("whatsapp_instance_id", instance_id).order("last_message_at", { ascending: false }).limit(1);
+      const { data: latestConvs } = await convQuery;
+      console.log(`[evogo-webhook] Lookup conversation: instance_id=${instance_id}, contact_id=${contactId}, result=${JSON.stringify(latestConvs)}`);
+      if (latestConvs && latestConvs.length > 0) {
+        const conv = latestConvs[0];
+        conversationId = conv.id;
+        console.log(`[evogo-webhook] Found existing conversation: ${conversationId}, status: ${conv.status}`);
+        const updatePayload = { last_message_at: (/* @__PURE__ */ new Date()).toISOString() };
+        if (conv.status === "resolved") {
+          if (!isFromMe) {
+            updatePayload.status = "waiting";
+            updatePayload.assigned_agent_id = null;
+            updatePayload.department_id = null;
+          } else {
+            updatePayload.status = "active";
+            updatePayload.assigned_agent_id = null;
+          }
+        }
+        await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
       } else {
+        console.log(`[evogo-webhook] No existing conversation found. Creating new one.`);
         const { data: newConv, error: convErr } = await supabaseAdmin.from("conversations").insert({
           unit_id,
+          whatsapp_instance_id: instance_id,
           contact_id: contactId,
           channel: "whatsapp",
-          status: "waiting",
+          status: isFromMe ? "active" : "waiting",
           last_message_at: (/* @__PURE__ */ new Date()).toISOString()
         }).select().single();
         if (convErr) throw convErr;
@@ -350,6 +378,13 @@ ${textContent}`;
           return;
         }
       }
+      let participantJid = null;
+      if (isFromMe && body.data?.message?.key?.participant) {
+        participantJid = body.data.message.key.participant;
+      } else if (isFromMe && messageData?.key?.participant) ;
+      else if (!isFromMe) {
+        participantJid = remoteJid;
+      }
       const insertPayload = {
         conversation_id: conversationId,
         sender_type: isFromMe ? "agent" : "contact",
@@ -358,7 +393,8 @@ ${textContent}`;
         media_url: mediaUrl,
         remote_msg_id: remoteMsgId,
         quoted_message_id: quotedInternalId,
-        quoted_content: quotedContent
+        quoted_content: quotedContent,
+        participant_jid: participantJid
       };
       const { error: msgErr } = await supabaseAdmin.from("messages").insert(insertPayload);
       if (msgErr) {
@@ -412,6 +448,49 @@ ${textContent}`;
       }
       return;
     }
+    if (body.event === "JoinedGroup") {
+      const instanceName = body.instance || body.instanceName;
+      const jid = body.data?.JID;
+      const groupName = body.data?.Name;
+      if (!instanceName || !jid || !groupName) return;
+      const phoneNumber = jid.split("@")[0];
+      const { data: instance } = await supabaseAdmin.from("whatsapp_instances").select("id, company_id, unit_id").eq("instance_name", instanceName).single();
+      if (!instance) return;
+      let { id: instance_id, company_id, unit_id } = instance;
+      let contactId;
+      const { data: existingContacts } = await supabaseAdmin.from("contacts").select("id, name").eq("company_id", company_id).eq("phone", phoneNumber).limit(1);
+      if (existingContacts && existingContacts.length > 0) {
+        contactId = existingContacts[0].id;
+        if (groupName && existingContacts[0].name !== groupName) {
+          await supabaseAdmin.from("contacts").update({ name: groupName }).eq("id", contactId);
+        }
+      } else {
+        const { data: newContact, error: contactErr } = await supabaseAdmin.from("contacts").insert({
+          company_id,
+          unit_id,
+          phone: phoneNumber,
+          name: groupName || "Grupo do WhatsApp"
+        }).select().single();
+        if (contactErr || !newContact) {
+          console.error("Failed to create contact for JoinedGroup", contactErr);
+          return;
+        }
+        contactId = newContact.id;
+      }
+      let activeConvQuery = supabaseAdmin.from("conversations").select("id").eq("contact_id", contactId).eq("whatsapp_instance_id", instance_id).in("status", ["waiting", "active"]).limit(1);
+      const { data: activeConvs } = await activeConvQuery;
+      if (!activeConvs || activeConvs.length === 0) {
+        await supabaseAdmin.from("conversations").insert({
+          unit_id,
+          whatsapp_instance_id: instance_id,
+          contact_id: contactId,
+          channel: "whatsapp",
+          status: "waiting",
+          last_message_at: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+      return;
+    }
     return;
   } catch (err) {
     console.log((/* @__PURE__ */ new Date()).toISOString() + " ERROR: " + String(err) + "\n");
@@ -431,7 +510,7 @@ async function handleReaction(targetRemoteId, emoji) {
 let serverEntryPromise;
 async function getServerEntry() {
   if (!serverEntryPromise) {
-    serverEntryPromise = import("./server-BNDz7mE0.mjs").then((n) => n.s).then(
+    serverEntryPromise = import("./server-BpYW9gSM.mjs").then((n) => n.s).then(
       (m) => m.default ?? m
     );
   }

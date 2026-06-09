@@ -321,9 +321,9 @@ export {
   Overlay as O,
   Portal as P,
   Root as R,
-  Title as T,
+  Trigger as T,
   WarningProvider as W,
-  Close as a,
-  Trigger as b,
+  Title as a,
+  Close as b,
   createDialogScope as c
 };

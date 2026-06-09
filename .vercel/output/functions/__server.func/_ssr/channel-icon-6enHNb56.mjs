@@ -1,6 +1,6 @@
 import { j as jsxRuntimeExports } from "../_libs/react.mjs";
 import { c as cn } from "./utils-H80jjgLf.mjs";
-import { _ as Instagram } from "../_libs/lucide-react.mjs";
+import { a9 as Instagram } from "../_libs/lucide-react.mjs";
 function ChannelIcon({ channel, className }) {
   if (channel === "instagram") {
     return /* @__PURE__ */ jsxRuntimeExports.jsx(
