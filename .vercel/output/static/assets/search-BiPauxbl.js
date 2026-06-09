@@ -1,1 +1,0 @@
-import{c}from"./utils-BKCY7W3W.js";const e=[["path",{d:"m7 15 5 5 5-5",key:"1hf1tw"}],["path",{d:"m7 9 5-5 5 5",key:"sgt6xg"}]],n=c("chevrons-up-down",e);const o=[["path",{d:"m21 21-4.34-4.34",key:"14j7rj"}],["circle",{cx:"11",cy:"11",r:"8",key:"4ej97u"}]],r=c("search",o);export{n as C,r as S};
