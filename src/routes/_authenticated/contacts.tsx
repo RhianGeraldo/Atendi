@@ -24,21 +24,29 @@ function ContactsPage() {
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
 
   const { data: contacts, isLoading } = useQuery({
-    queryKey: ["contacts", profile?.company_id, searchTerm],
+    queryKey: ["contacts", profile?.company_id, searchTerm, selectedUnitId],
     enabled: !!profile?.company_id,
     queryFn: async () => {
+      // Se não tem unidade selecionada (Empresa Mãe), pega todos os contatos.
+      // Se tem unidade, pega apenas os contatos que têm conversas na unidade logada.
+      const relation = selectedUnitId ? 'conversations!inner' : 'conversations';
+      
       let query = supabase
         .from("contacts")
         .select(`
           *,
-          conversations (
+          ${relation} (
             unit_id,
             units ( name ),
-            created_at
+            started_at
           )
         `)
         .eq("company_id", profile!.company_id!)
         .order("created_at", { ascending: false });
+
+      if (selectedUnitId) {
+        query = query.eq("conversations.unit_id", selectedUnitId);
+      }
 
       if (searchTerm) {
         query = query.or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`);
@@ -51,7 +59,7 @@ function ContactsPage() {
       return data.filter(c => !c.phone || c.phone.length <= 15).map(c => {
         // Sort conversations to get the latest
         const sortedConvs = (c.conversations || []).sort((a: any, b: any) => 
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
         );
         const lastConv = sortedConvs[0];
         return {

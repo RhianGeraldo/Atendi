@@ -62,6 +62,15 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
     }
   });
 
+  const { data: departmentName } = useQuery({
+    queryKey: ["department-name", profile?.department_id],
+    enabled: !!profile?.department_id,
+    queryFn: async () => {
+      const { data } = await supabase.from("departments").select("name").eq("id", profile!.department_id!).single();
+      return data?.name;
+    }
+  });
+
   const { selectedUnitId, setSelectedUnitId } = useUnit();
 
   const { data: units } = useQuery({
@@ -210,12 +219,20 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{profile?.name ?? "—"}</div>
-              <div className="truncate text-xs text-sidebar-foreground/60">
-                {profile?.role === "admin_company"
-                  ? "Admin"
-                  : profile?.role === "manager"
-                    ? "Gerente"
-                    : "Agente"}
+              <div className="flex items-center gap-1 truncate text-xs text-sidebar-foreground/60">
+                <span className="shrink-0">
+                  {profile?.role === "admin_company"
+                    ? "Admin"
+                    : profile?.role === "manager"
+                      ? "Gerente"
+                      : "Agente"}
+                </span>
+                {departmentName && (
+                  <>
+                    <span>•</span>
+                    <span className="truncate">{departmentName}</span>
+                  </>
+                )}
               </div>
             </div>
           )}

@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { sendEvogoText, sendEvogoMedia, sendEvogoReaction } from "../evogo";
+import { sendEvogoText, sendEvogoMedia, sendEvogoReaction, editEvogoMessage } from "../evogo";
 
 export const sendMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -11,6 +11,10 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     text: z.string().optional(),
     mediaType: z.enum(['image', 'video', 'audio', 'document', 'text']).optional(),
     mediaBase64: z.string().optional(),
+    quotedMessageId: z.string().optional(),
+    quotedParticipant: z.string().optional(),
+    quotedInternalId: z.string().uuid().optional(),
+    quotedContent: z.string().optional(),
   }))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
@@ -84,6 +88,44 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
     // 4. Send message via EvoGo
     let evogoResponse;
+    let finalParticipant = data.quotedParticipant;
+    let finalMessageId = data.quotedMessageId;
+    
+    // Fallback: If UI forgot to send the remote_msg_id, but sent the internal ID, fetch it from the DB!
+    if (data.quotedInternalId) {
+      const { data: qMsg } = await supabaseAdmin
+        .from('messages')
+        .select('remote_msg_id, sender_type')
+        .eq('id', data.quotedInternalId)
+        .single();
+        
+      if (!finalMessageId && qMsg?.remote_msg_id) {
+        finalMessageId = qMsg.remote_msg_id;
+      }
+    }
+
+    if (!finalParticipant && conv.contacts?.phone && !conv.contacts.phone.includes('-')) {
+      finalParticipant = `${conv.contacts.phone}@s.whatsapp.net`;
+    }
+
+    const quoted = finalMessageId ? {
+      messageId: finalMessageId,
+      ...(finalParticipant && { participant: finalParticipant })
+    } : undefined;
+
+    console.log('[sendMessageAction] Sending message:', {
+      host,
+      token: token.substring(0, 5) + '...',
+      instanceName,
+      number: phone,
+      text: textToSend,
+      quoted,
+      originalQuotedMessageId: data.quotedMessageId,
+      finalMessageId,
+      originalQuotedParticipant: data.quotedParticipant,
+      finalParticipant
+    });
+
     if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
       evogoResponse = await sendEvogoMedia({
         host,
@@ -93,6 +135,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         base64: data.mediaBase64,
         mediatype: data.mediaType as any,
         caption: textToSend,
+        quoted,
       });
     } else {
       evogoResponse = await sendEvogoText({
@@ -101,6 +144,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         instanceName,
         number: phone,
         text: textToSend,
+        quoted,
       });
     }
 
@@ -118,6 +162,9 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         media_type: data.mediaType || "text",
         media_url: data.mediaBase64 || null,
         remote_msg_id: remoteMsgId,
+        quoted_message_id: data.quotedInternalId,
+        quoted_content: data.quotedContent,
+        participant_jid: evogoResponse?.data?.Info?.Sender || null,
       })
       .select()
       .single();
@@ -508,6 +555,7 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
         number: conv.contacts.phone,
         remoteMsgId: msg.remote_msg_id,
         emoji: data.emoji,
+        fromMe: msg.sender_type === 'agent',
       });
     } catch (err) {
       console.warn("EvoGo Reaction failed, likely incorrect endpoint or unconfigured API. Still updating DB.", err);
@@ -718,4 +766,112 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
     } else {
       return { success: false, message: "Nenhum nome público ou foto encontrados no WhatsApp." };
     }
+  });
+
+export const editMessageAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    conversationId: z.string().uuid(),
+    messageId: z.string().uuid(),
+    newContent: z.string().min(1)
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    // 1. Get conversation and message
+    const { data: conv } = await supabase
+      .from("conversations")
+      .select("whatsapp_instance_id, unit_id, contact_id, contacts(phone)")
+      .eq("id", data.conversationId)
+      .single();
+
+    if (!conv || !conv.contacts?.phone) throw new Error("Conversation not found");
+
+    const { data: msg } = await supabase
+      .from("messages")
+      .select("remote_msg_id, sender_type, sender_id, media_type")
+      .eq("id", data.messageId)
+      .single();
+
+    if (!msg) throw new Error("Message not found");
+    if (!msg.remote_msg_id) throw new Error("Cannot edit a message without a remote ID");
+    if (msg.sender_type !== "agent") throw new Error("You can only edit messages sent by an agent");
+    if (msg.media_type && msg.media_type !== "text") throw new Error("Only text messages can be edited");
+
+    // 2. Format content with signature if enabled
+    let textToSend = data.newContent;
+    const { data: userProfile } = await supabase
+      .from("profiles")
+      .select("name, use_signature")
+      .eq("id", userId)
+      .single();
+
+    if (userProfile?.use_signature && userProfile?.name) {
+      textToSend = textToSend.trim() ? `*${userProfile.name}*:\n${textToSend}` : `*${userProfile.name}*:`;
+    }
+
+    // 3. Get evogo configuration
+    let host, token, instanceName;
+
+    if (conv.whatsapp_instance_id) {
+      const { data: instance } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .eq("id", conv.whatsapp_instance_id)
+        .single();
+
+      if (instance) {
+        host = instance.companies?.evogo_host;
+        token = instance.evogo_api_key;
+        instanceName = instance.instance_name;
+      }
+    }
+
+    if (!host && conv.unit_id) {
+      const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+      if (unitData) {
+        const { data: companyInstance } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("instance_name, evogo_api_key, companies(evogo_host)")
+          .eq("company_id", unitData.company_id)
+          .limit(1)
+          .maybeSingle();
+        if (companyInstance) {
+          host = companyInstance.companies?.evogo_host;
+          token = companyInstance.evogo_api_key;
+          instanceName = companyInstance.instance_name;
+        }
+      }
+    }
+
+    if (!host || !token || !instanceName) throw new Error("EvoGo is not configured");
+
+    // 4. Send Edit Request via EvoGo API
+    try {
+      await editEvogoMessage({
+        host,
+        token,
+        number: conv.contacts.phone,
+        remoteMsgId: msg.remote_msg_id,
+        message: textToSend,
+      });
+    } catch (err: any) {
+      console.error("EvoGo Edit failed:", err);
+      throw new Error(`Failed to edit message in WhatsApp: ${err.message || String(err)}`);
+    }
+
+    // 5. Update DB
+    const { error: updateErr } = await supabaseAdmin
+      .from("messages")
+      .update({
+        content: textToSend,
+        is_edited: true
+      })
+      .eq("id", data.messageId);
+
+    if (updateErr) {
+      console.error("Failed to update edited message in DB", updateErr);
+    }
+
+    return { success: true };
   });

@@ -41,10 +41,6 @@ function DashboardPage() {
         qWaiting = qWaiting.eq("unit_id", selectedUnitId);
         qActive = qActive.eq("unit_id", selectedUnitId);
         qResolved = qResolved.eq("unit_id", selectedUnitId);
-      } else {
-        qWaiting = qWaiting.is("unit_id", null);
-        qActive = qActive.is("unit_id", null);
-        qResolved = qResolved.is("unit_id", null);
       }
 
       const [waiting, active, resolved, agents] = await Promise.all([
@@ -70,7 +66,6 @@ function DashboardPage() {
       
       let qChart = supabase.from("conversations").select("started_at").gte("started_at", since.toISOString());
       if (selectedUnitId) qChart = qChart.eq("unit_id", selectedUnitId);
-      else qChart = qChart.is("unit_id", null);
 
       const { data } = await qChart;
       
@@ -98,7 +93,6 @@ function DashboardPage() {
         .limit(5);
 
       if (selectedUnitId) qOldest = qOldest.eq("unit_id", selectedUnitId);
-      else qOldest = qOldest.is("unit_id", null);
 
       const { data } = await qOldest;
       return data ?? [];
@@ -118,7 +112,6 @@ function DashboardPage() {
         .limit(6);
 
       if (selectedUnitId) qTasks = qTasks.eq("unit_id", selectedUnitId);
-      else qTasks = qTasks.is("unit_id", null);
 
       const { data } = await qTasks;
       return data ?? [];

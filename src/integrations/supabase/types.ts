@@ -581,6 +581,7 @@ export type Database = {
           id: string
           name: string
           slug: string
+          color: string
         }
         Insert: {
           active?: boolean
@@ -589,6 +590,7 @@ export type Database = {
           id?: string
           name: string
           slug: string
+          color?: string
         }
         Update: {
           active?: boolean
@@ -597,6 +599,7 @@ export type Database = {
           id?: string
           name?: string
           slug?: string
+          color?: string
         }
         Relationships: [
           {

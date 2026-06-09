@@ -14,6 +14,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
 import { QrCodeModal } from "@/components/whatsapp/qr-code-modal";
+import { QuickMessagesTab } from "@/components/settings/quick-messages-tab";
 import { InstanceSettingsModal } from "@/components/whatsapp/instance-settings-modal";
 import {
   AlertDialog,
@@ -288,6 +289,7 @@ function SettingsPage() {
           <TabsTrigger value="users">Equipe e Acessos</TabsTrigger>
           <TabsTrigger value="labels">Etiquetas</TabsTrigger>
           <TabsTrigger value="crm">CRM e Funis</TabsTrigger>
+          <TabsTrigger value="quick-messages">Mensagens Rápidas</TabsTrigger>
         </TabsList>
         
         <TabsContent value="general" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -482,8 +484,12 @@ function SettingsPage() {
           <LabelsTab />
         </TabsContent>
 
-        <TabsContent value="crm">
+        <TabsContent value="crm" className="grid gap-4">
           <CrmTab />
+        </TabsContent>
+
+        <TabsContent value="quick-messages" className="grid gap-4 md:grid-cols-2">
+          <QuickMessagesTab />
         </TabsContent>
       </Tabs>
 

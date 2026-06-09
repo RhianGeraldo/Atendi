@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, ArrowRightLeft, Users, Building2, User } from "lucide-react";
+import { Loader2, ArrowRightLeft, Users, Building2, User, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -82,6 +82,20 @@ export function TransferDialog({ conv }: { conv: any }) {
     },
     onError: (e) => {
       toast.error("Erro ao transferir", { description: (e as Error).message });
+    },
+  });
+
+  const returnToQueue = useMutation({
+    mutationFn: async () => {
+      await supabase
+        .from("conversations")
+        .update({ status: "waiting", assigned_agent_id: null })
+        .eq("id", conv.id);
+    },
+    onSuccess: () => {
+      toast.success("Atendimento retornado para a fila");
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
 
@@ -182,6 +196,22 @@ export function TransferDialog({ conv }: { conv: any }) {
             </ScrollArea>
           </TabsContent>
         </Tabs>
+
+        <div className="pt-4 mt-2 border-t flex justify-between items-center">
+          <span className="text-xs text-muted-foreground flex-1 pr-4">
+            Você também pode devolver este atendimento para a fila, deixando-o livre para outro consultor.
+          </span>
+          <Button 
+            variant="secondary" 
+            size="sm" 
+            onClick={() => returnToQueue.mutate()} 
+            disabled={returnToQueue.isPending}
+            className="shrink-0"
+          >
+            {returnToQueue.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Undo2 className="mr-2 h-4 w-4" />}
+            Devolver para a fila
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

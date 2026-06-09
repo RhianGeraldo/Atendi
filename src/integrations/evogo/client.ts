@@ -140,18 +140,19 @@ export class EvoGoClient {
     }, instanceToken);
   }
 
-  async sendText(number: string, text: string, instanceToken: string, delay = 1000) {
+  async sendText(number: string, text: string, instanceToken: string, delay = 1000, quoted?: { messageId: string, participant: string }) {
     return this.request('/send/text', {
       method: 'POST',
       body: JSON.stringify({
         number,
         text,
-        delay
+        delay,
+        ...(quoted && { quoted })
       }),
     }, instanceToken);
   }
 
-  async sendMedia(number: string, url: string, caption: string, filename: string, instanceToken: string, type: 'image' | 'video' | 'audio' | 'document' = 'document', delay = 1000) {
+  async sendMedia(number: string, url: string, caption: string, filename: string, instanceToken: string, type: 'image' | 'video' | 'audio' | 'document' = 'document', delay = 1000, quoted?: { messageId: string, participant: string }) {
     return this.request('/send/media', {
       method: 'POST',
       body: JSON.stringify({
@@ -160,7 +161,8 @@ export class EvoGoClient {
         caption,
         filename,
         type,
-        delay
+        delay,
+        ...(quoted && { quoted })
       }),
     }, instanceToken);
   }

@@ -14,7 +14,8 @@ export async function sendEvogoText({
   number,
   text,
   delay = 1000,
-}: SendMessageParams) {
+  quoted,
+}: SendMessageParams & { quoted?: { messageId: string, participant?: string } }) {
   // Normalize host URL
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/text`;
@@ -29,6 +30,7 @@ export async function sendEvogoText({
       number,
       text,
       delay,
+      ...(quoted && { quoted }),
     }),
   });
 
@@ -61,7 +63,8 @@ export async function sendEvogoMedia({
   mediatype,
   caption = '',
   delay = 1000,
-}: SendMediaParams) {
+  quoted,
+}: SendMediaParams & { quoted?: { messageId: string, participant?: string } }) {
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/media`;
 
@@ -81,6 +84,7 @@ export async function sendEvogoMedia({
     mediatype: mediatype, // fallback
     mimetype: mediatype === 'audio' ? 'audio/ogg' : mediatype === 'image' ? 'image/jpeg' : mediatype === 'video' ? 'video/mp4' : 'application/pdf',
     delay,
+    ...(quoted && { quoted }),
   };
 
   // Only pass filename for documents or audio
@@ -113,6 +117,7 @@ type SendReactionParams = {
   number: string;
   remoteMsgId: string;
   emoji: string;
+  fromMe?: boolean;
 };
 
 export async function sendEvogoReaction({
@@ -121,6 +126,7 @@ export async function sendEvogoReaction({
   number,
   remoteMsgId,
   emoji,
+  fromMe,
 }: SendReactionParams) {
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
   const url = `${baseUrl}/message/react`;
@@ -129,6 +135,7 @@ export async function sendEvogoReaction({
     number: number.includes('@') ? number : `${number}@s.whatsapp.net`,
     id: remoteMsgId,
     reaction: emoji,
+    ...(fromMe !== undefined ? { fromMe } : {}),
   };
 
   const response = await fetch(url, {
@@ -149,3 +156,44 @@ export async function sendEvogoReaction({
   return response.json();
 }
 
+export type EditMessageParams = {
+  host: string;
+  token: string;
+  number: string;
+  remoteMsgId: string;
+  message: string;
+};
+
+export async function editEvogoMessage({
+  host,
+  token,
+  number,
+  remoteMsgId,
+  message,
+}: EditMessageParams) {
+  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/message/edit`;
+
+  const body = {
+    chat: number.includes('@') ? number : `${number}@s.whatsapp.net`,
+    messageId: remoteMsgId,
+    message: message,
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('EvoGo Edit API Error:', errorText);
+    throw new Error(`Failed to edit message via EvoGo: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}

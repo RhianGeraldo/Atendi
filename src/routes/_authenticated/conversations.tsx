@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw } from "lucide-react";
+import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, toggleContactLabelAction, createLabelAction, assignConversationAction, transferConversationAction, updateContactFromWhatsappAction } from "@/lib/api/chat.functions";
+import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, toggleContactLabelAction, createLabelAction, assignConversationAction, transferConversationAction, updateContactFromWhatsappAction, editMessageAction } from "@/lib/api/chat.functions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -28,6 +28,7 @@ import EmojiPicker from "emoji-picker-react";
 import TextareaAutosize from "react-textarea-autosize";
 import { TransferDialog } from "@/components/chat/transfer-dialog";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 
 export const Route = createFileRoute("/_authenticated/conversations")({
   component: ConversationsPage,
@@ -65,6 +66,8 @@ interface ConvRow {
   assigned_agent_id: string | null;
   unit_id: string;
   whatsapp_instance_id: string | null;
+  unit?: { name: string; color?: string | null } | null;
+  whatsapp_instance?: { name: string } | null;
 }
 
 function ConversationsPage() {
@@ -73,7 +76,7 @@ function ConversationsPage() {
   const [tab, setTab] = useState<TabType>(searchTab || "waiting");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(searchConvId || null);
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(false);
   const { selectedUnitId } = useUnit();
 
   const { profile } = useAuth();
@@ -84,13 +87,11 @@ function ConversationsPage() {
       let query = supabase
         .from("conversations")
         .select(
-          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name)"
+          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), unit:units(name,color), whatsapp_instance:whatsapp_instances(name)"
         );
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
-      } else {
-        query = query.is("unit_id", null);
       }
 
       const { data, error } = await query.order("last_message_at", { ascending: false });
@@ -145,24 +146,27 @@ function ConversationsPage() {
     queryFn: async () => {
       let query = supabase
         .from("conversations")
-        .select("status, unread_count, department_id, assigned_agent_id, contact:contacts(phone)")
-        .gt("unread_count", 0);
+        .select("status, unread_count, department_id, assigned_agent_id, contact:contacts(phone)");
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
-      } else {
-        query = query.is("unit_id", null);
       }
 
       const { data, error } = await query;
       if (error) throw error;
       
-      const counts = { waiting: 0, active: 0, resolved: 0, groups: 0 };
+      const counts = { 
+        waiting: { total: 0, unread: 0 }, 
+        active: { total: 0, unread: 0 }, 
+        resolved: { total: 0, unread: 0 }, 
+        groups: { total: 0, unread: 0 } 
+      };
       
       data.forEach(c => {
         const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'));
         if (isGroup) {
-          counts.groups += c.unread_count || 0;
+          counts.groups.total++;
+          counts.groups.unread += c.unread_count || 0;
         } else {
           const isAdmin = profile?.role === "admin_company";
           const isManager = profile?.role === "manager";
@@ -174,17 +178,24 @@ function ConversationsPage() {
             const canSeeWaiting = isAdmin || isGeneral || isMyDept || isAssignedToMe;
             if (canSeeWaiting) {
               if (isAdmin || isManager || !c.assigned_agent_id || c.assigned_agent_id === profile?.id) {
-                counts.waiting++;
+                counts.waiting.total++;
+                counts.waiting.unread += c.unread_count || 0;
               }
             }
           }
           if (c.status === 'active') {
             const canSeeActive = isAdmin || (isManager && isMyDept) || isAssignedToMe;
-            if (canSeeActive) counts.active++;
+            if (canSeeActive) {
+              counts.active.total++;
+              counts.active.unread += c.unread_count || 0;
+            }
           }
           if (c.status === 'resolved') {
             const canSeeResolved = isAdmin || (isManager && isMyDept) || isAssignedToMe;
-            if (canSeeResolved) counts.resolved++;
+            if (canSeeResolved) {
+              counts.resolved.total++;
+              counts.resolved.unread += c.unread_count || 0;
+            }
           }
         }
       });
@@ -250,34 +261,34 @@ function ConversationsPage() {
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)} className="mt-3">
             <TabsList className="grid w-full grid-cols-4 h-auto py-1">
               <TabsTrigger value="waiting" className="px-1 py-1.5 text-xs relative">
-                Aguard.
-                {unreadCounts && unreadCounts.waiting > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white">
-                    {unreadCounts.waiting}
+                Aguard. {unreadCounts?.waiting.total || 0}
+                {unreadCounts && unreadCounts.waiting.unread > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
+                    {unreadCounts.waiting.unread}
                   </span>
                 )}
               </TabsTrigger>
               <TabsTrigger value="active" className="px-1 py-1.5 text-xs relative">
-                Andamento
-                {unreadCounts && unreadCounts.active > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white">
-                    {unreadCounts.active}
+                Andam. {unreadCounts?.active.total || 0}
+                {unreadCounts && unreadCounts.active.unread > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
+                    {unreadCounts.active.unread}
                   </span>
                 )}
               </TabsTrigger>
               <TabsTrigger value="resolved" className="px-1 py-1.5 text-xs relative">
-                Resolvidos
-                {unreadCounts && unreadCounts.resolved > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white">
-                    {unreadCounts.resolved}
+                Resolv. {unreadCounts?.resolved.total || 0}
+                {unreadCounts && unreadCounts.resolved.unread > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
+                    {unreadCounts.resolved.unread}
                   </span>
                 )}
               </TabsTrigger>
               <TabsTrigger value="groups" className="px-1 py-1.5 text-xs relative">
-                Grupos
-                {unreadCounts && unreadCounts.groups > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white">
-                    {unreadCounts.groups}
+                Grupos {unreadCounts?.groups.total || 0}
+                {unreadCounts && unreadCounts.groups.unread > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
+                    {unreadCounts.groups.unread}
                   </span>
                 )}
               </TabsTrigger>
@@ -292,6 +303,7 @@ function ConversationsPage() {
               selected={selectedId === c.id}
               onClick={() => setSelectedId(c.id)}
               currentUserId={profile?.id}
+              showUnitInfo={!selectedUnitId}
             />
           ))}
           {!filtered.length && (
@@ -412,129 +424,148 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex justify-end p-2 pb-0">
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={onClose}>
+    <div className="flex h-full flex-col bg-background/50">
+      <div className="flex justify-between items-center p-3 pb-0">
+        <h3 className="text-sm font-semibold ml-2 text-muted-foreground">Perfil</h3>
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground rounded-full hover:bg-muted" onClick={onClose}>
           <X className="h-4 w-4" />
         </Button>
       </div>
-      <div className="border-b border-border p-4 pt-0 flex flex-col items-center justify-center space-y-3 relative">
-        <Avatar className="h-24 w-24 border">
-          {profilePictureUrl ? (
-            <img src={profilePictureUrl} alt={conv.contact?.name} className="h-full w-full object-cover" />
-          ) : (
-            <AvatarFallback className={cn("text-2xl", isGroup ? "bg-primary/20 text-primary" : "bg-primary/10 text-primary")}>
-              {isGroup ? <Users className="h-10 w-10" /> : initials(conv.contact.name)}
-            </AvatarFallback>
-          )}
-        </Avatar>
-        <div className="text-center w-full relative">
-          <div className="flex items-center justify-center gap-1 max-w-[80%] mx-auto">
-            <h3 className="font-semibold text-lg truncate">{contactName || "Desconhecido"}</h3>
-            <ContactEditDialog contact={conv.contact} />
-          </div>
-          <p className="text-sm text-muted-foreground">{isGroup ? "Múltiplos Participantes" : formatPhone(conv.contact.phone)}</p>
+
+      <div className="p-5 pt-2 flex flex-col items-center justify-center relative">
+        <div className="relative mb-4 group">
+          <Avatar className="h-24 w-24 ring-4 ring-background shadow-xl">
+            {profilePictureUrl ? (
+              <img src={profilePictureUrl} alt={conv.contact?.name} className="h-full w-full object-cover" />
+            ) : (
+              <AvatarFallback className={cn("text-3xl font-medium", isGroup ? "bg-primary/20 text-primary" : "bg-gradient-to-br from-primary/20 to-primary/5 text-primary")}>
+                {isGroup ? <Users className="h-10 w-10 opacity-80" /> : initials(conv.contact.name)}
+              </AvatarFallback>
+            )}
+          </Avatar>
           <Button 
-            variant="ghost" 
+            variant="secondary" 
             size="icon" 
-            className="absolute right-2 top-2 h-8 w-8 text-muted-foreground hover:text-foreground"
-            title="Atualizar dados do WhatsApp"
+            className="absolute bottom-0 right-0 h-8 w-8 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+            title="Sincronizar foto do WhatsApp"
             onClick={() => updateContact.mutate()}
             disabled={updateContact.isPending}
           >
-            <RefreshCw className={`h-4 w-4 ${updateContact.isPending ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 text-muted-foreground ${updateContact.isPending ? 'animate-spin' : ''}`} />
           </Button>
         </div>
+
+        <div className="text-center w-full space-y-1.5">
+          <div className="flex items-center justify-center gap-1.5 max-w-[90%] mx-auto">
+            <h3 className="font-bold text-xl truncate">{contactName || "Desconhecido"}</h3>
+            <ContactEditDialog contact={conv.contact} />
+          </div>
+          
+          <div className="flex items-center justify-center">
+            <Badge variant="secondary" className="font-mono text-xs font-normal text-muted-foreground bg-muted/50 hover:bg-muted/80 transition-colors px-2.5 py-0.5">
+              {isGroup ? "Grupo" : formatPhone(conv.contact.phone)}
+            </Badge>
+          </div>
+        </div>
       </div>
 
-      <div className="p-4 border-b border-border space-y-2">
-        <div className="flex items-center justify-between pb-2">
-          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            <Tag className="h-3 w-3 inline mr-1" /> Etiquetas
-          </h4>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" className="h-6 text-xs px-2 gap-1 rounded-full">
-                <Plus className="h-3 w-3" /> Adicionar
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="p-0 w-48" align="end">
-              <Command>
-                <CommandInput 
-                  placeholder="Buscar etiqueta..." 
-                  className="h-8" 
-                  value={searchLabel}
-                  onValueChange={setSearchLabel}
-                />
-                <CommandList>
-                  <CommandEmpty>
-                    {searchLabel.length > 0 ? (
-                      <Button 
-                        variant="ghost" 
-                        className="w-full justify-start text-sm h-8 font-normal"
-                        onClick={() => createLabel.mutate(searchLabel)}
-                        disabled={createLabel.isPending}
-                      >
-                        Criar "{searchLabel}"
-                      </Button>
-                    ) : "Nenhuma etiqueta encontrada."}
-                  </CommandEmpty>
-                  <CommandGroup>
-                    {allLabels?.map(label => {
-                      const isSelected = conv.contact?.contact_labels?.some(cl => cl.labels?.id === label.id);
-                      return (
-                        <CommandItem
-                          key={label.id}
-                          onSelect={() => {
-                            toggleLabel.mutate({ labelId: label.id, action: isSelected ? "remove" : "add" });
-                          }}
-                        >
-                          <div 
-                            className="w-2 h-2 rounded-full mr-2" 
-                            style={{ backgroundColor: label.color || "#6b7280" }}
-                          />
-                          <span className="flex-1 text-xs">{label.name}</span>
-                          {isSelected && <Square className="h-3 w-3 opacity-50 bg-primary/20" />}
-                        </CommandItem>
-                      );
-                    })}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </div>
+      <ScrollArea className="flex-1">
+        <div className="px-4 pb-6 space-y-4">
+          {/* Etiquetas Container */}
+          <div className="bg-card border border-border/60 rounded-xl p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <Tag className="h-3.5 w-3.5 text-muted-foreground" /> 
+                Etiquetas
+              </h4>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full text-muted-foreground hover:text-primary">
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="p-0 w-56" align="end">
+                  <Command>
+                    <CommandInput 
+                      placeholder="Buscar etiqueta..." 
+                      className="h-8 text-xs" 
+                      value={searchLabel}
+                      onValueChange={setSearchLabel}
+                    />
+                    <CommandList>
+                      <CommandEmpty>
+                        {searchLabel.length > 0 ? (
+                          <Button 
+                            variant="ghost" 
+                            className="w-full justify-start text-xs h-8 font-normal"
+                            onClick={() => createLabel.mutate(searchLabel)}
+                            disabled={createLabel.isPending}
+                          >
+                            Criar "{searchLabel}"
+                          </Button>
+                        ) : "Nenhuma etiqueta encontrada."}
+                      </CommandEmpty>
+                      <CommandGroup>
+                        {allLabels?.map(label => {
+                          const isSelected = conv.contact?.contact_labels?.some(cl => cl.labels?.id === label.id);
+                          return (
+                            <CommandItem
+                              key={label.id}
+                              onSelect={() => {
+                                toggleLabel.mutate({ labelId: label.id, action: isSelected ? "remove" : "add" });
+                              }}
+                              className="text-xs"
+                            >
+                              <div 
+                                className="w-2 h-2 rounded-full mr-2" 
+                                style={{ backgroundColor: label.color || "#6b7280" }}
+                              />
+                              <span className="flex-1">{label.name}</span>
+                              {isSelected && <Square className="h-3 w-3 opacity-50 bg-primary/20" />}
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
 
-        <div className="flex flex-wrap gap-2">
-          {conv.contact?.contact_labels?.map((cl) => {
-            const label = cl.labels;
-            if (!label) return null;
-            const hexColor = label.color || "#6b7280";
-            return (
-              <Badge 
-                key={label.id} 
-                variant="outline" 
-                style={{ 
-                  backgroundColor: `${hexColor}1a`, 
-                  color: hexColor, 
-                  borderColor: `${hexColor}33` 
-                }}
-              >
-                {label.name}
-              </Badge>
-            );
-          })}
-          {!conv.contact?.contact_labels?.length && (
-            <span className="text-xs text-muted-foreground">Nenhuma etiqueta</span>
+            <div className="flex flex-wrap gap-1.5">
+              {conv.contact?.contact_labels?.map((cl) => {
+                const label = cl.labels;
+                if (!label) return null;
+                const hexColor = label.color || "#6b7280";
+                return (
+                  <Badge 
+                    key={label.id} 
+                    variant="outline" 
+                    className="font-normal text-[10px] px-2 py-0 h-5"
+                    style={{ 
+                      backgroundColor: `${hexColor}15`, 
+                      color: hexColor, 
+                      borderColor: `${hexColor}30` 
+                    }}
+                  >
+                    {label.name}
+                  </Badge>
+                );
+              })}
+              {!conv.contact?.contact_labels?.length && (
+                <span className="text-xs text-muted-foreground/70 italic">Nenhuma etiqueta atribuída.</span>
+              )}
+            </div>
+          </div>
+
+          {/* Ficha Completa */}
+          {conv.contact?.id && (
+            <div className="bg-card border border-border/60 rounded-xl shadow-sm overflow-hidden">
+              <ContactDetailsTabs contactId={conv.contact.id} />
+            </div>
           )}
         </div>
-      </div>
-
-      <div className="flex-1 min-h-0 flex flex-col">
-        {conv.contact?.id && (
-          <ContactDetailsTabs contactId={conv.contact.id} />
-        )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }
@@ -662,11 +693,13 @@ function ConversationItem({
   selected,
   onClick,
   currentUserId,
+  showUnitInfo,
 }: {
   conv: ConvRow;
   selected: boolean;
   onClick: () => void;
   currentUserId?: string;
+  showUnitInfo?: boolean;
 }) {
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
@@ -699,7 +732,38 @@ function ConversationItem({
             {conv.last_message_preview}
           </div>
         )}
-        <div className="mt-1.5 flex min-h-[20px] items-center gap-1.5">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {showUnitInfo && conv.unit?.name ? (
+            <div 
+              className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded w-fit max-w-full truncate border border-border/50"
+              style={{
+                backgroundColor: conv.unit.color ? `${conv.unit.color}20` : 'var(--muted)',
+                color: conv.unit.color || 'var(--muted-foreground)',
+                borderColor: conv.unit.color ? `${conv.unit.color}40` : 'var(--border)'
+              }}
+            >
+              <div 
+                className="h-1.5 w-1.5 rounded-full" 
+                style={{ backgroundColor: conv.unit.color || 'var(--muted-foreground)' }} 
+              />
+              <span className="font-medium">{conv.unit.name}</span>
+              {conv.whatsapp_instance?.name && (
+                <>
+                  <span className="opacity-50">•</span>
+                  <span className="truncate">{conv.whatsapp_instance.name}</span>
+                </>
+              )}
+            </div>
+          ) : (
+            !showUnitInfo && conv.whatsapp_instance?.name && (
+              <div 
+                className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded w-fit max-w-full truncate border border-border/50 bg-muted/50 text-muted-foreground"
+              >
+                <Phone className="h-2 w-2 opacity-70" />
+                <span className="truncate">{conv.whatsapp_instance.name}</span>
+              </div>
+            )
+          )}
           {conv.department?.name && (
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
               {conv.department.name}
@@ -758,6 +822,7 @@ interface MessageRow {
   is_deleted?: boolean;
   reactions?: Record<string, string[]>;
   isOptimistic?: boolean;
+  remote_msg_id?: string | null;
   profiles?: { name: string };
 }
 
@@ -777,8 +842,11 @@ function ChatPanel({
   const { selectedUnitId } = useUnit();
   const [text, setText] = useState("");
   const [selectedFile, setSelectedFile] = useState<{ file: File; base64: string; type: string } | null>(null);
+  const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
+  const [editingMessage, setEditingMessage] = useState<MessageRow | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [quickMsgIndex, setQuickMsgIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -789,11 +857,25 @@ function ChatPanel({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("messages")
-        .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, profiles(name)")
+        .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, remote_msg_id, profiles(name)")
         .eq("conversation_id", conv.id)
         .order("created_at", { ascending: true });
       if (error) throw error;
       return (data ?? []) as MessageRow[];
+    },
+  });
+
+  const { data: quickMessages } = useQuery({
+    queryKey: ["quick-messages", profile?.company_id],
+    enabled: !!profile?.company_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("quick_messages")
+        .select("*")
+        .eq("company_id", profile!.company_id!)
+        .order("shortcut", { ascending: true });
+      if (error) throw error;
+      return data;
     },
   });
 
@@ -810,8 +892,8 @@ function ChatPanel({
   }, [messages?.length, conv.id, conv.unread_count, qc]);
 
   const send = useMutation({
-    mutationFn: async (payload: { content: string; mediaType?: "text"|"image"|"video"|"audio"|"document"; mediaBase64?: string }) => {
-      await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64 } });
+    mutationFn: async (payload: { content: string; mediaType?: "text"|"image"|"video"|"audio"|"document"; mediaBase64?: string; quotedMessageId?: string; quotedParticipant?: string; quotedInternalId?: string; quotedContent?: string }) => {
+      await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent } });
     },
     onMutate: async (payload) => {
       await qc.cancelQueries({ queryKey: ["messages", conv.id] });
@@ -832,6 +914,7 @@ function ChatPanel({
       qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
       setText("");
       setSelectedFile(null);
+      setReplyingTo(null);
       
       setTimeout(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -850,6 +933,31 @@ function ChatPanel({
       qc.invalidateQueries({ queryKey: ["messages", conv.id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
+  });
+
+  const editMsg = useMutation({
+    mutationFn: async (payload: { messageId: string; content: string }) => {
+      await editMessageAction({ data: { conversationId: conv.id, messageId: payload.messageId, newContent: payload.content } });
+    },
+    onMutate: async (payload) => {
+      await qc.cancelQueries({ queryKey: ["messages", conv.id] });
+      const previousMessages = qc.getQueryData(["messages", conv.id]);
+      
+      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
+        if (!old) return old;
+        return old.map(m => m.id === payload.messageId ? { ...m, content: payload.content, is_edited: true } : m);
+      });
+      setText("");
+      setEditingMessage(null);
+      return { previousMessages };
+    },
+    onError: (e, v, context) => {
+      if (context?.previousMessages) qc.setQueryData(["messages", conv.id], context.previousMessages);
+      toast.error("Erro ao editar", { description: (e as Error).message });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["messages", conv.id] });
+    }
   });
 
   const react = useMutation({
@@ -949,12 +1057,65 @@ function ChatPanel({
     }
   };
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Bom dia";
+    if (hour < 18) return "Boa tarde";
+    return "Boa noite";
+  };
+
+  const insertQuickMessage = (content: string) => {
+    const now = new Date();
+    let t = content;
+    t = t.replace(/\{\{atendente\}\}/g, profile?.name || "Atendente");
+    t = t.replace(/\{\{cliente\}\}/g, conv.contact?.name && conv.contact.name !== "Desconhecido" ? conv.contact.name : "Cliente");
+    t = t.replace(/\{\{saudacao\}\}/g, getGreeting());
+    t = t.replace(/\{\{telefone\}\}/g, conv.contact?.phone || "");
+    t = t.replace(/\{\{protocolo\}\}/g, conv.id.substring(0, 8).toUpperCase());
+    t = t.replace(/\{\{data\}\}/g, now.toLocaleDateString('pt-BR'));
+    t = t.replace(/\{\{hora\}\}/g, now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+    setText(t);
+    document.getElementById('chat-input')?.focus();
+  };
+
   const handleSend = () => {
-    if (selectedFile) {
-      send.mutate({ content: text.trim(), mediaType: selectedFile.type as any, mediaBase64: selectedFile.base64 });
-    } else if (text.trim()) {
-      send.mutate({ content: text.trim() });
+    if (editingMessage) {
+      if (text.trim() && text.trim() !== editingMessage.content) {
+        editMsg.mutate({ messageId: editingMessage.id, content: text.trim() });
+      } else {
+        setEditingMessage(null);
+        setText("");
+      }
+      return;
     }
+
+    const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
+    const participant = replyingTo ? (replyingTo.participant_jid || (replyingTo.sender_type === "contact" ? (replyingTo.sender_id ? undefined : (conv.contact?.phone ? `${conv.contact.phone}@s.whatsapp.net` : undefined)) : undefined)) : undefined;
+
+    const quotedPayload = replyingTo ? {
+      quotedMessageId: replyingTo.remote_msg_id || undefined,
+      quotedParticipant: participant,
+      quotedInternalId: replyingTo.id,
+      quotedContent: replyingTo.content || (replyingTo.media_type !== "text" ? `[${replyingTo.media_type}]` : "Anexo"),
+    } : {};
+
+    if (selectedFile) {
+      send.mutate({ content: text.trim(), mediaType: selectedFile.type as any, mediaBase64: selectedFile.base64, ...quotedPayload });
+    } else if (text.trim()) {
+      send.mutate({ content: text.trim(), ...quotedPayload });
+    }
+  };
+
+  const startEdit = (msg: MessageRow) => {
+    setEditingMessage(msg);
+    let textToEdit = msg.content || "";
+    const hasSignature = textToEdit.match(/^\*(.+?)\*:\s*([\s\S]*)$/);
+    if (hasSignature) {
+      textToEdit = hasSignature[2];
+    }
+    setText(textToEdit);
+    setReplyingTo(null);
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   };
 
   const formatTime = (seconds: number) => {
@@ -976,6 +1137,19 @@ function ChatPanel({
     },
   });
 
+  const returnToQueue = useMutation({
+    mutationFn: async () => {
+      await supabase
+        .from("conversations")
+        .update({ status: "waiting", assigned_agent_id: null })
+        .eq("id", conv.id);
+    },
+    onSuccess: () => {
+      toast.success("Atendimento retornado para a fila");
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+
   const assignConv = useMutation({
     mutationFn: async () => {
       await assignConversationAction({ data: { conversationId: conv.id } });
@@ -993,47 +1167,50 @@ function ChatPanel({
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
+  const filteredQuickMsgs = text.startsWith('/') && quickMessages ? quickMessages.filter(qm => text === '/' || qm.shortcut.toLowerCase().includes(text.toLowerCase().substring(1))) : [];
+
   return (
     <div className="flex h-full min-w-0">
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-border bg-card px-5 py-3">
+        <header className="flex items-center justify-between border-b border-border bg-card px-5 py-3 shadow-sm z-10">
           <div className="flex items-center gap-3">
-            <Avatar className="h-10 w-10">
-              <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
-                {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
-              </AvatarFallback>
-            </Avatar>
+            <div className="relative">
+              <Avatar className="h-10 w-10 ring-2 ring-primary/10 ring-offset-2">
+                <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
+                  {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-success" />
+            </div>
             <div>
               <div className="flex items-center gap-2 text-sm font-semibold">
                 {contactName}
                 <ChannelIcon channel={conv.channel} className="h-4 w-4" />
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                {conv.department?.name && <span>{conv.department.name}</span>}
-                <span>•</span>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                {conv.department?.name && <span className="font-medium text-foreground/70">{conv.department.name}</span>}
+                {conv.department?.name && <span>•</span>}
                 <StatusBadge status={conv.status} />
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {conv.status === "active" && !isGroup && (
               <>
                 <TransferDialog conv={conv} />
-                <Button variant="outline" size="sm" onClick={() => resolve.mutate()}>
+                <Button variant="default" size="sm" className="hidden md:flex h-8" onClick={() => resolve.mutate()}>
+                  <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
                   Encerrar
                 </Button>
               </>
             )}
             <button 
-              className={cn("rounded p-2 text-muted-foreground hover:bg-accent", showSidebar && "bg-accent")}
+              className={cn("rounded-md p-2 text-muted-foreground hover:bg-accent transition-colors ml-1", showSidebar && "bg-accent text-foreground")}
               onClick={onToggleSidebar}
               title="Informações do Contato"
             >
-              <PanelRight className="h-4 w-4" />
-            </button>
-            <button className="rounded p-2 text-muted-foreground hover:bg-accent">
-              <MoreVertical className="h-4 w-4" />
+              <PanelRight className="h-4.5 w-4.5" />
             </button>
           </div>
         </header>
@@ -1049,6 +1226,8 @@ function ChatPanel({
               m={m} 
               isGroup={isGroup}
               onReact={(emoji) => react.mutate({ messageId: m.id, emoji })} 
+              onReply={(msg) => { setReplyingTo(msg); document.getElementById('chat-input')?.focus(); }}
+              onEdit={startEdit}
             />
           ))}
         </div>
@@ -1066,7 +1245,7 @@ function ChatPanel({
                         ? "Esta conversa foi transferida para você." 
                         : conv.status === 'active'
                           ? `Esta conversa está sendo atendida por ${conv.assigned_agent?.name || 'outro agente'}.`
-                          : "Esta conversa foi transferida para outro agente."}
+                          : `Esta conversa foi transferida para ${conv.assigned_agent?.name || 'outro agente'}.`}
                   </p>
                   <Button onClick={() => assignConv.mutate()} disabled={assignConv.isPending}>
                     {assignConv.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -1075,7 +1254,9 @@ function ChatPanel({
                 </>
               ) : (
                 <p className="text-sm font-medium text-muted-foreground">
-                  {conv.status === 'active' ? "Em atendimento por outro agente." : "Aguardando aceite do agente transferido."}
+                  {conv.status === 'active' 
+                    ? `Em atendimento por ${conv.assigned_agent?.name || 'outro agente'}.` 
+                    : `Aguardando aceite de ${conv.assigned_agent?.name || 'outro agente'}.`}
                 </p>
               )}
             </div>
@@ -1101,6 +1282,36 @@ function ChatPanel({
             </div>
           )}
           
+          {replyingTo && (
+            <div className="flex items-center gap-3 p-2 border-l-4 border-l-primary rounded-md bg-muted/30 relative pr-8 text-sm">
+              <button 
+                onClick={() => setReplyingTo(null)} 
+                className="absolute top-1 right-1 p-0.5 rounded-full bg-background border border-border hover:bg-accent text-muted-foreground"
+              >
+                <X className="h-3 w-3" />
+              </button>
+              <div className="flex-1 min-w-0">
+                <span className="font-semibold block mb-0.5 text-[10px] uppercase opacity-70">Respondendo a</span>
+                <span className="line-clamp-2 opacity-90 text-xs">{replyingTo.content || `[${replyingTo.media_type}]`}</span>
+              </div>
+            </div>
+          )}
+
+          {editingMessage && (
+            <div className="flex items-center gap-3 p-2 border-l-4 border-l-amber-500 rounded-md bg-amber-500/10 relative pr-8 text-sm">
+              <button 
+                onClick={() => { setEditingMessage(null); setText(""); }} 
+                className="absolute top-1 right-1 p-0.5 rounded-full bg-background border border-border hover:bg-accent text-muted-foreground"
+              >
+                <X className="h-3 w-3" />
+              </button>
+              <div className="flex-1 min-w-0">
+                <span className="font-semibold block mb-0.5 text-[10px] uppercase text-amber-600 opacity-90">Editando mensagem</span>
+                <span className="line-clamp-2 opacity-90 text-xs">{editingMessage.content?.replace(/^\*(.+?)\*:\s*/, '')}</span>
+              </div>
+            </div>
+          )}
+          
           <div className="flex items-end gap-2">
             {!isRecording ? (
               <>
@@ -1119,11 +1330,78 @@ function ChatPanel({
                     <EmojiPicker onEmojiClick={(e) => setText(prev => prev + e.emoji)} />
                   </PopoverContent>
                 </Popover>
+
+                <Popover open={filteredQuickMsgs.length > 0} onOpenChange={() => {}}>
+                  <PopoverTrigger asChild>
+                    <button 
+                      className="rounded p-2 text-muted-foreground hover:bg-accent"
+                      onClick={() => setText(prev => prev.startsWith('/') ? prev : '/' + prev)}
+                      title="Mensagens Rápidas"
+                    >
+                      <MessageSquarePlus className="h-4 w-4" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent 
+                    side="top" 
+                    align="start" 
+                    className="w-80 p-0 shadow-lg border-border"
+                    onOpenAutoFocus={(e) => e.preventDefault()}
+                    onCloseAutoFocus={(e) => {
+                      e.preventDefault();
+                      document.getElementById('chat-input')?.focus();
+                    }}
+                  >
+                    <div className="max-h-[300px] overflow-y-auto p-1">
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Mensagens Rápidas</div>
+                      {filteredQuickMsgs.length === 0 && (
+                        <div className="py-6 text-center text-sm text-muted-foreground">Nenhum atalho encontrado.</div>
+                      )}
+                      {filteredQuickMsgs.map((qm, i) => (
+                        <div
+                          key={qm.id}
+                          onClick={() => {
+                            insertQuickMessage(qm.content);
+                            setQuickMsgIndex(0);
+                          }}
+                          className={cn(
+                            "flex flex-col items-start gap-1 p-2 cursor-pointer rounded-sm mb-1 last:mb-0", 
+                            i === quickMsgIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50 text-foreground"
+                          )}
+                        >
+                          <span className="font-mono text-xs font-bold text-primary">{qm.shortcut}</span>
+                          <span className="text-sm text-muted-foreground line-clamp-1">{qm.content}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
                 
                 <TextareaAutosize
+                  id="chat-input"
                   value={text}
-                  onChange={(e) => setText(e.target.value)}
+                  onChange={(e) => {
+                    setText(e.target.value);
+                    setQuickMsgIndex(0); // reset index when typing
+                  }}
                   onKeyDown={(e) => {
+                    if (filteredQuickMsgs.length > 0) {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setQuickMsgIndex(prev => Math.min(prev + 1, filteredQuickMsgs.length - 1));
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setQuickMsgIndex(prev => Math.max(prev - 1, 0));
+                        return;
+                      }
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        insertQuickMessage(filteredQuickMsgs[quickMsgIndex].content);
+                        setQuickMsgIndex(0);
+                        return;
+                      }
+                    }
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       handleSend();
@@ -1215,7 +1493,7 @@ function FormattedText({ text }: { text: string }) {
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
-function MessageBubble({ m, isGroup, onReact }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void }) {
+function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void, onReply?: (m: MessageRow) => void, onEdit?: (m: MessageRow) => void }) {
   const mine = m.sender_type === "agent";
   
   let senderName = null;
@@ -1264,27 +1542,47 @@ function MessageBubble({ m, isGroup, onReact }: { m: MessageRow, isGroup?: boole
           </div>
         )}
         {onReact && !m.isOptimistic && !m.is_deleted && (
-          <Popover>
-            <PopoverTrigger asChild>
-              <button className={cn(
-                "absolute top-1 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-full bg-background border border-border shadow-sm text-muted-foreground hover:text-foreground z-10",
-                mine ? "-left-10" : "-right-10"
-              )}>
-                <SmilePlus className="h-4 w-4" />
+          <div className={cn(
+            "absolute top-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 p-0.5 rounded-full bg-background border border-border shadow-sm text-muted-foreground z-10",
+            mine ? "-left-20" : "-right-20"
+          )}>
+            {onReply && (
+              <button 
+                onClick={() => onReply(m)}
+                className="hover:text-foreground hover:bg-accent p-1.5 rounded-full transition-colors"
+                title="Responder"
+              >
+                <CornerUpLeft className="h-3.5 w-3.5" />
               </button>
-            </PopoverTrigger>
-            <PopoverContent side="top" className="w-auto p-2 flex gap-1 rounded-full shadow-lg border-border">
-              {QUICK_EMOJIS.map(e => (
-                <button 
-                  key={e} 
-                  onClick={() => onReact(e)} 
-                  className="hover:bg-accent rounded-full p-2 text-xl transition-transform hover:scale-125"
-                >
-                  {e}
+            )}
+            {onEdit && mine && m.media_type === "text" && m.remote_msg_id && (
+              <button 
+                onClick={() => onEdit(m)}
+                className="hover:text-foreground hover:bg-accent p-1.5 rounded-full transition-colors"
+                title="Editar"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="hover:text-foreground hover:bg-accent p-1.5 rounded-full transition-colors" title="Reagir">
+                  <SmilePlus className="h-3.5 w-3.5" />
                 </button>
-              ))}
-            </PopoverContent>
-          </Popover>
+              </PopoverTrigger>
+              <PopoverContent side="top" className="w-auto p-2 flex gap-1 rounded-full shadow-lg border-border">
+                {QUICK_EMOJIS.map(e => (
+                  <button 
+                    key={e} 
+                    onClick={() => onReact(e)} 
+                    className="hover:bg-accent rounded-full p-2 text-xl transition-transform hover:scale-125"
+                  >
+                    {e}
+                  </button>
+                ))}
+              </PopoverContent>
+            </Popover>
+          </div>
         )}
 
         {m.quoted_content && !m.is_deleted && (

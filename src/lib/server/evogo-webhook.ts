@@ -298,19 +298,15 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         // Update contact name
         if (remoteJid.includes('@g.us')) {
           // If it's a group and we got the actual name, update it if it differs
-          if (actualGroupName && existingContacts[0].name !== actualGroupName) {
+          if (actualGroupName && existingContacts[0].name !== actualGroupName && existingContacts[0].name === 'Grupo do WhatsApp') {
             await supabaseAdmin
               .from('contacts')
               .update({ name: actualGroupName })
               .eq('id', contactId);
           }
-        } else if (pushName && pushName !== 'Desconhecido' && existingContacts[0].name !== pushName) {
-          // If it's a direct contact, update the person's name
-          await supabaseAdmin
-            .from('contacts')
-            .update({ name: pushName })
-            .eq('id', contactId);
         }
+        // Removemos a atualização automática do nome de contatos diretos (pushName)
+        // para não sobrescrever o nome que o usuário digitou manualmente no CRM!
       } else {
         // Create new contact
         const groupDefaultName = actualGroupName || 'Grupo do WhatsApp';
@@ -318,6 +314,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           .from('contacts')
           .insert({
             company_id: company_id,
+            unit_id: unit_id,
             name: remoteJid.includes('@g.us') ? groupDefaultName : pushName,
             phone: phoneNumber,
           })
@@ -418,6 +415,15 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       }
 
       // 6. Insert message
+      let participantJid: string | null = null;
+      if (isFromMe && body.data?.message?.key?.participant) {
+        participantJid = body.data.message.key.participant;
+      } else if (isFromMe && messageData?.key?.participant) {
+        participantJid = messageData.key.participant;
+      } else if (!isFromMe) {
+        participantJid = remoteJid;
+      }
+
       const insertPayload: any = {
         conversation_id: conversationId,
         sender_type: isFromMe ? 'agent' : 'contact',
@@ -427,6 +433,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         remote_msg_id: remoteMsgId,
         quoted_message_id: quotedInternalId,
         quoted_content: quotedContent,
+        participant_jid: participantJid,
       };
 
       const { error: msgErr } = await supabaseAdmin
@@ -576,6 +583,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           .from('contacts')
           .insert({
             company_id: company_id,
+            unit_id: unit_id,
             phone: phoneNumber,
             name: groupName || 'Grupo do WhatsApp',
           })
