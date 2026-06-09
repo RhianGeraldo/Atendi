@@ -21,8 +21,8 @@ function AuthPage() {
   
   const [isRegister, setIsRegister] = useState(!!companyId);
   const [name, setName] = useState("");
-  const [email, setEmail] = useState(isRegister ? "" : "admin@demo.com");
-  const [password, setPassword] = useState(isRegister ? "" : "demo1234");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -66,7 +66,7 @@ function AuthPage() {
           </p>
         </div>
         <p className="text-xs text-sidebar-foreground/50">
-          © {new Date().getFullYear()} Grupo Exemplo
+          © {new Date().getFullYear()} Grupo Omni
         </p>
       </div>
 
@@ -123,22 +123,16 @@ function AuthPage() {
             </Button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-muted-foreground">
-            {isRegister ? "Já possui uma conta?" : "Ainda não tem uma conta?"}
-            <button
-              type="button"
-              onClick={() => setIsRegister(!isRegister)}
-              className="ml-1 font-medium text-primary hover:underline"
-            >
-              {isRegister ? "Faça login" : "Cadastre-se"}
-            </button>
-          </div>
-
-          {!isRegister && (
-            <div className="mt-6 rounded-md bg-muted p-3 text-xs text-muted-foreground">
-              <strong className="text-foreground">Conta de demonstração:</strong>
-              <br />
-              admin@demo.com / demo1234
+          {isRegister && (
+            <div className="mt-6 text-center text-sm text-muted-foreground">
+              Já possui uma conta?
+              <button
+                type="button"
+                onClick={() => setIsRegister(false)}
+                className="ml-1 font-medium text-primary hover:underline"
+              >
+                Faça login
+              </button>
             </div>
           )}
         </Card>
