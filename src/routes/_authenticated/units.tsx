@@ -33,7 +33,12 @@ export const Route = createFileRoute("/_authenticated/units")({
 });
 
 function slugify(s: string) {
-  return s.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function UnitsPage() {
