@@ -32,7 +32,15 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   useEffect(() => {
     if (!open || !instance || !company?.evogo_host) return;
 
-    setWebhookUrl(instance.webhook_url || "");
+    let defaultWebhook = instance.webhook_url;
+    const currentDomainWebhook = `${window.location.origin}/api/evogo/webhook`;
+    
+    // Se estiver vazio, for do supabase antigo, ou for de um domínio antigo diferente do atual, atualiza pra origem atual
+    if (!defaultWebhook || defaultWebhook.includes('supabase.co') || !defaultWebhook.startsWith(window.location.origin)) {
+      defaultWebhook = currentDomainWebhook;
+    }
+
+    setWebhookUrl(defaultWebhook);
     
     // Fetch advanced settings from EvoGo
     const fetchSettings = async () => {

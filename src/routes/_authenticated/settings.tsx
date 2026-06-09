@@ -30,6 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import { DepartmentsTab } from "@/components/settings/departments-tab";
 import { UsersTab } from "@/components/settings/users-tab";
 import { LabelsTab } from "@/components/settings/labels-tab";
+import { CrmTab } from "@/components/settings/crm-tab";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
@@ -171,9 +172,23 @@ function SettingsPage() {
         throw new Error("Configure Host e Token primeiro.");
       }
       
-      // Gera o slug técnico: slug(company)-slug(name)
-      const slugify = (s: string) => s.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, '');
-      const technicalName = `${slugify(company.name)}-${slugify(name)}`;
+      // Gera o slug técnico com remoção de acentos real e sem espaços
+      const slugify = (s: string) => s
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/\s+/g, '')
+        .replace(/[^\w-]/g, '');
+        
+      let unitSlugPart = "";
+      if (selectedUnitId) {
+        const { data: unitData } = await supabase.from("units").select("name").eq("id", selectedUnitId).single();
+        if (unitData?.name) {
+          unitSlugPart = `-${slugify(unitData.name)}`;
+        }
+      }
+
+      const technicalName = `${slugify(company.name)}${unitSlugPart}-${slugify(name)}`;
 
       // Salvar no banco
       const { data, error } = await supabase.from("whatsapp_instances").insert({
@@ -192,8 +207,8 @@ function SettingsPage() {
         const evogoId = evoRes?.data?.id || evoRes?.id;
 
         if (evogoId) {
-          // Salva no banco local
-          const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/evogo-webhook`;
+          // Salva no banco local com base no domínio que o usuário está acessando
+          const webhookUrl = `${window.location.origin}/api/evogo/webhook`;
           
           await supabase.from("whatsapp_instances").update({
             evogo_instance_id: evogoId,
@@ -266,12 +281,13 @@ function SettingsPage() {
       </div>
       
       <Tabs defaultValue="general" className="space-y-6">
-        <TabsList>
+        <TabsList className="flex flex-wrap h-auto gap-1 justify-start">
           <TabsTrigger value="general">Geral e Integrações</TabsTrigger>
           <TabsTrigger value="profile">Meu Perfil</TabsTrigger>
           <TabsTrigger value="departments">Departamentos</TabsTrigger>
           <TabsTrigger value="users">Equipe e Acessos</TabsTrigger>
           <TabsTrigger value="labels">Etiquetas</TabsTrigger>
+          <TabsTrigger value="crm">CRM e Funis</TabsTrigger>
         </TabsList>
         
         <TabsContent value="general" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -464,6 +480,10 @@ function SettingsPage() {
 
         <TabsContent value="labels">
           <LabelsTab />
+        </TabsContent>
+
+        <TabsContent value="crm">
+          <CrmTab />
         </TabsContent>
       </Tabs>
 

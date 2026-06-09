@@ -148,6 +148,22 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         } else if (msg.albumMessage) {
           // albumMessage is just an album cover notification - images arrive as separate imageMessage events
           return;
+        } else if (msg.protocolMessage && (msg.protocolMessage.type === 14 || msg.protocolMessage.type === 'MESSAGE_EDIT')) {
+          // It's an edited message. The original ID is in msg.protocolMessage.key.id
+          const editedMsg = msg.protocolMessage.editedMessage;
+          if (editedMsg) {
+            textContent = editedMsg.conversation || editedMsg.extendedTextMessage?.text || '[Mensagem Editada]';
+            // Optionally, we could find the original message and update it, 
+            // but for now we'll just insert it as a new message indicating it was edited
+            textContent = `✏️ *Editado:* ${textContent}`;
+          } else {
+            return; // Ignore if no content
+          }
+        } else if (msg.secretEncryptedMessage || (info && info.Edit === "1" && !msg.conversation && !msg.extendedTextMessage)) {
+          // Evogo sends edited messages as secretEncryptedMessage if it fails to decrypt them
+          // We must ignore them to prevent "[Mídia/Mensagem não suportada]" spam
+          console.log('[evogo-webhook] Ignoring secretEncryptedMessage/Edit without decrypted content');
+          return;
         }
         
       } else {
@@ -219,6 +235,17 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             if (targetId) {
               return await handleReaction(targetId, emoji);
             }
+          } else if (msgType.protocolMessage && (msgType.protocolMessage.type === 14 || msgType.protocolMessage.type === 'MESSAGE_EDIT')) {
+            const editedMsg = msgType.protocolMessage.editedMessage;
+            if (editedMsg) {
+              textContent = editedMsg.conversation || editedMsg.extendedTextMessage?.text || '[Mensagem Editada]';
+              textContent = `✏️ *Editado:* ${textContent}`;
+            } else {
+              return;
+            }
+          } else if (msgType.secretEncryptedMessage) {
+            console.log('[evogo-webhook] Ignoring secretEncryptedMessage/Edit without decrypted content');
+            return;
           }
         }
       }
@@ -243,7 +270,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       // 1. Find the instance in the DB
       const { data: instance, error: instanceErr } = await supabaseAdmin
         .from('whatsapp_instances')
-        .select('unit_id, company_id')
+        .select('id, unit_id, company_id')
         .eq('instance_name', instanceName)
         .single();
 
@@ -252,18 +279,9 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         return;
       }
 
-      let { company_id, unit_id } = instance;
-      if (!unit_id) {
-         // Fallback para a primeira unidade da empresa se a instância for global
-         const { data: fallbackUnit } = await supabaseAdmin.from('units').select('id').eq('company_id', company_id).order('created_at').limit(1).maybeSingle();
-         if (fallbackUnit) {
-            unit_id = fallbackUnit.id;
-         } else {
-            console.log('Instance has no unit_id: ' + instanceName + '\n');
-            console.error('Instance has no unit_id linked:', instanceName);
-            return;
-         }
-      }
+      let { id: instance_id, company_id, unit_id } = instance;
+      // Se não tem unit_id, significa que é da Empresa Mãe (Matriz), o que é perfeitamente válido.
+      // Mantemos unit_id como null ou undefined.
 
       // 2. Find or create Contact
       let contactId;
@@ -310,33 +328,54 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         contactId = newContact.id;
       }
 
-      // 3. Find active or waiting conversation
+      // 3. Find latest conversation for this contact in THIS EXACT INSTANCE
       let conversationId;
-      const { data: activeConvs } = await supabaseAdmin
+      let convQuery = supabaseAdmin
         .from('conversations')
         .select('id, status')
-        .eq('unit_id', unit_id)
         .eq('contact_id', contactId)
-        .in('status', ['waiting', 'active'])
+        .eq('whatsapp_instance_id', instance_id)
+        .order('last_message_at', { ascending: false })
         .limit(1);
-
-      if (activeConvs && activeConvs.length > 0) {
-        conversationId = activeConvs[0].id;
         
-        // Update last_message_at
+      const { data: latestConvs } = await convQuery;
+
+      console.log(`[evogo-webhook] Lookup conversation: instance_id=${instance_id}, contact_id=${contactId}, result=${JSON.stringify(latestConvs)}`);
+
+      if (latestConvs && latestConvs.length > 0) {
+        const conv = latestConvs[0];
+        conversationId = conv.id;
+        console.log(`[evogo-webhook] Found existing conversation: ${conversationId}, status: ${conv.status}`);
+        
+        const updatePayload: any = { last_message_at: new Date().toISOString() };
+        
+        // Se a conversa estava resolvida
+        if (conv.status === 'resolved') {
+          if (!isFromMe) {
+            updatePayload.status = 'waiting';
+            updatePayload.assigned_agent_id = null;
+            updatePayload.department_id = null;
+          } else {
+            updatePayload.status = 'active';
+            updatePayload.assigned_agent_id = null;
+          }
+        }
+
         await supabaseAdmin.from('conversations')
-          .update({ last_message_at: new Date().toISOString() })
+          .update(updatePayload)
           .eq('id', conversationId);
 
       } else {
+        console.log(`[evogo-webhook] No existing conversation found. Creating new one.`);
         // Create new conversation
         const { data: newConv, error: convErr } = await supabaseAdmin
           .from('conversations')
           .insert({
             unit_id: unit_id,
+            whatsapp_instance_id: instance_id,
             contact_id: contactId,
             channel: 'whatsapp',
-            status: 'waiting',
+            status: isFromMe ? 'active' : 'waiting',
             last_message_at: new Date().toISOString()
           })
           .select()
@@ -505,21 +544,14 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       // 1. Find the instance in the DB
       const { data: instance } = await supabaseAdmin
         .from('whatsapp_instances')
-        .select('company_id, unit_id')
+        .select('id, company_id, unit_id')
         .eq('instance_name', instanceName)
         .single();
         
       if (!instance) return;
       
-      let { company_id, unit_id } = instance;
-      if (!unit_id) {
-         const { data: fallbackUnit } = await supabaseAdmin.from('units').select('id').eq('company_id', company_id).order('created_at').limit(1).maybeSingle();
-         if (fallbackUnit) {
-            unit_id = fallbackUnit.id;
-         } else {
-            return;
-         }
-      }
+      let { id: instance_id, company_id, unit_id } = instance;
+      // Se não tem unit_id, significa que é da Empresa Mãe (Matriz).
       
       // 2. Find or create Contact
       let contactId;
@@ -558,19 +590,22 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       }
       
       // 3. Find or create waiting conversation
-      const { data: activeConvs } = await supabaseAdmin
+      let activeConvQuery = supabaseAdmin
         .from('conversations')
         .select('id')
-        .eq('unit_id', unit_id)
         .eq('contact_id', contactId)
+        .eq('whatsapp_instance_id', instance_id)
         .in('status', ['waiting', 'active'])
         .limit(1);
+
+      const { data: activeConvs } = await activeConvQuery;
 
       if (!activeConvs || activeConvs.length === 0) {
         await supabaseAdmin
           .from('conversations')
           .insert({
             unit_id: unit_id,
+            whatsapp_instance_id: instance_id,
             contact_id: contactId,
             channel: 'whatsapp',
             status: 'waiting',

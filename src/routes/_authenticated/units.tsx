@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Store, Smartphone, Settings, QrCode } from "lucide-react";
+import { Plus, Store, Smartphone, Settings, QrCode, Trash2, Users } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -166,7 +166,8 @@ function UnitsPage() {
 function UnitItem({ unit, company, onConnectInstance, onSettingsInstance }: { unit: any, company: any, onConnectInstance: (inst: any) => void, onSettingsInstance: (inst: any) => void }) {
   const qc = useQueryClient();
   const [instanceName, setInstanceName] = useState("");
-  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean, type: 'disconnect' | 'delete' | null, instance: any }>({ open: false, type: null, instance: null });
+  const [deptName, setDeptName] = useState("");
+  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean, type: 'disconnect' | 'delete' | 'delete_dept' | null, instance: any, dept: any }>({ open: false, type: null, instance: null, dept: null });
 
   const handleDisconnect = async (instance: any) => {
     try {
@@ -178,7 +179,7 @@ function UnitItem({ unit, company, onConnectInstance, onSettingsInstance }: { un
     } catch (e: any) {
       toast.error("Erro ao desconectar", { description: e.message });
     } finally {
-      setConfirmDialog({ open: false, type: null, instance: null });
+      setConfirmDialog({ open: false, type: null, instance: null, dept: null });
     }
   };
 
@@ -194,7 +195,19 @@ function UnitItem({ unit, company, onConnectInstance, onSettingsInstance }: { un
     } catch (e: any) {
       toast.error("Erro ao deletar", { description: e.message });
     } finally {
-      setConfirmDialog({ open: false, type: null, instance: null });
+      setConfirmDialog({ open: false, type: null, instance: null, dept: null });
+    }
+  };
+
+  const handleDeleteDept = async (dept: any) => {
+    try {
+      await supabase.from("departments").delete().eq("id", dept.id);
+      toast.success("Departamento excluído.");
+      qc.invalidateQueries({ queryKey: ["departments", unit.id] });
+    } catch (e: any) {
+      toast.error("Erro ao deletar", { description: e.message });
+    } finally {
+      setConfirmDialog({ open: false, type: null, instance: null, dept: null });
     }
   };
 
@@ -208,6 +221,36 @@ function UnitItem({ unit, company, onConnectInstance, onSettingsInstance }: { un
       if (error) throw error;
       return data;
     },
+  });
+
+  const { data: departments, isLoading: isLoadingDepts } = useQuery({
+    queryKey: ["departments", unit.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("departments")
+        .select("*")
+        .eq("unit_id", unit.id)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const createDept = useMutation({
+    mutationFn: async (name: string) => {
+      const { error } = await supabase.from("departments").insert({
+        company_id: company.id,
+        unit_id: unit.id,
+        name,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Departamento criado!");
+      setDeptName("");
+      qc.invalidateQueries({ queryKey: ["departments", unit.id] });
+    },
+    onError: (e) => toast.error("Erro ao criar departamento", { description: (e as Error).message })
   });
 
   const createInstance = useMutation({
@@ -333,18 +376,67 @@ function UnitItem({ unit, company, onConnectInstance, onSettingsInstance }: { un
               <div className="text-sm text-muted-foreground italic">Nenhuma instância nesta unidade.</div>
             )}
           </div>
+
+          <div className="space-y-3 pt-6 border-t mt-4">
+            <h4 className="text-sm font-semibold mb-2">Departamentos da Unidade</h4>
+            <div className="flex items-end gap-3 max-w-sm">
+              <div className="flex-1 space-y-1">
+                <Input 
+                  size={1}
+                  placeholder="Novo Departamento (ex: Vendas)" 
+                  value={deptName}
+                  onChange={(e) => setDeptName(e.target.value)}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <Button 
+                size="sm"
+                onClick={() => createDept.mutate(deptName)}
+                disabled={!deptName || createDept.isPending}
+              >
+                Criar
+              </Button>
+            </div>
+
+            {isLoadingDepts ? (
+              <div className="text-xs text-muted-foreground">Carregando departamentos...</div>
+            ) : departments?.length ? (
+              <div className="grid gap-3 md:grid-cols-2">
+                {departments.map((dept) => (
+                  <div key={dept.id} className="flex items-center justify-between rounded-md border p-3">
+                    <div>
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        <Users className="h-4 w-4 text-muted-foreground" />
+                        {dept.name}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setConfirmDialog({ open: true, type: 'delete_dept', instance: null, dept: dept })} title="Deletar">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground italic">Nenhum departamento nesta unidade.</div>
+            )}
+          </div>
+
         </div>
       </AccordionContent>
 
-      <AlertDialog open={confirmDialog.open} onOpenChange={(open) => !open && setConfirmDialog({ open: false, type: null, instance: null })}>
+      <AlertDialog open={confirmDialog.open} onOpenChange={(open) => !open && setConfirmDialog({ open: false, type: null, instance: null, dept: null })}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirmDialog.type === 'disconnect' ? "Desconectar Aparelho?" : "Deletar Instância?"}
+              {confirmDialog.type === 'disconnect' ? "Desconectar Aparelho?" : confirmDialog.type === 'delete_dept' ? "Deletar Departamento?" : "Deletar Instância?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmDialog.type === 'disconnect' 
                 ? `Isso irá deslogar o WhatsApp do aparelho "${confirmDialog.instance?.name}". Você precisará ler o QR Code novamente para conectar.`
+                : confirmDialog.type === 'delete_dept'
+                ? `Tem certeza que deseja deletar o departamento "${confirmDialog.dept?.name}"? Isso pode afetar conversas em andamento.`
                 : `Isso apagará permanentemente a instância "${confirmDialog.instance?.name}" e todos os seus dados não poderão ser recuperados.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -354,6 +446,7 @@ function UnitItem({ unit, company, onConnectInstance, onSettingsInstance }: { un
               onClick={() => {
                 if (confirmDialog.type === 'disconnect') handleDisconnect(confirmDialog.instance);
                 else if (confirmDialog.type === 'delete') handleDelete(confirmDialog.instance);
+                else if (confirmDialog.type === 'delete_dept') handleDeleteDept(confirmDialog.dept);
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

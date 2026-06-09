@@ -87,6 +87,7 @@ export function UsersTab() {
   const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState("agent");
   const [newUserUnits, setNewUserUnits] = useState<string[]>([]);
+  const [newUserDepartment, setNewUserDepartment] = useState<string>("none");
   const [isCreating, setIsCreating] = useState(false);
 
   // Fetches ALL profiles of the company
@@ -96,7 +97,7 @@ export function UsersTab() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, email, role, user_units(unit_id, role)") // FIXME: add has_matriz_access when migration is applied
+        .select("id, name, email, role, department_id, has_matriz_access, departments!profiles_department_id_fkey(name), user_units(unit_id, role)")
         .eq("company_id", profile!.company_id!);
       if (error) throw error;
       return data;
@@ -112,9 +113,32 @@ export function UsersTab() {
     }
   });
 
+  const { data: companyName } = useQuery({
+    queryKey: ["company-name", profile?.company_id],
+    enabled: !!profile?.company_id,
+    queryFn: async () => {
+      const { data } = await supabase.from("companies").select("name").eq("id", profile!.company_id!).single();
+      return data?.name;
+    }
+  });
+
+  const { data: departments } = useQuery({
+    queryKey: ["departments", profile?.company_id],
+    enabled: !!profile?.company_id,
+    queryFn: async () => {
+      const { data } = await supabase.from("departments").select("id, name").eq("company_id", profile!.company_id!);
+      return data ?? [];
+    }
+  });
+
   const updateGlobalRole = useMutation({
     mutationFn: async ({ userId, role }: { userId: string, role: string }) => {
-      const { error } = await supabase.from("profiles").update({ role }).eq("id", userId);
+      const { error } = await supabase.rpc("update_user_profile_admin", {
+        p_user_id: userId,
+        p_role: role,
+        p_has_matriz_access: null,
+        p_company_id: null
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -122,6 +146,18 @@ export function UsersTab() {
       qc.invalidateQueries({ queryKey: ["users"] });
     },
     onError: (e) => toast.error("Erro ao atualizar", { description: (e as Error).message })
+  });
+
+  const updateUserDepartment = useMutation({
+    mutationFn: async ({ userId, departmentId }: { userId: string, departmentId: string | null }) => {
+      const { error } = await supabase.from("profiles").update({ department_id: departmentId }).eq("id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Departamento atualizado.");
+      qc.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (e) => toast.error("Erro ao atualizar departamento", { description: (e as Error).message })
   });
 
   const toggleUnitAccess = useMutation({
@@ -147,16 +183,16 @@ export function UsersTab() {
   const toggleSpecificUnitAccess = useMutation({
     mutationFn: async ({ userId, unitId, hasAccess }: { userId: string, unitId: string, hasAccess: boolean }) => {
       if (unitId === "matriz") {
-        const { error } = await supabase.from("profiles").update({ has_matriz_access: !hasAccess }).eq("id", userId);
+        const { error } = await supabase.rpc("toggle_matriz_access_rpc", { p_user_id: userId, p_has_access: hasAccess });
         if (error) throw error;
         return;
       }
 
-      if (hasAccess) {
+      if (!hasAccess) {
         const { error } = await supabase.from("user_units").delete().eq("user_id", userId).eq("unit_id", unitId);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("user_units").insert({ user_id: userId, unit_id: unitId, role: "agent" });
+        const { error } = await supabase.from("user_units").upsert({ user_id: userId, unit_id: unitId, role: "agent" });
         if (error) throw error;
       }
     },
@@ -193,6 +229,7 @@ export function UsersTab() {
           data: {
             name: newUserName,
             company_id: profile.company_id,
+            department_id: newUserDepartment === "none" ? null : newUserDepartment,
           }
         }
       });
@@ -215,10 +252,13 @@ export function UsersTab() {
         }
 
         if (newUserRole !== "agent" || newUserUnits.includes("matriz")) {
-          await supabase.from("profiles").update({ 
-            role: newUserRole
-            // has_matriz_access: newUserUnits.includes("matriz") // FIXME: add back when DB is migrated
-          }).eq("id", data.user.id);
+          const { error: pErr } = await supabase.rpc("update_user_profile_admin", {
+            p_user_id: data.user.id,
+            p_role: newUserRole,
+            p_has_matriz_access: newUserUnits.includes("matriz"),
+            p_company_id: null
+          });
+          if (pErr) throw pErr;
         }
 
         const standardUnits = newUserUnits.filter(id => id !== "matriz");
@@ -228,7 +268,8 @@ export function UsersTab() {
             unit_id: uid,
             role: "agent"
           }));
-          await supabase.from("user_units").insert(unitInserts);
+          const { error: uErr } = await supabase.from("user_units").insert(unitInserts);
+          if (uErr) throw uErr;
         }
       }
 
@@ -239,19 +280,42 @@ export function UsersTab() {
       setNewUserPassword("");
       setNewUserRole("agent");
       setNewUserUnits([]);
+      setNewUserDepartment("none");
       qc.invalidateQueries({ queryKey: ["users"] });
     } catch (e: any) {
       // Se o erro for que o usuário já existe, tentamos vinculá-lo
       if (e.message?.includes("already registered") || e.message?.includes("User already exists")) {
         try {
-          await supabase.from("profiles").update({ company_id: profile!.company_id }).eq("email", newUserEmail);
-          toast.success("O usuário já existia e foi vinculado à sua empresa!");
+          const { data: existingProfile } = await supabase.from("profiles").select("id").eq("email", newUserEmail).single();
+          
+          if (existingProfile) {
+            const { error: pErr } = await supabase.rpc("update_user_profile_admin", {
+              p_user_id: existingProfile.id,
+              p_role: newUserRole,
+              p_has_matriz_access: newUserUnits.includes("matriz"),
+              p_company_id: profile!.company_id
+            });
+            if (pErr) throw pErr;
+
+            const standardUnits = newUserUnits.filter(id => id !== "matriz");
+            if (standardUnits.length > 0) {
+              const unitInserts = standardUnits.map(uid => ({
+                user_id: existingProfile.id,
+                unit_id: uid,
+                role: "agent"
+              }));
+              await supabase.from("user_units").upsert(unitInserts);
+            }
+          }
+
+          toast.success("O usuário já existia e foi vinculado à sua empresa com os acessos definidos!");
           setIsCreateModalOpen(false);
           setNewUserName("");
           setNewUserEmail("");
           setNewUserPassword("");
           setNewUserRole("agent");
           setNewUserUnits([]);
+          setNewUserDepartment("none");
           qc.invalidateQueries({ queryKey: ["users"] });
           return;
         } catch (linkError: any) {
@@ -265,7 +329,7 @@ export function UsersTab() {
     }
   };
 
-  const unitsWithMatriz = units ? [{ id: "matriz", name: "Empresa Mãe (Sede)" }, ...units] : [];
+  const unitsWithMatriz = units ? [{ id: "matriz", name: companyName || "Empresa Mãe (Sede)" }, ...units] : [];
 
   return (
     <div className="space-y-6">
@@ -315,6 +379,7 @@ export function UsersTab() {
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="h-10 px-4 text-left font-medium">Nome / E-mail</th>
+                    <th className="h-10 px-4 text-left font-medium">Departamento</th>
                     <th className="h-10 px-4 text-left font-medium">Nível Global</th>
                     {!selectedUnitId && <th className="h-10 px-4 text-right font-medium">Ações</th>}
                   </tr>
@@ -331,6 +396,27 @@ export function UsersTab() {
                         <td className="p-4">
                           <div className="font-medium">{u.name} {isSelf && <Badge variant="outline" className="ml-2 text-[10px]">Você</Badge>}</div>
                           <div className="text-xs text-muted-foreground">{u.email}</div>
+                        </td>
+                        <td className="p-4">
+                          {!selectedUnitId ? (
+                            <Select 
+                              disabled={updateUserDepartment.isPending} 
+                              value={u.department_id || "none"} 
+                              onValueChange={(val) => updateUserDepartment.mutate({ userId: u.id, departmentId: val === "none" ? null : val })}
+                            >
+                              <SelectTrigger className="h-8 w-[160px]">
+                                <SelectValue placeholder="Sem departamento" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">Nenhum</SelectItem>
+                                {departments?.map(dept => (
+                                  <SelectItem key={dept.id} value={dept.id}>{dept.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <span className="text-sm">{u.departments?.name || "Nenhum"}</span>
+                          )}
                         </td>
                         <td className="p-4">
                           {!selectedUnitId ? (
@@ -413,11 +499,11 @@ export function UsersTab() {
                   const removed = currentSelected.filter((id: string) => !newSelected.includes(id));
                   
                   added.forEach(unitId => {
-                    toggleSpecificUnitAccess.mutate({ userId: manageAccessUser.id, unitId, hasAccess: false });
+                    toggleSpecificUnitAccess.mutate({ userId: manageAccessUser.id, unitId, hasAccess: true });
                   });
                   
                   removed.forEach(unitId => {
-                    toggleSpecificUnitAccess.mutate({ userId: manageAccessUser.id, unitId, hasAccess: true });
+                    toggleSpecificUnitAccess.mutate({ userId: manageAccessUser.id, unitId, hasAccess: false });
                   });
                   
                   setManageAccessUser((prev: any) => ({
@@ -456,6 +542,20 @@ export function UsersTab() {
               <Label>Senha Temporária</Label>
               <Input type="password" required minLength={6} value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} />
               <p className="text-xs text-muted-foreground">O funcionário poderá alterar depois (mínimo 6 caracteres).</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Departamento Principal</Label>
+              <Select value={newUserDepartment} onValueChange={setNewUserDepartment}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um departamento (Opcional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem departamento</SelectItem>
+                  {departments?.map(dept => (
+                    <SelectItem key={dept.id} value={dept.id}>{dept.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>Nível de Acesso (Matriz)</Label>

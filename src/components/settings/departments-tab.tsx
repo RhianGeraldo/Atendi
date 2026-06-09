@@ -7,24 +7,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth-context";
-import { useUnit } from "@/lib/unit-context";
 
 export function DepartmentsTab() {
   const { profile } = useAuth();
-  const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
   
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
 
   const { data: departments, isLoading } = useQuery({
-    queryKey: ["departments", profile?.company_id, selectedUnitId],
+    queryKey: ["departments", profile?.company_id, "sede"],
     enabled: !!profile?.company_id,
     queryFn: async () => {
-      let q = supabase.from("departments").select("*");
-      if (selectedUnitId) q = q.eq("unit_id", selectedUnitId);
-      // FIXME: The database is missing the migration that adds company_id and makes unit_id optional.
-      // else q = q.is("unit_id", null);
+      let q = supabase.from("departments").select("*")
+        .eq("company_id", profile!.company_id!)
+        .is("unit_id", null);
       
       const { data, error } = await q.order("created_at", { ascending: true });
       if (error) throw error;
@@ -36,8 +33,8 @@ export function DepartmentsTab() {
     mutationFn: async () => {
       if (!name) throw new Error("Nome é obrigatório");
       const { error } = await supabase.from("departments").insert({
-        // company_id: profile!.company_id!, // FIXME: add back when DB is migrated
-        unit_id: selectedUnitId || null,
+        company_id: profile!.company_id!,
+        unit_id: null,
         name,
         description,
       });
@@ -68,8 +65,8 @@ export function DepartmentsTab() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Novo Departamento</CardTitle>
-          <CardDescription>Crie setores para organizar o atendimento.</CardDescription>
+          <CardTitle>Novo Departamento (Sede)</CardTitle>
+          <CardDescription>Crie setores para organizar o atendimento da Empresa Mãe.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-end gap-3 max-w-2xl">
@@ -91,7 +88,7 @@ export function DepartmentsTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Departamentos {selectedUnitId ? "da Unidade" : "da Sede"}</CardTitle>
+          <CardTitle>Departamentos da Sede</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (

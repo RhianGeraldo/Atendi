@@ -1,14 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users } from "lucide-react";
+import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, toggleContactLabelAction, createLabelAction } from "@/lib/api/chat.functions";
+import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, toggleContactLabelAction, createLabelAction, assignConversationAction, transferConversationAction, updateContactFromWhatsappAction } from "@/lib/api/chat.functions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,9 +26,17 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import EmojiPicker from "emoji-picker-react";
 import TextareaAutosize from "react-textarea-autosize";
+import { TransferDialog } from "@/components/chat/transfer-dialog";
+import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 
 export const Route = createFileRoute("/_authenticated/conversations")({
   component: ConversationsPage,
+  validateSearch: (search: Record<string, unknown>) => {
+    return {
+      c: search.c as string | undefined,
+      tab: search.tab as "waiting" | "active" | "resolved" | "groups" | undefined,
+    }
+  }
 });
 
 type Status = "waiting" | "active" | "resolved";
@@ -52,60 +60,98 @@ interface ConvRow {
     contact_labels?: { labels: { id: string; name: string; color: string | null } }[];
   };
   department: { name: string } | null;
+  assigned_agent?: { name: string } | null;
+  department_id: string | null;
+  assigned_agent_id: string | null;
+  unit_id: string;
+  whatsapp_instance_id: string | null;
 }
 
 function ConversationsPage() {
+  const { c: searchConvId, tab: searchTab } = Route.useSearch();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TabType>("waiting");
+  const [tab, setTab] = useState<TabType>(searchTab || "waiting");
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(searchConvId || null);
   const [showSidebar, setShowSidebar] = useState(true);
   const { selectedUnitId } = useUnit();
 
+  const { profile } = useAuth();
+  
   const { data: conversations } = useQuery({
-    queryKey: ["conversations", tab, selectedUnitId],
+    queryKey: ["conversations", tab, selectedUnitId, profile?.id, profile?.role, profile?.department_id],
     queryFn: async () => {
       let query = supabase
         .from("conversations")
         .select(
-          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name)"
+          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name)"
         );
-
-      if (tab === "groups") {
-        // Fetch all statuses for groups
-      } else {
-        query = query.eq("status", tab);
-      }
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
+      } else {
+        query = query.is("unit_id", null);
       }
-      // Se for nulo (Sede/Empresa Mãe), não filtra por unit_id. O RLS garante que verá todas da empresa.
 
       const { data, error } = await query.order("last_message_at", { ascending: false });
       if (error) throw error;
       
       const allConvs = (data ?? []) as unknown as ConvRow[];
       
-      // Filter out groups from main tabs, or keep only groups for the "groups" tab
       return allConvs.filter(c => {
         const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'));
         if (tab === "groups") return isGroup;
-        return !isGroup;
+        if (isGroup) return false;
+
+        const isAdmin = profile?.role === "admin_company";
+        const isManager = profile?.role === "manager";
+        const isMyDept = c.department_id === profile?.department_id;
+        const isGeneral = !c.department_id;
+        const isAssignedToMe = c.assigned_agent_id === profile?.id;
+
+        if (tab === "waiting") {
+          const canSeeWaiting = isAdmin || isGeneral || isMyDept || isAssignedToMe;
+          if (!canSeeWaiting) return false;
+          if (isAdmin || isManager) return c.status === "waiting";
+          return c.status === "waiting" && (!c.assigned_agent_id || c.assigned_agent_id === profile?.id);
+        }
+        if (tab === "active") {
+          const canSeeActive = isAdmin || (isManager && isMyDept) || isAssignedToMe;
+          return c.status === "active" && canSeeActive;
+        }
+        if (tab === "resolved") {
+          const canSeeResolved = isAdmin || (isManager && isMyDept) || isAssignedToMe;
+          return c.status === "resolved" && canSeeResolved;
+        }
+        return false;
       });
     },
   });
 
+  useEffect(() => {
+    if (searchTab && searchTab !== tab) {
+      setTab(searchTab as TabType);
+    }
+  }, [searchTab]);
+
+  useEffect(() => {
+    if (searchConvId && searchConvId !== selectedId) {
+      setSelectedId(searchConvId);
+    }
+  }, [searchConvId]);
+
   const { data: unreadCounts } = useQuery({
-    queryKey: ["unread-counts", selectedUnitId],
+    queryKey: ["unread-counts", selectedUnitId, profile?.id, profile?.department_id],
     queryFn: async () => {
       let query = supabase
         .from("conversations")
-        .select("status, unread_count, contact:contacts(phone)")
+        .select("status, unread_count, department_id, assigned_agent_id, contact:contacts(phone)")
         .gt("unread_count", 0);
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
+      } else {
+        query = query.is("unit_id", null);
       }
 
       const { data, error } = await query;
@@ -116,11 +162,30 @@ function ConversationsPage() {
       data.forEach(c => {
         const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'));
         if (isGroup) {
-          counts.groups += c.unread_count || 0; // Ou contar conversas: counts.groups++ dependendo se quer total de msgs ou total de conversas. A imagem mostra 1 na bolinha de contato. Para as abas, geralmente mostramos a quantidade de conversas com mensagens não lidas.
+          counts.groups += c.unread_count || 0;
         } else {
-          if (c.status === 'waiting') counts.waiting++;
-          if (c.status === 'active') counts.active++;
-          if (c.status === 'resolved') counts.resolved++;
+          const isAdmin = profile?.role === "admin_company";
+          const isManager = profile?.role === "manager";
+          const isMyDept = c.department_id === profile?.department_id;
+          const isGeneral = !c.department_id;
+          const isAssignedToMe = c.assigned_agent_id === profile?.id;
+
+          if (c.status === 'waiting') {
+            const canSeeWaiting = isAdmin || isGeneral || isMyDept || isAssignedToMe;
+            if (canSeeWaiting) {
+              if (isAdmin || isManager || !c.assigned_agent_id || c.assigned_agent_id === profile?.id) {
+                counts.waiting++;
+              }
+            }
+          }
+          if (c.status === 'active') {
+            const canSeeActive = isAdmin || (isManager && isMyDept) || isAssignedToMe;
+            if (canSeeActive) counts.active++;
+          }
+          if (c.status === 'resolved') {
+            const canSeeResolved = isAdmin || (isManager && isMyDept) || isAssignedToMe;
+            if (canSeeResolved) counts.resolved++;
+          }
         }
       });
       
@@ -226,6 +291,7 @@ function ConversationsPage() {
               conv={c}
               selected={selectedId === c.id}
               onClick={() => setSelectedId(c.id)}
+              currentUserId={profile?.id}
             />
           ))}
           {!filtered.length && (
@@ -243,6 +309,7 @@ function ConversationsPage() {
             conv={selected} 
             showSidebar={showSidebar}
             onToggleSidebar={() => setShowSidebar(!showSidebar)}
+            onAssigned={() => setTab("active")}
           />
         ) : (
           <EmptyChat />
@@ -310,11 +377,35 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
   const { data: profilePictureUrl } = useQuery({
     queryKey: ["contact-profile-pic", conv.contact?.id, selectedUnitId],
     queryFn: async () => {
-      if (!conv.contact?.id || !selectedUnitId) return null;
-      return await fetchContactInfoAction({ data: { contactId: conv.contact.id, unitId: selectedUnitId } });
+      if (!conv.contact?.id || (!conv.unit_id && !conv.whatsapp_instance_id)) return null;
+      return await fetchContactInfoAction({ data: { contactId: conv.contact.id, unitId: conv.unit_id, whatsappInstanceId: conv.whatsapp_instance_id } });
     },
-    enabled: !!conv.contact?.id && !!selectedUnitId,
+    enabled: !!conv.contact?.id && !!conv.unit_id,
     staleTime: 1000 * 60 * 60, // 1 hour
+  });
+
+  const updateContact = useMutation({
+    mutationFn: async () => {
+      return await updateContactFromWhatsappAction({
+        data: { contactId: conv.contact.id, unitId: conv.unit_id, whatsappInstanceId: conv.whatsapp_instance_id }
+      });
+    },
+    onSuccess: (data) => {
+      if (data?.success) {
+        if (data.updatedName === "Foto Encontrada") {
+          toast.success(data.message || "Foto de perfil atualizada!");
+        } else {
+          toast.success(`Nome atualizado para: ${data.updatedName}`);
+        }
+      } else if (data?.message) {
+        toast.info(data.message);
+      }
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["contact-profile-pic", conv.contact.id] });
+    },
+    onError: (e) => {
+      toast.error(e.message || "Erro ao atualizar contato.");
+    }
   });
 
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
@@ -327,128 +418,123 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
           <X className="h-4 w-4" />
         </Button>
       </div>
-      <div className="border-b border-border p-4 pt-0 flex flex-col items-center justify-center space-y-3">
+      <div className="border-b border-border p-4 pt-0 flex flex-col items-center justify-center space-y-3 relative">
         <Avatar className="h-24 w-24 border">
           {profilePictureUrl ? (
-            <img src={profilePictureUrl} alt={conv.contact?.name} className="object-cover" />
+            <img src={profilePictureUrl} alt={conv.contact?.name} className="h-full w-full object-cover" />
           ) : (
-            <AvatarFallback className={cn("text-xl", isGroup ? "bg-primary/20 text-primary" : "bg-primary/10 text-primary")}>
-              {isGroup ? <Users className="h-8 w-8" /> : initials(conv.contact?.name)}
+            <AvatarFallback className={cn("text-2xl", isGroup ? "bg-primary/20 text-primary" : "bg-primary/10 text-primary")}>
+              {isGroup ? <Users className="h-10 w-10" /> : initials(conv.contact.name)}
             </AvatarFallback>
           )}
         </Avatar>
-        <div className="text-center">
-          <h3 className="font-semibold text-lg">{contactName || "Desconhecido"}</h3>
-          <p className="text-sm text-muted-foreground">{isGroup ? "Múltiplos Participantes" : formatPhone(conv.contact?.phone)}</p>
+        <div className="text-center w-full relative">
+          <div className="flex items-center justify-center gap-1 max-w-[80%] mx-auto">
+            <h3 className="font-semibold text-lg truncate">{contactName || "Desconhecido"}</h3>
+            <ContactEditDialog contact={conv.contact} />
+          </div>
+          <p className="text-sm text-muted-foreground">{isGroup ? "Múltiplos Participantes" : formatPhone(conv.contact.phone)}</p>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="absolute right-2 top-2 h-8 w-8 text-muted-foreground hover:text-foreground"
+            title="Atualizar dados do WhatsApp"
+            onClick={() => updateContact.mutate()}
+            disabled={updateContact.isPending}
+          >
+            <RefreshCw className={`h-4 w-4 ${updateContact.isPending ? 'animate-spin' : ''}`} />
+          </Button>
         </div>
       </div>
 
-      <ScrollArea className="flex-1 p-4">
-        <div className="space-y-6">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between pb-2">
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                <Tag className="h-3 w-3 inline mr-1" /> Etiquetas
-              </h4>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-6 text-xs px-2 gap-1 rounded-full">
-                    <Plus className="h-3 w-3" /> Adicionar
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="p-0 w-48" align="end">
-                  <Command>
-                    <CommandInput 
-                      placeholder="Buscar etiqueta..." 
-                      className="h-8" 
-                      value={searchLabel}
-                      onValueChange={setSearchLabel}
-                    />
-                    <CommandList>
-                      <CommandEmpty>
-                        {searchLabel.length > 0 ? (
-                          <Button 
-                            variant="ghost" 
-                            className="w-full justify-start text-sm h-8 font-normal"
-                            onClick={() => createLabel.mutate(searchLabel)}
-                            disabled={createLabel.isPending}
-                          >
-                            Criar "{searchLabel}"
-                          </Button>
-                        ) : "Nenhuma etiqueta encontrada."}
-                      </CommandEmpty>
-                      <CommandGroup>
-                        {allLabels?.map(label => {
-                          const isSelected = conv.contact?.contact_labels?.some(cl => cl.labels?.id === label.id);
-                          return (
-                            <CommandItem
-                              key={label.id}
-                              onSelect={() => {
-                                toggleLabel.mutate({ labelId: label.id, action: isSelected ? "remove" : "add" });
-                              }}
-                            >
-                              <div 
-                                className="w-2 h-2 rounded-full mr-2" 
-                                style={{ backgroundColor: label.color || "#6b7280" }}
-                              />
-                              <span className="flex-1 text-xs">{label.name}</span>
-                              {isSelected && <Square className="h-3 w-3 opacity-50 bg-primary/20" />}
-                            </CommandItem>
-                          );
-                        })}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {conv.contact?.contact_labels?.map((cl) => {
-                const label = cl.labels;
-                if (!label) return null;
-                const hexColor = label.color || "#6b7280";
-                return (
-                  <Badge 
-                    key={label.id} 
-                    variant="outline" 
-                    style={{ 
-                      backgroundColor: `${hexColor}1a`, 
-                      color: hexColor, 
-                      borderColor: `${hexColor}33` 
-                    }}
-                  >
-                    {label.name}
-                  </Badge>
-                );
-              })}
-              {!conv.contact?.contact_labels?.length && (
-                <span className="text-xs text-muted-foreground">Nenhuma etiqueta</span>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Detalhes
-            </h4>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between border-b pb-1">
-                <span className="text-muted-foreground">E-mail</span>
-                <span>{conv.contact?.email || "—"}</span>
-              </div>
-              <div className="flex justify-between border-b pb-1">
-                <span className="text-muted-foreground">Departamento</span>
-                <span>{conv.department?.name || "—"}</span>
-              </div>
-              <div className="flex justify-between border-b pb-1">
-                <span className="text-muted-foreground">Criado em</span>
-                <span>{new Date(conv.started_at).toLocaleDateString()}</span>
-              </div>
-            </div>
-          </div>
+      <div className="p-4 border-b border-border space-y-2">
+        <div className="flex items-center justify-between pb-2">
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            <Tag className="h-3 w-3 inline mr-1" /> Etiquetas
+          </h4>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-6 text-xs px-2 gap-1 rounded-full">
+                <Plus className="h-3 w-3" /> Adicionar
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="p-0 w-48" align="end">
+              <Command>
+                <CommandInput 
+                  placeholder="Buscar etiqueta..." 
+                  className="h-8" 
+                  value={searchLabel}
+                  onValueChange={setSearchLabel}
+                />
+                <CommandList>
+                  <CommandEmpty>
+                    {searchLabel.length > 0 ? (
+                      <Button 
+                        variant="ghost" 
+                        className="w-full justify-start text-sm h-8 font-normal"
+                        onClick={() => createLabel.mutate(searchLabel)}
+                        disabled={createLabel.isPending}
+                      >
+                        Criar "{searchLabel}"
+                      </Button>
+                    ) : "Nenhuma etiqueta encontrada."}
+                  </CommandEmpty>
+                  <CommandGroup>
+                    {allLabels?.map(label => {
+                      const isSelected = conv.contact?.contact_labels?.some(cl => cl.labels?.id === label.id);
+                      return (
+                        <CommandItem
+                          key={label.id}
+                          onSelect={() => {
+                            toggleLabel.mutate({ labelId: label.id, action: isSelected ? "remove" : "add" });
+                          }}
+                        >
+                          <div 
+                            className="w-2 h-2 rounded-full mr-2" 
+                            style={{ backgroundColor: label.color || "#6b7280" }}
+                          />
+                          <span className="flex-1 text-xs">{label.name}</span>
+                          {isSelected && <Square className="h-3 w-3 opacity-50 bg-primary/20" />}
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
-      </ScrollArea>
+
+        <div className="flex flex-wrap gap-2">
+          {conv.contact?.contact_labels?.map((cl) => {
+            const label = cl.labels;
+            if (!label) return null;
+            const hexColor = label.color || "#6b7280";
+            return (
+              <Badge 
+                key={label.id} 
+                variant="outline" 
+                style={{ 
+                  backgroundColor: `${hexColor}1a`, 
+                  color: hexColor, 
+                  borderColor: `${hexColor}33` 
+                }}
+              >
+                {label.name}
+              </Badge>
+            );
+          })}
+          {!conv.contact?.contact_labels?.length && (
+            <span className="text-xs text-muted-foreground">Nenhuma etiqueta</span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 flex flex-col">
+        {conv.contact?.id && (
+          <ContactDetailsTabs contactId={conv.contact.id} />
+        )}
+      </div>
     </div>
   );
 }
@@ -575,10 +661,12 @@ function ConversationItem({
   conv,
   selected,
   onClick,
+  currentUserId,
 }: {
   conv: ConvRow;
   selected: boolean;
   onClick: () => void;
+  currentUserId?: string;
 }) {
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
@@ -615,6 +703,16 @@ function ConversationItem({
           {conv.department?.name && (
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
               {conv.department.name}
+            </Badge>
+          )}
+          {conv.status === "active" && conv.assigned_agent?.name && (
+            <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal text-muted-foreground bg-muted/30">
+              {conv.assigned_agent.name}
+            </Badge>
+          )}
+          {conv.status === "waiting" && conv.assigned_agent_id && conv.assigned_agent_id === currentUserId && (
+            <Badge variant="default" className="px-1.5 py-0 text-[10px] font-normal bg-orange-500 hover:bg-orange-600">
+              Transferido
             </Badge>
           )}
           {conv.tags?.map((t) => (
@@ -658,21 +756,25 @@ interface MessageRow {
   quoted_content?: string | null;
   is_edited?: boolean;
   is_deleted?: boolean;
-  reactions?: Record<string, number>;
+  reactions?: Record<string, string[]>;
   isOptimistic?: boolean;
+  profiles?: { name: string };
 }
 
 function ChatPanel({ 
   conv,
   showSidebar,
-  onToggleSidebar
+  onToggleSidebar,
+  onAssigned
 }: { 
   conv: ConvRow;
   showSidebar?: boolean;
   onToggleSidebar?: () => void;
+  onAssigned?: () => void;
 }) {
-  const { user } = useAuth();
+  const { profile } = useAuth();
   const qc = useQueryClient();
+  const { selectedUnitId } = useUnit();
   const [text, setText] = useState("");
   const [selectedFile, setSelectedFile] = useState<{ file: File; base64: string; type: string } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -687,7 +789,7 @@ function ChatPanel({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("messages")
-        .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions")
+        .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, profiles(name)")
         .eq("conversation_id", conv.id)
         .order("created_at", { ascending: true });
       if (error) throw error;
@@ -723,7 +825,8 @@ function ChatPanel({
         media_type: payload.mediaType || "text",
         media_url: payload.mediaBase64 || null,
         created_at: new Date().toISOString(),
-        isOptimistic: true
+        isOptimistic: true,
+        profiles: profile?.name ? { name: profile.name } : undefined
       };
 
       qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
@@ -873,6 +976,20 @@ function ChatPanel({
     },
   });
 
+  const assignConv = useMutation({
+    mutationFn: async () => {
+      await assignConversationAction({ data: { conversationId: conv.id } });
+    },
+    onSuccess: () => {
+      toast.success("Atendimento puxado para você.");
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      onAssigned?.();
+    },
+    onError: (e) => {
+      toast.error("Erro ao puxar atendimento", { description: (e as Error).message });
+    }
+  });
+
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
@@ -900,10 +1017,13 @@ function ChatPanel({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {conv.status !== "resolved" && (
-              <Button variant="outline" size="sm" onClick={() => resolve.mutate()}>
-                Encerrar
-              </Button>
+            {conv.status === "active" && !isGroup && (
+              <>
+                <TransferDialog conv={conv} />
+                <Button variant="outline" size="sm" onClick={() => resolve.mutate()}>
+                  Encerrar
+                </Button>
+              </>
             )}
             <button 
               className={cn("rounded p-2 text-muted-foreground hover:bg-accent", showSidebar && "bg-accent")}
@@ -934,7 +1054,32 @@ function ChatPanel({
         </div>
 
         {/* Input */}
-        <div className="border-t border-border bg-card p-3 flex flex-col gap-2">
+        <div className="border-t border-border bg-card p-3 flex flex-col gap-2 relative">
+          {(conv.status === 'waiting' || (conv.status === 'active' && conv.assigned_agent_id && conv.assigned_agent_id !== profile?.id)) && !isGroup && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card gap-2">
+              {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || profile?.role === 'admin_company' || profile?.role === 'manager') ? (
+                <>
+                  <p className="text-sm font-medium text-muted-foreground text-center px-4">
+                    {!conv.assigned_agent_id 
+                      ? "Esta conversa está na fila e aguardando um agente." 
+                      : conv.assigned_agent_id === profile?.id 
+                        ? "Esta conversa foi transferida para você." 
+                        : conv.status === 'active'
+                          ? `Esta conversa está sendo atendida por ${conv.assigned_agent?.name || 'outro agente'}.`
+                          : "Esta conversa foi transferida para outro agente."}
+                  </p>
+                  <Button onClick={() => assignConv.mutate()} disabled={assignConv.isPending}>
+                    {assignConv.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    {!conv.assigned_agent_id ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
+                  </Button>
+                </>
+              ) : (
+                <p className="text-sm font-medium text-muted-foreground">
+                  {conv.status === 'active' ? "Em atendimento por outro agente." : "Aguardando aceite do agente transferido."}
+                </p>
+              )}
+            </div>
+          )}
           {selectedFile && (
             <div className="flex items-center gap-3 p-2 border border-border rounded-md bg-muted/50 w-fit relative pr-8">
               <button 
@@ -1030,46 +1175,6 @@ function ChatPanel({
         </div>
       </div>
 
-      {/* Right panel */}
-      <aside className="hidden w-[320px] shrink-0 flex-col border-l border-border bg-card xl:flex">
-        <div className="border-b border-border p-5 text-center">
-          <Avatar className="mx-auto h-16 w-16">
-            <AvatarFallback className="text-base">
-              {initials(conv.contact?.name)}
-            </AvatarFallback>
-          </Avatar>
-          <h3 className="mt-3 text-base font-semibold">{conv.contact?.name}</h3>
-          <p className="text-xs text-muted-foreground">Cliente</p>
-        </div>
-        <div className="space-y-4 p-5 text-sm">
-          {conv.contact?.phone && (
-            <Field icon={Phone} label="Telefone" value={formatPhone(conv.contact.phone)} />
-          )}
-          {conv.contact?.email && (
-            <Field icon={Mail} label="E-mail" value={conv.contact.email} />
-          )}
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <Tag className="h-3 w-3" /> Tags
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {conv.contact?.tags?.length ? (
-                conv.contact.tags.map((t) => (
-                  <Badge key={t} variant="secondary">{t}</Badge>
-                ))
-              ) : (
-                <span className="text-xs text-muted-foreground">Sem tags</span>
-              )}
-            </div>
-          </div>
-          <div>
-            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Iniciado
-            </div>
-            <div>{formatRelative(conv.started_at)}</div>
-          </div>
-        </div>
-      </aside>
     </div>
   );
 }
@@ -1122,6 +1227,20 @@ function MessageBubble({ m, isGroup, onReact }: { m: MessageRow, isGroup?: boole
       senderName = match[1];
       displayContent = match[2];
     }
+  } else if (mine) {
+    if (m.profiles?.name) {
+      senderName = m.profiles.name;
+    }
+    
+    // Check if user has signature enabled (it would be manually inserted as *Name*:\n...)
+    const hasSignature = displayContent.match(/^\*(.+?)\*:\s*([\s\S]*)$/);
+    if (hasSignature) {
+      // Strip signature visually so it doesn't duplicate the header
+      displayContent = hasSignature[2];
+      if (!senderName) {
+        senderName = hasSignature[1];
+      }
+    }
   }
 
   return (
@@ -1137,7 +1256,10 @@ function MessageBubble({ m, isGroup, onReact }: { m: MessageRow, isGroup?: boole
         )}
       >
         {senderName && (
-          <div className="mb-1 text-xs font-bold text-primary/80 dark:text-primary/90">
+          <div className={cn(
+            "mb-1 text-xs font-bold",
+            mine ? "text-primary-foreground/90" : "text-primary/80 dark:text-primary/90"
+          )}>
             {senderName}
           </div>
         )}

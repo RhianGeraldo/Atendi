@@ -15,10 +15,10 @@ export const sendMessageAction = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     
-    // 1. Get conversation to find contact_id and unit_id
+    // 1. Get conversation to find contact_id and instance_id
     const { data: conv, error: convErr } = await supabase
       .from("conversations")
-      .select("unit_id, contact_id, contacts(phone)")
+      .select("whatsapp_instance_id, unit_id, contact_id, contacts(phone)")
       .eq("id", data.conversationId)
       .single();
 
@@ -31,36 +31,33 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       throw new Error("Contact has no phone number.");
     }
 
-    // 2. Get evogo configuration for the unit/company
-    const { data: instance, error: instanceErr } = await supabaseAdmin
-      .from("whatsapp_instances")
-      .select("instance_name, evogo_api_key, companies(evogo_host)")
-      .eq("unit_id", conv.unit_id)
-      .limit(1)
-      .maybeSingle();
+    // 2. Get evogo configuration for the conversation's instance
+    let host, token, instanceName;
 
-    let host = instance?.companies?.evogo_host;
-    let token = instance?.evogo_api_key;
-    let instanceName = instance?.instance_name;
-
-    // If unit has no specific instance, fallback to company level instance
-    if (!instance) {
-      // Find company id for this unit
-      const { data: unitData } = await supabaseAdmin
-        .from("units")
-        .select("company_id")
-        .eq("id", conv.unit_id)
+    if (conv.whatsapp_instance_id) {
+      const { data: instance } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .eq("id", conv.whatsapp_instance_id)
         .single();
-        
+
+      if (instance) {
+        host = instance.companies?.evogo_host;
+        token = instance.evogo_api_key;
+        instanceName = instance.instance_name;
+      }
+    }
+
+    if (!host && conv.unit_id) {
+      // Fallback for old conversations
+      const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
       if (unitData) {
         const { data: companyInstance } = await supabaseAdmin
           .from("whatsapp_instances")
           .select("instance_name, evogo_api_key, companies(evogo_host)")
           .eq("company_id", unitData.company_id)
-          .is("unit_id", null)
           .limit(1)
           .maybeSingle();
-          
         if (companyInstance) {
           host = companyInstance.companies?.evogo_host;
           token = companyInstance.evogo_api_key;
@@ -70,7 +67,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     }
 
     if (!host || !token || !instanceName) {
-      throw new Error("EvoGo is not configured for this unit/company.");
+      throw new Error("EvoGo is not configured for this conversation.");
     }
 
     // 3. Get user profile for signature
@@ -230,17 +227,31 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
 
     // 5. Find or create Conversation
     let conversationId;
-    const { data: activeConv } = await supabaseAdmin
+    const { data: latestConvs } = await supabaseAdmin
       .from('conversations')
-      .select('id')
+      .select('id, status')
       .eq('unit_id', unitId)
       .eq('contact_id', contactId)
-      .in('status', ['waiting', 'active'])
-      .limit(1)
-      .maybeSingle();
+      .order('last_message_at', { ascending: false })
+      .limit(1);
 
-    if (activeConv) {
-      conversationId = activeConv.id;
+    if (latestConvs && latestConvs.length > 0) {
+      const conv = latestConvs[0];
+      conversationId = conv.id;
+      
+      const updatePayload: any = { last_message_at: new Date().toISOString() };
+      
+      // Se a conversa estava resolvida e o agente iniciou uma conversa, ela volta para 'active' com o agente
+      if (conv.status === 'resolved') {
+        updatePayload.status = 'active';
+        updatePayload.assigned_agent_id = userId;
+        // Optionally update department if we want, but we can leave it as is or null
+      }
+      
+      await supabaseAdmin.from('conversations')
+        .update(updatePayload)
+        .eq('id', conversationId);
+        
     } else {
       const { data: newConv, error: convErr } = await supabaseAdmin
         .from('conversations')
@@ -285,28 +296,54 @@ export const fetchContactInfoAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
     contactId: z.string().uuid(),
-    unitId: z.string().uuid()
+    unitId: z.string().uuid().optional().nullable(),
+    whatsappInstanceId: z.string().uuid().optional().nullable()
   }))
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     
+    let whatsappInstanceId = data.whatsappInstanceId;
+    if (!whatsappInstanceId) {
+      const { data: convData } = await supabaseAdmin.from('conversations').select('whatsapp_instance_id').eq('contact_id', data.contactId).order('last_message_at', { ascending: false }).limit(1).maybeSingle();
+      if (convData?.whatsapp_instance_id) whatsappInstanceId = convData.whatsapp_instance_id;
+    }
+
     // Get contact phone
     const { data: contact } = await supabase.from('contacts').select('phone').eq('id', data.contactId).single();
     if (!contact?.phone) return null;
 
-    // Get instance for unit
-    const { data: instance } = await supabaseAdmin
-      .from("whatsapp_instances")
-      .select("instance_name, evogo_api_key, companies(evogo_host)")
-      .eq("unit_id", data.unitId)
-      .limit(1)
-      .maybeSingle();
+    let host, token, instanceName;
+    if (whatsappInstanceId) {
+      const { data: instance } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .eq("id", whatsappInstanceId)
+        .single();
 
-    if (!instance || !instance.evogo_api_key || !instance.companies?.evogo_host) return null;
+      if (instance) {
+        host = instance.companies?.evogo_host;
+        token = instance.evogo_api_key;
+        instanceName = instance.instance_name;
+      }
+    } else {
+      // Fallback for old conversations
+      const { data: contactFull } = await supabase.from('contacts').select('company_id').eq('id', data.contactId).single();
+      if (contactFull?.company_id) {
+        const { data: compInstance } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("instance_name, evogo_api_key, companies(evogo_host)")
+          .eq("company_id", contactFull.company_id)
+          .limit(1)
+          .maybeSingle();
+        if (compInstance) {
+          host = compInstance.companies?.evogo_host;
+          token = compInstance.evogo_api_key;
+          instanceName = compInstance.instance_name;
+        }
+      }
+    }
 
-    const host = instance.companies.evogo_host;
-    const token = instance.evogo_api_key;
-    const instanceName = instance.instance_name;
+    if (!host || !token) return null;
 
     try {
       const url = `${host}/user/avatar`;
@@ -412,7 +449,7 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
     // 1. Get conversation and message
     const { data: conv } = await supabase
       .from("conversations")
-      .select("unit_id, contact_id, contacts(phone)")
+      .select("whatsapp_instance_id, unit_id, contact_id, contacts(phone)")
       .eq("id", data.conversationId)
       .single();
 
@@ -429,25 +466,28 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
 
     // 2. Get evogo configuration
     let host, token, instanceName;
-    const { data: instance } = await supabaseAdmin
-      .from("whatsapp_instances")
-      .select("instance_name, evogo_api_key, companies(evogo_host)")
-      .eq("unit_id", conv.unit_id)
-      .limit(1)
-      .maybeSingle();
 
-    if (instance) {
-      host = instance.companies?.evogo_host;
-      token = instance.evogo_api_key;
-      instanceName = instance.instance_name;
-    } else {
+    if (conv.whatsapp_instance_id) {
+      const { data: instance } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .eq("id", conv.whatsapp_instance_id)
+        .single();
+
+      if (instance) {
+        host = instance.companies?.evogo_host;
+        token = instance.evogo_api_key;
+        instanceName = instance.instance_name;
+      }
+    }
+
+    if (!host && conv.unit_id) {
       const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
       if (unitData) {
         const { data: companyInstance } = await supabaseAdmin
           .from("whatsapp_instances")
           .select("instance_name, evogo_api_key, companies(evogo_host)")
           .eq("company_id", unitData.company_id)
-          .is("unit_id", null)
           .limit(1)
           .maybeSingle();
         if (companyInstance) {
@@ -482,4 +522,200 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       .eq("id", data.messageId);
 
     return { success: true };
+  });
+
+export const assignConversationAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    conversationId: z.string().uuid(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    // 1. Get the user's main department
+    const { data: userProfile } = await supabaseAdmin
+      .from("profiles")
+      .select("department_id")
+      .eq("id", userId)
+      .limit(1)
+      .maybeSingle();
+
+    // We don't strictly require a department, but we'll assign it if found.
+    const updateData: any = {
+      assigned_agent_id: userId,
+      status: "active",
+    };
+
+    if (userProfile?.department_id) {
+      updateData.department_id = userProfile.department_id;
+    }
+
+    const { error } = await supabaseAdmin
+      .from("conversations")
+      .update(updateData)
+      .eq("id", data.conversationId);
+
+    if (error) {
+      console.error("Failed to assign conversation:", error);
+      throw new Error("Falha ao puxar atendimento.");
+    }
+
+    return { success: true };
+  });
+
+export const transferConversationAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    conversationId: z.string().uuid(),
+    targetType: z.enum(["department", "agent"]),
+    targetId: z.string().uuid(),
+  }))
+  .handler(async ({ data }) => {
+
+    const updateData: any = {};
+
+    if (data.targetType === "department") {
+      updateData.department_id = data.targetId;
+      updateData.assigned_agent_id = null; // back to queue
+      updateData.status = "waiting"; 
+    } else {
+      updateData.assigned_agent_id = data.targetId;
+      updateData.status = "waiting";
+
+      // Atualizar o departamento para o departamento do agente que vai receber
+      const { data: userProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("department_id")
+        .eq("id", data.targetId)
+        .limit(1)
+        .maybeSingle();
+
+      if (userProfile?.department_id) {
+        updateData.department_id = userProfile.department_id;
+      }
+    }
+
+    const { error } = await supabaseAdmin
+      .from("conversations")
+      .update(updateData)
+      .eq("id", data.conversationId);
+
+    if (error) {
+      console.error("Failed to transfer conversation:", error);
+      throw new Error("Falha ao transferir atendimento.");
+    }
+
+    return { success: true };
+  });
+
+export const updateContactFromWhatsappAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    contactId: z.string().uuid(),
+    unitId: z.string().uuid().optional().nullable(),
+    whatsappInstanceId: z.string().uuid().optional().nullable()
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    
+    let whatsappInstanceId = data.whatsappInstanceId;
+    if (!whatsappInstanceId) {
+      const { data: convData } = await supabaseAdmin.from('conversations').select('whatsapp_instance_id').eq('contact_id', data.contactId).order('last_message_at', { ascending: false }).limit(1).maybeSingle();
+      if (convData?.whatsapp_instance_id) whatsappInstanceId = convData.whatsapp_instance_id;
+    }
+    
+    const { data: contact } = await supabase.from('contacts').select('phone').eq('id', data.contactId).single();
+    if (!contact?.phone) throw new Error("Contato sem telefone.");
+
+    let host, token, instanceName;
+    if (whatsappInstanceId) {
+      const { data: instance } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .eq("id", whatsappInstanceId)
+        .single();
+
+      if (instance) {
+        host = instance.companies?.evogo_host;
+        token = instance.evogo_api_key;
+        instanceName = instance.instance_name;
+      }
+    } else {
+      // Fallback for old conversations
+      const { data: contactFull } = await supabase.from('contacts').select('company_id').eq('id', data.contactId).single();
+      if (contactFull?.company_id) {
+        const { data: compInstance } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("instance_name, evogo_api_key, companies(evogo_host)")
+          .eq("company_id", contactFull.company_id)
+          .limit(1)
+          .maybeSingle();
+        if (compInstance) {
+          host = compInstance.companies?.evogo_host;
+          token = compInstance.evogo_api_key;
+          instanceName = compInstance.instance_name;
+        }
+      }
+    }
+
+    if (!host || !token || !instanceName) {
+      throw new Error("EvoGo não configurado para esta unidade/empresa.");
+    }
+    let pushName = null;
+
+    try {
+      const resInfo = await fetch(`${host}/user/info`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': token },
+        body: JSON.stringify({ number: contact.phone }),
+        signal: AbortSignal.timeout(5000)
+      });
+      
+      if (resInfo.ok) {
+        const jsonInfo = await resInfo.json();
+        pushName = jsonInfo.name || jsonInfo.pushName || jsonInfo.pushname || jsonInfo.contactName || null;
+      } else {
+        const resProfile = await fetch(`${host}/chat/fetchProfile/${instanceName}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': token },
+          body: JSON.stringify({ number: contact.phone }),
+          signal: AbortSignal.timeout(5000)
+        });
+        if (resProfile.ok) {
+          const jsonProfile = await resProfile.json();
+          pushName = jsonProfile.name || jsonProfile.pushName || jsonProfile.pushname || null;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to fetch user info:", e);
+      throw new Error("Falha ao buscar informações no WhatsApp.");
+    }
+
+    let avatarUrl = null;
+    try {
+      // Alguns endpoints Evolution usam /chat/fetchProfilePictureUrl/:instance ou similar. 
+      // Vamos tentar /user/avatar primeiro com timeout curto
+      const resAvatar = await fetch(`${host}/user/avatar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': token },
+        body: JSON.stringify({ number: contact.phone, preview: false }),
+        signal: AbortSignal.timeout(5000)
+      });
+      if (resAvatar.ok) {
+        const jsonAvatar = await resAvatar.json();
+        avatarUrl = jsonAvatar.url || jsonAvatar.profilePictureUrl || jsonAvatar.picture || null;
+      }
+    } catch (e) {
+      console.warn("Failed to fetch avatar:", e);
+    }
+
+    if (pushName) {
+      await supabaseAdmin.from('contacts').update({ name: pushName }).eq('id', data.contactId);
+      return { success: true, updatedName: pushName, avatarFound: !!avatarUrl };
+    } else if (avatarUrl) {
+      // Name not found, but avatar was! Return success so the UI gives a positive toast
+      return { success: true, updatedName: "Foto Encontrada", avatarFound: true, message: "Foto de perfil atualizada!" };
+    } else {
+      return { success: false, message: "Nenhum nome público ou foto encontrados no WhatsApp." };
+    }
   });

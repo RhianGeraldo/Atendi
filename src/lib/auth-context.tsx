@@ -10,6 +10,7 @@ export interface Profile {
   role: "admin_company" | "manager" | "agent";
   company_id: string | null;
   has_matriz_access: boolean;
+  department_id: string | null;
 }
 
 interface AuthContextValue {
@@ -55,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loadProfile(userId: string) {
     const { data } = await supabase
       .from("profiles")
-      .select("id,name,email,avatar_url,role,company_id") // FIXME: add has_matriz_access when migration is applied
+      .select("id,name,email,avatar_url,role,company_id,department_id") // FIXME: add has_matriz_access when migration is applied
       .eq("id", userId)
       .maybeSingle();
     if (data) setProfile(data as Profile);

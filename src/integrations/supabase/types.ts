@@ -122,6 +122,7 @@ export type Database = {
           status: Database["public"]["Enums"]["conversation_status"]
           tags: string[]
           unit_id: string
+          whatsapp_instance_id: string | null
         }
         Insert: {
           assigned_agent_id?: string | null
@@ -135,6 +136,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["conversation_status"]
           tags?: string[]
           unit_id: string
+          whatsapp_instance_id?: string | null
         }
         Update: {
           assigned_agent_id?: string | null
@@ -148,6 +150,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["conversation_status"]
           tags?: string[]
           unit_id?: string
+          whatsapp_instance_id?: string | null
         }
         Relationships: [
           {
@@ -378,12 +381,42 @@ export type Database = {
           },
         ]
       }
+      pipelines: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pipelines_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pipeline_stages: {
         Row: {
           color: string
           id: string
           name: string
           order: number
+          pipeline_id: string | null
           unit_id: string
         }
         Insert: {
@@ -391,6 +424,7 @@ export type Database = {
           id?: string
           name: string
           order?: number
+          pipeline_id?: string | null
           unit_id: string
         }
         Update: {
@@ -398,9 +432,17 @@ export type Database = {
           id?: string
           name?: string
           order?: number
+          pipeline_id?: string | null
           unit_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "pipeline_stages_pipeline_id_fkey"
+            columns: ["pipeline_id"]
+            isOneToOne: false
+            referencedRelation: "pipelines"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "pipeline_stages_unit_id_fkey"
             columns: ["unit_id"]
@@ -469,6 +511,7 @@ export type Database = {
           priority: Database["public"]["Enums"]["task_priority"]
           status: Database["public"]["Enums"]["task_status"]
           title: string
+          task_type: string
           unit_id: string
         }
         Insert: {
@@ -482,6 +525,7 @@ export type Database = {
           priority?: Database["public"]["Enums"]["task_priority"]
           status?: Database["public"]["Enums"]["task_status"]
           title: string
+          task_type?: string
           unit_id: string
         }
         Update: {
@@ -495,6 +539,7 @@ export type Database = {
           priority?: Database["public"]["Enums"]["task_priority"]
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
+          task_type?: string
           unit_id?: string
         }
         Relationships: [
