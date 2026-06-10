@@ -386,8 +386,9 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             whatsapp_instance_id: instance_id,
             contact_id: contactId,
             channel: 'whatsapp',
-            status: isFromMe ? 'active' : 'waiting',
-            last_message_at: new Date().toISOString()
+            status: isFromMe ? 'resolved' : 'waiting',
+            last_message_at: new Date().toISOString(),
+            resolved_at: isFromMe ? new Date().toISOString() : null
           })
           .select()
           .single();
