@@ -316,7 +316,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
         .from('contacts')
         .insert({
           company_id: data.companyId,
-          name: "Desconhecido", // They can edit later
+          name: rawPhone, // They can edit later
           phone: rawPhone,
         })
         .select()

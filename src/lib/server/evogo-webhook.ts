@@ -304,18 +304,34 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
               .update({ name: actualGroupName })
               .eq('id', contactId);
           }
+        } else {
+          // It's a direct contact
+          if (!isFromMe && pushName && pushName !== 'Desconhecido') {
+            const currentName = existingContacts[0].name;
+            if (currentName === phoneNumber || currentName === 'Desconhecido') {
+              await supabaseAdmin
+                .from('contacts')
+                .update({ name: pushName })
+                .eq('id', contactId);
+            }
+          }
         }
-        // Removemos a atualização automática do nome de contatos diretos (pushName)
-        // para não sobrescrever o nome que o usuário digitou manualmente no CRM!
       } else {
         // Create new contact
         const groupDefaultName = actualGroupName || 'Grupo do WhatsApp';
+        let newContactName = pushName;
+        if (remoteJid.includes('@g.us')) {
+          newContactName = groupDefaultName;
+        } else if (isFromMe || !pushName || pushName === 'Desconhecido') {
+          newContactName = phoneNumber || 'Desconhecido';
+        }
+
         const { data: newContact, error: contactErr } = await supabaseAdmin
           .from('contacts')
           .insert({
             company_id: company_id,
             unit_id: unit_id,
-            name: remoteJid.includes('@g.us') ? groupDefaultName : pushName,
+            name: newContactName,
             phone: phoneNumber,
           })
           .select()
