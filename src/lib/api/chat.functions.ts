@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { sendEvogoText, sendEvogoMedia, sendEvogoReaction, editEvogoMessage } from "../evogo";
+import { sendEvogoText, sendEvogoLink, sendEvogoMedia, sendEvogoReaction, editEvogoMessage } from "../evogo";
 
 export const sendMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -19,15 +19,35 @@ export const sendMessageAction = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     
-    // 1. Get conversation to find contact_id and instance_id
     const { data: conv, error: convErr } = await supabase
       .from("conversations")
-      .select("whatsapp_instance_id, unit_id, contact_id, contacts(phone)")
+      .select("status, whatsapp_instance_id, unit_id, contact_id, contacts(phone)")
       .eq("id", data.conversationId)
       .single();
 
     if (convErr || !conv) {
       throw new Error("Conversation not found or access denied.");
+    }
+
+    let targetConversationId = data.conversationId;
+    let isNewConversation = false;
+
+    if (conv.status === 'resolved') {
+      // Create a new active conversation because the current one is resolved
+      const { data: newConv, error: createErr } = await supabaseAdmin.from("conversations").insert({
+        unit_id: conv.unit_id,
+        whatsapp_instance_id: conv.whatsapp_instance_id,
+        contact_id: conv.contact_id,
+        channel: 'whatsapp',
+        status: 'active',
+        assigned_agent_id: userId,
+        last_message_at: new Date().toISOString()
+      }).select().single();
+
+      if (!createErr && newConv) {
+        targetConversationId = newConv.id;
+        isNewConversation = true;
+      }
     }
 
     const phone = conv.contacts?.phone;
@@ -126,15 +146,58 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       finalParticipant
     });
 
+    let mediaUrlToSend = data.mediaBase64;
+
     if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
+      // Tentar fazer o upload pro Supabase Storage antes de enviar
+      try {
+        if (data.mediaBase64.startsWith('data:')) {
+          const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+          if (match) {
+            const mimeType = match[1];
+            const base64Data = match[2];
+            const buffer = Buffer.from(base64Data, 'base64');
+            const ext = mimeType.split('/')[1] || 'bin';
+            const fileName = `${targetConversationId}/${Date.now()}.${ext}`;
+            
+            const { data: uploadData, error: uploadError } = await supabaseAdmin
+              .storage
+              .from('media')
+              .upload(fileName, buffer, {
+                contentType: mimeType,
+                upsert: false
+              });
+              
+            if (!uploadError && uploadData) {
+              const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
+              mediaUrlToSend = publicUrlData.publicUrl;
+              console.log('Successfully uploaded media to Supabase:', mediaUrlToSend);
+            } else {
+              console.error('Error uploading to Supabase:', uploadError);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse or upload base64 to Supabase', e);
+      }
+
       evogoResponse = await sendEvogoMedia({
         host,
         token,
         instanceName,
         number: phone,
-        base64: data.mediaBase64,
+        base64: mediaUrlToSend!,
         mediatype: data.mediaType as any,
         caption: textToSend,
+        quoted,
+      });
+    } else if (textToSend.match(/https?:\/\//)) {
+      evogoResponse = await sendEvogoLink({
+        host,
+        token,
+        instanceName,
+        number: phone,
+        text: textToSend,
         quoted,
       });
     } else {
@@ -155,12 +218,12 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     const { data: msg, error: msgErr } = await supabase
       .from("messages")
       .insert({
-        conversation_id: data.conversationId,
+        conversation_id: targetConversationId,
         sender_type: "agent",
         sender_id: userId,
         content: textToSend || null,
         media_type: data.mediaType || "text",
-        media_url: data.mediaBase64 || null,
+        media_url: mediaUrlToSend || null,
         remote_msg_id: remoteMsgId,
         quoted_message_id: data.quotedInternalId,
         quoted_content: data.quotedContent,
@@ -178,9 +241,9 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     await supabaseAdmin
       .from("conversations")
       .update({ last_message_at: new Date().toISOString(), status: 'active' })
-      .eq("id", data.conversationId);
+      .eq("id", targetConversationId);
 
-    return { success: true, message: msg };
+    return { success: true, message: msg, newConversationId: isNewConversation ? targetConversationId : undefined };
   });
 
 export const sendProactiveMessageAction = createServerFn({ method: "POST" })
@@ -279,27 +342,21 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       .select('id, status')
       .eq('unit_id', unitId)
       .eq('contact_id', contactId)
-      .order('last_message_at', { ascending: false })
+      .order('started_at', { ascending: false })
       .limit(1);
 
-    if (latestConvs && latestConvs.length > 0) {
+    if (latestConvs && latestConvs.length > 0 && latestConvs[0].status !== 'resolved') {
       const conv = latestConvs[0];
       conversationId = conv.id;
       
       const updatePayload: any = { last_message_at: new Date().toISOString() };
-      
-      // Se a conversa estava resolvida e o agente iniciou uma conversa, ela volta para 'active' com o agente
-      if (conv.status === 'resolved') {
-        updatePayload.status = 'active';
-        updatePayload.assigned_agent_id = userId;
-        // Optionally update department if we want, but we can leave it as is or null
-      }
       
       await supabaseAdmin.from('conversations')
         .update(updatePayload)
         .eq('id', conversationId);
         
     } else {
+      // Create new conversation because there's no conversation or the latest one is resolved
       const { data: newConv, error: convErr } = await supabaseAdmin
         .from('conversations')
         .insert({

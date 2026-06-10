@@ -332,7 +332,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         .select('id, status')
         .eq('contact_id', contactId)
         .eq('whatsapp_instance_id', instance_id)
-        .order('last_message_at', { ascending: false })
+        .order('started_at', { ascending: false })
         .limit(1);
         
       const { data: latestConvs } = await convQuery;
@@ -341,27 +341,34 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       if (latestConvs && latestConvs.length > 0) {
         const conv = latestConvs[0];
-        conversationId = conv.id;
-        console.log(`[evogo-webhook] Found existing conversation: ${conversationId}, status: ${conv.status}`);
         
-        const updatePayload: any = { last_message_at: new Date().toISOString() };
-        
-        // Se a conversa estava resolvida
+        // Se a conversa estava resolvida, cria uma NOVA em vez de reabrir
         if (conv.status === 'resolved') {
-          if (!isFromMe) {
-            updatePayload.status = 'waiting';
-            updatePayload.assigned_agent_id = null;
-            updatePayload.department_id = null;
-          } else {
-            updatePayload.status = 'active';
-            updatePayload.assigned_agent_id = null;
-          }
+          console.log(`[evogo-webhook] Latest conversation was resolved. Creating new ticket.`);
+          const { data: newConv, error: convErr } = await supabaseAdmin
+            .from('conversations')
+            .insert({
+              unit_id: unit_id,
+              whatsapp_instance_id: instance_id,
+              contact_id: contactId,
+              channel: 'whatsapp',
+              status: isFromMe ? 'active' : 'waiting',
+              last_message_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+          if (convErr) throw convErr;
+          conversationId = newConv.id;
+        } else {
+          conversationId = conv.id;
+          console.log(`[evogo-webhook] Found active/waiting conversation: ${conversationId}`);
+          
+          const updatePayload: any = { last_message_at: new Date().toISOString() };
+          await supabaseAdmin.from('conversations')
+            .update(updatePayload)
+            .eq('id', conversationId);
         }
-
-        await supabaseAdmin.from('conversations')
-          .update(updatePayload)
-          .eq('id', conversationId);
-
       } else {
         console.log(`[evogo-webhook] No existing conversation found. Creating new one.`);
         // Create new conversation

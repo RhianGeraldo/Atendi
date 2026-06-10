@@ -15,6 +15,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
 import { QrCodeModal } from "@/components/whatsapp/qr-code-modal";
 import { QuickMessagesTab } from "@/components/settings/quick-messages-tab";
+import { ResolutionReasonsTab } from "@/components/settings/resolution-reasons-tab";
 import { InstanceSettingsModal } from "@/components/whatsapp/instance-settings-modal";
 import {
   AlertDialog,
@@ -290,6 +291,7 @@ function SettingsPage() {
           <TabsTrigger value="labels">Etiquetas</TabsTrigger>
           <TabsTrigger value="crm">CRM e Funis</TabsTrigger>
           <TabsTrigger value="quick-messages">Mensagens Rápidas</TabsTrigger>
+          <TabsTrigger value="resolution-reasons">Motivos de Encerramento</TabsTrigger>
         </TabsList>
         
         <TabsContent value="general" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -490,6 +492,10 @@ function SettingsPage() {
 
         <TabsContent value="quick-messages" className="grid gap-4 md:grid-cols-2">
           <QuickMessagesTab />
+        </TabsContent>
+
+        <TabsContent value="resolution-reasons">
+          <ResolutionReasonsTab />
         </TabsContent>
       </Tabs>
 

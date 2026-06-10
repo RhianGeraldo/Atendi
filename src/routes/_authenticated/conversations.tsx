@@ -27,6 +27,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import EmojiPicker from "emoji-picker-react";
 import TextareaAutosize from "react-textarea-autosize";
 import { TransferDialog } from "@/components/chat/transfer-dialog";
+import { LinkPreview } from "@/components/chat/link-preview";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 
@@ -847,19 +848,35 @@ function ChatPanel({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [quickMsgIndex, setQuickMsgIndex] = useState(0);
+  const [resolveDialogOpen, setResolveDialogOpen] = useState(false);
+  const [selectedReasonId, setSelectedReasonId] = useState<string>("");
+  const [resolveObservation, setResolveObservation] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const { data: messages } = useQuery({
-    queryKey: ["messages", conv.id],
+    queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id],
     queryFn: async () => {
+      // 1. Get all conversation IDs for this contact on this instance
+      const { data: convs, error: convErr } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("contact_id", conv.contact.id)
+        .eq("whatsapp_instance_id", conv.whatsapp_instance_id);
+        
+      if (convErr) throw convErr;
+      
+      const convIds = convs?.map(c => c.id) || [conv.id];
+
+      // 2. Fetch all messages for these conversations
       const { data, error } = await supabase
         .from("messages")
         .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, remote_msg_id, profiles(name)")
-        .eq("conversation_id", conv.id)
+        .in("conversation_id", convIds)
         .order("created_at", { ascending: true });
+        
       if (error) throw error;
       return (data ?? []) as MessageRow[];
     },
@@ -891,13 +908,19 @@ function ChatPanel({
     }
   }, [messages?.length, conv.id, conv.unread_count, qc]);
 
+  const navigate = Route.useNavigate();
+
   const send = useMutation({
     mutationFn: async (payload: { content: string; mediaType?: "text"|"image"|"video"|"audio"|"document"; mediaBase64?: string; quotedMessageId?: string; quotedParticipant?: string; quotedInternalId?: string; quotedContent?: string }) => {
-      await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent } });
+      const res = await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent } });
+      if (res?.newConversationId) {
+        navigate({ to: ".", search: (prev: any) => ({ ...prev, c: res.newConversationId }) });
+      }
+      return res;
     },
     onMutate: async (payload) => {
-      await qc.cancelQueries({ queryKey: ["messages", conv.id] });
-      const previousMessages = qc.getQueryData(["messages", conv.id]);
+      await qc.cancelQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
+      const previousMessages = qc.getQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id]);
       
       const optimisticMsg: MessageRow = {
         id: crypto.randomUUID(),
@@ -911,7 +934,7 @@ function ChatPanel({
         profiles: profile?.name ? { name: profile.name } : undefined
       };
 
-      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
+      qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
       setText("");
       setSelectedFile(null);
       setReplyingTo(null);
@@ -924,13 +947,13 @@ function ChatPanel({
     },
     onError: (e, variables, context) => {
       if (context?.previousMessages) {
-        qc.setQueryData(["messages", conv.id], context.previousMessages);
+        qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], context.previousMessages);
       }
       setText(context?.content || "");
       toast.error("Erro ao enviar", { description: (e as Error).message });
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["messages", conv.id] });
+      qc.invalidateQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
@@ -940,10 +963,10 @@ function ChatPanel({
       await editMessageAction({ data: { conversationId: conv.id, messageId: payload.messageId, newContent: payload.content } });
     },
     onMutate: async (payload) => {
-      await qc.cancelQueries({ queryKey: ["messages", conv.id] });
-      const previousMessages = qc.getQueryData(["messages", conv.id]);
+      await qc.cancelQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
+      const previousMessages = qc.getQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id]);
       
-      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
+      qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
         return old.map(m => m.id === payload.messageId ? { ...m, content: payload.content, is_edited: true } : m);
       });
@@ -952,11 +975,11 @@ function ChatPanel({
       return { previousMessages };
     },
     onError: (e, v, context) => {
-      if (context?.previousMessages) qc.setQueryData(["messages", conv.id], context.previousMessages);
+      if (context?.previousMessages) qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], context.previousMessages);
       toast.error("Erro ao editar", { description: (e as Error).message });
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["messages", conv.id] });
+      qc.invalidateQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
     }
   });
 
@@ -965,21 +988,21 @@ function ChatPanel({
       await reactToMessageAction({ data: { conversationId: conv.id, messageId, emoji } });
     },
     onMutate: async ({ messageId, emoji }) => {
-      await qc.cancelQueries({ queryKey: ["messages", conv.id] });
-      const previousMessages = qc.getQueryData(["messages", conv.id]);
+      await qc.cancelQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
+      const previousMessages = qc.getQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id]);
       
-      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
+      qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
         return old.map(m => m.id === messageId ? { ...m, reactions: emoji ? { [emoji]: 1 } : {} } : m);
       });
       return { previousMessages };
     },
     onError: (e, v, context) => {
-      if (context?.previousMessages) qc.setQueryData(["messages", conv.id], context.previousMessages);
+      if (context?.previousMessages) qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], context.previousMessages);
       toast.error("Erro ao reagir", { description: (e as Error).message });
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["messages", conv.id] });
+      qc.invalidateQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
     }
   });
 
@@ -987,17 +1010,50 @@ function ChatPanel({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result as string;
-      let type = "document";
-      if (file.type.startsWith("image/")) type = "image";
-      else if (file.type.startsWith("video/")) type = "video";
-      else if (file.type.startsWith("audio/")) type = "audio";
-      
-      setSelectedFile({ file, base64, type });
-    };
-    reader.readAsDataURL(file);
+    let type = "document";
+    if (file.type.startsWith("image/")) type = "image";
+    else if (file.type.startsWith("video/")) type = "video";
+    else if (file.type.startsWith("audio/")) type = "audio";
+    
+    if (type === "image") {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX_DIM = 800;
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > height && width > MAX_DIM) {
+          height *= MAX_DIM / width;
+          width = MAX_DIM;
+        } else if (height > MAX_DIM) {
+          width *= MAX_DIM / height;
+          height = MAX_DIM;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          // Fill white background in case of transparent PNGs
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, width, height);
+          const base64 = canvas.toDataURL("image/jpeg", 0.8);
+          setSelectedFile({ file, base64, type });
+        }
+        URL.revokeObjectURL(img.src);
+      };
+      img.src = URL.createObjectURL(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result as string;
+        setSelectedFile({ file, base64, type });
+      };
+      reader.readAsDataURL(file);
+    }
+    
     e.target.value = ""; // reset
   };
 
@@ -1124,17 +1180,44 @@ function ChatPanel({
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const { data: resolutionReasons } = useQuery({
+    queryKey: ["resolution-reasons", profile?.company_id],
+    enabled: !!profile?.company_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("resolution_reasons" as any)
+        .select("id, label, order")
+        .eq("company_id", profile!.company_id!)
+        .eq("active", true)
+        .order("order", { ascending: true });
+      if (error && error.code !== '42P01') throw error;
+      return (data || []) as { id: string; label: string; order: number }[];
+    },
+  });
+
   const resolve = useMutation({
-    mutationFn: async () => {
-      await supabase
+    mutationFn: async ({ reasonId, observation }: { reasonId: string; observation: string }) => {
+      const { error } = await supabase
         .from("conversations")
-        .update({ status: "resolved", resolved_at: new Date().toISOString() })
+        .update({
+          status: "resolved",
+          resolved_at: new Date().toISOString(),
+          resolution_reason_id: reasonId || null,
+          resolution_observation: observation.trim() || null,
+        } as any)
         .eq("id", conv.id);
+      if (error) throw error;
     },
     onSuccess: () => {
       toast.success("Atendimento encerrado");
+      setResolveDialogOpen(false);
+      setSelectedReasonId("");
+      setResolveObservation("");
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
+    onError: (e) => {
+      toast.error("Erro ao encerrar atendimento", { description: (e as Error).message });
+    }
   });
 
   const returnToQueue = useMutation({
@@ -1199,10 +1282,95 @@ function ChatPanel({
             {conv.status === "active" && !isGroup && (
               <>
                 <TransferDialog conv={conv} />
-                <Button variant="default" size="sm" className="hidden md:flex h-8" onClick={() => resolve.mutate()}>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="hidden md:flex h-8"
+                  onClick={() => setResolveDialogOpen(true)}
+                >
                   <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
                   Encerrar
                 </Button>
+
+                {/* Resolve Dialog */}
+                <Dialog open={resolveDialogOpen} onOpenChange={setResolveDialogOpen}>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle className="flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5 text-primary" />
+                        Encerrar Atendimento
+                      </DialogTitle>
+                      <DialogDescription>
+                        Informe o motivo do encerramento para registrar no histórico do contato.
+                      </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="resolve-reason">
+                          Motivo do Encerramento <span className="text-destructive">*</span>
+                        </Label>
+                        {(!resolutionReasons || resolutionReasons.length === 0) ? (
+                          <div className="text-sm text-muted-foreground border border-dashed rounded-md p-3 text-center">
+                            Nenhum motivo cadastrado. Configure os motivos em <strong>Configurações</strong>.
+                          </div>
+                        ) : (
+                          <Select value={selectedReasonId} onValueChange={setSelectedReasonId}>
+                            <SelectTrigger id="resolve-reason">
+                              <SelectValue placeholder="Selecione um motivo..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {resolutionReasons.map((r) => (
+                                <SelectItem key={r.id} value={r.id}>
+                                  {r.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="resolve-observation">
+                          Observação <span className="text-xs text-muted-foreground">(opcional)</span>
+                        </Label>
+                        <Textarea
+                          id="resolve-observation"
+                          placeholder="Adicione uma observação sobre este atendimento..."
+                          value={resolveObservation}
+                          onChange={(e) => setResolveObservation(e.target.value)}
+                          rows={3}
+                          className="resize-none"
+                        />
+                      </div>
+                    </div>
+
+                    <DialogFooter className="gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setResolveDialogOpen(false);
+                          setSelectedReasonId("");
+                          setResolveObservation("");
+                        }}
+                        disabled={resolve.isPending}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button
+                        onClick={() => resolve.mutate({ reasonId: selectedReasonId, observation: resolveObservation })}
+                        disabled={!selectedReasonId || resolve.isPending || (!resolutionReasons || resolutionReasons.length === 0)}
+                      >
+                        {resolve.isPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="mr-2 h-4 w-4" />
+                        )}
+                        Confirmar Encerramento
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </>
             )}
             <button 
@@ -1476,17 +1644,31 @@ function Field({
   );
 }
 
-function FormattedText({ text }: { text: string }) {
+function FormattedText({ text, mine }: { text: string, mine?: boolean }) {
   if (!text) return null;
-  const parts = text.split(/(\*[^*]+\*|_{1}[^_]+_{1}|~[^~]+~)/g);
+  const parts = text.split(/(\*[^*]+\*|_{1}[^_]+_{1}|~[^~]+~|https?:\/\/[^\s]+)/g);
+  
+  const firstUrlMatch = text.match(/https?:\/\/[^\s]+/);
+  const firstUrl = firstUrlMatch ? firstUrlMatch[0] : null;
+
   return (
-    <div className="whitespace-pre-wrap break-words">
-      {parts.map((part, i) => {
-        if (part.startsWith('*') && part.endsWith('*')) return <strong key={i}>{part.slice(1, -1)}</strong>;
-        if (part.startsWith('_') && part.endsWith('_')) return <em key={i}>{part.slice(1, -1)}</em>;
-        if (part.startsWith('~') && part.endsWith('~')) return <del key={i}>{part.slice(1, -1)}</del>;
-        return <span key={i}>{part}</span>;
-      })}
+    <div className="whitespace-pre-wrap break-words flex flex-col gap-1">
+      {firstUrl && <LinkPreview url={firstUrl} mine={mine} />}
+      <div>
+        {parts.map((part, i) => {
+          if (part.startsWith('*') && part.endsWith('*')) return <strong key={i}>{part.slice(1, -1)}</strong>;
+          if (part.startsWith('_') && part.endsWith('_')) return <em key={i}>{part.slice(1, -1)}</em>;
+          if (part.startsWith('~') && part.endsWith('~')) return <del key={i}>{part.slice(1, -1)}</del>;
+          if (part.match(/^https?:\/\//)) {
+            return (
+              <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 font-medium opacity-90 hover:opacity-100">
+                {part}
+              </a>
+            );
+          }
+          return <span key={i}>{part}</span>;
+        })}
+      </div>
     </div>
   );
 }
@@ -1616,21 +1798,21 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
               </DialogContent>
             </Dialog>
             {displayContent && displayContent !== "📷 Imagem" && (
-              <div className="mt-2"><FormattedText text={displayContent} /></div>
+              <div className="mt-2"><FormattedText text={displayContent} mine={mine} /></div>
             )}
           </div>
         ) : m.media_type === "audio" && m.media_url ? (
           <div className="mb-2 flex flex-col gap-1">
             <audio controls src={m.media_url} className="h-10 w-48" />
-            {displayContent && displayContent !== "🎵 Áudio" && <div className="text-xs"><FormattedText text={displayContent} /></div>}
+            {displayContent && displayContent !== "🎵 Áudio" && <div className="text-xs"><FormattedText text={displayContent} mine={mine} /></div>}
           </div>
         ) : m.media_type === "video" && m.media_url ? (
           <div className="mb-2 flex flex-col gap-1">
             <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
-            {displayContent && displayContent !== "🎥 Vídeo" && <div className="text-xs"><FormattedText text={displayContent} /></div>}
+            {displayContent && displayContent !== "🎥 Vídeo" && <div className="text-xs"><FormattedText text={displayContent} mine={mine} /></div>}
           </div>
         ) : (
-          <FormattedText text={displayContent} />
+          <FormattedText text={displayContent} mine={mine} />
         )}
         <div
           className={cn(

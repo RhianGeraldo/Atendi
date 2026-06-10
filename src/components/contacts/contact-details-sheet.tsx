@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
-import { History, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock } from "lucide-react";
+import { History, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 import {
   Sheet,
   SheetContent,
@@ -163,19 +164,59 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
           status,
           started_at,
           last_message_at,
+          resolved_at,
           channel,
           whatsapp_instance_id,
+          resolution_observation,
           whatsapp_instances (
             name,
             instance_name
+          ),
+          resolution_reason:resolution_reasons (
+            label
+          ),
+          assigned_agent:profiles!conversations_assigned_agent_id_fkey (
+            name
+          ),
+          messages (
+            sender_type,
+            profiles (
+              name
+            )
           )
         `)
         .eq("contact_id", contactId)
-        .order("last_message_at", { ascending: false });
+        .order("started_at", { ascending: false });
       if (error) throw error;
       return data;
     },
   });
+
+  const getDuration = (start: string, end?: string | null) => {
+    if (!end) return "Em andamento";
+    const mins = differenceInMinutes(new Date(end), new Date(start));
+    if (mins < 60) return `${mins} min`;
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${hours}h ${remMins}m`;
+  };
+
+  const getAgentsInvolved = (conv: any) => {
+    // Unique list of agents who sent messages
+    const agents = new Set<string>();
+    if (conv.messages) {
+      conv.messages.forEach((m: any) => {
+        if (m.sender_type === "agent" && m.profiles?.name) {
+          agents.add(m.profiles.name);
+        }
+      });
+    }
+    // Also add the assigned agent if not in the list
+    if (conv.assigned_agent?.name) {
+      agents.add(conv.assigned_agent.name);
+    }
+    return Array.from(agents);
+  };
 
   const { data: opportunities, isLoading: isLoadingOpportunities } = useQuery({
     queryKey: ["contact-opportunities", contactId],
@@ -278,42 +319,76 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
               Nenhuma conversa registrada.
             </div>
           ) : (
-            <div className="space-y-4">
-              {conversations.map((conv: any) => (
-                <div key={conv.id} className="flex flex-col gap-3 p-4 rounded-lg border bg-card text-card-foreground shadow-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex flex-col">
-                      <Badge variant="outline" className={getStatusColor(conv.status)}>
-                        {translateStatus(conv.status)}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      <span>{format(new Date(conv.last_message_at), "dd/MM/yy HH:mm", { locale: ptBR })}</span>
-                    </div>
+            <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
+              {conversations.map((conv: any) => {
+                const agents = getAgentsInvolved(conv);
+                const isResolved = conv.status === 'resolved';
+
+                return (
+                <div key={conv.id} className="relative flex items-start gap-4 group is-active">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-muted text-muted-foreground shadow shrink-0 z-10">
+                    <MessageCircle className="h-4 w-4" />
                   </div>
-
-                  <Separator />
-
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      {conv.channel === 'whatsapp' ? (
-                        <MessageCircle className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <MessageCircle className="h-4 w-4" />
-                      )}
-                      <span className="capitalize">{conv.channel}</span>
-                    </div>
-                    
-                    {conv.whatsapp_instances && (
-                      <div className="flex items-center gap-1.5 text-xs bg-muted px-2 py-1 rounded-md">
-                        <Smartphone className="h-3 w-3" />
-                        <span className="truncate max-w-[150px]">{conv.whatsapp_instances.name}</span>
+                  <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-mono text-muted-foreground uppercase truncate">#{conv.id.substring(0, 8)}</span>
+                          <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wider shrink-0", getStatusColor(conv.status))}>
+                            {translateStatus(conv.status)}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Clock className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{format(new Date(conv.started_at), "dd/MM/yy HH:mm", { locale: ptBR })}</span>
+                        </div>
                       </div>
-                    )}
+                      
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <div className="flex items-center gap-1.5 text-[10px] bg-muted px-2 py-0.5 rounded-full font-medium">
+                          {conv.channel === 'whatsapp' && <Smartphone className="h-3 w-3 text-green-500 shrink-0" />}
+                          <span className="truncate max-w-[80px]">{conv.whatsapp_instances?.name || conv.channel}</span>
+                        </div>
+                        {isResolved && (
+                          <div className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full">
+                            {getDuration(conv.started_at, conv.resolved_at)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <Separator className="my-2" />
+
+                    <div className="space-y-2.5">
+                      {/* Agents info */}
+                      <div className="flex items-start gap-2">
+                        <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[11px] font-semibold block mb-0.5 text-foreground/80">Atendentes Envolvidos</span>
+                          <span className="text-[11px] text-muted-foreground truncate block">
+                            {agents.length > 0 ? agents.join(", ") : "Nenhum agente"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Resolution details */}
+                      {isResolved && (
+                        <div className="mt-2 rounded-md bg-primary/5 border border-primary/10 px-2.5 py-2 space-y-1">
+                          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-primary">
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{conv.resolution_reason?.label || "Atendimento Encerrado"}</span>
+                          </div>
+                          {conv.resolution_observation && (
+                            <p className="text-[11px] text-muted-foreground pl-5 leading-relaxed italic line-clamp-3">
+                              "{conv.resolution_observation}"
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           )}
         </TabsContent>

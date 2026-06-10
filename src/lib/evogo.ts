@@ -30,6 +30,7 @@ export async function sendEvogoText({
       number,
       text,
       delay,
+      preview: true,
       ...(quoted && { quoted }),
     }),
   });
@@ -38,6 +39,42 @@ export async function sendEvogoText({
     const errorText = await response.text();
     console.error('EvoGo API Error:', errorText);
     throw new Error(`Failed to send message via EvoGo: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function sendEvogoLink({
+  host,
+  token,
+  instanceName,
+  number,
+  text,
+  delay = 1000,
+  quoted,
+}: SendMessageParams & { quoted?: { messageId: string, participant?: string } }) {
+  // Normalize host URL
+  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/send/link`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      number,
+      text,
+      delay,
+      ...(quoted && { quoted }),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('EvoGo API Error (link):', errorText);
+    throw new Error(`Failed to send link via EvoGo: ${response.status} ${response.statusText}`);
   }
 
   return response.json();
@@ -69,28 +106,38 @@ export async function sendEvogoMedia({
   const url = `${baseUrl}/send/media`;
 
   // EvoGo expects raw base64 WITHOUT the data:...;base64, prefix
-  // FileReader.readAsDataURL() returns "data:image/jpeg;base64,/9j/4AAQ..."
-  // We need to strip everything up to and including the comma
   const rawBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
 
-  // EvoGo expects {number, url (base64 or URL), caption, type, delay}
-  // Passing 'filename' for an image often forces WhatsApp to send it as a document attachment.
   const body: any = {
     number,
     url: rawBase64,
-    media: rawBase64, // fallback for older Evolution API
     caption,
-    type: mediatype,
-    mediatype: mediatype, // fallback
-    mimetype: mediatype === 'audio' ? 'audio/ogg' : mediatype === 'image' ? 'image/jpeg' : mediatype === 'video' ? 'video/mp4' : 'application/pdf',
+    type: mediatype, // "image", "video", "audio", "document"
     delay,
     ...(quoted && { quoted }),
   };
 
-  // Only pass filename for documents or audio
-  if (mediatype === 'document' || mediatype === 'audio') {
-    body.filename = mediatype === 'audio' ? 'audio.ogg' : 'document.pdf';
-    body.fileName = body.filename; // fallback
+  if (mediatype === 'image') {
+    // NEVER pass filename for images, as Evolution API uses it to force 
+    // the media to be sent as a Document (which causes the gray box).
+    body.mimetype = 'image/jpeg';
+  } else if (mediatype === 'document') {
+    let mime = 'application/pdf';
+    if (base64.startsWith('data:')) {
+      mime = base64.split(';')[0].split(':')[1];
+    }
+    const ext = mime.split('/')[1] || 'pdf';
+    body.filename = `document.${ext}`;
+    body.fileName = `document.${ext}`;
+    body.mimetype = mime;
+  } else if (mediatype === 'audio') {
+    body.filename = 'audio.ogg';
+    body.fileName = 'audio.ogg';
+    body.mimetype = 'audio/ogg';
+  } else if (mediatype === 'video') {
+    body.filename = 'video.mp4';
+    body.fileName = 'video.mp4';
+    body.mimetype = 'video/mp4';
   }
 
   const response = await fetch(url, {

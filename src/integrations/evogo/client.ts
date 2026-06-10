@@ -153,17 +153,24 @@ export class EvoGoClient {
   }
 
   async sendMedia(number: string, url: string, caption: string, filename: string, instanceToken: string, type: 'image' | 'video' | 'audio' | 'document' = 'document', delay = 1000, quoted?: { messageId: string, participant: string }) {
+    const body: any = {
+      number,
+      url,
+      caption,
+      type,
+      delay,
+      ...(quoted && { quoted })
+    };
+
+    if (type !== 'image') {
+      body.filename = filename;
+    } else {
+      body.mimetype = 'image/jpeg';
+    }
+
     return this.request('/send/media', {
       method: 'POST',
-      body: JSON.stringify({
-        number,
-        url,
-        caption,
-        filename,
-        type,
-        delay,
-        ...(quoted && { quoted })
-      }),
+      body: JSON.stringify(body),
     }, instanceToken);
   }
 }
