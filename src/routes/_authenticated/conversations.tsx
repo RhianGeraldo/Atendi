@@ -260,7 +260,7 @@ function ConversationsPage() {
             }} />
           </div>
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)} className="mt-3">
-            <TabsList className="grid w-full grid-cols-4 h-auto py-1">
+            <TabsList className="grid w-full grid-cols-3 h-auto py-1">
               <TabsTrigger value="waiting" className="px-1 py-1.5 text-xs relative">
                 Aguard. {unreadCounts?.waiting?.total || 0}
                 {unreadCounts && unreadCounts.waiting?.unread > 0 && (
@@ -274,14 +274,6 @@ function ConversationsPage() {
                 {unreadCounts && unreadCounts.active?.unread > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
                     {unreadCounts.active.unread}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="resolved" className="px-1 py-1.5 text-xs relative">
-                Resolv. {unreadCounts?.resolved?.total || 0}
-                {unreadCounts && unreadCounts.resolved?.unread > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
-                    {unreadCounts.resolved.unread}
                   </span>
                 )}
               </TabsTrigger>
