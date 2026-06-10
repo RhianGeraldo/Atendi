@@ -260,7 +260,7 @@ function ConversationsPage() {
             }} />
           </div>
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)} className="mt-3">
-            <TabsList className="grid w-full grid-cols-3 h-auto py-1">
+            <TabsList className="grid w-full grid-cols-4 h-auto py-1">
               <TabsTrigger value="waiting" className="px-1 py-1.5 text-xs relative">
                 Aguard. {unreadCounts?.waiting?.total || 0}
                 {unreadCounts && unreadCounts.waiting?.unread > 0 && (
@@ -274,6 +274,14 @@ function ConversationsPage() {
                 {unreadCounts && unreadCounts.active?.unread > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
                     {unreadCounts.active.unread}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="resolved" className="px-1 py-1.5 text-xs relative">
+                Resolv. {unreadCounts?.resolved?.total || 0}
+                {unreadCounts && unreadCounts.resolved?.unread > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
+                    {unreadCounts.resolved.unread}
                   </span>
                 )}
               </TabsTrigger>
@@ -904,11 +912,7 @@ function ChatPanel({
 
   const send = useMutation({
     mutationFn: async (payload: { content: string; mediaType?: "text"|"image"|"video"|"audio"|"document"; mediaBase64?: string; quotedMessageId?: string; quotedParticipant?: string; quotedInternalId?: string; quotedContent?: string }) => {
-      const res = await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent } });
-      if (res?.newConversationId) {
-        navigate({ to: ".", search: (prev: any) => ({ ...prev, c: res.newConversationId }) });
-      }
-      return res;
+      return await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent } });
     },
     onMutate: async (payload) => {
       await qc.cancelQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
@@ -1189,16 +1193,45 @@ function ChatPanel({
 
   const resolve = useMutation({
     mutationFn: async ({ reasonId, observation }: { reasonId: string; observation: string }) => {
+      const resolvedAt = new Date().toISOString();
+      
+      // 1. Update conversation status
       const { error } = await supabase
         .from("conversations")
         .update({
           status: "resolved",
-          resolved_at: new Date().toISOString(),
+          resolved_at: resolvedAt,
           resolution_reason_id: reasonId || null,
           resolution_observation: observation.trim() || null,
         } as any)
         .eq("id", conv.id);
       if (error) throw error;
+      
+      // 2. Find when this session started (last resolved_at from sessions, or conversation started_at)
+      const { data: lastSession } = await supabase
+        .from("conversation_sessions" as any)
+        .select("resolved_at")
+        .eq("conversation_id", conv.id)
+        .order("resolved_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      const sessionStartedAt = lastSession?.resolved_at || conv.started_at;
+      
+      // 3. Save the session record for attendance history
+      await supabase
+        .from("conversation_sessions" as any)
+        .insert({
+          conversation_id: conv.id,
+          contact_id: conv.contact?.id,
+          whatsapp_instance_id: conv.whatsapp_instance_id,
+          started_at: sessionStartedAt,
+          resolved_at: resolvedAt,
+          assigned_agent_id: conv.assigned_agent_id,
+          department_id: conv.department_id,
+          resolution_reason_id: reasonId || null,
+          resolution_observation: observation.trim() || null,
+        });
     },
     onSuccess: () => {
       toast.success("Atendimento encerrado");
@@ -1206,6 +1239,7 @@ function ChatPanel({
       setSelectedReasonId("");
       setResolveObservation("");
       qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["contact-conversations"] });
     },
     onError: (e) => {
       toast.error("Erro ao encerrar atendimento", { description: (e as Error).message });

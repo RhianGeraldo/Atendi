@@ -341,34 +341,23 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       if (latestConvs && latestConvs.length > 0) {
         const conv = latestConvs[0];
+        conversationId = conv.id;
         
-        // Se a conversa estava resolvida, cria uma NOVA em vez de reabrir
+        const updatePayload: any = { last_message_at: new Date().toISOString() };
+        
+        // Se a conversa estava resolvida, reabre ela como 'waiting'
         if (conv.status === 'resolved') {
-          console.log(`[evogo-webhook] Latest conversation was resolved. Creating new ticket.`);
-          const { data: newConv, error: convErr } = await supabaseAdmin
-            .from('conversations')
-            .insert({
-              unit_id: unit_id,
-              whatsapp_instance_id: instance_id,
-              contact_id: contactId,
-              channel: 'whatsapp',
-              status: isFromMe ? 'active' : 'waiting',
-              last_message_at: new Date().toISOString()
-            })
-            .select()
-            .single();
-
-          if (convErr) throw convErr;
-          conversationId = newConv.id;
+          console.log(`[evogo-webhook] Reopening resolved conversation: ${conversationId}`);
+          updatePayload.status = 'waiting';
+          updatePayload.assigned_agent_id = null;
+          updatePayload.resolved_at = null;
         } else {
-          conversationId = conv.id;
           console.log(`[evogo-webhook] Found active/waiting conversation: ${conversationId}`);
-          
-          const updatePayload: any = { last_message_at: new Date().toISOString() };
-          await supabaseAdmin.from('conversations')
-            .update(updatePayload)
-            .eq('id', conversationId);
         }
+        
+        await supabaseAdmin.from('conversations')
+          .update(updatePayload)
+          .eq('id', conversationId);
       } else {
         console.log(`[evogo-webhook] No existing conversation found. Creating new one.`);
         // Create new conversation

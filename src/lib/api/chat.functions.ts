@@ -29,26 +29,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       throw new Error("Conversation not found or access denied.");
     }
 
-    let targetConversationId = data.conversationId;
-    let isNewConversation = false;
-
-    if (conv.status === 'resolved') {
-      // Create a new active conversation because the current one is resolved
-      const { data: newConv, error: createErr } = await supabaseAdmin.from("conversations").insert({
-        unit_id: conv.unit_id,
-        whatsapp_instance_id: conv.whatsapp_instance_id,
-        contact_id: conv.contact_id,
-        channel: 'whatsapp',
-        status: 'active',
-        assigned_agent_id: userId,
-        last_message_at: new Date().toISOString()
-      }).select().single();
-
-      if (!createErr && newConv) {
-        targetConversationId = newConv.id;
-        isNewConversation = true;
-      }
-    }
+    const targetConversationId = data.conversationId;
 
     const phone = conv.contacts?.phone;
     if (!phone) {
@@ -237,13 +218,22 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       throw new Error("Message sent but failed to save in history.");
     }
 
-    // 5. Update conversation last_message_at
+    // 5. Update conversation last_message_at and reopen if resolved
+    const convUpdate: any = { last_message_at: new Date().toISOString() };
+    if (conv.status === 'resolved') {
+      convUpdate.status = 'active';
+      convUpdate.assigned_agent_id = userId;
+      convUpdate.resolved_at = null;
+    } else if (conv.status === 'waiting') {
+      convUpdate.status = 'active';
+      convUpdate.assigned_agent_id = userId;
+    }
     await supabaseAdmin
       .from("conversations")
-      .update({ last_message_at: new Date().toISOString(), status: 'active' })
+      .update(convUpdate)
       .eq("id", targetConversationId);
 
-    return { success: true, message: msg, newConversationId: isNewConversation ? targetConversationId : undefined };
+    return { success: true, message: msg };
   });
 
 export const sendProactiveMessageAction = createServerFn({ method: "POST" })
@@ -345,25 +335,31 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       .order('started_at', { ascending: false })
       .limit(1);
 
-    if (latestConvs && latestConvs.length > 0 && latestConvs[0].status !== 'resolved') {
+    if (latestConvs && latestConvs.length > 0) {
       const conv = latestConvs[0];
       conversationId = conv.id;
       
       const updatePayload: any = { last_message_at: new Date().toISOString() };
+      
+      // Se estava resolvida, reabre como active
+      if (conv.status === 'resolved') {
+        updatePayload.status = 'active';
+        updatePayload.assigned_agent_id = userId;
+        updatePayload.resolved_at = null;
+      }
       
       await supabaseAdmin.from('conversations')
         .update(updatePayload)
         .eq('id', conversationId);
         
     } else {
-      // Create new conversation because there's no conversation or the latest one is resolved
       const { data: newConv, error: convErr } = await supabaseAdmin
         .from('conversations')
         .insert({
           unit_id: unitId,
           contact_id: contactId,
           channel: 'whatsapp',
-          status: 'active', // Since we started it, it's active
+          status: 'active',
           last_message_at: new Date().toISOString(),
           assigned_agent_id: userId,
         })
