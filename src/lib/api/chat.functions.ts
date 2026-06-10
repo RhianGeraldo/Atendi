@@ -282,7 +282,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     // 3. Get user profile for signature
     const { data: userProfile } = await supabase
       .from("profiles")
-      .select("name, use_signature")
+      .select("name, use_signature, department_id")
       .eq("id", userId)
       .single();
 
@@ -331,7 +331,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     let conversationId;
     const { data: latestConvs } = await supabaseAdmin
       .from('conversations')
-      .select('id, status')
+      .select('id, status, assigned_agent_id, assigned_agent:profiles!conversations_assigned_agent_id_fkey(name)')
       .eq('unit_id', unitId)
       .eq('contact_id', contactId)
       .eq('whatsapp_instance_id', instance.id)
@@ -342,19 +342,34 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       const conv = latestConvs[0];
       conversationId = conv.id;
       
-      const updatePayload: any = { last_message_at: new Date().toISOString() };
-      
-      // Se estava resolvida, reabre como active
-      if (conv.status === 'resolved') {
-        updatePayload.status = 'active';
-        updatePayload.assigned_agent_id = userId;
-        updatePayload.resolved_at = null;
+      if (conv.status === 'active') {
+        if (conv.assigned_agent_id === userId) {
+          // Already with me, just update last message time
+          const updatePayload: any = { last_message_at: new Date().toISOString() };
+          await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
+        } else if (conv.assigned_agent_id) {
+          // With another agent
+          throw new Error(`Essa conversa já está em andamento com o(a) atendente ${(conv as any).assigned_agent?.name || 'Desconhecido'}.`);
+        } else {
+          // Active but no agent
+          const updatePayload: any = { 
+            last_message_at: new Date().toISOString(),
+            assigned_agent_id: userId,
+            department_id: userProfile?.department_id || null,
+          };
+          await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
+        }
+      } else {
+        // waiting or resolved -> reopen and assign
+        const updatePayload: any = { 
+          last_message_at: new Date().toISOString(),
+          status: 'active',
+          assigned_agent_id: userId,
+          department_id: userProfile?.department_id || null,
+          resolved_at: null 
+        };
+        await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
       }
-      
-      await supabaseAdmin.from('conversations')
-        .update(updatePayload)
-        .eq('id', conversationId);
-        
     } else {
       const { data: newConv, error: convErr } = await supabaseAdmin
         .from('conversations')
@@ -366,6 +381,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
           whatsapp_instance_id: instance.id,
           last_message_at: new Date().toISOString(),
           assigned_agent_id: userId,
+          department_id: userProfile?.department_id || null,
         })
         .select()
         .single();
