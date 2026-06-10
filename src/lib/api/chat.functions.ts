@@ -280,7 +280,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     if (!rawPhone.startsWith("55")) rawPhone = "55" + rawPhone; // basic br fallback
 
     // 3. Get user profile for signature
-    const { data: userProfile } = await supabase
+    const { data: userProfile } = await supabaseAdmin
       .from("profiles")
       .select("name, use_signature, department_id")
       .eq("id", userId)
@@ -344,8 +344,11 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       
       if (conv.status === 'active') {
         if (conv.assigned_agent_id === userId) {
-          // Already with me, just update last message time
-          const updatePayload: any = { last_message_at: new Date().toISOString() };
+          // Already with me, update last message time and ensure department is set
+          const updatePayload: any = { 
+            last_message_at: new Date().toISOString(),
+            department_id: userProfile?.department_id || null
+          };
           await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
         } else if (conv.assigned_agent_id) {
           // With another agent
