@@ -251,7 +251,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     // 1. Get instance config
     const { data: instance, error: instanceErr } = await supabaseAdmin
       .from("whatsapp_instances")
-      .select("instance_name, evogo_api_key, unit_id, companies(evogo_host)")
+      .select("id, instance_name, evogo_api_key, unit_id, companies(evogo_host)")
       .eq("instance_name", data.instanceName)
       .eq("company_id", data.companyId)
       .single();
@@ -334,6 +334,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       .select('id, status')
       .eq('unit_id', unitId)
       .eq('contact_id', contactId)
+      .eq('whatsapp_instance_id', instance.id)
       .order('started_at', { ascending: false })
       .limit(1);
 
@@ -362,6 +363,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
           contact_id: contactId,
           channel: 'whatsapp',
           status: 'active',
+          whatsapp_instance_id: instance.id,
           last_message_at: new Date().toISOString(),
           assigned_agent_id: userId,
         })
