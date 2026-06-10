@@ -100,7 +100,7 @@ function ConversationsPage() {
       
       const allConvs = (data ?? []) as unknown as ConvRow[];
       
-      return allConvs.filter(c => {
+      const filtered = allConvs.filter(c => {
         const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'));
         if (tab === "groups") return isGroup;
         if (isGroup) return false;
@@ -127,6 +127,21 @@ function ConversationsPage() {
         }
         return false;
       });
+
+      // Para a aba "resolved", deduplificar: exibir apenas a conversa mais recente
+      // por contato + instância. A query já está ordenada por last_message_at DESC,
+      // então o primeiro encontrado em cada grupo é sempre o mais recente.
+      if (tab === "resolved") {
+        const seen = new Set<string>();
+        return filtered.filter(c => {
+          const key = `${c.contact?.id ?? 'no-contact'}__${c.whatsapp_instance_id ?? 'no-instance'}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
+
+      return filtered;
     },
   });
 
@@ -147,13 +162,13 @@ function ConversationsPage() {
     queryFn: async () => {
       let query = supabase
         .from("conversations")
-        .select("status, unread_count, department_id, assigned_agent_id, contact:contacts(phone)");
+        .select("id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts(id, phone)");
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
       }
 
-      const { data, error } = await query;
+      const { data, error } = await query.order("last_message_at", { ascending: false });
       if (error) throw error;
       
       const counts = { 
@@ -162,6 +177,9 @@ function ConversationsPage() {
         resolved: { total: 0, unread: 0 }, 
         groups: { total: 0, unread: 0 } 
       };
+
+      // Rastrear duplicatas de resolvidas por (contact_id, instance_id)
+      const resolvedSeen = new Set<string>();
       
       data.forEach(c => {
         const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'));
@@ -194,8 +212,13 @@ function ConversationsPage() {
           if (c.status === 'resolved') {
             const canSeeResolved = isAdmin || (isManager && isMyDept) || isAssignedToMe;
             if (canSeeResolved) {
-              counts.resolved.total++;
-              counts.resolved.unread += c.unread_count || 0;
+              // Contar apenas a conversa mais recente por contato + instância
+              const key = `${(c.contact as any)?.id ?? 'no-contact'}__${c.whatsapp_instance_id ?? 'no-instance'}`;
+              if (!resolvedSeen.has(key)) {
+                resolvedSeen.add(key);
+                counts.resolved.total++;
+                counts.resolved.unread += c.unread_count || 0;
+              }
             }
           }
         }
