@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
+import { getPhoneVariants } from '@/lib/utils';
 
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
@@ -285,11 +286,12 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       // 2. Find or create Contact
       let contactId;
+      const phoneVariants = getPhoneVariants(phoneNumber || '');
       const { data: existingContacts } = await supabaseAdmin
         .from('contacts')
         .select('id, name')
         .eq('company_id', company_id)
-        .eq('phone', phoneNumber)
+        .in('phone', phoneVariants)
         .limit(1);
 
       if (existingContacts && existingContacts.length > 0) {
@@ -526,10 +528,11 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       if (!labelInfo) return; // Label not sync'd yet
       
       // 2. Find Contact
+      const phoneVariants = getPhoneVariants(phone);
       const { data: contactInfo } = await supabaseAdmin
         .from('contacts')
         .select('id')
-        .eq('phone', phone)
+        .in('phone', phoneVariants)
         .eq('company_id', instance.company_id)
         .maybeSingle();
         
@@ -574,11 +577,12 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       
       // 2. Find or create Contact
       let contactId;
+      const phoneVariants = getPhoneVariants(phoneNumber);
       const { data: existingContacts } = await supabaseAdmin
         .from('contacts')
         .select('id, name')
         .eq('company_id', company_id)
-        .eq('phone', phoneNumber)
+        .in('phone', phoneVariants)
         .limit(1);
 
       if (existingContacts && existingContacts.length > 0) {

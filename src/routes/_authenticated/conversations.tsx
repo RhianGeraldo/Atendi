@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -79,8 +79,23 @@ function ConversationsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(searchConvId || null);
   const [showSidebar, setShowSidebar] = useState(false);
   const { selectedUnitId } = useUnit();
+  const [instanceFilter, setInstanceFilter] = useState<string | null>(null);
 
   const { profile } = useAuth();
+  
+  const { data: instances } = useQuery({
+    queryKey: ["whatsapp_instances_filter"],
+    queryFn: async () => {
+      if (!profile?.company_id) return [];
+      const { data, error } = await supabase
+        .from("whatsapp_instances")
+        .select("id, name, instance_name")
+        .eq("company_id", profile.company_id);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!profile?.company_id,
+  });
   
   const { data: conversations } = useQuery({
     queryKey: ["conversations", tab, selectedUnitId, profile?.id, profile?.role, profile?.department_id],
@@ -158,7 +173,7 @@ function ConversationsPage() {
   }, [searchConvId]);
 
   const { data: unreadCounts } = useQuery({
-    queryKey: ["unread-counts", selectedUnitId, profile?.id, profile?.department_id],
+    queryKey: ["unread-counts", selectedUnitId, profile?.id, profile?.department_id, instanceFilter],
     queryFn: async () => {
       let query = supabase
         .from("conversations")
@@ -182,6 +197,10 @@ function ConversationsPage() {
       const resolvedSeen = new Set<string>();
       
       data.forEach(c => {
+        if (instanceFilter && instanceFilter !== "all" && c.whatsapp_instance_id !== instanceFilter) {
+          return;
+        }
+
         const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'));
         if (isGroup) {
           counts.groups.total++;
@@ -252,6 +271,9 @@ function ConversationsPage() {
   }, [qc]);
 
   const filtered = (conversations ?? []).filter((c) => {
+    if (instanceFilter && instanceFilter !== "all") {
+      if (c.whatsapp_instance_id !== instanceFilter) return false;
+    }
     if (!search) return true;
     const s = search.toLowerCase();
     return (
@@ -277,6 +299,25 @@ function ConversationsPage() {
                 className="h-9 pl-8"
               />
             </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="icon" variant={instanceFilter && instanceFilter !== "all" ? "default" : "outline"} className="h-9 w-9 shrink-0">
+                  <Filter className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setInstanceFilter("all")}>
+                  Todas as instâncias
+                  {(!instanceFilter || instanceFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4" />}
+                </DropdownMenuItem>
+                {instances?.map(inst => (
+                  <DropdownMenuItem key={inst.id} onClick={() => setInstanceFilter(inst.id)}>
+                    {inst.name || inst.instance_name}
+                    {instanceFilter === inst.id && <CheckCircle2 className="ml-auto h-4 w-4" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <NewConversationDialog onCreated={(id) => {
               setTab("active");
               setSelectedId(id);
@@ -608,7 +649,7 @@ function NewConversationDialog({ onCreated }: { onCreated: (id: string) => void 
       if (!profile?.company_id) return [];
       const { data, error } = await supabase
         .from("whatsapp_instances")
-        .select("instance_name")
+        .select("id, name, instance_name")
         .eq("company_id", profile.company_id);
       if (error) throw error;
       return data ?? [];
@@ -669,7 +710,7 @@ function NewConversationDialog({ onCreated }: { onCreated: (id: string) => void 
               <SelectContent>
                 {instances?.map((inst) => (
                   <SelectItem key={inst.instance_name} value={inst.instance_name}>
-                    {inst.instance_name}
+                    {inst.name || inst.instance_name}
                   </SelectItem>
                 ))}
                 {!instances?.length && (
@@ -732,7 +773,7 @@ function ConversationItem({
     <button
       onClick={onClick}
       className={cn(
-        "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border px-3 py-3 text-left transition-colors hover:bg-accent/40",
+        "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-colors hover:bg-accent/40",
         selected && "bg-accent/60",
       )}
     >
@@ -742,9 +783,9 @@ function ConversationItem({
         </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1 grid">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <ChannelIcon channel={conv.channel} className="h-4 w-4 shrink-0" />
-          <span className={cn("truncate text-sm font-medium flex-1", conv.unread_count && conv.unread_count > 0 && "font-bold text-foreground")}>
+          <span className={cn("truncate text-sm font-medium flex-1 min-w-0", conv.unread_count && conv.unread_count > 0 && "font-bold text-foreground")}>
             {contactName}
           </span>
           <span className={cn("whitespace-nowrap shrink-0 text-[11px]", conv.unread_count && conv.unread_count > 0 ? "font-bold text-success" : "text-muted-foreground")}>
@@ -809,7 +850,7 @@ function ConversationItem({
             </Badge>
           ))}
           {conv.unread_count && conv.unread_count > 0 ? (
-            <Badge className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-success px-1.5 py-0 text-[10px] font-bold hover:bg-success">
+            <Badge className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-success px-1.5 py-0 text-[10px] font-bold hover:bg-success">
               {conv.unread_count}
             </Badge>
           ) : null}

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendEvogoText, sendEvogoLink, sendEvogoMedia, sendEvogoReaction, editEvogoMessage } from "../evogo";
+import { getPhoneVariants } from "@/lib/utils";
 
 export const sendMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -301,11 +302,12 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
 
     // 4. Find or create Contact
     let contactId;
+    const phoneVariants = getPhoneVariants(rawPhone);
     const { data: existingContact } = await supabaseAdmin
       .from('contacts')
       .select('id')
       .eq('company_id', data.companyId)
-      .eq('phone', rawPhone)
+      .in('phone', phoneVariants)
       .limit(1)
       .maybeSingle();
 
