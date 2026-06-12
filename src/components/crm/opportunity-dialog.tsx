@@ -8,18 +8,116 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Calendar } from "@/components/ui/calendar";
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { useUnit } from "@/lib/unit-context";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CheckSquare, Circle, Trash2, Calendar, DollarSign, Target, Plus, Phone, MessageSquare, Video, MoreHorizontal, CalendarClock, Clock } from "lucide-react";
+import { CheckSquare, Circle, Trash2, Calendar as CalendarIcon, DollarSign, Target, Plus, Phone, MessageSquare, Video, MoreHorizontal, CalendarClock, Clock, Info, ListTodo, StickyNote, User, Save } from "lucide-react";
 import { TaskDialog } from "@/components/crm/task-dialog";
+
+function OpportunityNotes({ opportunityId }: { opportunityId: string }) {
+  const qc = useQueryClient();
+  const { profile } = useAuth();
+  const [newNote, setNewNote] = useState("");
+
+  const { data: notes, isLoading } = useQuery({
+    queryKey: ["opportunity-notes", opportunityId],
+    enabled: !!opportunityId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("opportunity_notes")
+        .select(`
+          id,
+          content,
+          created_at,
+          profiles (
+            name,
+            email
+          )
+        `)
+        .eq("opportunity_id", opportunityId)
+        .order("created_at", { ascending: false });
+      if (error && error.code !== '42P01') throw error; 
+      return data || [];
+    },
+  });
+
+  const addNote = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from("opportunity_notes")
+        .insert({
+          opportunity_id: opportunityId,
+          user_id: profile?.id,
+          content: newNote
+        });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setNewNote("");
+      toast.success("Observação adicionada!");
+      qc.invalidateQueries({ queryKey: ["opportunity-notes", opportunityId] });
+    },
+    onError: (e) => toast.error("Erro ao adicionar", { description: (e as Error).message })
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <Textarea 
+          placeholder="Adicione uma observação sobre esta oportunidade..."
+          value={newNote}
+          onChange={(e) => setNewNote(e.target.value)}
+          className="resize-none"
+          rows={3}
+        />
+        <div className="flex justify-end">
+          <Button 
+            onClick={() => addNote.mutate()}
+            disabled={!newNote.trim() || addNote.isPending}
+            size="sm"
+          >
+            {addNote.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Salvar Observação
+          </Button>
+        </div>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-4">
+        {isLoading ? (
+          <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : !notes || notes.length === 0 ? (
+          <div className="text-sm text-muted-foreground text-center py-4 border rounded-lg border-dashed">
+            Nenhuma observação registrada.
+          </div>
+        ) : (
+          notes.map((note: any) => (
+            <div key={note.id} className="p-3 border rounded-lg space-y-2 bg-muted/30">
+              <p className="text-sm whitespace-pre-wrap">{note.content}</p>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <User className="h-3 w-3" />
+                <span>{note.profiles?.name || note.profiles?.email || "Usuário"}</span>
+                <span>•</span>
+                <Clock className="h-3 w-3" />
+                <span>{format(new Date(note.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function OpportunityDialog({ 
   children, 
@@ -92,10 +190,13 @@ export function OpportunityDialog({
 
   // Fetch Contacts for dropdown if defaultContactId is not provided
   const { data: contacts, isLoading: isLoadingContacts } = useQuery({
-    queryKey: ["contacts-dropdown", profile?.company_id, contactSearch],
+    queryKey: ["contacts-dropdown", profile?.company_id, contactSearch, selectedUnitId],
     enabled: !defaultContactId && !!profile?.company_id && open,
     queryFn: async () => {
       let q = supabase.from("contacts").select("id, name, phone").eq("company_id", profile!.company_id!);
+      if (selectedUnitId) {
+        q = q.eq("unit_id", selectedUnitId);
+      }
       if (contactSearch) {
         q = q.or(`name.ilike.%${contactSearch}%,phone.ilike.%${contactSearch}%`);
       }
@@ -186,26 +287,37 @@ export function OpportunityDialog({
       <DialogTrigger asChild>
         {children}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
+      <DialogContent className={cn("p-0 overflow-hidden flex flex-col", opportunity ? "sm:max-w-[750px] h-[80vh] max-h-[600px]" : "sm:max-w-[500px] max-h-[90vh]")}>
+        <DialogHeader className="px-6 py-4 border-b shrink-0 bg-muted/10">
           <DialogTitle className="text-xl">
             {opportunity ? "Gerenciar Oportunidade" : "Nova Oportunidade"}
           </DialogTitle>
         </DialogHeader>
 
         {opportunity ? (
-          <Tabs defaultValue="details" className="w-full mt-2">
-            <TabsList className="grid w-full grid-cols-3 mb-4">
-              <TabsTrigger value="details">Detalhes</TabsTrigger>
-              <TabsTrigger value="tasks">
-                Tarefas 
-                {tasks && tasks.length > 0 && <Badge variant="secondary" className="ml-2 text-[10px] px-1">{tasks.filter(t => t.status === 'done').length}/{tasks.length}</Badge>}
-              </TabsTrigger>
-              <TabsTrigger value="notes">Notas</TabsTrigger>
-            </TabsList>
+          <Tabs defaultValue="details" className="flex flex-1 overflow-hidden" orientation="vertical">
+            {/* Menu Lateral */}
+            <div className="w-[200px] border-r bg-muted/10 shrink-0 p-3 overflow-y-auto">
+              <TabsList className="flex flex-col h-auto w-full items-stretch justify-start p-0 bg-transparent space-y-1">
+                <TabsTrigger value="details" className="justify-start px-3 py-2.5 font-medium data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">
+                  <Info className="mr-2 h-4 w-4" /> Detalhes
+                </TabsTrigger>
+                <TabsTrigger value="tasks" className="justify-between px-3 py-2.5 font-medium data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">
+                  <div className="flex items-center">
+                    <ListTodo className="mr-2 h-4 w-4" /> Tarefas 
+                  </div>
+                  {tasks && tasks.length > 0 && <Badge variant="secondary" className="ml-2 text-[10px] px-1">{tasks.filter(t => t.status === 'done').length}/{tasks.length}</Badge>}
+                </TabsTrigger>
+                <TabsTrigger value="notes" className="justify-start px-3 py-2.5 font-medium data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none">
+                  <StickyNote className="mr-2 h-4 w-4" /> Notas
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-            {/* TAB: DETALHES */}
-            <TabsContent value="details" className="space-y-4">
+            {/* Conteúdo */}
+            <div className="flex-1 overflow-y-auto p-6 bg-background">
+              {/* TAB: DETALHES */}
+              <TabsContent value="details" className="m-0 space-y-4">
               <div className="space-y-2">
                 <Label>Título</Label>
                 <Input placeholder="Ex: Projeto Site" value={title} onChange={e => setTitle(e.target.value)} />
@@ -217,7 +329,28 @@ export function OpportunityDialog({
                 </div>
                 <div className="space-y-2">
                   <Label>Fechamento Esperado</Label>
-                  <Input type="date" value={expectedCloseDate} onChange={e => setExpectedCloseDate(e.target.value)} />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant={"outline"}
+                        className={cn(
+                          "w-full justify-start text-left font-normal",
+                          !expectedCloseDate && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {expectedCloseDate ? format(new Date(expectedCloseDate + 'T12:00:00'), "PPP", { locale: ptBR }) : <span>Selecione uma data</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={expectedCloseDate ? new Date(expectedCloseDate + 'T12:00:00') : undefined}
+                        onSelect={(date) => setExpectedCloseDate(date ? format(date, "yyyy-MM-dd") : "")}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -246,7 +379,7 @@ export function OpportunityDialog({
             </TabsContent>
 
             {/* TAB: TAREFAS */}
-            <TabsContent value="tasks" className="space-y-4">
+            <TabsContent value="tasks" className="m-0 space-y-4">
               <TaskDialog opportunityId={opportunity.id} contactId={opportunity.contact_id} defaultUnitId={opportunity.unit_id}>
                 <Button variant="outline" size="sm" className="w-full">
                   <Plus className="h-4 w-4 mr-2" /> Nova Tarefa
@@ -289,21 +422,14 @@ export function OpportunityDialog({
             </TabsContent>
 
             {/* TAB: NOTAS */}
-            <TabsContent value="notes" className="space-y-4">
-              <Textarea 
-                placeholder="Anotações gerais sobre a negociação..." 
-                value={notes} 
-                onChange={e => setNotes(e.target.value)}
-                className="min-h-[150px] resize-none"
-              />
-              <Button className="w-full" onClick={() => saveOpportunity.mutate()} disabled={saveOpportunity.isPending}>
-                Salvar Notas
-              </Button>
+            <TabsContent value="notes" className="m-0 space-y-4">
+              <OpportunityNotes opportunityId={opportunity.id} />
             </TabsContent>
+            </div>
           </Tabs>
         ) : (
           /* MODO DE CRIAÇÃO (NOVA OPORTUNIDADE) */
-          <div className="space-y-4 mt-4">
+          <div className="p-6 space-y-4 overflow-y-auto">
             <div className="space-y-2">
               <Label>Título da Oportunidade</Label>
               <Input placeholder="Ex: Projeto Site Institucional" value={title} onChange={e => setTitle(e.target.value)} />
@@ -316,7 +442,28 @@ export function OpportunityDialog({
               </div>
               <div className="space-y-2">
                 <Label>Data de Fechamento</Label>
-                <Input type="date" value={expectedCloseDate} onChange={e => setExpectedCloseDate(e.target.value)} />
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant={"outline"}
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !expectedCloseDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {expectedCloseDate ? format(new Date(expectedCloseDate + 'T12:00:00'), "PPP", { locale: ptBR }) : <span>Selecione uma data</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={expectedCloseDate ? new Date(expectedCloseDate + 'T12:00:00') : undefined}
+                      onSelect={(date) => setExpectedCloseDate(date ? format(date, "yyyy-MM-dd") : "")}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
 

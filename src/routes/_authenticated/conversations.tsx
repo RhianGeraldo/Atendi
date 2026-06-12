@@ -889,6 +889,7 @@ interface MessageRow {
   isOptimistic?: boolean;
   remote_msg_id?: string | null;
   profiles?: { name: string };
+  metadata?: any;
 }
 
 function ChatPanel({ 
@@ -937,7 +938,7 @@ function ChatPanel({
       // 2. Fetch all messages for these conversations
       const { data, error } = await supabase
         .from("messages")
-        .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, remote_msg_id, profiles(name)")
+        .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, remote_msg_id, profiles(name), metadata")
         .in("conversation_id", convIds)
         .order("created_at", { ascending: true });
         
@@ -1870,6 +1871,8 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
   
   const isSticker = displayContent === "🖼️ Figurinha";
 
+  const adReply = m.metadata?.externalAdReply;
+
   return (
     <div className={cn("flex relative", mine ? "justify-end" : "justify-start")}>
       <div
@@ -1938,6 +1941,30 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
           <div className="mb-2 rounded bg-black/10 dark:bg-white/10 p-2 text-xs border-l-4 opacity-90 border-l-current">
             <span className="font-semibold block mb-0.5 text-[10px] uppercase opacity-70">Mensagem Respondida</span>
             <span className="line-clamp-3 opacity-90">{m.quoted_content}</span>
+          </div>
+        )}
+
+        {adReply && !m.is_deleted && (
+          <div className="mb-2 w-full max-w-sm rounded-lg border border-border/60 bg-black/5 dark:bg-white/5 overflow-hidden">
+            {adReply.thumbnailURL ? (
+              <a href={adReply.sourceURL || '#'} target="_blank" rel="noopener noreferrer" className="block relative h-32 w-full bg-muted overflow-hidden">
+                <img src={adReply.thumbnailURL} alt="Ad Thumbnail" className="absolute inset-0 w-full h-full object-cover transition-transform hover:scale-105" />
+                <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm">
+                  Anúncio
+                </div>
+              </a>
+            ) : (
+              <div className="bg-black/60 text-white text-[10px] font-bold px-2 py-1 flex justify-between items-center w-full">
+                <span>Anúncio</span>
+                {adReply.sourceApp && <span className="capitalize">{adReply.sourceApp}</span>}
+              </div>
+            )}
+            <div className="p-2.5">
+              <h4 className="font-bold text-xs truncate mb-1">{adReply.title || "Anúncio do Meta"}</h4>
+              {adReply.body && (
+                <p className="text-[11px] opacity-80 line-clamp-3 whitespace-pre-wrap">{adReply.body}</p>
+              )}
+            </div>
           </div>
         )}
 

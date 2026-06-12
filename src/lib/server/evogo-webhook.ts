@@ -55,6 +55,8 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       let quotedContent: string | null = null;
       let actualGroupName: string | null = null;
 
+      let metadata: any = {};
+
       if (body.event === 'Message') {
         // WhatsMeow / EvoGo native format
         const info = body.data?.Info;
@@ -90,7 +92,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           actualGroupName = body.data.groupData.Name;
         }
 
-        // Parse quoted messages
+        // Parse quoted messages and external ad reply
         if (body.data?.isQuoted && body.data?.quoted) {
           quotedStanzaId = body.data.quoted.stanzaID;
           const qm = body.data.quoted.quotedMessage;
@@ -99,6 +101,17 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           quotedStanzaId = msg.extendedTextMessage.contextInfo.stanzaId;
           const qm = msg.extendedTextMessage.contextInfo.quotedMessage;
           quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || 'Anexo';
+        }
+
+        const ci = msg.extendedTextMessage?.contextInfo;
+        if (ci) {
+          if (ci.externalAdReply) metadata.externalAdReply = ci.externalAdReply;
+          if (ci.conversionSource) metadata.conversionSource = ci.conversionSource;
+          if (ci.conversionData) metadata.conversionData = ci.conversionData;
+          if (ci.ctwaPayload) metadata.ctwaPayload = ci.ctwaPayload;
+          if (ci.ctwaSignals) metadata.ctwaSignals = ci.ctwaSignals;
+          if (ci.entryPointConversionApp) metadata.entryPointConversionApp = ci.entryPointConversionApp;
+          if (ci.entryPointConversionSource) metadata.entryPointConversionSource = ci.entryPointConversionSource;
         }
         
         if (msg.conversation) {
@@ -151,16 +164,30 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         } else if (msg.albumMessage) {
           // albumMessage is just an album cover notification - images arrive as separate imageMessage events
           return;
-        } else if (msg.protocolMessage && (msg.protocolMessage.type === 14 || msg.protocolMessage.type === 'MESSAGE_EDIT')) {
-          // It's an edited message. The original ID is in msg.protocolMessage.key.id
-          const editedMsg = msg.protocolMessage.editedMessage;
-          if (editedMsg) {
-            textContent = editedMsg.conversation || editedMsg.extendedTextMessage?.text || '[Mensagem Editada]';
-            // Optionally, we could find the original message and update it, 
-            // but for now we'll just insert it as a new message indicating it was edited
-            textContent = `✏️ *Editado:* ${textContent}`;
+        } else if (msg.protocolMessage) {
+          if (msg.protocolMessage.type === 14 || msg.protocolMessage.type === 'MESSAGE_EDIT') {
+            const editedMsg = msg.protocolMessage.editedMessage;
+            if (editedMsg) {
+              textContent = editedMsg.conversation || editedMsg.extendedTextMessage?.text || '[Mensagem Editada]';
+              textContent = `✏️ *Editado:* ${textContent}`;
+            } else {
+              return;
+            }
+          } else if (msg.protocolMessage.type === 3 || msg.protocolMessage.type === 'EPHEMERAL_SETTING') {
+            textContent = '⏱️ *Aviso:* Configuração de mensagens temporárias alterada.';
+          } else if (msg.protocolMessage.type === 0 || msg.protocolMessage.type === 'REVOKE') {
+            const targetId = msg.protocolMessage.key?.id || msg.protocolMessage.key?.ID;
+            if (targetId) {
+              console.log('[evogo-webhook] Revoking message ID:', targetId);
+              const { error } = await supabaseAdmin
+                .from('messages')
+                .update({ is_deleted: true })
+                .eq('remote_msg_id', targetId);
+              if (error) console.error('[evogo-webhook] Error revoking message:', error);
+            }
+            return;
           } else {
-            return; // Ignore if no content
+            return;
           }
         } else if (msg.secretEncryptedMessage || (info && info.Edit === "1" && !msg.conversation && !msg.extendedTextMessage)) {
           // Evogo sends edited messages as secretEncryptedMessage if it fails to decrypt them
@@ -190,6 +217,17 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           quotedStanzaId = msgType.extendedTextMessage.contextInfo.stanzaId;
           const qm = msgType.extendedTextMessage.contextInfo.quotedMessage;
           quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || 'Anexo';
+        }
+
+        const ci2 = msgType?.extendedTextMessage?.contextInfo;
+        if (ci2) {
+          if (ci2.externalAdReply) metadata.externalAdReply = ci2.externalAdReply;
+          if (ci2.conversionSource) metadata.conversionSource = ci2.conversionSource;
+          if (ci2.conversionData) metadata.conversionData = ci2.conversionData;
+          if (ci2.ctwaPayload) metadata.ctwaPayload = ci2.ctwaPayload;
+          if (ci2.ctwaSignals) metadata.ctwaSignals = ci2.ctwaSignals;
+          if (ci2.entryPointConversionApp) metadata.entryPointConversionApp = ci2.entryPointConversionApp;
+          if (ci2.entryPointConversionSource) metadata.entryPointConversionSource = ci2.entryPointConversionSource;
         }
 
         if (msgType) {
@@ -238,11 +276,28 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             if (targetId) {
               return await handleReaction(targetId, emoji);
             }
-          } else if (msgType.protocolMessage && (msgType.protocolMessage.type === 14 || msgType.protocolMessage.type === 'MESSAGE_EDIT')) {
-            const editedMsg = msgType.protocolMessage.editedMessage;
-            if (editedMsg) {
-              textContent = editedMsg.conversation || editedMsg.extendedTextMessage?.text || '[Mensagem Editada]';
-              textContent = `✏️ *Editado:* ${textContent}`;
+          } else if (msgType.protocolMessage) {
+            if (msgType.protocolMessage.type === 14 || msgType.protocolMessage.type === 'MESSAGE_EDIT') {
+              const editedMsg = msgType.protocolMessage.editedMessage;
+              if (editedMsg) {
+                textContent = editedMsg.conversation || editedMsg.extendedTextMessage?.text || '[Mensagem Editada]';
+                textContent = `✏️ *Editado:* ${textContent}`;
+              } else {
+                return;
+              }
+            } else if (msgType.protocolMessage.type === 3 || msgType.protocolMessage.type === 'EPHEMERAL_SETTING') {
+              textContent = '⏱️ *Aviso:* Configuração de mensagens temporárias alterada.';
+            } else if (msgType.protocolMessage.type === 0 || msgType.protocolMessage.type === 'REVOKE') {
+              const targetId = msgType.protocolMessage.key?.id || msgType.protocolMessage.key?.ID;
+              if (targetId) {
+                console.log('[evogo-webhook] Revoking message ID:', targetId);
+                const { error } = await supabaseAdmin
+                  .from('messages')
+                  .update({ is_deleted: true })
+                  .eq('remote_msg_id', targetId);
+                if (error) console.error('[evogo-webhook] Error revoking message:', error);
+              }
+              return;
             } else {
               return;
             }
@@ -451,6 +506,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         quoted_message_id: quotedInternalId,
         quoted_content: quotedContent,
         participant_jid: participantJid,
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
       };
 
       const { error: msgErr } = await supabaseAdmin

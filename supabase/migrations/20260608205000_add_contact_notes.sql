@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS public.contact_notes (
 
 ALTER TABLE public.contact_notes ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view notes of contacts in their company" ON public.contact_notes;
 CREATE POLICY "Users can view notes of contacts in their company" ON public.contact_notes FOR SELECT USING (
   EXISTS (
     SELECT 1 FROM public.contacts c
@@ -16,6 +17,7 @@ CREATE POLICY "Users can view notes of contacts in their company" ON public.cont
   )
 );
 
+DROP POLICY IF EXISTS "Users can insert notes for contacts in their company" ON public.contact_notes;
 CREATE POLICY "Users can insert notes for contacts in their company" ON public.contact_notes FOR INSERT WITH CHECK (
   EXISTS (
     SELECT 1 FROM public.contacts c

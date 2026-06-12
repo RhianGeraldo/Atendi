@@ -1,0 +1,17 @@
+{
+  "event": "messages.upsert",
+  "instance": "8fac659e-c7a6-4ce9-8ec7-e1c4d4d1a279",
+  "data": {
+    "message": {
+      "key": {
+        "remoteJid": "554491529987@s.whatsapp.net",
+        "id": "TEST12345",
+        "fromMe": false
+      },
+      "message": {
+        "conversation": "TEST LOCAL WEBHOOK 2"
+      },
+      "messageTimestamp": 1781049655.526
+    }
+  }
+}

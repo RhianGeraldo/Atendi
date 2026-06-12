@@ -388,26 +388,34 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
       const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
       const statusRes: any = await client.getInstanceStatus(instance.evogo_api_key);
       
+      let ownerJid = instance.owner_jid;
+      let evoInstState = null;
+      try {
+        const allRes: any = await client.getAllInstances();
+        const evogoInstances = allRes?.data || allRes || [];
+        const evoInst = evogoInstances.find((e: any) => e.token === instance.evogo_api_key || e.instance?.apikey === instance.evogo_api_key || e.instance?.instanceName === instance.instance_name);
+        if (evoInst) {
+          if (evoInst.jid || evoInst.instance?.owner) {
+            ownerJid = (evoInst.jid || evoInst.instance?.owner).split('@')[0].split(':')[0];
+          }
+          if (evoInst.state || evoInst.instance?.state || evoInst.status || evoInst.instance?.status) {
+            evoInstState = evoInst.state || evoInst.instance?.state || evoInst.status || evoInst.instance?.status;
+          }
+        }
+      } catch (err) {
+        console.error("Erro ao buscar JID/estado na atualização:", err);
+      }
+
+      // EvoGo returns { data: { Connected: true, LoggedIn: false } } when not scanned.
       const isConnected = 
         statusRes?.instance?.state === 'open' || 
         statusRes?.instance?.status === 'open' || 
         statusRes?.data?.instance?.state === 'open' ||
-        statusRes?.connected || 
-        statusRes?.data?.connected ||
-        statusRes?.data?.Connected === true ||
-        statusRes?.Connected === true;
-      
-      let ownerJid = instance.owner_jid;
-      try {
-        const allRes: any = await client.getAllInstances();
-        const evogoInstances = allRes?.data || [];
-        const evoInst = evogoInstances.find((e: any) => e.token === instance.evogo_api_key);
-        if (evoInst && evoInst.jid) {
-          ownerJid = evoInst.jid.split('@')[0].split(':')[0];
-        }
-      } catch (err) {
-        console.error("Erro ao buscar JID na atualização:", err);
-      }
+        (statusRes?.data?.Connected === true && statusRes?.data?.LoggedIn === true) ||
+        (statusRes?.Connected === true && statusRes?.LoggedIn === true) ||
+        statusRes?.state === 'open' ||
+        evoInstState === 'open' ||
+        evoInstState === 'ONLINE';
       
       const newStatus = isConnected ? 'connected' : 'disconnected';
       const updateData: any = { status: newStatus };
@@ -425,7 +433,6 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
       }
     } catch (err: any) {
       console.error("Erro ao atualizar status:", err);
-      // If it's a 404 or specifically disconnected, we force update
       const msg = err.message?.toLowerCase() || "";
       if (msg.includes("not found") || msg.includes("disconnected") || msg.includes("logout") || msg.includes("404")) {
         await supabase.from("whatsapp_instances").update({ status: 'disconnected' }).eq("id", instance.id);

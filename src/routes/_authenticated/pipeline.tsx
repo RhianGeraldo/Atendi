@@ -68,7 +68,7 @@ function PipelinePage() {
 
   // Fetch Opportunities for this pipeline
   const { data: opportunities, isLoading: isLoadingOpps } = useQuery({
-    queryKey: ["opportunities", selectedPipelineId, profile?.role, profile?.id],
+    queryKey: ["opportunities", selectedPipelineId, profile?.role, profile?.id, selectedUnitId],
     enabled: !!selectedPipelineId && !!stages && stages.length > 0 && !!profile?.id,
     queryFn: async () => {
       const stageIds = stages!.map(s => s.id);
@@ -85,6 +85,11 @@ function PipelinePage() {
       // Filtra para que usuários comuns vejam apenas as próprias oportunidades
       if (profile?.role !== "admin_company" && profile?.role !== "manager") {
         query = query.eq("owner_id", profile!.id);
+      }
+
+      // Filtra pela unidade selecionada no painel superior
+      if (selectedUnitId) {
+        query = query.eq("unit_id", selectedUnitId);
       }
 
       const { data, error } = await query;
@@ -263,23 +268,6 @@ function PipelinePage() {
                                           </div>
                                         </div>
 
-                                        {/* Badges row: Tasks, Notes */}
-                                        {(totalTasks > 0 || hasNotes) && (
-                                          <div className="flex items-center gap-2 flex-wrap">
-                                            {totalTasks > 0 && (
-                                              <Badge variant={completedTasks === totalTasks ? "default" : "secondary"} className="text-[10px] px-1.5 h-5 gap-1 font-medium bg-muted/60">
-                                                <CheckSquare className="h-3 w-3" />
-                                                {completedTasks}/{totalTasks}
-                                              </Badge>
-                                            )}
-                                            {hasNotes && (
-                                              <Badge variant="secondary" className="text-[10px] px-1.5 h-5 gap-1 bg-muted/60">
-                                                <FileText className="h-3 w-3" />
-                                              </Badge>
-                                            )}
-                                          </div>
-                                        )}
-                                        
                                         {/* Contact row */}
                                         <div className="flex items-center gap-2">
                                           <Avatar className="h-6 w-6 border bg-background">
@@ -292,12 +280,28 @@ function PipelinePage() {
                                           </span>
                                         </div>
 
-                                        {!selectedUnitId && opp.units?.name && (
-                                          <div className="flex items-center gap-1 mt-2 text-[10px] font-medium px-2 py-0.5 rounded bg-muted/60 text-muted-foreground w-fit max-w-full">
-                                            <Building className="h-3 w-3 shrink-0" />
-                                            <span className="truncate">{opp.units.name}</span>
+                                        {/* Badges row: Unit, Tasks, Notes */}
+                                        {(!selectedUnitId && opp.units?.name || totalTasks > 0 || hasNotes) ? (
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            {!selectedUnitId && opp.units?.name && (
+                                              <div className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-muted/60 text-muted-foreground w-fit max-w-full">
+                                                <Building className="h-3 w-3 shrink-0" />
+                                                <span className="truncate">{opp.units.name}</span>
+                                              </div>
+                                            )}
+                                            {totalTasks > 0 && (
+                                              <Badge variant={completedTasks === totalTasks ? "default" : "secondary"} className="text-[10px] px-1.5 h-5 gap-1 font-medium bg-muted/60">
+                                                <CheckSquare className="h-3 w-3" />
+                                                {completedTasks}/{totalTasks}
+                                              </Badge>
+                                            )}
+                                            {hasNotes && (
+                                              <Badge variant="secondary" className="text-[10px] px-1.5 h-5 gap-1 bg-muted/60">
+                                                <FileText className="h-3 w-3" />
+                                              </Badge>
+                                            )}
                                           </div>
-                                        )}
+                                        ) : null}
                                         
                                         {/* Footer */}
                                         <div className="flex items-center justify-between mt-2 pt-3 border-t border-border/40">

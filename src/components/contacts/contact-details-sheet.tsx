@@ -276,7 +276,7 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
             <History className="h-5 w-5 text-muted-foreground" />
             <h3 className="text-lg font-semibold">Observações</h3>
           </div>
-          {/* ContactNotes component should be here if imported */}
+          <ContactNotes contactId={contactId} />
         </TabsContent>
 
         <TabsContent value="conversations" className="mt-0">
@@ -618,7 +618,8 @@ function ContactNotes({ contactId }: { contactId: string }) {
   const { data: notes, isLoading } = useQuery({
     queryKey: ["contact-notes", contactId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // 1. Fetch contact notes
+      const { data: contactNotes, error: err1 } = await supabase
         .from("contact_notes" as any)
         .select(`
           id,
@@ -629,10 +630,40 @@ function ContactNotes({ contactId }: { contactId: string }) {
             email
           )
         `)
-        .eq("contact_id", contactId)
-        .order("created_at", { ascending: false });
-      if (error && error.code !== '42P01') throw error; // Ignore table missing error
-      return data || [];
+        .eq("contact_id", contactId);
+      
+      if (err1 && err1.code !== '42P01') throw err1;
+
+      // 2. Fetch opportunity notes for this contact
+      const { data: oppNotes, error: err2 } = await supabase
+        .from("opportunity_notes" as any)
+        .select(`
+          id,
+          content,
+          created_at,
+          profiles (
+            name,
+            email
+          ),
+          opportunities!inner (
+            id,
+            title,
+            contact_id
+          )
+        `)
+        .eq("opportunities.contact_id", contactId);
+      
+      if (err2 && err2.code !== '42P01') throw err2;
+
+      const allNotes: any[] = [];
+      if (contactNotes) {
+        allNotes.push(...contactNotes.map((n: any) => ({ ...n, type: 'contact' })));
+      }
+      if (oppNotes) {
+        allNotes.push(...oppNotes.map((n: any) => ({ ...n, type: 'opportunity', opportunity: n.opportunities })));
+      }
+
+      return allNotes.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     },
   });
 
@@ -689,12 +720,25 @@ function ContactNotes({ contactId }: { contactId: string }) {
           notes.map((note: any) => (
             <div key={note.id} className="p-3 border rounded-lg space-y-2 bg-muted/30">
               <p className="text-sm whitespace-pre-wrap">{note.content}</p>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <User className="h-3 w-3" />
-                <span>{note.profiles?.name || note.profiles?.email || "Usuário"}</span>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-2">
+                <div className="flex items-center gap-1.5">
+                  <User className="h-3 w-3" />
+                  <span>{note.profiles?.name || note.profiles?.email || "Usuário"}</span>
+                </div>
                 <span>•</span>
-                <Clock className="h-3 w-3" />
-                <span>{format(new Date(note.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</span>
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-3 w-3" />
+                  <span>{format(new Date(note.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</span>
+                </div>
+                {note.type === 'opportunity' && note.opportunity && (
+                  <>
+                    <span>•</span>
+                    <div className="flex items-center gap-1.5 text-primary">
+                      <Target className="h-3 w-3" />
+                      <span className="truncate max-w-[150px]">{note.opportunity.title}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           ))
