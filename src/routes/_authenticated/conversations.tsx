@@ -1968,12 +1968,7 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
           </div>
         )}
 
-        {m.is_deleted ? (
-          <div className="flex items-center gap-1.5 italic">
-            <span className="text-[16px]">🚫</span>
-            Mensagem apagada
-          </div>
-        ) : m.media_type === "image" && m.media_url ? (
+        {m.media_type === "image" && m.media_url ? (
           <div className="mb-2">
             <Dialog>
               <DialogTrigger asChild>
@@ -2054,6 +2049,16 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
           </div>
         ) : (
           <FormattedText text={displayContent} mine={mine} />
+        )}
+
+        {m.is_deleted && (
+          <div className={cn(
+            "mt-1.5 pt-1.5 border-t text-xs flex items-center gap-1.5 italic opacity-80",
+            mine ? "border-primary-foreground/20" : "border-border"
+          )}>
+            <span className="text-[14px]">🚫</span>
+            Mensagem apagada
+          </div>
         )}
         <div
           className={cn(
