@@ -99,9 +99,14 @@ export function QuickMessagesTab() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    let type: "image" | "audio" | "document" = "document";
+    let type: "image" | "audio" | "document" | "video" = "document";
     if (file.type.startsWith("image/")) type = "image";
-    else if (file.type.startsWith("audio/") || file.type.startsWith("video/")) type = "audio";
+    else if (file.type.startsWith("video/")) type = "video";
+    else if (file.type.startsWith("audio/")) type = "audio";
+
+    if (type === 'audio' || type === 'document') {
+      setContent("");
+    }
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -411,20 +416,22 @@ export function QuickMessagesTab() {
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium">Conteúdo da Mensagem</label>
-                    <span className="text-[10px] text-muted-foreground bg-muted px-2 py-1 rounded cursor-help" title="{{atendente}}, {{cliente}}, {{saudacao}}, {{telefone}}, {{protocolo}}, {{data}}, {{hora}}">
-                      Variáveis: {'{{atendente}}'}, {'{{cliente}}'}...
-                    </span>
+                {mediaType !== 'audio' && mediaType !== 'document' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm font-medium">Conteúdo da Mensagem</label>
+                      <span className="text-[10px] text-muted-foreground bg-muted px-2 py-1 rounded cursor-help" title="{{atendente}}, {{cliente}}, {{saudacao}}, {{telefone}}, {{protocolo}}, {{data}}, {{hora}}">
+                        Variáveis: {'{{atendente}}'}, {'{{cliente}}'}...
+                      </span>
+                    </div>
+                    <Textarea 
+                      value={content} 
+                      onChange={(e) => setContent(e.target.value)} 
+                      placeholder="Olá {{cliente}}, como podemos ajudar?"
+                      rows={5}
+                    />
                   </div>
-                  <Textarea 
-                    value={content} 
-                    onChange={(e) => setContent(e.target.value)} 
-                    placeholder="Olá {{cliente}}, como podemos ajudar?"
-                    rows={5}
-                  />
-                </div>
+                )}
                 <Button 
                   className="w-full" 
                   onClick={() => saveMessage.mutate()}
