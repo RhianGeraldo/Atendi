@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, FileText } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, FileText, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -938,7 +938,7 @@ function ChatPanel({
       // 2. Fetch all messages for these conversations
       const { data, error } = await supabase
         .from("messages")
-        .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, remote_msg_id, profiles(name), metadata")
+        .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
         .in("conversation_id", convIds)
         .order("created_at", { ascending: true });
         
@@ -1993,6 +1993,14 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
         ) : m.media_type === "audio" && m.media_url ? (
           <div className="mb-2 flex flex-col gap-1">
             <audio controls src={m.media_url} className="h-10 w-48" />
+            {m.transcription && (
+              <div className="mt-1 pt-1 border-t border-border/50 text-xs italic flex flex-col gap-0.5 w-48 opacity-90">
+                <span className="flex items-center gap-1 font-semibold text-[10px] text-primary">
+                  <Sparkles className="h-3 w-3" /> Transcrição Automática
+                </span>
+                <span className="whitespace-pre-wrap leading-tight">{m.transcription}</span>
+              </div>
+            )}
             {displayContent && displayContent !== "🎵 Áudio" && <div className="text-xs"><FormattedText text={displayContent} mine={mine} /></div>}
           </div>
         ) : m.media_type === "video" && m.media_url ? (

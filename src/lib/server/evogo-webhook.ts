@@ -50,6 +50,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       let phoneNumber: string | null = '';
       let mediaType = 'text';
       let mediaUrl: string | null = null;
+      let audioBase64: string | null = null;
       let remoteMsgId: string | null = null;
       let quotedStanzaId: string | null = null;
       let quotedContent: string | null = null;
@@ -139,6 +140,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           textContent = '🎵 Áudio';
           const audioMsg = msg.audioMessage || msg.ptvMessage;
           if (msg.base64) {
+            audioBase64 = msg.base64;
             mediaUrl = `data:${audioMsg?.mimetype || 'audio/ogg'};base64,${msg.base64}`;
           }
         } else if (msg.documentMessage) {
@@ -255,6 +257,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             mediaType = 'audio';
             textContent = '🎵 Áudio';
             if (base64Content) {
+              audioBase64 = base64Content;
               const audioMsg = msgType.audioMessage || msgType.ptvMessage;
               mediaUrl = `data:${audioMsg.mimetype || 'audio/ogg'};base64,${base64Content}`;
             }
@@ -516,7 +519,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       if (msgErr) {
         // Fallback without new columns in case migration hasn't run yet
         console.error("Insert failed with new columns, falling back...", msgErr);
-        await supabaseAdmin
+        const { data: fallbackMsg } = await supabaseAdmin
           .from('messages')
           .insert({
             conversation_id: conversationId,
@@ -524,7 +527,15 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             content: textContent,
             media_type: mediaType,
             media_url: mediaUrl,
-          });
+          })
+          .select()
+          .single();
+        
+        if (fallbackMsg && mediaType === 'audio' && audioBase64 && instance.company_id) {
+          triggerAudioTranscription(fallbackMsg.id, audioBase64, instance.company_id);
+        }
+      } else if (newMessage && mediaType === 'audio' && audioBase64 && instance.company_id) {
+        triggerAudioTranscription(newMessage.id, audioBase64, instance.company_id);
       }
 
       return;
@@ -729,4 +740,59 @@ async function handleReaction(targetRemoteId: string, emoji: string): Promise<vo
     .eq('id', msg.id);
 
   return;
+}
+
+async function triggerAudioTranscription(messageId: string, base64Audio: string, companyId: string) {
+  try {
+    const { data: company } = await supabaseAdmin
+      .from('companies')
+      .select('transcription_provider, transcription_api_key')
+      .eq('id', companyId)
+      .single();
+
+    if (!company?.transcription_provider || company.transcription_provider === 'none' || !company?.transcription_api_key) {
+      return;
+    }
+
+    const provider = company.transcription_provider;
+    const apiKey = company.transcription_api_key;
+
+    const buffer = Buffer.from(base64Audio, 'base64');
+    const blob = new Blob([buffer], { type: 'audio/ogg' });
+    const formData = new FormData();
+    formData.append('file', blob, 'audio.ogg');
+    formData.append('model', provider === 'groq' ? 'whisper-large-v3-turbo' : 'whisper-1');
+    formData.append('language', 'pt');
+    formData.append('response_format', 'json');
+
+    const baseUrl = provider === 'groq' 
+      ? 'https://api.groq.com/openai/v1/audio/transcriptions' 
+      : 'https://api.openai.com/v1/audio/transcriptions';
+
+    console.log(`[transcribeAudio] Sending to ${provider} for message ${messageId}...`);
+    const response = await fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: formData as any
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('[transcribeAudio] API Error:', err);
+      return;
+    }
+
+    const data = await response.json();
+    if (data.text) {
+      console.log(`[transcribeAudio] Success! Length: ${data.text.length}`);
+      await supabaseAdmin
+        .from('messages')
+        .update({ transcription: data.text })
+        .eq('id', messageId);
+    }
+  } catch (error) {
+    console.error('[transcribeAudio] Error:', error);
+  }
 }

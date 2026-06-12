@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User } from "lucide-react";
+import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { DepartmentsTab } from "@/components/settings/departments-tab";
 import { UsersTab } from "@/components/settings/users-tab";
@@ -47,6 +48,9 @@ function SettingsPage() {
   const [token, setToken] = useState("");
   const [useSignature, setUseSignature] = useState(profile?.use_signature || false);
 
+  const [aiProvider, setAiProvider] = useState("");
+  const [aiApiKey, setAiApiKey] = useState("");
+
   const [newCompanyName, setNewCompanyName] = useState("");
   
   // QrCode Modal State
@@ -60,7 +64,7 @@ function SettingsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("id, name, evogo_host, evogo_global_token")
+        .select("id, name, evogo_host, evogo_global_token, transcription_provider, transcription_api_key")
         .eq("id", profile!.company_id!)
         .single();
       if (error) throw error;
@@ -87,11 +91,12 @@ function SettingsPage() {
     onError: (e) => toast.error("Erro ao criar empresa", { description: (e as Error).message })
   });
 
-  useEffect(() => {
     if (company) {
       setHost(company.evogo_host || "");
       setToken(company.evogo_global_token || "");
       setNewCompanyName(company.name || "");
+      setAiProvider(company.transcription_provider || "");
+      setAiApiKey(company.transcription_api_key || "");
     }
   }, [company]);
 
@@ -106,6 +111,25 @@ function SettingsPage() {
     },
     onSuccess: () => {
       toast.success("Configurações salvas!");
+      qc.invalidateQueries({ queryKey: ["company", profile?.company_id] });
+    },
+    onError: (e) => toast.error("Erro ao salvar", { description: (e as Error).message })
+  });
+
+  const saveAiConfig = useMutation({
+    mutationFn: async () => {
+      if (!profile?.company_id) throw new Error("Sem empresa vinculada");
+      const { error } = await supabase
+        .from("companies")
+        .update({ 
+          transcription_provider: aiProvider || null, 
+          transcription_api_key: aiApiKey || null 
+        })
+        .eq("id", profile.company_id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Configurações de IA salvas!");
       qc.invalidateQueries({ queryKey: ["company", profile?.company_id] });
     },
     onError: (e) => toast.error("Erro ao salvar", { description: (e as Error).message })
@@ -289,6 +313,7 @@ function SettingsPage() {
           <TabsTrigger value="departments">Departamentos</TabsTrigger>
           <TabsTrigger value="users">Equipe e Acessos</TabsTrigger>
           <TabsTrigger value="labels">Etiquetas</TabsTrigger>
+          <TabsTrigger value="ai-transcription">Inteligência Artificial</TabsTrigger>
           <TabsTrigger value="crm">CRM e Funis</TabsTrigger>
           <TabsTrigger value="quick-messages">Mensagens Rápidas</TabsTrigger>
           <TabsTrigger value="resolution-reasons">Motivos de Encerramento</TabsTrigger>
@@ -484,6 +509,65 @@ function SettingsPage() {
 
         <TabsContent value="labels">
           <LabelsTab />
+        </TabsContent>
+
+        <TabsContent value="ai-transcription" className="grid gap-4 md:grid-cols-2">
+          {!selectedUnitId && (
+            <Card className="col-span-1">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5" />
+                  Transcrição de Áudios
+                </CardTitle>
+                <CardDescription>
+                  Configure a API de inteligência artificial para transcrever áudios automaticamente.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Provedor de IA</label>
+                  <Select value={aiProvider} onValueChange={setAiProvider}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um provedor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Desativado</SelectItem>
+                      <SelectItem value="groq">Groq (Mais Rápido/Barato)</SelectItem>
+                      <SelectItem value="whisper">OpenAI (Whisper nativo)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {aiProvider && aiProvider !== "none" && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">API Key ({aiProvider === "groq" ? "Groq" : "OpenAI"})</label>
+                    <div className="relative">
+                      <Key className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input 
+                        type="password"
+                        placeholder="sk-..." 
+                        value={aiApiKey}
+                        onChange={(e) => setAiApiKey(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                  </div>
+                )}
+                <Button 
+                  className="w-full" 
+                  onClick={() => saveAiConfig.mutate()}
+                  disabled={saveAiConfig.isPending || isLoadingCompany}
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  Salvar Configurações
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+          {selectedUnitId && (
+            <div className="col-span-full rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+              A transcrição de áudio é configurada de forma global na Empresa Mãe.
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="crm" className="grid gap-4">
