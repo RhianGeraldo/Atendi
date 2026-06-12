@@ -48,8 +48,18 @@ function SettingsPage() {
   const [token, setToken] = useState("");
   const [useSignature, setUseSignature] = useState(profile?.use_signature || false);
 
-  const [aiProvider, setAiProvider] = useState("");
-  const [aiApiKey, setAiApiKey] = useState("");
+  const [useSignature, setUseSignature] = useState(profile?.use_signature || false);
+
+  const [aiSettings, setAiSettings] = useState({
+    keys: { openai: "", groq: "", openrouter: "" },
+    engines: { transcription: "none", chatbot: "none" },
+    chatbot_models: [
+      "meta-llama/llama-3-8b-instruct:free",
+      "google/gemma-7b-it:free"
+    ],
+    active_chatbot_model: ""
+  });
+  const [newModelInput, setNewModelInput] = useState("");
 
   const [newCompanyName, setNewCompanyName] = useState("");
   
@@ -64,7 +74,7 @@ function SettingsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("id, name, evogo_host, evogo_global_token, transcription_provider, transcription_api_key")
+        .select("id, name, evogo_host, evogo_global_token, ai_settings")
         .eq("id", profile!.company_id!)
         .single();
       if (error) throw error;
@@ -96,8 +106,24 @@ function SettingsPage() {
       setHost(company.evogo_host || "");
       setToken(company.evogo_global_token || "");
       setNewCompanyName(company.name || "");
-      setAiProvider(company.transcription_provider || "");
-      setAiApiKey(company.transcription_api_key || "");
+      if (company.ai_settings) {
+        setAiSettings({
+          keys: {
+            openai: company.ai_settings.keys?.openai || "",
+            groq: company.ai_settings.keys?.groq || "",
+            openrouter: company.ai_settings.keys?.openrouter || "",
+          },
+          engines: {
+            transcription: company.ai_settings.engines?.transcription || "none",
+            chatbot: company.ai_settings.engines?.chatbot || "none",
+          },
+          chatbot_models: company.ai_settings.chatbot_models || [
+            "meta-llama/llama-3-8b-instruct:free",
+            "google/gemma-7b-it:free"
+          ],
+          active_chatbot_model: company.ai_settings.active_chatbot_model || ""
+        });
+      }
     }
   }, [company]);
 
@@ -123,8 +149,7 @@ function SettingsPage() {
       const { error } = await supabase
         .from("companies")
         .update({ 
-          transcription_provider: aiProvider || null, 
-          transcription_api_key: aiApiKey || null 
+          ai_settings: aiSettings
         })
         .eq("id", profile.company_id);
       if (error) throw error;
@@ -512,57 +537,170 @@ function SettingsPage() {
           <LabelsTab />
         </TabsContent>
 
-        <TabsContent value="ai-transcription" className="grid gap-4 md:grid-cols-2">
+        <TabsContent value="ai-transcription" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {!selectedUnitId && (
-            <Card className="col-span-1">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5" />
-                  Transcrição de Áudios
-                </CardTitle>
-                <CardDescription>
-                  Configure a API de inteligência artificial para transcrever áudios automaticamente.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Provedor de IA</label>
-                  <Select value={aiProvider} onValueChange={setAiProvider}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione um provedor" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Desativado</SelectItem>
-                      <SelectItem value="groq">Groq (Mais Rápido/Barato)</SelectItem>
-                      <SelectItem value="whisper">OpenAI (Whisper nativo)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {aiProvider && aiProvider !== "none" && (
+            <>
+              {/* Card de Chaves de API */}
+              <Card className="col-span-full lg:col-span-1">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Key className="h-5 w-5" />
+                    Cofre de Chaves (API)
+                  </CardTitle>
+                  <CardDescription>
+                    Cadastre as chaves dos provedores que deseja utilizar no sistema.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">API Key ({aiProvider === "groq" ? "Groq" : "OpenAI"})</label>
-                    <div className="relative">
-                      <Key className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input 
-                        type="password"
-                        placeholder="sk-..." 
-                        value={aiApiKey}
-                        onChange={(e) => setAiApiKey(e.target.value)}
-                        className="pl-9"
-                      />
-                    </div>
+                    <label className="text-sm font-medium">OpenRouter (Recomendado)</label>
+                    <Input 
+                      type="password"
+                      placeholder="sk-or-v1-..." 
+                      value={aiSettings.keys.openrouter}
+                      onChange={(e) => setAiSettings({...aiSettings, keys: {...aiSettings.keys, openrouter: e.target.value}})}
+                    />
                   </div>
-                )}
-                <Button 
-                  className="w-full" 
-                  onClick={() => saveAiConfig.mutate()}
-                  disabled={saveAiConfig.isPending || isLoadingCompany}
-                >
-                  <Save className="mr-2 h-4 w-4" />
-                  Salvar Configurações
-                </Button>
-              </CardContent>
-            </Card>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Groq (Mais Rápido)</label>
+                    <Input 
+                      type="password"
+                      placeholder="gsk_..." 
+                      value={aiSettings.keys.groq}
+                      onChange={(e) => setAiSettings({...aiSettings, keys: {...aiSettings.keys, groq: e.target.value}})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">OpenAI (Whisper/GPT)</label>
+                    <Input 
+                      type="password"
+                      placeholder="sk-..." 
+                      value={aiSettings.keys.openai}
+                      onChange={(e) => setAiSettings({...aiSettings, keys: {...aiSettings.keys, openai: e.target.value}})}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Card de Motores */}
+              <Card className="col-span-full lg:col-span-2">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5" />
+                    Motores de Inteligência Artificial
+                  </CardTitle>
+                  <CardDescription>
+                    Defina qual provedor de IA será responsável por cada recurso do sistema.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Motor de Transcrição */}
+                  <div className="space-y-3 p-4 border rounded-lg bg-muted/30">
+                    <div className="flex items-center gap-2">
+                      <Mic className="h-4 w-4 text-primary" />
+                      <h4 className="font-semibold text-sm">Motor de Transcrição de Áudio (Speech-to-Text)</h4>
+                    </div>
+                    <p className="text-xs text-muted-foreground">O provedor selecionado converterá áudios do WhatsApp em texto automaticamente.</p>
+                    <Select 
+                      value={aiSettings.engines.transcription} 
+                      onValueChange={(val) => setAiSettings({...aiSettings, engines: {...aiSettings.engines, transcription: val}})}
+                    >
+                      <SelectTrigger className="w-full sm:w-[300px]">
+                        <SelectValue placeholder="Selecione um motor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhum (Desativado)</SelectItem>
+                        <SelectItem value="groq">Groq (whisper-large-v3-turbo)</SelectItem>
+                        <SelectItem value="openai">OpenAI (whisper-1)</SelectItem>
+                        <SelectItem value="openrouter">OpenRouter (via groq/whisper)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Motor de Chatbot */}
+                  <div className="space-y-3 p-4 border rounded-lg bg-muted/30">
+                    <div className="flex items-center gap-2">
+                      <MessageCircle className="h-4 w-4 text-primary" />
+                      <h4 className="font-semibold text-sm">Motor de Chatbot (Respostas e IA)</h4>
+                    </div>
+                    <p className="text-xs text-muted-foreground">O provedor selecionado gerará as respostas automáticas e análises.</p>
+                    <Select 
+                      value={aiSettings.engines.chatbot} 
+                      onValueChange={(val) => setAiSettings({...aiSettings, engines: {...aiSettings.engines, chatbot: val}})}
+                    >
+                      <SelectTrigger className="w-full sm:w-[300px]">
+                        <SelectValue placeholder="Selecione um motor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nenhum (Desativado)</SelectItem>
+                        <SelectItem value="openrouter">OpenRouter</SelectItem>
+                        <SelectItem value="groq">Groq</SelectItem>
+                        <SelectItem value="openai">OpenAI</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {/* Seleção de Modelo Específico (Se OpenRouter selecionado) */}
+                    {aiSettings.engines.chatbot === "openrouter" && (
+                      <div className="mt-4 space-y-2 pt-4 border-t border-border/50">
+                        <label className="text-sm font-medium">Selecione o Modelo do OpenRouter</label>
+                        <div className="flex items-center gap-2 max-w-md">
+                          <Select 
+                            value={aiSettings.active_chatbot_model} 
+                            onValueChange={(val) => setAiSettings({...aiSettings, active_chatbot_model: val})}
+                          >
+                            <SelectTrigger className="flex-1">
+                              <SelectValue placeholder="Escolha um modelo salvo" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {aiSettings.chatbot_models.map((mod) => (
+                                <SelectItem key={mod} value={mod}>{mod}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="flex items-center gap-2 mt-2 max-w-md">
+                          <Input 
+                            placeholder="Adicionar novo modelo (ex: anthropic/claude-3-haiku)" 
+                            value={newModelInput}
+                            onChange={(e) => setNewModelInput(e.target.value)}
+                            className="flex-1 h-9"
+                          />
+                          <Button 
+                            variant="secondary" 
+                            size="sm" 
+                            className="h-9"
+                            onClick={() => {
+                              if (newModelInput && !aiSettings.chatbot_models.includes(newModelInput)) {
+                                setAiSettings({
+                                  ...aiSettings,
+                                  chatbot_models: [...aiSettings.chatbot_models, newModelInput],
+                                  active_chatbot_model: newModelInput
+                                });
+                                setNewModelInput("");
+                              }
+                            }}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2">
+                    <Button 
+                      onClick={() => saveAiConfig.mutate()}
+                      disabled={saveAiConfig.isPending || isLoadingCompany}
+                      className="w-full sm:w-auto"
+                    >
+                      <Save className="mr-2 h-4 w-4" />
+                      Salvar Todas Configurações de IA
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
           )}
           {selectedUnitId && (
             <div className="col-span-full rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">

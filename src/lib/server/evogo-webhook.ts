@@ -746,28 +746,42 @@ async function triggerAudioTranscription(messageId: string, base64Audio: string,
   try {
     const { data: company } = await supabaseAdmin
       .from('companies')
-      .select('transcription_provider, transcription_api_key')
+      .select('ai_settings')
       .eq('id', companyId)
       .single();
 
-    if (!company?.transcription_provider || company.transcription_provider === 'none' || !company?.transcription_api_key) {
+    if (!company?.ai_settings?.engines?.transcription || company.ai_settings.engines.transcription === 'none') {
       return;
     }
 
-    const provider = company.transcription_provider;
-    const apiKey = company.transcription_api_key;
+    const provider = company.ai_settings.engines.transcription;
+    const apiKey = company.ai_settings.keys?.[provider as keyof typeof company.ai_settings.keys];
+
+    if (!apiKey) {
+      console.warn(`[transcribeAudio] No API key found for provider: ${provider}`);
+      return;
+    }
 
     const buffer = Buffer.from(base64Audio, 'base64');
     const blob = new Blob([buffer], { type: 'audio/ogg' });
     const formData = new FormData();
     formData.append('file', blob, 'audio.ogg');
-    formData.append('model', provider === 'groq' ? 'whisper-large-v3-turbo' : 'whisper-1');
+    
+    let baseUrl = '';
+    
+    if (provider === 'openrouter') {
+      baseUrl = 'https://openrouter.ai/api/v1/audio/transcriptions';
+      formData.append('model', 'groq/whisper-large-v3-turbo');
+    } else if (provider === 'groq') {
+      baseUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
+      formData.append('model', 'whisper-large-v3-turbo');
+    } else {
+      baseUrl = 'https://api.openai.com/v1/audio/transcriptions';
+      formData.append('model', 'whisper-1');
+    }
+
     formData.append('language', 'pt');
     formData.append('response_format', 'json');
-
-    const baseUrl = provider === 'groq' 
-      ? 'https://api.groq.com/openai/v1/audio/transcriptions' 
-      : 'https://api.openai.com/v1/audio/transcriptions';
 
     console.log(`[transcribeAudio] Sending to ${provider} for message ${messageId}...`);
     const response = await fetch(baseUrl, {
