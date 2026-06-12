@@ -1905,8 +1905,7 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
           <div className="mb-2">
             <a 
               href={m.media_url || "#"} 
-              target={m.media_url ? "_blank" : undefined}
-              rel={m.media_url ? "noopener noreferrer" : undefined}
+              download={displayContent || "Documento.pdf"}
               className={cn(
                 "flex items-center gap-3 p-3 rounded-lg border max-w-[260px] transition-opacity",
                 m.media_url ? "hover:opacity-90 cursor-pointer" : "cursor-default opacity-90",
