@@ -947,6 +947,20 @@ function ChatPanel({
     },
   });
 
+  const { data: quickMessageFolders } = useQuery({
+    queryKey: ["quick-message-folders", profile?.company_id],
+    enabled: !!profile?.company_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("quick_message_folders")
+        .select("*")
+        .eq("company_id", profile!.company_id!)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+  });
+
   const { data: quickMessages } = useQuery({
     queryKey: ["quick-messages", profile?.company_id],
     enabled: !!profile?.company_id,
@@ -1374,7 +1388,26 @@ function ChatPanel({
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
-  const filteredQuickMsgs = text.startsWith('/') && quickMessages ? quickMessages.filter(qm => text === '/' || qm.shortcut.toLowerCase().includes(text.toLowerCase().substring(1))) : [];
+  const filteredQuickMsgs = React.useMemo(() => {
+    if (!text.startsWith('/') || !quickMessages) return [];
+    const search = text === '/' ? '' : text.toLowerCase().substring(1);
+    
+    let filtered = quickMessages;
+    if (search) {
+      filtered = filtered.filter(qm => 
+        qm.shortcut.toLowerCase().includes(search) || 
+        (qm.name && qm.name.toLowerCase().includes(search))
+      );
+    }
+    
+    return [...filtered].sort((a, b) => {
+      const folderA = quickMessageFolders?.find(f => f.id === a.folder_id)?.name || 'Z_Raiz';
+      const folderB = quickMessageFolders?.find(f => f.id === b.folder_id)?.name || 'Z_Raiz';
+      
+      if (folderA !== folderB) return folderA.localeCompare(folderB);
+      return a.shortcut.localeCompare(b.shortcut);
+    });
+  }, [text, quickMessages, quickMessageFolders]);
 
   return (
     <div className="flex h-full min-w-0">
@@ -1645,27 +1678,43 @@ function ChatPanel({
                       document.getElementById('chat-input')?.focus();
                     }}
                   >
-                    <div className="max-h-[300px] overflow-y-auto p-1">
-                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Mensagens Rápidas</div>
+                    <div className="max-h-[300px] overflow-y-auto p-1 relative">
                       {filteredQuickMsgs.length === 0 && (
                         <div className="py-6 text-center text-sm text-muted-foreground">Nenhum atalho encontrado.</div>
                       )}
-                      {filteredQuickMsgs.map((qm, i) => (
-                        <div
-                          key={qm.id}
-                          onClick={() => {
-                            insertQuickMessage(qm);
-                            setQuickMsgIndex(0);
-                          }}
-                          className={cn(
-                            "flex flex-col items-start gap-1 p-2 cursor-pointer rounded-sm mb-1 last:mb-0", 
-                            i === quickMsgIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50 text-foreground"
-                          )}
-                        >
-                          <span className="font-mono text-xs font-bold text-primary">{qm.shortcut}</span>
-                          <span className="text-sm text-muted-foreground line-clamp-1">{qm.content}</span>
-                        </div>
-                      ))}
+                      {filteredQuickMsgs.map((qm, i) => {
+                        const currentFolder = quickMessageFolders?.find(f => f.id === qm.folder_id)?.name || "Raiz";
+                        const prevFolder = i > 0 ? (quickMessageFolders?.find(f => f.id === filteredQuickMsgs[i-1].folder_id)?.name || "Raiz") : null;
+                        const showHeader = currentFolder !== prevFolder;
+
+                        return (
+                          <React.Fragment key={qm.id}>
+                            {showHeader && (
+                              <div className="px-2 py-1.5 mt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 bg-muted/30 sticky top-0 backdrop-blur-md z-10 flex items-center gap-1.5 rounded-sm">
+                                {currentFolder === "Raiz" ? <MessageSquarePlus className="h-3 w-3" /> : <Folder className="h-3 w-3" />}
+                                {currentFolder}
+                              </div>
+                            )}
+                            <div
+                              onClick={() => {
+                                insertQuickMessage(qm);
+                                setQuickMsgIndex(0);
+                              }}
+                              className={cn(
+                                "flex flex-col items-start gap-1 p-2 cursor-pointer rounded-sm mb-0.5", 
+                                i === quickMsgIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50 text-foreground"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 w-full">
+                                <span className="font-semibold text-xs flex-1 truncate">{qm.name || "Mensagem sem nome"}</span>
+                                <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded shrink-0">{qm.shortcut}</span>
+                                {qm.media_url && <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />}
+                              </div>
+                              <span className="text-xs text-muted-foreground line-clamp-1">{qm.content || "Contém apenas anexo"}</span>
+                            </div>
+                          </React.Fragment>
+                        );
+                      })}
                     </div>
                   </PopoverContent>
                 </Popover>
