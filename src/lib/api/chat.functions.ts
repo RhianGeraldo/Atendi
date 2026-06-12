@@ -918,36 +918,176 @@ export const editMessageAction = createServerFn({ method: "POST" })
           instanceName = companyInstance.instance_name;
         }
       }
+    messageId: z.string().uuid(),
+    newText: z.string()
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+
+    const { data: msg, error: msgErr } = await supabase
+      .from("messages")
+      .select("remote_msg_id, conversation_id, conversations(whatsapp_instance_id)")
+      .eq("id", data.messageId)
+      .single();
+
+    if (msgErr || !msg) {
+      throw new Error("Mensagem não encontrada");
     }
 
-    if (!host || !token || !instanceName) throw new Error("EvoGo is not configured");
-
-    // 4. Send Edit Request via EvoGo API
-    try {
-      await editEvogoMessage({
-        host,
-        token,
-        number: conv.contacts.phone,
-        remoteMsgId: msg.remote_msg_id,
-        message: textToSend,
-      });
-    } catch (err: any) {
-      console.error("EvoGo Edit failed:", err);
-      throw new Error(`Failed to edit message in WhatsApp: ${err.message || String(err)}`);
+    if (!msg.remote_msg_id) {
+      throw new Error("Não é possível editar esta mensagem");
     }
 
-    // 5. Update DB
+    let host, token, instanceName;
+
+    if (msg.conversations?.whatsapp_instance_id) {
+      const { data: instance } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .eq("id", msg.conversations.whatsapp_instance_id)
+        .single();
+
+      if (instance) {
+        host = instance.companies?.evogo_host;
+        token = instance.evogo_api_key;
+        instanceName = instance.instance_name;
+      }
+    }
+
+    if (!host || !token || !instanceName) {
+      throw new Error("Não foi possível resolver a conexão com a Evolution API.");
+    }
+
+    const evoRes = await editEvogoMessage({
+      host,
+      token,
+      instanceName,
+      messageId: msg.remote_msg_id,
+      text: data.newText,
+    });
+
+    if (evoRes.error) {
+      throw new Error(evoRes.error);
+    }
+
     const { error: updateErr } = await supabaseAdmin
       .from("messages")
       .update({
-        content: textToSend,
-        is_edited: true
+        content: data.newText,
+        is_edited: true,
       })
       .eq("id", data.messageId);
 
     if (updateErr) {
-      console.error("Failed to update edited message in DB", updateErr);
+      throw new Error("Erro ao atualizar o banco de dados");
     }
 
     return { success: true };
+  });
+
+export const transcribeAudioAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    messageId: z.string().uuid(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+
+    const { data: msg } = await supabaseAdmin
+      .from("messages")
+      .select("id, media_url, conversations(contacts(company_id))")
+      .eq("id", data.messageId)
+      .single();
+
+    if (!msg || !msg.media_url) {
+      throw new Error("Mensagem de áudio não encontrada.");
+    }
+
+    const companyId = msg.conversations?.contacts?.company_id;
+    if (!companyId) throw new Error("ID da empresa não encontrado.");
+
+    const { data: company } = await supabaseAdmin
+      .from('companies')
+      .select('ai_settings')
+      .eq('id', companyId)
+      .single();
+
+    if (!company?.ai_settings?.engines?.transcription || company.ai_settings.engines.transcription === 'none') {
+      throw new Error("Transcrição de IA não está habilitada.");
+    }
+
+    const provider = company.ai_settings.engines.transcription;
+    const apiKey = company.ai_settings.keys?.[provider as keyof typeof company.ai_settings.keys];
+
+    if (!apiKey) {
+      throw new Error(`Nenhuma chave de API configurada para o provedor: ${provider}`);
+    }
+
+    // O media_url salva no formato 'data:audio/ogg;base64,.....'
+    const base64Audio = msg.media_url.split(',')[1];
+    if (!base64Audio) {
+       throw new Error("Áudio não possui formato base64 válido.");
+    }
+
+    let response;
+
+    if (provider === 'openrouter') {
+      response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'openai/whisper-1',
+          input_audio: {
+            data: base64Audio,
+            format: 'ogg'
+          }
+        })
+      });
+    } else {
+      const buffer = Buffer.from(base64Audio, 'base64');
+      const blob = new Blob([buffer], { type: 'audio/ogg' });
+      const formData = new FormData();
+      formData.append('file', blob, 'audio.ogg');
+      
+      let baseUrl = '';
+      if (provider === 'groq') {
+        baseUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
+        formData.append('model', 'whisper-large-v3-turbo');
+      } else {
+        baseUrl = 'https://api.openai.com/v1/audio/transcriptions';
+        formData.append('model', 'whisper-1');
+      }
+
+      formData.append('language', 'pt');
+      formData.append('response_format', 'json');
+
+      response = await fetch(baseUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: formData as any
+      });
+    }
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('[transcribeAudioAction] API Error:', response.status, err);
+      throw new Error(`Falha na API de transcrição: ${response.status}`);
+    }
+
+    const apiData = await response.json();
+    if (!apiData.text) {
+      throw new Error("API retornou resposta sem texto.");
+    }
+
+    await supabaseAdmin
+      .from('messages')
+      .update({ transcription: apiData.text })
+      .eq('id', data.messageId);
+
+    return { success: true, text: apiData.text };
   });

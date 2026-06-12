@@ -1044,6 +1044,21 @@ function ChatPanel({
     }
   });
 
+  const transcribeAudio = useMutation({
+    mutationFn: async (messageId: string) => {
+      return transcribeAudioAction({ data: { messageId } });
+    },
+    onSuccess: (data, variables) => {
+      toast.success("Transcrição concluída com sucesso!");
+      qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
+        if (!old) return old;
+        return old.map(m => m.id === variables ? { ...m, transcription: data.text } : m);
+      });
+      qc.invalidateQueries({ queryKey: ["messages"] });
+    },
+    onError: (e) => toast.error("Erro na transcrição", { description: (e as Error).message })
+  });
+
   const react = useMutation({
     mutationFn: async ({ messageId, emoji }: { messageId: string, emoji: string }) => {
       await reactToMessageAction({ data: { conversationId: conv.id, messageId, emoji } });
@@ -1993,13 +2008,28 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
         ) : m.media_type === "audio" && m.media_url ? (
           <div className="mb-2 flex flex-col gap-1">
             <audio controls src={m.media_url} className="h-10 w-48" />
-            {m.transcription && (
+            {m.transcription ? (
               <div className="mt-1 pt-1 border-t border-border/50 text-xs italic flex flex-col gap-0.5 w-48 opacity-90">
                 <span className="flex items-center gap-1 font-semibold text-[10px] text-primary">
                   <Sparkles className="h-3 w-3" /> Transcrição Automática
                 </span>
                 <span className="whitespace-pre-wrap leading-tight">{m.transcription}</span>
               </div>
+            ) : (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="mt-1 h-6 text-[10px] w-48 border border-border/50 bg-background/50 text-muted-foreground hover:text-primary"
+                onClick={() => transcribeAudio.mutate(m.id)}
+                disabled={transcribeAudio.isPending && transcribeAudio.variables === m.id}
+              >
+                {transcribeAudio.isPending && transcribeAudio.variables === m.id ? (
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                ) : (
+                  <Sparkles className="mr-1 h-3 w-3" />
+                )}
+                Transcrever Áudio
+              </Button>
             )}
             {displayContent && displayContent !== "🎵 Áudio" && <div className="text-xs"><FormattedText text={displayContent} mine={mine} /></div>}
           </div>
