@@ -1799,6 +1799,47 @@ const openMediaInNewTab = (mediaUrl: string) => {
   }
 };
 
+function PdfViewer({ url }: { url: string }) {
+  const [blobUrl, setBlobUrl] = useState<string>("");
+
+  useEffect(() => {
+    if (!url) return;
+    if (url.startsWith("data:")) {
+      try {
+        const [header, base64] = url.split(',');
+        const mimeString = header.split(':')[1].split(';')[0];
+        
+        const byteCharacters = atob(base64);
+        const byteArrays = [];
+        
+        for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+          const slice = byteCharacters.slice(offset, offset + 512);
+          const byteNumbers = new Array(slice.length);
+          for (let i = 0; i < slice.length; i++) {
+            byteNumbers[i] = slice.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          byteArrays.push(byteArray);
+        }
+        
+        const blob = new Blob(byteArrays, { type: mimeString });
+        const newUrl = URL.createObjectURL(blob);
+        setBlobUrl(newUrl);
+        return () => URL.revokeObjectURL(newUrl);
+      } catch (e) {
+        console.error("Failed to parse data URI", e);
+        setBlobUrl(url);
+      }
+    } else {
+      setBlobUrl(url);
+    }
+  }, [url]);
+
+  if (!blobUrl) return <div className="flex items-center justify-center h-full p-10 text-muted-foreground">Carregando PDF...</div>;
+
+  return <iframe src={blobUrl} className="w-full h-full rounded-md border-0 min-h-[70vh]" title="PDF Viewer" />;
+}
+
 function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void, onReply?: (m: MessageRow) => void, onEdit?: (m: MessageRow) => void }) {
   const mine = m.sender_type === "agent";
   
@@ -1937,31 +1978,50 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
           </div>
         ) : m.media_type === "document" ? (
           <div className="mb-2">
-            <a 
-              href={m.media_url || "#"} 
-              download={displayContent || "Documento.pdf"}
-              className={cn(
-                "flex items-center gap-3 p-3 rounded-lg border max-w-[260px] transition-opacity",
-                m.media_url ? "hover:opacity-90 cursor-pointer" : "cursor-default opacity-90",
-                mine ? "bg-black/10 dark:bg-white/10 border-transparent" : "bg-muted/80 border-border"
+            <Dialog>
+              <DialogTrigger asChild>
+                <div 
+                  className={cn(
+                    "flex items-center gap-3 p-3 rounded-lg border max-w-[260px] transition-opacity",
+                    m.media_url ? "hover:opacity-90 cursor-pointer" : "cursor-default opacity-90",
+                    mine ? "bg-black/10 dark:bg-white/10 border-transparent" : "bg-muted/80 border-border"
+                  )}
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-red-500 text-white shadow-sm">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1 overflow-hidden">
+                    <p className="truncate text-sm font-semibold leading-tight">{displayContent || "Documento"}</p>
+                    <p className={cn("mt-1 truncate text-[10px] font-medium uppercase opacity-70")}>
+                      {m.media_url ? "Documento PDF" : "Documento (sem arquivo)"}
+                    </p>
+                  </div>
+                </div>
+              </DialogTrigger>
+              {m.media_url && (
+                <DialogContent className="max-w-4xl p-0 bg-white dark:bg-zinc-900 border-none shadow-xl flex flex-col h-[85vh]">
+                  <div className="flex justify-between items-center p-4 border-b">
+                    <h2 className="text-sm font-semibold truncate pr-4 flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-red-500" />
+                      {displayContent || "Documento.pdf"}
+                    </h2>
+                    <a 
+                      href={m.media_url} 
+                      download={displayContent || "Documento.pdf"}
+                      onClick={(e) => {
+                        // Se for base64, o download direto pode falhar em alguns cenários, mas como é atributo download, deve funcionar.
+                      }}
+                      className="text-sm text-blue-500 hover:underline px-4 font-medium"
+                    >
+                      Baixar
+                    </a>
+                  </div>
+                  <div className="flex-1 w-full relative bg-muted/30">
+                    <PdfViewer url={m.media_url} />
+                  </div>
+                </DialogContent>
               )}
-              onClick={(e) => { 
-                e.preventDefault();
-                if (m.media_url) {
-                  openMediaInNewTab(m.media_url);
-                }
-              }}
-            >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-red-500 text-white shadow-sm">
-                <FileText className="h-5 w-5" />
-              </div>
-              <div className="min-w-0 flex-1 overflow-hidden">
-                <p className="truncate text-sm font-semibold leading-tight">{displayContent || "Documento"}</p>
-                <p className={cn("mt-1 truncate text-[10px] font-medium uppercase opacity-70")}>
-                  {m.media_url ? "Documento PDF" : "Documento (sem arquivo)"}
-                </p>
-              </div>
-            </a>
+            </Dialog>
           </div>
         ) : (
           <FormattedText text={displayContent} mine={mine} />
