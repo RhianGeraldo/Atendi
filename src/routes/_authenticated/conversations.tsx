@@ -962,7 +962,14 @@ function ChatPanel({
   });
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    const scrollToBottom = () => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "auto" });
+      }
+    };
+    
+    scrollToBottom();
+    const timeout = setTimeout(scrollToBottom, 150);
     
     // Reset unread count when chat is opened
     if (conv.id && conv.unread_count && conv.unread_count > 0) {
@@ -971,6 +978,8 @@ function ChatPanel({
         qc.invalidateQueries({ queryKey: ["unread-counts"] });
       });
     }
+
+    return () => clearTimeout(timeout);
   }, [messages?.length, conv.id, conv.unread_count, qc]);
 
   const navigate = Route.useNavigate();
@@ -2009,9 +2018,9 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onTranscribe, isT
           </div>
         ) : m.media_type === "audio" && m.media_url ? (
           <div className="mb-2 flex flex-col gap-1">
-            <audio controls src={m.media_url} className="h-10 w-48" />
+            <audio controls src={m.media_url} className="h-12 w-[260px]" />
             {m.transcription ? (
-              <div className="mt-1 pt-1 border-t border-border/50 text-xs italic flex flex-col gap-0.5 w-48 opacity-90">
+              <div className="mt-1 pt-1 border-t border-border/50 text-xs italic flex flex-col gap-0.5 w-[260px] opacity-90">
                 <span className="flex items-center gap-1 font-semibold text-[10px] text-primary">
                   <Sparkles className="h-3 w-3" /> Transcrição Automática
                 </span>
@@ -2021,7 +2030,7 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onTranscribe, isT
               <Button 
                 variant="ghost" 
                 size="sm" 
-                className="mt-1 h-6 text-[10px] w-48 border border-border/50 bg-background/50 text-muted-foreground hover:text-primary"
+                className="mt-1 h-6 text-[10px] w-[260px] border border-border/50 bg-background/50 text-muted-foreground hover:text-primary"
                 onClick={() => onTranscribe?.(m.id)}
                 disabled={isTranscribingId === m.id}
               >
