@@ -1874,11 +1874,10 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
     <div className={cn("flex relative", mine ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[70%] flex flex-col relative group text-sm",
-          !isSticker && "rounded-2xl px-3.5 py-2 shadow-sm",
-          !isSticker && mine && "rounded-br-sm bg-primary text-primary-foreground",
-          !isSticker && !mine && "rounded-bl-sm bg-card text-foreground border border-border",
-          isSticker && "bg-transparent border-none p-0 shadow-none",
+          "max-w-[70%] flex flex-col rounded-2xl px-3.5 py-2 text-sm shadow-sm relative group",
+          mine
+            ? "rounded-br-sm bg-primary text-primary-foreground"
+            : "rounded-bl-sm bg-card text-foreground border border-border",
           m.is_deleted && "opacity-60",
           m.isOptimistic && "opacity-70"
         )}
@@ -1948,32 +1947,24 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
             Mensagem apagada
           </div>
         ) : m.media_type === "image" && m.media_url ? (
-          <div className={cn("mb-2", isSticker && "mb-0")}>
-            {isSticker ? (
-              <img 
-                src={m.media_url} 
-                alt="Figurinha" 
-                className="max-w-[150px] object-contain drop-shadow-sm" 
-              />
-            ) : (
-              <Dialog>
-                <DialogTrigger asChild>
-                  <img 
-                    src={m.media_url} 
-                    alt={displayContent || "Imagem recebida"} 
-                    className="max-w-[200px] cursor-pointer rounded-lg hover:opacity-90 transition-opacity" 
-                  />
-                </DialogTrigger>
-                <DialogContent className="max-w-4xl p-1 bg-transparent border-none shadow-none flex justify-center items-center">
-                  <img 
-                    src={m.media_url} 
-                    alt={displayContent || "Imagem recebida"} 
-                    className="max-h-[85vh] w-auto rounded-md object-contain" 
-                  />
-                </DialogContent>
-              </Dialog>
-            )}
-            {displayContent && displayContent !== "📷 Imagem" && !isSticker && (
+          <div className="mb-2">
+            <Dialog>
+              <DialogTrigger asChild>
+                <img 
+                  src={m.media_url} 
+                  alt={displayContent || "Imagem recebida"} 
+                  className="max-w-[200px] cursor-pointer rounded-lg hover:opacity-90 transition-opacity" 
+                />
+              </DialogTrigger>
+              <DialogContent className="max-w-4xl p-1 bg-transparent border-none shadow-none flex justify-center items-center">
+                <img 
+                  src={m.media_url} 
+                  alt={displayContent || "Imagem recebida"} 
+                  className="max-h-[85vh] w-auto rounded-md object-contain" 
+                />
+              </DialogContent>
+            </Dialog>
+            {displayContent && displayContent !== "📷 Imagem" && displayContent !== "🖼️ Figurinha" && (
               <div className="mt-2"><FormattedText text={displayContent} mine={mine} /></div>
             )}
           </div>
