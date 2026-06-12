@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo, Fragment } from "react";
 import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, FileText, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -1388,7 +1388,7 @@ function ChatPanel({
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
-  const filteredQuickMsgs = React.useMemo(() => {
+  const filteredQuickMsgs = useMemo(() => {
     if (!text.startsWith('/') || !quickMessages) return [];
     const search = text === '/' ? '' : text.toLowerCase().substring(1);
     
@@ -1688,7 +1688,7 @@ function ChatPanel({
                         const showHeader = currentFolder !== prevFolder;
 
                         return (
-                          <React.Fragment key={qm.id}>
+                          <Fragment key={qm.id}>
                             {showHeader && (
                               <div className="px-2 py-1.5 mt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 bg-muted/30 sticky top-0 backdrop-blur-md z-10 flex items-center gap-1.5 rounded-sm">
                                 {currentFolder === "Raiz" ? <MessageSquarePlus className="h-3 w-3" /> : <Folder className="h-3 w-3" />}
@@ -1712,7 +1712,7 @@ function ChatPanel({
                               </div>
                               <span className="text-xs text-muted-foreground line-clamp-1">{qm.content || "Contém apenas anexo"}</span>
                             </div>
-                          </React.Fragment>
+                          </Fragment>
                         );
                       })}
                     </div>
