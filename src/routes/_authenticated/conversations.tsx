@@ -1571,7 +1571,7 @@ function ChatPanel({
                 </div>
               )}
               <div className="text-xs truncate max-w-[150px]">
-                {selectedFile.file.name}
+                {selectedFile.file?.name || "Anexo"}
               </div>
             </div>
           )}
