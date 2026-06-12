@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles } from "lucide-react";
+import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
