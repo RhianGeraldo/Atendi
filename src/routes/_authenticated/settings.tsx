@@ -48,8 +48,6 @@ function SettingsPage() {
   const [token, setToken] = useState("");
   const [useSignature, setUseSignature] = useState(profile?.use_signature || false);
 
-  const [useSignature, setUseSignature] = useState(profile?.use_signature || false);
-
   const [aiSettings, setAiSettings] = useState({
     keys: { openai: "", groq: "", openrouter: "" },
     engines: { transcription: "none", chatbot: "none" },
