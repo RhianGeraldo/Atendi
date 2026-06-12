@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS conversation_sessions (
   whatsapp_instance_id UUID REFERENCES whatsapp_instances(id) ON DELETE SET NULL,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  assigned_agent_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  assigned_agent_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
   department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
   resolution_reason_id UUID REFERENCES resolution_reasons(id) ON DELETE SET NULL,
   resolution_observation TEXT,
