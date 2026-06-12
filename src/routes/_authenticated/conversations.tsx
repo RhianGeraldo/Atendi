@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, FileText, Sparkles, Folder, FolderOpen } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, FileText, Sparkles, Folder, FolderOpen, Video, Headphones } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -916,6 +916,7 @@ function ChatPanel({
   const [resolveDialogOpen, setResolveDialogOpen] = useState(false);
   const [selectedReasonId, setSelectedReasonId] = useState<string>("");
   const [resolveObservation, setResolveObservation] = useState("");
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -1388,26 +1389,43 @@ function ChatPanel({
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
-  const filteredQuickMsgs = useMemo(() => {
-    if (!text.startsWith('/') || !quickMessages) return [];
+  const quickMsgItems = useMemo(() => {
+    if (!text.startsWith('/') || !quickMessages) return { items: [], focusableCount: 0 };
     const search = text === '/' ? '' : text.toLowerCase().substring(1);
-    
-    let filtered = quickMessages;
-    if (search) {
-      filtered = filtered.filter(qm => 
+    const isSearch = search.length > 0;
+
+    let items: any[] = [];
+    let focusCount = 0;
+
+    if (isSearch) {
+      const filtered = quickMessages.filter(qm => 
         qm.shortcut.toLowerCase().includes(search) || 
         (qm.name && qm.name.toLowerCase().includes(search))
-      );
-    }
-    
-    return [...filtered].sort((a, b) => {
-      const folderA = quickMessageFolders?.find(f => f.id === a.folder_id)?.name || 'Z_Raiz';
-      const folderB = quickMessageFolders?.find(f => f.id === b.folder_id)?.name || 'Z_Raiz';
+      ).sort((a, b) => a.shortcut.localeCompare(b.shortcut));
       
-      if (folderA !== folderB) return folderA.localeCompare(folderB);
-      return a.shortcut.localeCompare(b.shortcut);
-    });
-  }, [text, quickMessages, quickMessageFolders]);
+      items = filtered.map(qm => ({ type: 'message', id: qm.id, qm, index: focusCount++ }));
+    } else {
+      const rootMsgs = quickMessages.filter(qm => !qm.folder_id).sort((a, b) => a.shortcut.localeCompare(b.shortcut));
+      if (rootMsgs.length > 0) {
+        items.push({ type: 'header', id: 'root', name: 'Raiz', folderId: null, isExpanded: true, count: rootMsgs.length });
+        rootMsgs.forEach(qm => items.push({ type: 'message', id: qm.id, qm, index: focusCount++ }));
+      }
+
+      const sortedFolders = [...(quickMessageFolders || [])].sort((a, b) => a.name.localeCompare(b.name));
+      sortedFolders.forEach(folder => {
+        const folderMsgs = quickMessages.filter(qm => qm.folder_id === folder.id).sort((a, b) => a.shortcut.localeCompare(b.shortcut));
+        if (folderMsgs.length > 0) {
+          const isExpanded = expandedFolders.has(folder.id);
+          items.push({ type: 'header', id: folder.id, name: folder.name, folderId: folder.id, isExpanded, count: folderMsgs.length });
+          if (isExpanded) {
+            folderMsgs.forEach(qm => items.push({ type: 'message', id: qm.id, qm, index: focusCount++ }));
+          }
+        }
+      });
+    }
+
+    return { items, focusableCount: focusCount };
+  }, [text, quickMessages, quickMessageFolders, expandedFolders]);
 
   return (
     <div className="flex h-full min-w-0">
@@ -1679,40 +1697,64 @@ function ChatPanel({
                     }}
                   >
                     <div className="max-h-[300px] overflow-y-auto p-1 relative">
-                      {filteredQuickMsgs.length === 0 && (
+                      {quickMsgItems.items.length === 0 && (
                         <div className="py-6 text-center text-sm text-muted-foreground">Nenhum atalho encontrado.</div>
                       )}
-                      {filteredQuickMsgs.map((qm, i) => {
-                        const currentFolder = quickMessageFolders?.find(f => f.id === qm.folder_id)?.name || "Raiz";
-                        const prevFolder = i > 0 ? (quickMessageFolders?.find(f => f.id === filteredQuickMsgs[i-1].folder_id)?.name || "Raiz") : null;
-                        const showHeader = currentFolder !== prevFolder;
-
-                        return (
-                          <Fragment key={qm.id}>
-                            {showHeader && (
-                              <div className="px-2 py-1.5 mt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 bg-muted/30 sticky top-0 backdrop-blur-md z-10 flex items-center gap-1.5 rounded-sm">
-                                {currentFolder === "Raiz" ? <MessageSquarePlus className="h-3 w-3" /> : <Folder className="h-3 w-3" />}
-                                {currentFolder}
-                              </div>
-                            )}
-                            <div
+                      {quickMsgItems.items.map((item) => {
+                        if (item.type === 'header') {
+                          return (
+                            <div 
+                              key={`header-${item.id}`}
                               onClick={() => {
-                                insertQuickMessage(qm);
-                                setQuickMsgIndex(0);
+                                if (item.folderId) {
+                                  setExpandedFolders(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(item.folderId)) next.delete(item.folderId);
+                                    else next.add(item.folderId);
+                                    return next;
+                                  });
+                                }
                               }}
                               className={cn(
-                                "flex flex-col items-start gap-1 p-2 cursor-pointer rounded-sm mb-0.5", 
-                                i === quickMsgIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50 text-foreground"
+                                "px-2 py-1.5 mt-1 mb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 bg-muted/50 sticky top-0 backdrop-blur-md z-10 flex items-center justify-between rounded-sm",
+                                item.folderId ? "cursor-pointer hover:bg-muted/80 transition-colors" : ""
                               )}
                             >
-                              <div className="flex items-center gap-2 w-full">
-                                <span className="font-semibold text-xs flex-1 truncate">{qm.name || "Mensagem sem nome"}</span>
-                                <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded shrink-0">{qm.shortcut}</span>
-                                {qm.media_url && <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />}
+                              <div className="flex items-center gap-1.5">
+                                {item.folderId === null ? <MessageSquarePlus className="h-3 w-3" /> : (item.isExpanded ? <FolderOpen className="h-3 w-3" /> : <Folder className="h-3 w-3" />)}
+                                {item.name}
                               </div>
-                              <span className="text-xs text-muted-foreground line-clamp-1">{qm.content || "Contém apenas anexo"}</span>
                             </div>
-                          </Fragment>
+                          );
+                        }
+
+                        const { qm, index } = item;
+                        return (
+                          <div
+                            key={qm.id}
+                            onClick={() => {
+                              insertQuickMessage(qm);
+                              setQuickMsgIndex(0);
+                            }}
+                            className={cn(
+                              "flex flex-col items-start gap-1 p-2 cursor-pointer rounded-sm mb-0.5", 
+                              index === quickMsgIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50 text-foreground"
+                            )}
+                          >
+                            <div className="flex items-center gap-2 w-full">
+                              <span className="font-semibold text-xs flex-1 truncate">{qm.name || "Mensagem sem nome"}</span>
+                              <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded shrink-0">{qm.shortcut}</span>
+                              {qm.media_url && (
+                                <span className="shrink-0 text-muted-foreground ml-1">
+                                  {qm.media_type === 'image' ? <ImageIcon className="h-3 w-3" /> :
+                                   qm.media_type === 'audio' ? <Headphones className="h-3 w-3" /> :
+                                   qm.media_type === 'video' ? <Video className="h-3 w-3" /> :
+                                   <Paperclip className="h-3 w-3" />}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-xs text-muted-foreground line-clamp-1">{qm.content || "Contém apenas anexo"}</span>
+                          </div>
                         );
                       })}
                     </div>
@@ -1727,10 +1769,10 @@ function ChatPanel({
                     setQuickMsgIndex(0); // reset index when typing
                   }}
                   onKeyDown={(e) => {
-                    if (filteredQuickMsgs.length > 0) {
+                    if (quickMsgItems.focusableCount > 0) {
                       if (e.key === "ArrowDown") {
                         e.preventDefault();
-                        setQuickMsgIndex(prev => Math.min(prev + 1, filteredQuickMsgs.length - 1));
+                        setQuickMsgIndex(prev => Math.min(prev + 1, quickMsgItems.focusableCount - 1));
                         return;
                       }
                       if (e.key === "ArrowUp") {
@@ -1740,7 +1782,8 @@ function ChatPanel({
                       }
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        insertQuickMessage(filteredQuickMsgs[quickMsgIndex]);
+                        const selectedItem = quickMsgItems.items.find(i => i.type === 'message' && i.index === quickMsgIndex);
+                        if (selectedItem) insertQuickMessage(selectedItem.qm);
                         setQuickMsgIndex(0);
                         return;
                       }
