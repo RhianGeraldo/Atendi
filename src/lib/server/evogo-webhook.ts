@@ -512,9 +512,11 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
       };
 
-      const { error: msgErr } = await supabaseAdmin
+      const { error: msgErr, data: newMessage } = await supabaseAdmin
         .from('messages')
-        .insert(insertPayload);
+        .insert(insertPayload)
+        .select()
+        .single();
 
       if (msgErr) {
         // Fallback without new columns in case migration hasn't run yet
