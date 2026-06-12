@@ -91,6 +91,7 @@ function SettingsPage() {
     onError: (e) => toast.error("Erro ao criar empresa", { description: (e as Error).message })
   });
 
+  useEffect(() => {
     if (company) {
       setHost(company.evogo_host || "");
       setToken(company.evogo_global_token || "");
