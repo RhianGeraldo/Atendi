@@ -532,10 +532,10 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           .single();
         
         if (fallbackMsg && mediaType === 'audio' && audioBase64 && instance.company_id) {
-          triggerAudioTranscription(fallbackMsg.id, audioBase64, instance.company_id);
+          await triggerAudioTranscription(fallbackMsg.id, audioBase64, instance.company_id);
         }
       } else if (newMessage && mediaType === 'audio' && audioBase64 && instance.company_id) {
-        triggerAudioTranscription(newMessage.id, audioBase64, instance.company_id);
+        await triggerAudioTranscription(newMessage.id, audioBase64, instance.company_id);
       }
 
       return;
