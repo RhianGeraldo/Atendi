@@ -1205,9 +1205,9 @@ function ChatPanel({
     return "Boa noite";
   };
 
-  const insertQuickMessage = (content: string) => {
+  const insertQuickMessage = (qm: { content: string, media_url?: string | null, media_type?: string | null }) => {
     const now = new Date();
-    let t = content;
+    let t = qm.content || "";
     t = t.replace(/\{\{atendente\}\}/g, profile?.name || "Atendente");
     t = t.replace(/\{\{cliente\}\}/g, conv.contact?.name && conv.contact.name !== "Desconhecido" ? conv.contact.name : "Cliente");
     t = t.replace(/\{\{saudacao\}\}/g, getGreeting());
@@ -1216,6 +1216,15 @@ function ChatPanel({
     t = t.replace(/\{\{data\}\}/g, now.toLocaleDateString('pt-BR'));
     t = t.replace(/\{\{hora\}\}/g, now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     setText(t);
+    
+    if (qm.media_url && qm.media_type) {
+      setSelectedFile({
+        file: null, // No raw file, we will send base64 directly
+        base64: qm.media_url,
+        type: qm.media_type as any
+      });
+    }
+
     document.getElementById('chat-input')?.focus();
   };
 
@@ -1645,7 +1654,7 @@ function ChatPanel({
                         <div
                           key={qm.id}
                           onClick={() => {
-                            insertQuickMessage(qm.content);
+                            insertQuickMessage(qm);
                             setQuickMsgIndex(0);
                           }}
                           className={cn(
@@ -1682,7 +1691,7 @@ function ChatPanel({
                       }
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        insertQuickMessage(filteredQuickMsgs[quickMsgIndex].content);
+                        insertQuickMessage(filteredQuickMsgs[quickMsgIndex]);
                         setQuickMsgIndex(0);
                         return;
                       }
