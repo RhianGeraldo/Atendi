@@ -33,7 +33,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
     
     // Dump to file for debugging
     try {
-      fs.writeFileSync('webhook-debug.json', JSON.stringify(logBody, null, 2));
+      // fs.writeFileSync('webhook-debug.json', JSON.stringify(logBody, null, 2));
     } catch (e) {
       console.error("Failed to write webhook-debug.json", e);
     }
@@ -131,7 +131,9 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         } else if (msg.documentMessage) {
           mediaType = 'document';
           textContent = msg.documentMessage.fileName || '📄 Documento';
-          // No preview for documents, show filename as content
+          if (msg.base64) {
+            mediaUrl = `data:${msg.documentMessage.mimetype || 'application/pdf'};base64,${msg.base64}`;
+          }
         } else if (msg.stickerMessage) {
           mediaType = 'image';
           textContent = '🖼️ Figurinha';

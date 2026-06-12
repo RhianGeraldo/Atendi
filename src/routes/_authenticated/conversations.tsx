@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -1900,6 +1900,30 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
           <div className="mb-2 flex flex-col gap-1">
             <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
             {displayContent && displayContent !== "🎥 Vídeo" && <div className="text-xs"><FormattedText text={displayContent} mine={mine} /></div>}
+          </div>
+        ) : m.media_type === "document" ? (
+          <div className="mb-2">
+            <a 
+              href={m.media_url || "#"} 
+              target={m.media_url ? "_blank" : undefined}
+              rel={m.media_url ? "noopener noreferrer" : undefined}
+              className={cn(
+                "flex items-center gap-3 p-3 rounded-lg border max-w-[260px] transition-opacity",
+                m.media_url ? "hover:opacity-90 cursor-pointer" : "cursor-default opacity-90",
+                mine ? "bg-black/10 dark:bg-white/10 border-transparent" : "bg-muted/80 border-border"
+              )}
+              onClick={(e) => { if (!m.media_url) e.preventDefault(); }}
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-red-500 text-white shadow-sm">
+                <FileText className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <p className="truncate text-sm font-semibold leading-tight">{displayContent || "Documento"}</p>
+                <p className={cn("mt-1 truncate text-[10px] font-medium uppercase opacity-70")}>
+                  {m.media_url ? "Documento PDF" : "Documento (sem arquivo)"}
+                </p>
+              </div>
+            </a>
           </div>
         ) : (
           <FormattedText text={displayContent} mine={mine} />

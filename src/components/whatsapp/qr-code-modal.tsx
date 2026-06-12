@@ -34,7 +34,7 @@ export function QrCodeModal({ instance, company, open, onOpenChange, onSuccess }
       try {
         const res: any = await client.getQrCode(instance.evogo_api_key);
         
-        const isConnected = res.connected || res.data?.connected;
+        const isConnected = res.connected || res.data?.connected || res.data?.Connected === true || res.Connected === true;
         // Verifica se conectou
         if (isConnected) {
           await handleConnected();
@@ -76,10 +76,30 @@ export function QrCodeModal({ instance, company, open, onOpenChange, onSuccess }
       setStatus("connected");
       
       try {
+        let ownerJid = null;
+        try {
+          const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
+          // Precisamos buscar todas as instâncias para pegar o JID
+          const allRes: any = await client.getAllInstances();
+          const evogoInstances = allRes?.data || [];
+          const evoInst = evogoInstances.find((e: any) => e.token === instance.evogo_api_key);
+          
+          if (evoInst && evoInst.jid) {
+            ownerJid = evoInst.jid.split('@')[0].split(':')[0];
+          }
+        } catch (err) {
+          console.error("Erro ao buscar owner da instância:", err);
+        }
+
         // Atualiza banco de dados
+        const updateData: any = { status: "connected" };
+        if (ownerJid) {
+          updateData.owner_jid = ownerJid;
+        }
+
         await supabase
           .from("whatsapp_instances")
-          .update({ status: "connected" })
+          .update(updateData)
           .eq("id", instance.id);
           
         toast.success("WhatsApp conectado com sucesso!");

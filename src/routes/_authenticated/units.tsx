@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Store, Smartphone, Settings, QrCode, Trash2, Users, MoreVertical, Edit2, ChevronRight, Layers } from "lucide-react";
+import { Plus, Store, Smartphone, Settings, QrCode, Trash2, Users, MoreVertical, Edit2, ChevronRight, Layers, RefreshCw } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -318,6 +318,7 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [selectedInstance, setSelectedInstance] = useState<any>(null);
+  const [refreshingInstance, setRefreshingInstance] = useState<string | null>(null);
 
   const { data: instances, isLoading: isLoadingInstances } = useQuery({
     queryKey: ["whatsapp-instances", unit.id],
@@ -378,6 +379,63 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
       toast.error("Erro ao desconectar", { description: e.message });
     } finally {
       setConfirmDialog({ open: false, type: null, instance: null, dept: null });
+    }
+  };
+
+  const handleRefreshInstance = async (instance: any) => {
+    setRefreshingInstance(instance.id);
+    try {
+      const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
+      const statusRes: any = await client.getInstanceStatus(instance.evogo_api_key);
+      
+      const isConnected = 
+        statusRes?.instance?.state === 'open' || 
+        statusRes?.instance?.status === 'open' || 
+        statusRes?.data?.instance?.state === 'open' ||
+        statusRes?.connected || 
+        statusRes?.data?.connected ||
+        statusRes?.data?.Connected === true ||
+        statusRes?.Connected === true;
+      
+      let ownerJid = instance.owner_jid;
+      try {
+        const allRes: any = await client.getAllInstances();
+        const evogoInstances = allRes?.data || [];
+        const evoInst = evogoInstances.find((e: any) => e.token === instance.evogo_api_key);
+        if (evoInst && evoInst.jid) {
+          ownerJid = evoInst.jid.split('@')[0].split(':')[0];
+        }
+      } catch (err) {
+        console.error("Erro ao buscar JID na atualização:", err);
+      }
+      
+      const newStatus = isConnected ? 'connected' : 'disconnected';
+      const updateData: any = { status: newStatus };
+      if (ownerJid) {
+        updateData.owner_jid = ownerJid;
+      }
+      
+      await supabase.from("whatsapp_instances").update(updateData).eq("id", instance.id);
+      qc.invalidateQueries({ queryKey: ["whatsapp-instances", unit.id] });
+      
+      if (newStatus === 'connected') {
+        toast.success("Conexão ativa!");
+      } else {
+        toast.warning("Aparelho está desconectado.");
+      }
+    } catch (err: any) {
+      console.error("Erro ao atualizar status:", err);
+      // If it's a 404 or specifically disconnected, we force update
+      const msg = err.message?.toLowerCase() || "";
+      if (msg.includes("not found") || msg.includes("disconnected") || msg.includes("logout") || msg.includes("404")) {
+        await supabase.from("whatsapp_instances").update({ status: 'disconnected' }).eq("id", instance.id);
+        qc.invalidateQueries({ queryKey: ["whatsapp-instances", unit.id] });
+        toast.warning("Aparelho está desconectado.");
+      } else {
+        toast.error("Erro ao verificar conexão", { description: "Verifique o status do EvoGo." });
+      }
+    } finally {
+      setRefreshingInstance(null);
     }
   };
 
@@ -475,8 +533,17 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
                             </Badge>
                           </div>
                           <p className="text-[10px] text-muted-foreground font-mono">{inst.instance_name}</p>
+                          {inst.owner_jid && (
+                            <p className="text-[11px] font-medium text-foreground/80 font-mono mt-1 flex items-center gap-1">
+                              <Smartphone className="h-3 w-3" />
+                              +{inst.owner_jid}
+                            </p>
+                          )}
                         </div>
                         <div className="flex gap-1.5 opacity-100 sm:opacity-50 group-hover:opacity-100 transition-opacity">
+                          <Button variant="secondary" size="icon" className="h-8 w-8 bg-muted/50 hover:bg-muted" onClick={() => handleRefreshInstance(inst)} title="Verificar Status">
+                            <RefreshCw className={`h-4 w-4 text-primary ${refreshingInstance === inst.id ? 'animate-spin' : ''}`} />
+                          </Button>
                           {inst.status === 'connected' ? (
                             <Button variant="outline" size="sm" className="h-8 px-3 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/20" onClick={() => setConfirmDialog({ open: true, type: 'disconnect', instance: inst, dept: null })}>
                               Desconectar
