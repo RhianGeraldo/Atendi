@@ -217,15 +217,15 @@ export function QuickMessagesTab() {
   })) || [];
 
   const MessageCard = ({ qm }: { qm: any }) => (
-    <div key={qm.id} className="flex items-start justify-between border rounded-lg p-4 bg-muted/20">
-      <div className="space-y-2 flex-1">
-        <div className="font-semibold text-sm">{qm.name}</div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block bg-primary/10 text-primary font-mono px-2 py-0.5 rounded text-xs font-bold">
+    <div key={qm.id} className="flex items-start justify-between border rounded-lg p-4 bg-card shadow-sm hover:shadow-md transition-shadow group">
+      <div className="space-y-1.5 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-block bg-primary/10 text-primary font-mono px-2 py-0.5 rounded text-xs font-bold shrink-0">
             {qm.shortcut}
           </span>
+          <span className="font-semibold text-sm truncate">{qm.name || "Mensagem sem nome"}</span>
           {qm.media_url && (
-            <span className="inline-flex items-center text-xs text-muted-foreground bg-background border px-1.5 py-0.5 rounded gap-1">
+            <span className="inline-flex items-center text-[10px] text-muted-foreground bg-muted border px-1.5 py-0.5 rounded gap-1 ml-1">
               {qm.media_type === 'image' && <ImageIcon className="h-3 w-3" />}
               {qm.media_type === 'audio' && <Headphones className="h-3 w-3" />}
               {qm.media_type === 'document' && <FileText className="h-3 w-3" />}
@@ -234,10 +234,10 @@ export function QuickMessagesTab() {
           )}
         </div>
         {qm.content && (
-          <p className="text-sm text-muted-foreground line-clamp-2">{qm.content}</p>
+          <p className="text-sm text-muted-foreground line-clamp-2 border-l-2 border-muted pl-2 mt-1">{qm.content}</p>
         )}
       </div>
-      <div className="flex gap-2 ml-4">
+      <div className="flex gap-1 ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
         <Button 
           variant="ghost" 
           size="icon" 
@@ -272,7 +272,7 @@ export function QuickMessagesTab() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <CardTitle className="flex items-center gap-2">
             <MessageSquarePlus className="h-5 w-5" />
@@ -282,7 +282,7 @@ export function QuickMessagesTab() {
             Organize atalhos e crie pastas para respostas prontas no chat.
           </CardDescription>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 w-full md:w-auto">
           {/* Folder Modal */}
           <Dialog open={isFolderOpen} onOpenChange={(open) => {
             setIsFolderOpen(open);
@@ -462,18 +462,20 @@ export function QuickMessagesTab() {
             {foldersWithMessages.length > 0 && (
               <Accordion type="multiple" defaultValue={folders?.map(f => f.id)} className="w-full space-y-4">
                 {foldersWithMessages.map(folder => (
-                  <AccordionItem key={folder.id} value={folder.id} className="border rounded-lg bg-card px-4">
-                    <div className="flex items-center justify-between">
-                      <AccordionTrigger className="hover:no-underline flex-1 py-4">
-                        <div className="flex items-center gap-2 font-semibold">
-                          <Folder className="h-4 w-4 text-primary" />
+                  <AccordionItem key={folder.id} value={folder.id} className="border-none bg-muted/30 rounded-xl overflow-hidden shadow-sm">
+                    <div className="flex items-center justify-between bg-card border rounded-xl hover:border-primary/50 transition-colors group/folder">
+                      <AccordionTrigger className="hover:no-underline flex-1 px-4 py-4">
+                        <div className="flex items-center gap-3 font-semibold text-base">
+                          <div className="bg-primary/10 p-1.5 rounded-md text-primary">
+                            <Folder className="h-4 w-4" />
+                          </div>
                           {folder.name}
-                          <span className="text-xs text-muted-foreground font-normal ml-2">
-                            ({folder.messages.length} atalhos)
+                          <span className="text-xs bg-muted text-muted-foreground font-normal px-2 py-0.5 rounded-full ml-2">
+                            {folder.messages.length} atalhos
                           </span>
                         </div>
                       </AccordionTrigger>
-                      <div className="flex gap-2">
+                      <div className="flex gap-1 pr-4 opacity-0 group-hover/folder:opacity-100 transition-opacity">
                         <Button 
                           variant="ghost" 
                           size="icon" 
@@ -502,7 +504,7 @@ export function QuickMessagesTab() {
                         </Button>
                       </div>
                     </div>
-                    <AccordionContent className="pt-2 pb-4 space-y-4">
+                    <AccordionContent className="pt-4 pb-2 px-4 space-y-3">
                       {folder.messages.length === 0 ? (
                         <p className="text-sm text-muted-foreground text-center py-4">Nenhuma mensagem nesta pasta.</p>
                       ) : (
