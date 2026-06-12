@@ -762,39 +762,55 @@ async function triggerAudioTranscription(messageId: string, base64Audio: string,
       return;
     }
 
-    const buffer = Buffer.from(base64Audio, 'base64');
-    const blob = new Blob([buffer], { type: 'audio/ogg' });
-    const formData = new FormData();
-    formData.append('file', blob, 'audio.ogg');
-    
-    let baseUrl = '';
-    
+    let response;
+
     if (provider === 'openrouter') {
-      baseUrl = 'https://openrouter.ai/api/v1/audio/transcriptions';
-      formData.append('model', 'groq/whisper-large-v3-turbo');
-    } else if (provider === 'groq') {
-      baseUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
-      formData.append('model', 'whisper-large-v3-turbo');
+      console.log(`[transcribeAudio] Sending to OpenRouter for message ${messageId}...`);
+      response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'openai/whisper-1',
+          input_audio: {
+            data: base64Audio,
+            format: 'ogg'
+          }
+        })
+      });
     } else {
-      baseUrl = 'https://api.openai.com/v1/audio/transcriptions';
-      formData.append('model', 'whisper-1');
+      const buffer = Buffer.from(base64Audio, 'base64');
+      const blob = new Blob([buffer], { type: 'audio/ogg' });
+      const formData = new FormData();
+      formData.append('file', blob, 'audio.ogg');
+      
+      let baseUrl = '';
+      if (provider === 'groq') {
+        baseUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
+        formData.append('model', 'whisper-large-v3-turbo');
+      } else {
+        baseUrl = 'https://api.openai.com/v1/audio/transcriptions';
+        formData.append('model', 'whisper-1');
+      }
+
+      formData.append('language', 'pt');
+      formData.append('response_format', 'json');
+
+      console.log(`[transcribeAudio] Sending to ${provider} for message ${messageId}...`);
+      response = await fetch(baseUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: formData as any
+      });
     }
-
-    formData.append('language', 'pt');
-    formData.append('response_format', 'json');
-
-    console.log(`[transcribeAudio] Sending to ${provider} for message ${messageId}...`);
-    const response = await fetch(baseUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: formData as any
-    });
 
     if (!response.ok) {
       const err = await response.text();
-      console.error('[transcribeAudio] API Error:', err);
+      console.error('[transcribeAudio] API Error:', response.status, err);
       return;
     }
 
