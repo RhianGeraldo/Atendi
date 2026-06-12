@@ -1764,6 +1764,40 @@ function FormattedText({ text, mine }: { text: string, mine?: boolean }) {
 }
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+const openMediaInNewTab = (mediaUrl: string) => {
+  if (!mediaUrl) return;
+  
+  if (mediaUrl.startsWith('data:')) {
+    try {
+      const [header, base64] = mediaUrl.split(',');
+      const mimeString = header.split(':')[1].split(';')[0];
+      
+      const byteCharacters = atob(base64);
+      const byteArrays = [];
+      
+      for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+        const slice = byteCharacters.slice(offset, offset + 512);
+        const byteNumbers = new Array(slice.length);
+        for (let i = 0; i < slice.length; i++) {
+          byteNumbers[i] = slice.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        byteArrays.push(byteArray);
+      }
+      
+      const blob = new Blob(byteArrays, { type: mimeString });
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank');
+      
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    } catch (e) {
+      console.error("Failed to open data URI in new tab", e);
+      window.open(mediaUrl, '_blank');
+    }
+  } else {
+    window.open(mediaUrl, '_blank');
+  }
+};
 
 function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void, onReply?: (m: MessageRow) => void, onEdit?: (m: MessageRow) => void }) {
   const mine = m.sender_type === "agent";
@@ -1911,7 +1945,12 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
                 m.media_url ? "hover:opacity-90 cursor-pointer" : "cursor-default opacity-90",
                 mine ? "bg-black/10 dark:bg-white/10 border-transparent" : "bg-muted/80 border-border"
               )}
-              onClick={(e) => { if (!m.media_url) e.preventDefault(); }}
+              onClick={(e) => { 
+                e.preventDefault();
+                if (m.media_url) {
+                  openMediaInNewTab(m.media_url);
+                }
+              }}
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-red-500 text-white shadow-sm">
                 <FileText className="h-5 w-5" />
