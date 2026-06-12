@@ -1502,6 +1502,8 @@ function ChatPanel({
               onReact={(emoji) => react.mutate({ messageId: m.id, emoji })} 
               onReply={(msg) => { setReplyingTo(msg); document.getElementById('chat-input')?.focus(); }}
               onEdit={startEdit}
+              onTranscribe={(id) => transcribeAudio.mutate(id)}
+              isTranscribingId={transcribeAudio.isPending ? transcribeAudio.variables : null}
             />
           ))}
         </div>
@@ -1856,7 +1858,7 @@ function PdfViewer({ url }: { url: string }) {
   return <iframe src={blobUrl} className="w-full h-full rounded-md border-0 min-h-[70vh]" title="PDF Viewer" />;
 }
 
-function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void, onReply?: (m: MessageRow) => void, onEdit?: (m: MessageRow) => void }) {
+function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onTranscribe, isTranscribingId }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void, onReply?: (m: MessageRow) => void, onEdit?: (m: MessageRow) => void, onTranscribe?: (id: string) => void, isTranscribingId?: string | null }) {
   const mine = m.sender_type === "agent";
   
   let senderName = null;
@@ -2020,10 +2022,10 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit }: { m: MessageRow
                 variant="ghost" 
                 size="sm" 
                 className="mt-1 h-6 text-[10px] w-48 border border-border/50 bg-background/50 text-muted-foreground hover:text-primary"
-                onClick={() => transcribeAudio.mutate(m.id)}
-                disabled={transcribeAudio.isPending && transcribeAudio.variables === m.id}
+                onClick={() => onTranscribe?.(m.id)}
+                disabled={isTranscribingId === m.id}
               >
-                {transcribeAudio.isPending && transcribeAudio.variables === m.id ? (
+                {isTranscribingId === m.id ? (
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" />
                 ) : (
                   <Sparkles className="mr-1 h-3 w-3" />
