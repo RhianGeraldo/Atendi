@@ -519,6 +519,11 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         .single();
 
       if (msgErr) {
+        if (msgErr.code === '23505') {
+          console.log('[evogo-webhook] Duplicate remote_msg_id, ignoring:', remoteMsgId);
+          return;
+        }
+
         // Fallback without new columns in case migration hasn't run yet
         console.error("Insert failed with new columns, falling back...", msgErr);
         const { data: fallbackMsg } = await supabaseAdmin
