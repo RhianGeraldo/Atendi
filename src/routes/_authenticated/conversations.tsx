@@ -2074,9 +2074,14 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onTranscribe, isT
         {adReply && !m.is_deleted && (
           <div className="mb-2 w-full max-w-sm rounded-lg border border-border/60 bg-black/5 dark:bg-white/5 overflow-hidden">
             {adReply.thumbnailURL ? (
-              <a href={adReply.sourceURL || '#'} target="_blank" rel="noopener noreferrer" className="block relative h-32 w-full bg-muted overflow-hidden">
-                <img src={adReply.thumbnailURL} alt="Ad Thumbnail" className="absolute inset-0 w-full h-full object-cover transition-transform hover:scale-105" />
-                <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm">
+              <a href={adReply.sourceURL || '#'} target="_blank" rel="noopener noreferrer" className="block relative h-40 w-full bg-black/10 dark:bg-white/5 overflow-hidden flex items-center justify-center group/ad">
+                {/* Blurred background for aspect ratio differences */}
+                <div 
+                  className="absolute inset-0 w-full h-full bg-cover bg-center blur-sm opacity-40 scale-110 transition-transform group-hover/ad:scale-125" 
+                  style={{ backgroundImage: `url(${adReply.thumbnailURL})` }} 
+                />
+                <img src={adReply.thumbnailURL} alt="Ad Thumbnail" className="relative z-10 w-full h-full object-contain drop-shadow-md transition-transform group-hover/ad:scale-105" />
+                <div className="absolute top-2 left-2 z-20 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm">
                   Anúncio
                 </div>
               </a>
