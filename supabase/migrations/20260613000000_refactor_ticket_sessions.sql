@@ -22,6 +22,7 @@ CREATE INDEX IF NOT EXISTS idx_session_events_session_id ON session_events(sessi
 ALTER TABLE session_events ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for session_events
+DROP POLICY IF EXISTS "Users can view session_events for their company" ON session_events;
 CREATE POLICY "Users can view session_events for their company"
   ON session_events FOR SELECT
   USING (
@@ -34,6 +35,7 @@ CREATE POLICY "Users can view session_events for their company"
     )
   );
 
+DROP POLICY IF EXISTS "Users can insert session_events" ON session_events;
 CREATE POLICY "Users can insert session_events"
   ON session_events FOR INSERT
   WITH CHECK (

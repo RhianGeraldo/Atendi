@@ -8,29 +8,37 @@ create table if not exists public.quick_message_folders (
 -- RLS
 alter table public.quick_message_folders enable row level security;
 
+DROP POLICY IF EXISTS "Users can view quick_message_folders of their company" ON public.quick_message_folders;
 create policy "Users can view quick_message_folders of their company"
 on public.quick_message_folders for select
 using (
   company_id = (select company_id from public.profiles where id = auth.uid())
 );
 
+
+DROP POLICY IF EXISTS "Users can insert quick_message_folders to their company" ON public.quick_message_folders;
 create policy "Users can insert quick_message_folders to their company"
 on public.quick_message_folders for insert
 with check (
   company_id = (select company_id from public.profiles where id = auth.uid())
 );
 
+
+DROP POLICY IF EXISTS "Users can update quick_message_folders of their company" ON public.quick_message_folders;
 create policy "Users can update quick_message_folders of their company"
 on public.quick_message_folders for update
 using (
   company_id = (select company_id from public.profiles where id = auth.uid())
 );
 
+
+DROP POLICY IF EXISTS "Users can delete quick_message_folders of their company" ON public.quick_message_folders;
 create policy "Users can delete quick_message_folders of their company"
 on public.quick_message_folders for delete
 using (
   company_id = (select company_id from public.profiles where id = auth.uid())
 );
+
 
 -- Alter quick_messages table
 alter table public.quick_messages

@@ -27,6 +27,7 @@ import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
 import { TaskDialog } from "@/components/crm/task-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Link } from "@tanstack/react-router";
 
 interface ContactDetailsSheetProps {
   contactId: string | null;
@@ -770,10 +771,15 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
           value,
           expected_close_date,
           created_at,
+          stage_id,
+          contact_id,
           pipeline_stages (
+            id,
             name,
             color,
+            pipeline_id,
             pipelines (
+              id,
               name
             )
           )
@@ -993,36 +999,47 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
           ) : (
             <div className="space-y-4">
               {opportunities.map((opp: any) => (
-                <div key={opp.id} className="flex flex-col gap-3 p-4 rounded-lg border bg-card text-card-foreground shadow-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-medium">{opp.title}</div>
-                      {opp.pipeline_stages?.pipelines?.name && (
-                        <div className="text-xs text-muted-foreground mt-0.5">
-                          Funil: {opp.pipeline_stages.pipelines.name}
+                <div key={opp.id} className="relative group flex flex-col gap-3 p-4 rounded-lg border bg-card text-card-foreground shadow-sm hover:shadow-md transition-all">
+                  <OpportunityDialog opportunity={opp}>
+                    <div className="cursor-pointer space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="font-medium hover:text-primary transition-colors">{opp.title}</div>
+                          {opp.pipeline_stages?.pipelines?.name && (
+                            <div className="text-xs text-muted-foreground mt-0.5">
+                              Funil: {opp.pipeline_stages.pipelines.name}
+                            </div>
+                          )}
                         </div>
-                      )}
+                        {opp.pipeline_stages && (
+                          <Badge style={{ backgroundColor: opp.pipeline_stages.color, color: '#fff' }} variant="outline">
+                            {opp.pipeline_stages.name}
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      <Separator />
+                      
+                      <div className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-1.5 text-green-600 font-medium">
+                          <DollarSign className="h-4 w-4" />
+                          <span>
+                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(opp.value || 0)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <CalendarDays className="h-3 w-3" />
+                          <span>{format(new Date(opp.created_at), "dd/MM/yyyy", { locale: ptBR })}</span>
+                        </div>
+                      </div>
                     </div>
-                    {opp.pipeline_stages && (
-                      <Badge style={{ backgroundColor: opp.pipeline_stages.color, color: '#fff' }} variant="outline">
-                        {opp.pipeline_stages.name}
-                      </Badge>
-                    )}
-                  </div>
-                  
-                  <Separator />
-                  
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-1.5 text-green-600 font-medium">
-                      <DollarSign className="h-4 w-4" />
-                      <span>
-                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(opp.value || 0)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <CalendarDays className="h-3 w-3" />
-                      <span>{format(new Date(opp.created_at), "dd/MM/yyyy", { locale: ptBR })}</span>
-                    </div>
+                  </OpportunityDialog>
+
+                  {/* Link to CRM */}
+                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Link to="/pipeline" className="h-7 w-7 rounded-full bg-background/80 backdrop-blur border flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-colors" title="Ver no CRM">
+                      <ExternalLink className="h-3 w-3" />
+                    </Link>
                   </div>
                 </div>
               ))}
@@ -1043,13 +1060,34 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
 }
 
 export function ContactDetailsSheet({ contactId, open, onOpenChange }: ContactDetailsSheetProps) {
+  const { profile } = useAuth();
+  const qc = useQueryClient();
+  const isAdmin = profile?.role === 'admin_company';
+
+  const deleteContact = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from("contacts")
+        .delete()
+        .eq("id", contactId!);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Contato excluído com sucesso");
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      onOpenChange(false);
+    },
+    onError: (error) => {
+      toast.error("Erro ao excluir contato", { description: error.message });
+    }
+  });
   const { data: contact, isLoading: isLoadingContact } = useQuery({
     queryKey: ["contact-details", contactId],
     enabled: !!contactId && open,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("contacts")
-        .select("*")
+        .select("*, creator:profiles!contacts_created_by_fkey(name)")
         .eq("id", contactId!)
         .single();
       if (error) throw error;
@@ -1073,7 +1111,37 @@ export function ContactDetailsSheet({ contactId, open, onOpenChange }: ContactDe
             <SheetHeader className="p-6 pb-4 border-b">
               <div className="flex items-center justify-between">
                 <SheetTitle className="text-2xl">{contact.name}</SheetTitle>
-                <ContactEditDialog contact={contact} />
+                <div className="flex items-center gap-1">
+                  <ContactEditDialog contact={contact} />
+                  {isAdmin && (
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-destructive hover:text-destructive hover:bg-destructive/10" title="Excluir contato">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-[425px]">
+                        <DialogHeader>
+                          <DialogTitle>Excluir Contato</DialogTitle>
+                        </DialogHeader>
+                        <div className="py-4">
+                          <p className="text-sm text-muted-foreground">
+                            Tem certeza que deseja excluir o contato <strong>{contact.name}</strong>? Esta ação não pode ser desfeita e todas as conversas e dados vinculados serão perdidos.
+                          </p>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))}>
+                            Cancelar
+                          </Button>
+                          <Button variant="destructive" onClick={() => deleteContact.mutate()} disabled={deleteContact.isPending}>
+                            {deleteContact.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                            Excluir
+                          </Button>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  )}
+                </div>
               </div>
               <SheetDescription className="flex flex-col gap-2 mt-2">
                 {contact.phone && (
@@ -1095,6 +1163,34 @@ export function ContactDetailsSheet({ contactId, open, onOpenChange }: ContactDe
                       {tag}
                     </Badge>
                   ))}
+                </div>
+              )}
+
+              {(contact.source || contact.creator) && (
+                <div className="flex flex-col gap-1.5 mt-4 pt-4 border-t border-border/50 text-xs">
+                  {contact.creator && (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <User className="h-3.5 w-3.5" />
+                      <span>Criado por: <span className="font-medium text-foreground">{contact.creator.name}</span></span>
+                    </div>
+                  )}
+                  {contact.source && (
+                    <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                      <Target className="h-3.5 w-3.5" />
+                      <div className="flex items-center gap-1.5">
+                        <span>Origem:</span>
+                        <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4 font-semibold">
+                          {contact.source}
+                        </Badge>
+                        {contact.source_details && (
+                          <>
+                            <span className="text-muted-foreground/50">•</span>
+                            <span>{contact.source_details}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </SheetHeader>

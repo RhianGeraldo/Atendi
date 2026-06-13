@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContactDetailsSheet } from "@/components/contacts/contact-details-sheet";
+import { CreateContactDialog } from "@/components/contacts/create-contact-dialog";
 import { Link, ExternalLink, Image as ImageIcon } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/contacts")({
@@ -162,6 +163,7 @@ function ContactsPage() {
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
       <div className="flex items-center justify-between space-y-2">
         <h2 className="text-3xl font-bold tracking-tight">Gestão de Contatos</h2>
+        <CreateContactDialog />
       </div>
 
       <Tabs defaultValue="all" className="space-y-4">

@@ -153,8 +153,8 @@ export function OpportunityDialog({
         setValue(opportunity.value?.toString() || "");
         setNotes(opportunity.notes || "");
         setExpectedCloseDate(opportunity.expected_close_date ? opportunity.expected_close_date.split('T')[0] : "");
-        setContactId(opportunity.contact_id || "");
-        // We need to fetch the pipelineId for this stage, but for simplicity we rely on the parent or we just show stages across pipelines? No, we should show pipelines.
+        setContactId(opportunity.contact_id || defaultContactId || "");
+        setPipelineId(opportunity.pipeline_stages?.pipeline_id || opportunity.pipeline_stages?.pipelines?.id || defaultPipelineId || "");
         setStageId(opportunity.stage_id || "");
       } else {
         setTitle("");
