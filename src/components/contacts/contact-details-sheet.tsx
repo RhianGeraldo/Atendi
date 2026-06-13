@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
-import { History, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon } from "lucide-react";
+import { History, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import {
@@ -297,6 +297,387 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
   );
 }
 
+function ContactJourney({ contactId }: { contactId: string }) {
+  const { data: events, isLoading } = useQuery({
+    queryKey: ["contact-journey", contactId],
+    queryFn: async () => {
+      const [
+        { data: messages },
+        { data: sessions },
+        { data: opportunities },
+        { data: tasks },
+        { data: contactNotes },
+        { data: oppNotes }
+      ] = await Promise.all([
+        supabase
+          .from("messages")
+          .select(`id, created_at, metadata, conversations!inner(contact_id)`)
+          .eq("conversations.contact_id", contactId)
+          .not("metadata", "is", null),
+          
+        supabase
+          .from("conversation_sessions" as any)
+          .select(`id, started_at, resolved_at, resolution_observation, whatsapp_instances(name), resolution_reasons(label), profiles!conversation_sessions_assigned_agent_id_fkey(name)`)
+          .eq("contact_id", contactId),
+
+        supabase
+          .from("opportunities")
+          .select(`id, title, value, created_at, pipeline_stages(name, color, pipelines(name))`)
+          .eq("contact_id", contactId),
+
+        supabase
+          .from("tasks")
+          .select(`id, title, due_date, status, task_type, created_at`)
+          .eq("contact_id", contactId),
+
+        supabase
+          .from("contact_notes" as any)
+          .select(`id, content, created_at, profiles(name, email)`)
+          .eq("contact_id", contactId),
+
+        supabase
+          .from("opportunity_notes" as any)
+          .select(`id, content, created_at, profiles(name, email), opportunities!inner(id, title, contact_id)`)
+          .eq("opportunities.contact_id", contactId)
+      ]);
+
+      const journeyEvents: any[] = [];
+
+      if (messages) {
+        messages.forEach(msg => {
+          const meta = msg.metadata;
+          const adReply = meta?.externalAdReply || meta?.contextInfo?.externalAdReply || meta?.extendedTextMessage?.contextInfo?.externalAdReply || meta?.Message?.extendedTextMessage?.contextInfo?.externalAdReply;
+          if (adReply) {
+            const conversionSource = meta.conversionSource || meta.contextInfo?.conversionSource || meta.extendedTextMessage?.contextInfo?.conversionSource || meta.Message?.extendedTextMessage?.contextInfo?.conversionSource;
+            journeyEvents.push({
+              id: `ad-${msg.id}`,
+              date: new Date(msg.created_at),
+              type: 'ad',
+              data: { adReply, conversionSource, sourceApp: adReply.sourceApp }
+            });
+          }
+        });
+      }
+
+      if (sessions) {
+        sessions.forEach((sess: any) => {
+          journeyEvents.push({
+            id: `sess-${sess.id}`,
+            date: new Date(sess.started_at),
+            type: 'conversation',
+            data: sess
+          });
+        });
+      }
+
+      if (opportunities) {
+        opportunities.forEach((opp: any) => {
+          journeyEvents.push({
+            id: `opp-${opp.id}`,
+            date: new Date(opp.created_at),
+            type: 'opportunity',
+            data: opp
+          });
+        });
+      }
+
+      if (tasks) {
+        tasks.forEach((task: any) => {
+          journeyEvents.push({
+            id: `task-${task.id}`,
+            date: new Date(task.created_at),
+            type: 'task',
+            data: task
+          });
+        });
+      }
+
+      if (contactNotes) {
+        contactNotes.forEach((note: any) => {
+          journeyEvents.push({
+            id: `cnote-${note.id}`,
+            date: new Date(note.created_at),
+            type: 'note',
+            data: { ...note, isOppNote: false }
+          });
+        });
+      }
+
+      if (oppNotes) {
+        oppNotes.forEach((note: any) => {
+          journeyEvents.push({
+            id: `onote-${note.id}`,
+            date: new Date(note.created_at),
+            type: 'note',
+            data: { ...note, isOppNote: true }
+          });
+        });
+      }
+
+      return journeyEvents.sort((a, b) => b.date.getTime() - a.date.getTime());
+    }
+  });
+
+  const getDuration = (start: string, end?: string | null) => {
+    if (!end) return "Em andamento";
+    const mins = differenceInMinutes(new Date(end), new Date(start));
+    if (mins < 60) return `${mins} min`;
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${hours}h ${remMins}m`;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!events || events.length === 0) {
+    return (
+      <div className="text-center py-8 text-muted-foreground border rounded-lg border-dashed mt-4">
+        Nenhum evento registrado na jornada deste contato.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-2 mb-6">
+        <Map className="h-5 w-5 text-muted-foreground" />
+        <h3 className="text-lg font-semibold">Jornada do Lead</h3>
+      </div>
+      
+      <div className="relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent space-y-6">
+        {events.map((event: any, index: number) => {
+          // AD EVENT
+          if (event.type === 'ad') {
+            const adData = event.data.adReply;
+            return (
+              <div key={event.id} className="relative flex items-start gap-4">
+                <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-primary/10 text-primary shadow shrink-0 z-10">
+                  <Megaphone className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0 p-4 rounded-xl border bg-card text-card-foreground shadow-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {format(event.date, "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
+                    </span>
+                  </div>
+                  <div className="flex gap-4">
+                    {adData.thumbnailURL || adData.originalImageURL ? (
+                      <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-md overflow-hidden bg-muted flex items-center justify-center border shrink-0">
+                        <img 
+                          src={adData.thumbnailURL || adData.originalImageURL} 
+                          alt="Ad thumbnail" 
+                          className="h-full w-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.parentElement?.classList.add('p-2');
+                          }}
+                        />
+                        <ImageIcon className="h-5 w-5 text-muted-foreground absolute -z-10" />
+                      </div>
+                    ) : (
+                      <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-md bg-muted flex items-center justify-center border text-muted-foreground shrink-0">
+                        <ImageIcon className="h-5 w-5" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                      <span className="text-xs font-semibold text-primary mb-1">Interação via Anúncio</span>
+                      <h4 className="font-semibold text-sm sm:text-base line-clamp-2 leading-tight" title={adData.title}>
+                        {adData.title || "Anúncio sem título"}
+                      </h4>
+                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                        {event.data.conversionSource && (
+                          <Badge variant="secondary" className="text-[10px]">
+                            {event.data.conversionSource}
+                          </Badge>
+                        )}
+                        {event.data.sourceApp && (
+                          <Badge variant="outline" className="text-[10px] capitalize">
+                            {event.data.sourceApp}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          // CONVERSATION EVENT
+          if (event.type === 'conversation') {
+            const sess = event.data;
+            return (
+              <div key={event.id} className="relative flex items-start gap-4">
+                <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-blue-500/10 text-blue-500 shadow shrink-0 z-10">
+                  <MessageCircle className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-semibold text-blue-600">Atendimento</span>
+                        <span className="text-xs font-mono text-muted-foreground uppercase truncate">#{sess.id.substring(0, 8)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Clock className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{format(event.date, "dd/MM/yy HH:mm", { locale: ptBR })}</span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <div className="flex items-center gap-1.5 text-[10px] bg-muted px-2 py-0.5 rounded-full font-medium">
+                        <Smartphone className="h-3 w-3 text-green-500 shrink-0" />
+                        <span className="truncate max-w-[80px]">{sess.whatsapp_instances?.name || "WhatsApp"}</span>
+                      </div>
+                      <div className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full">
+                        {getDuration(sess.started_at, sess.resolved_at)}
+                      </div>
+                    </div>
+                  </div>
+                  <Separator className="my-2" />
+                  <div className="flex items-start gap-2">
+                    <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[11px] font-semibold block mb-0.5 text-foreground/80">Atendido por</span>
+                      <span className="text-[11px] text-muted-foreground truncate block">
+                        {sess.assigned_agent?.name || "Bot / Não atribuído"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          // OPPORTUNITY EVENT
+          if (event.type === 'opportunity') {
+            const opp = event.data;
+            return (
+              <div key={event.id} className="relative flex items-start gap-4">
+                <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-green-500/10 text-green-600 shadow shrink-0 z-10">
+                  <Target className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {format(event.date, "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-semibold text-green-600 mb-1 block">Oportunidade Criada</span>
+                      <div className="font-medium">{opp.title}</div>
+                      {opp.pipeline_stages?.pipelines?.name && (
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          Funil: {opp.pipeline_stages.pipelines.name}
+                        </div>
+                      )}
+                    </div>
+                    {opp.pipeline_stages && (
+                      <Badge style={{ backgroundColor: opp.pipeline_stages.color, color: '#fff' }} variant="outline">
+                        {opp.pipeline_stages.name}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-green-600 font-medium text-sm mt-3">
+                    <DollarSign className="h-4 w-4" />
+                    <span>
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(opp.value || 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          // TASK EVENT
+          if (event.type === 'task') {
+            const task = event.data;
+            const isDone = task.status === 'done';
+            return (
+              <div key={event.id} className="relative flex items-start gap-4">
+                <div className={`flex items-center justify-center w-10 h-10 rounded-full border-4 border-background shadow shrink-0 z-10 ${isDone ? 'bg-emerald-500/10 text-emerald-600' : 'bg-orange-500/10 text-orange-600'}`}>
+                  {isDone ? <CheckSquare className="h-4 w-4" /> : <CalendarClock className="h-4 w-4" />}
+                </div>
+                <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {format(event.date, "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
+                    </span>
+                  </div>
+                  <div>
+                    <span className={`text-xs font-semibold mb-1 block ${isDone ? 'text-emerald-600' : 'text-orange-600'}`}>
+                      {isDone ? 'Tarefa Concluída' : 'Tarefa Criada'}
+                    </span>
+                    <span className={`text-sm font-medium ${isDone ? 'line-through text-muted-foreground' : ''}`}>
+                      {task.title}
+                    </span>
+                    {task.due_date && (
+                      <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1">
+                        <CalendarDays className="h-3 w-3" />
+                        Vencimento: {format(new Date(task.due_date), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          // NOTE EVENT
+          if (event.type === 'note') {
+            const note = event.data;
+            return (
+              <div key={event.id} className="relative flex items-start gap-4">
+                <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-amber-500/10 text-amber-600 shadow shrink-0 z-10">
+                  <Edit2 className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {format(event.date, "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold text-amber-600 mb-1 block">Anotação Adicionada</span>
+                    <p className="text-sm whitespace-pre-wrap">{note.content}</p>
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground mt-2">
+                      <div className="flex items-center gap-1.5">
+                        <User className="h-3 w-3" />
+                        <span>{note.profiles?.name || note.profiles?.email || "Usuário"}</span>
+                      </div>
+                      {note.isOppNote && note.opportunities && (
+                        <>
+                          <span>•</span>
+                          <div className="flex items-center gap-1.5 text-primary">
+                            <Target className="h-3 w-3" />
+                            <span className="truncate max-w-[150px]">{note.opportunities.title}</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          return null;
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function ContactDetailsTabs({ contactId }: { contactId: string }) {
   const { data: contact, isLoading: isLoadingContact } = useQuery({
     queryKey: ["contact-details", contactId],
@@ -418,9 +799,10 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
   }
 
   return (
-    <Tabs defaultValue="observacoes" className="flex-1 flex flex-col h-full min-h-0 w-full">
+    <Tabs defaultValue="jornada" className="flex-1 flex flex-col h-full min-h-0 w-full">
       <div className="px-4 pt-4 border-b w-full">
-        <TabsList className="grid w-full grid-cols-5 h-auto py-1 bg-muted/50 mb-3">
+        <TabsList className="grid w-full grid-cols-6 h-auto py-1 bg-muted/50 mb-3">
+          <TabsTrigger value="jornada" className="px-1 py-1.5 text-[10px] sm:text-[11px] font-bold">Jornada</TabsTrigger>
           <TabsTrigger value="observacoes" className="px-1 py-1.5 text-[10px] sm:text-[11px]">Notas</TabsTrigger>
           <TabsTrigger value="conversations" className="px-1 py-1.5 text-[10px] sm:text-[11px]">Histórico</TabsTrigger>
           <TabsTrigger value="opportunities" className="px-1 py-1.5 text-[10px] sm:text-[11px]">CRM</TabsTrigger>
@@ -430,6 +812,10 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
       </div>
 
       <ScrollArea className="flex-1 p-4">
+
+        <TabsContent value="jornada" className="mt-0">
+          <ContactJourney contactId={contactId} />
+        </TabsContent>
 
         <TabsContent value="observacoes" className="mt-0">
           <div className="flex items-center gap-2 mb-6">
