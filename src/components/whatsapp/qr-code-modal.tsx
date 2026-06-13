@@ -112,7 +112,26 @@ export function QrCodeModal({ instance, company, open, onOpenChange, onSuccess }
       }
     };
 
-    poll();
+    const initConnection = async () => {
+      try {
+        let defaultWebhook = instance.webhook_url;
+        if (!defaultWebhook || defaultWebhook.includes('supabase.co') || !defaultWebhook.startsWith(window.location.origin)) {
+          defaultWebhook = `${window.location.origin}/api/evogo/webhook`;
+        }
+        
+        // Em casos que a instância desconectou e ficou em um estado "zumbi",
+        // forçar a chamada de connect faz a Evolution API gerar o QR Code novamente.
+        // Se ela já estiver conectando, a API apenas ignora.
+        await client.connectInstance(defaultWebhook, instance.evogo_api_key);
+      } catch (err) {
+        console.warn("Aviso ao forçar conexão (pode ser ignorado se já estiver conectando):", err);
+      }
+      
+      // Inicia o polling logo em seguida
+      poll();
+    };
+
+    initConnection();
 
     return () => {
       isPolling = false;
