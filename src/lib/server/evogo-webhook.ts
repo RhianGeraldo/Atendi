@@ -157,6 +157,18 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           } else if (msg.stickerMessage.jpegThumbnail) {
             mediaUrl = `data:image/jpeg;base64,${msg.stickerMessage.jpegThumbnail}`;
           }
+        } else if (msg.contactMessage || msg.contactsArrayMessage) {
+          mediaType = 'text';
+          textContent = '👤 Contato(s) recebido(s)';
+        } else if (msg.locationMessage || msg.liveLocationMessage) {
+          mediaType = 'text';
+          textContent = '📍 Localização recebida';
+        } else if (msg.pollCreationMessage || msg.pollCreationMessageV2 || msg.pollCreationMessageV3) {
+          mediaType = 'text';
+          textContent = '📊 Enquete: ' + (msg.pollCreationMessage?.name || msg.pollCreationMessageV2?.name || msg.pollCreationMessageV3?.name || 'Votação');
+        } else if (info?.Type === 'call' || msg.messageStubType === 'CALL_MISSED_VOICE' || msg.messageStubType === 'CALL_MISSED_VIDEO' || msg.messageStubType === 40 || msg.messageStubType === 41) {
+          mediaType = 'text';
+          textContent = '📞 Chamada de voz/vídeo perdida';
         } else if (info.Type === 'reaction' || msg.reactionMessage) {
           const targetId = msg.reactionMessage?.key?.ID || msg.reactionMessage?.key?.id;
           const emoji = msg.reactionMessage?.text || '';
@@ -195,6 +207,10 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           // Evogo sends edited messages as secretEncryptedMessage if it fails to decrypt them
           // We must ignore them to prevent "[Mídia/Mensagem não suportada]" spam
           console.log('[evogo-webhook] Ignoring secretEncryptedMessage/Edit without decrypted content');
+          return;
+        } else if (info?.Type === 'text' && !msg.conversation && !msg.extendedTextMessage) {
+          // Ignore empty text messages (like PushName or system events sent as messages)
+          console.log('[evogo-webhook] Ignoring empty text message');
           return;
         }
         
