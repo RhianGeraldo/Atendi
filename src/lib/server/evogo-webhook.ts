@@ -37,9 +37,6 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
     } catch (e) {
       console.error("Failed to write webhook-debug.json", e);
     }
-
-    }
-
     // --- Handle PushName (CTWA LID Resolution) ---
     if (body.event === 'PushName') {
       const instanceName = body.instance || body.instanceName;
