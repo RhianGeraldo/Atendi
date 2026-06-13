@@ -475,7 +475,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       if (remoteMsgId) {
         const { data: existingMsg } = await supabaseAdmin
           .from('messages')
-          .select('id')
+          .select('id, metadata')
           .eq('remote_msg_id', remoteMsgId)
           .maybeSingle();
         
@@ -485,6 +485,16 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             .from('conversations')
             .update({ last_message_at: new Date().toISOString() })
             .eq('id', conversationId);
+
+          // Update metadata if the new payload has metadata that might have been missing initially
+          if (Object.keys(metadata).length > 0) {
+            const currentMeta = typeof existingMsg.metadata === 'object' && existingMsg.metadata !== null ? existingMsg.metadata : {};
+            const newMetadata = { ...currentMeta, ...metadata };
+            await supabaseAdmin
+              .from('messages')
+              .update({ metadata: newMetadata })
+              .eq('id', existingMsg.id);
+          }
           return;
         }
       }
@@ -520,7 +530,24 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       if (msgErr) {
         if (msgErr.code === '23505') {
-          console.log('[evogo-webhook] Duplicate remote_msg_id, ignoring:', remoteMsgId);
+          console.log('[evogo-webhook] Duplicate remote_msg_id during insert. Updating metadata if present:', remoteMsgId);
+          if (Object.keys(metadata).length > 0 && remoteMsgId) {
+            // Fetch existing to merge metadata
+            const { data: existing } = await supabaseAdmin
+              .from('messages')
+              .select('id, metadata')
+              .eq('remote_msg_id', remoteMsgId)
+              .maybeSingle();
+              
+            if (existing) {
+              const currentMeta = typeof existing.metadata === 'object' && existing.metadata !== null ? existing.metadata : {};
+              const newMetadata = { ...currentMeta, ...metadata };
+              await supabaseAdmin
+                .from('messages')
+                .update({ metadata: newMetadata })
+                .eq('id', existing.id);
+            }
+          }
           return;
         }
 
