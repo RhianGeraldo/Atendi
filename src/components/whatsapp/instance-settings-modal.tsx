@@ -46,12 +46,12 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     const fetchSettings = async () => {
       setLoading(true);
       try {
-        if (!instance.evogo_instance_id) {
-          throw new Error("Instância local sem ID do EvoGo vinculado.");
+        if (!instance.instance_name) {
+          throw new Error("Instância local sem nome do EvoGo vinculado.");
         }
 
         const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
-        const res: any = await client.getAdvancedSettings(instance.evogo_instance_id, instance.evogo_api_key);
+        const res: any = await client.getAdvancedSettings(instance.instance_name, instance.evogo_api_key);
         
         if (res) {
           setAdvSettings({
@@ -88,8 +88,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
       }
 
       // 2. Save Advanced Settings
-      if (instance.evogo_instance_id) {
-        await client.updateAdvancedSettings(instance.evogo_instance_id, advSettings, instance.evogo_api_key);
+      if (instance.instance_name) {
+        await client.updateAdvancedSettings(instance.instance_name, advSettings, instance.evogo_api_key);
       }
 
       toast.success("Configurações salvas com sucesso!");
