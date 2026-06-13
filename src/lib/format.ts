@@ -23,12 +23,18 @@ export function formatMessageTime(date: string | Date | null | undefined): strin
 export function formatPhone(phone?: string | null): string {
   if (!phone) return "";
   const digits = phone.replace(/\D/g, "");
+  
+  // Se for maior que 13 dígitos, provavelmente é um @lid ou ID do Facebook
+  if (digits.length > 13) {
+    return phone;
+  }
+  
   // +55 11 98765 0001
   if (digits.length >= 12) {
     const ddi = digits.slice(0, 2);
     const ddd = digits.slice(2, 4);
-    const part1 = digits.slice(4, 9);
-    const part2 = digits.slice(9, 13);
+    const part1 = digits.slice(4, digits.length - 4);
+    const part2 = digits.slice(digits.length - 4);
     return `+${ddi} (${ddd}) ${part1}-${part2}`;
   }
   if (digits.length === 11) {

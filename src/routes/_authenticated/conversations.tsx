@@ -499,7 +499,10 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
   });
 
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
-  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  let contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  if (!contactName || contactName === "Desconhecido" || /^\d+$/.test(contactName)) {
+    contactName = isGroup ? "Grupo do WhatsApp" : (formatPhone(conv.contact?.phone || "") || contactName || "Desconhecido");
+  }
 
   return (
     <div className="flex h-full flex-col bg-background/50">
@@ -514,10 +517,10 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
         <div className="relative mb-4 group">
           <Avatar className="h-24 w-24 ring-4 ring-background shadow-xl">
             {profilePictureUrl ? (
-              <img src={profilePictureUrl} alt={conv.contact?.name} className="h-full w-full object-cover" />
+              <img src={profilePictureUrl} alt={contactName} className="h-full w-full object-cover" />
             ) : (
               <AvatarFallback className={cn("text-3xl font-medium", isGroup ? "bg-primary/20 text-primary" : "bg-gradient-to-br from-primary/20 to-primary/5 text-primary")}>
-                {isGroup ? <Users className="h-10 w-10 opacity-80" /> : initials(conv.contact?.name || "Desconhecido")}
+                {isGroup ? <Users className="h-10 w-10 opacity-80" /> : initials(contactName)}
               </AvatarFallback>
             )}
           </Avatar>
@@ -780,7 +783,10 @@ function ConversationItem({
   showUnitInfo?: boolean;
 }) {
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
-  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  let contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  if (!contactName || contactName === "Desconhecido" || /^\d+$/.test(contactName)) {
+    contactName = isGroup ? "Grupo do WhatsApp" : (formatPhone(conv.contact?.phone || "") || contactName || "Desconhecido");
+  }
 
   return (
     <button
@@ -792,7 +798,7 @@ function ConversationItem({
     >
       <Avatar className="h-10 w-10">
         <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
-          {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
+          {isGroup ? <Users className="h-4 w-4" /> : initials(contactName)}
         </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1 grid">
@@ -1436,7 +1442,10 @@ function ChatPanel({
   });
 
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
-  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  let contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  if (!contactName || contactName === "Desconhecido" || /^\d+$/.test(contactName)) {
+    contactName = isGroup ? "Grupo do WhatsApp" : (formatPhone(conv.contact?.phone || "") || contactName || "Desconhecido");
+  }
 
   const quickMsgItems = useMemo(() => {
     if (!text.startsWith('/') || !quickMessages) return { items: [], focusableCount: 0 };
@@ -1485,7 +1494,7 @@ function ChatPanel({
             <div className="relative">
               <Avatar className="h-10 w-10 ring-2 ring-primary/10 ring-offset-2">
                 <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
-                  {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
+                  {isGroup ? <Users className="h-4 w-4" /> : initials(contactName)}
                 </AvatarFallback>
               </Avatar>
               <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-success" />

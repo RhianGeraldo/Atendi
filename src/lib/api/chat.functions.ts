@@ -938,7 +938,7 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
       console.warn("Failed to fetch avatar:", e);
     }
 
-    if (pushName) {
+    if (pushName && !pushName.includes('@lid') && !/^\d+$/.test(pushName.replace(/\D/g, ''))) {
       await supabaseAdmin.from('contacts').update({ name: pushName }).eq('id', data.contactId);
       return { success: true, updatedName: pushName, avatarFound: !!avatarUrl };
     } else if (avatarUrl) {
