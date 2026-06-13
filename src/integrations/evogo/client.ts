@@ -65,6 +65,13 @@ export class EvoGoClient {
     return this.request('/instance/qr', {}, instanceToken);
   }
 
+  async getPairingCode(phone: string, instanceToken: string) {
+    return this.request('/instance/pair', {
+      method: 'POST',
+      body: JSON.stringify({ phone })
+    }, instanceToken);
+  }
+
   async getInstanceStatus(instanceToken: string) {
     return this.request('/instance/status', {}, instanceToken);
   }

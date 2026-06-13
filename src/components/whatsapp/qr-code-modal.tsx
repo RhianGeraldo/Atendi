@@ -3,6 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { QrCode, Smartphone, Loader2, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { EvoGoClient } from "@/integrations/evogo/client";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -18,6 +20,10 @@ export function QrCodeModal({ instance, company, open, onOpenChange, onSuccess }
   const qc = useQueryClient();
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "qr" | "connected">("loading");
+  const [pairingMode, setPairingMode] = useState(false);
+  const [pairingPhone, setPairingPhone] = useState("");
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [isPairingLoading, setIsPairingLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !instance || !company?.evogo_host) return;
@@ -112,31 +118,43 @@ export function QrCodeModal({ instance, company, open, onOpenChange, onSuccess }
       }
     };
 
-    const initConnection = async () => {
-      try {
-        let defaultWebhook = instance.webhook_url;
-        if (!defaultWebhook || defaultWebhook.includes('supabase.co') || !defaultWebhook.startsWith(window.location.origin)) {
-          defaultWebhook = `${window.location.origin}/api/evogo/webhook`;
-        }
-        
-        // Em casos que a instância desconectou e ficou em um estado "zumbi",
-        // forçar a chamada de connect faz a Evolution API gerar o QR Code novamente.
-        // Se ela já estiver conectando, a API apenas ignora.
-        await client.connectInstance(defaultWebhook, instance.evogo_api_key);
-      } catch (err) {
-        console.warn("Aviso ao forçar conexão (pode ser ignorado se já estiver conectando):", err);
-      }
-      
-      // Inicia o polling logo em seguida
-      poll();
-    };
-
-    initConnection();
+    poll();
 
     return () => {
       isPolling = false;
     };
   }, [open, instance, company]);
+
+  const handleRequestPairing = async () => {
+    if (!pairingPhone) {
+      toast.error("Digite o número de telefone.");
+      return;
+    }
+    
+    const cleanPhone = pairingPhone.replace(/\D/g, "");
+    if (cleanPhone.length < 10) {
+      toast.error("Número inválido.");
+      return;
+    }
+
+    setIsPairingLoading(true);
+    setPairingCode(null);
+    try {
+      const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
+      const res: any = await client.getPairingCode(cleanPhone, instance.evogo_api_key);
+      const code = res.code || res.data?.code || res.pairingCode || res.data?.pairingCode || (typeof res === 'string' ? res : null);
+      if (code) {
+        setPairingCode(code);
+        toast.success("Código gerado!");
+      } else {
+        toast.error("Não foi possível gerar o código.");
+      }
+    } catch (e: any) {
+      toast.error(`Erro ao gerar código: ${e.message}`);
+    } finally {
+      setIsPairingLoading(false);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -160,20 +178,68 @@ export function QrCodeModal({ instance, company, open, onOpenChange, onSuccess }
           )}
 
           {status === "qr" && qrCodeUrl && (
-            <div className="flex flex-col items-center gap-4">
-              <div className="bg-white p-4 rounded-xl shadow-sm border">
-                <img src={qrCodeUrl} alt="QR Code WhatsApp" className="w-[240px] h-[240px]" />
-              </div>
-              
-              <div className="bg-sidebar-accent/50 text-sm text-sidebar-foreground p-4 rounded-lg w-full space-y-2">
-                <p className="font-medium">Como conectar:</p>
-                <ol className="list-decimal list-inside space-y-1 text-xs opacity-80">
-                  <li>Abra o WhatsApp no seu celular</li>
-                  <li>Toque em <strong>Aparelhos conectados</strong></li>
-                  <li>Toque em <strong>Conectar um aparelho</strong></li>
-                  <li>Aponte seu celular para esta tela</li>
-                </ol>
-              </div>
+            <div className="flex flex-col items-center gap-4 w-full">
+              {!pairingMode ? (
+                <>
+                  <div className="bg-white p-4 rounded-xl shadow-sm border">
+                    <img src={qrCodeUrl} alt="QR Code WhatsApp" className="w-[240px] h-[240px]" />
+                  </div>
+                  
+                  <div className="bg-sidebar-accent/50 text-sm text-sidebar-foreground p-4 rounded-lg w-full space-y-2">
+                    <p className="font-medium">Como conectar via QR Code:</p>
+                    <ol className="list-decimal list-inside space-y-1 text-xs opacity-80">
+                      <li>Abra o WhatsApp no seu celular</li>
+                      <li>Toque em <strong>Aparelhos conectados</strong></li>
+                      <li>Toque em <strong>Conectar um aparelho</strong></li>
+                      <li>Aponte seu celular para esta tela</li>
+                    </ol>
+                  </div>
+                  
+                  <Button variant="link" size="sm" onClick={() => setPairingMode(true)} className="text-muted-foreground mt-2">
+                    Ou conectar usando código (Pairing Code)
+                  </Button>
+                </>
+              ) : (
+                <div className="w-full flex flex-col items-center gap-4 animate-in fade-in zoom-in-95">
+                  <div className="text-center space-y-1">
+                    <h3 className="font-medium">Vincular com Número de Telefone</h3>
+                    <p className="text-xs text-muted-foreground">O WhatsApp enviará uma notificação para inserir o código abaixo.</p>
+                  </div>
+                  
+                  {!pairingCode ? (
+                    <div className="w-full max-w-xs space-y-3">
+                      <Input
+                        placeholder="Ex: 5511999999999"
+                        value={pairingPhone}
+                        onChange={(e) => setPairingPhone(e.target.value)}
+                        disabled={isPairingLoading}
+                      />
+                      <Button 
+                        className="w-full" 
+                        onClick={handleRequestPairing}
+                        disabled={isPairingLoading || !pairingPhone}
+                      >
+                        {isPairingLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Gerar Código
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="bg-muted px-6 py-4 rounded-xl border border-border shadow-sm flex gap-2 tracking-widest text-3xl font-mono font-bold text-primary">
+                        {pairingCode}
+                      </div>
+                      <p className="text-xs text-muted-foreground text-center">
+                        Insira este código no seu WhatsApp quando solicitado.<br/>
+                        Estamos aguardando a conexão...
+                      </p>
+                    </div>
+                  )}
+                  
+                  <Button variant="link" size="sm" onClick={() => setPairingMode(false)} className="text-muted-foreground mt-4">
+                    Voltar para o QR Code
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
