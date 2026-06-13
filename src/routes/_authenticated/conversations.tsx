@@ -477,7 +477,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
   const updateContact = useMutation({
     mutationFn: async () => {
       return await updateContactFromWhatsappAction({
-        data: { contactId: conv.contact?.id, unitId: conv.unit_id, whatsappInstanceId: conv.whatsapp_instance_id }
+        data: { contactId: conv.contact.id, unitId: conv.unit_id, whatsappInstanceId: conv.whatsapp_instance_id }
       });
     },
     onSuccess: (data) => {
@@ -491,7 +491,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
         toast.info(data.message);
       }
       qc.invalidateQueries({ queryKey: ["conversations"] });
-      qc.invalidateQueries({ queryKey: ["contact-profile-pic", conv.contact?.id] });
+      qc.invalidateQueries({ queryKey: ["contact-profile-pic", conv.contact.id] });
     },
     onError: (e) => {
       toast.error(e.message || "Erro ao atualizar contato.");
@@ -499,10 +499,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
   });
 
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
-  let contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
-  if (!contactName || contactName === "Desconhecido" || /^\d+$/.test(contactName)) {
-    contactName = isGroup ? "Grupo do WhatsApp" : (formatPhone(conv.contact?.phone || "") || contactName || "Desconhecido");
-  }
+  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
   return (
     <div className="flex h-full flex-col bg-background/50">
@@ -517,10 +514,10 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
         <div className="relative mb-4 group">
           <Avatar className="h-24 w-24 ring-4 ring-background shadow-xl">
             {profilePictureUrl ? (
-              <img src={profilePictureUrl} alt={contactName} className="h-full w-full object-cover" />
+              <img src={profilePictureUrl} alt={conv.contact?.name} className="h-full w-full object-cover" />
             ) : (
               <AvatarFallback className={cn("text-3xl font-medium", isGroup ? "bg-primary/20 text-primary" : "bg-gradient-to-br from-primary/20 to-primary/5 text-primary")}>
-                {isGroup ? <Users className="h-10 w-10 opacity-80" /> : initials(contactName)}
+                {isGroup ? <Users className="h-10 w-10 opacity-80" /> : initials(conv.contact.name)}
               </AvatarFallback>
             )}
           </Avatar>
@@ -544,7 +541,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
           
           <div className="flex items-center justify-center">
             <Badge variant="secondary" className="font-mono text-xs font-normal text-muted-foreground bg-muted/50 hover:bg-muted/80 transition-colors px-2.5 py-0.5">
-              {isGroup ? "Grupo" : formatPhone(conv.contact?.phone || "")}
+              {isGroup ? "Grupo" : formatPhone(conv.contact.phone)}
             </Badge>
           </div>
         </div>
@@ -783,10 +780,7 @@ function ConversationItem({
   showUnitInfo?: boolean;
 }) {
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
-  let contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
-  if (!contactName || contactName === "Desconhecido" || /^\d+$/.test(contactName)) {
-    contactName = isGroup ? "Grupo do WhatsApp" : (formatPhone(conv.contact?.phone || "") || contactName || "Desconhecido");
-  }
+  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
   return (
     <button
@@ -798,7 +792,7 @@ function ConversationItem({
     >
       <Avatar className="h-10 w-10">
         <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
-          {isGroup ? <Users className="h-4 w-4" /> : initials(contactName)}
+          {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
         </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1 grid">
@@ -942,14 +936,13 @@ function ChatPanel({
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const { data: messages } = useQuery({
-    queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id],
-    enabled: !!conv.contact?.id,
+    queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id],
     queryFn: async () => {
       // 1. Get all conversation IDs for this contact on this instance
       const { data: convs, error: convErr } = await supabase
         .from("conversations")
         .select("id")
-        .eq("contact_id", conv.contact?.id)
+        .eq("contact_id", conv.contact.id)
         .eq("whatsapp_instance_id", conv.whatsapp_instance_id);
         
       if (convErr) throw convErr;
@@ -1024,8 +1017,8 @@ function ChatPanel({
       return await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent } });
     },
     onMutate: async (payload) => {
-      await qc.cancelQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
-      const previousMessages = qc.getQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id]);
+      await qc.cancelQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
+      const previousMessages = qc.getQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id]);
       
       const optimisticMsg: MessageRow = {
         id: crypto.randomUUID(),
@@ -1039,7 +1032,7 @@ function ChatPanel({
         profiles: profile?.name ? { name: profile.name } : undefined
       };
 
-      qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
+      qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
       setText("");
       setSelectedFile(null);
       setReplyingTo(null);
@@ -1052,13 +1045,13 @@ function ChatPanel({
     },
     onError: (e, variables, context) => {
       if (context?.previousMessages) {
-        qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], context.previousMessages);
+        qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], context.previousMessages);
       }
       setText(context?.content || "");
       toast.error("Erro ao enviar", { description: (e as Error).message });
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
+      qc.invalidateQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
@@ -1068,10 +1061,10 @@ function ChatPanel({
       await editMessageAction({ data: { conversationId: conv.id, messageId: payload.messageId, newContent: payload.content } });
     },
     onMutate: async (payload) => {
-      await qc.cancelQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
-      const previousMessages = qc.getQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id]);
+      await qc.cancelQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
+      const previousMessages = qc.getQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id]);
       
-      qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
+      qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
         return old.map(m => m.id === payload.messageId ? { ...m, content: payload.content, is_edited: true } : m);
       });
@@ -1080,11 +1073,11 @@ function ChatPanel({
       return { previousMessages };
     },
     onError: (e, v, context) => {
-      if (context?.previousMessages) qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], context.previousMessages);
+      if (context?.previousMessages) qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], context.previousMessages);
       toast.error("Erro ao editar", { description: (e as Error).message });
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
+      qc.invalidateQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
     }
   });
 
@@ -1094,7 +1087,7 @@ function ChatPanel({
     },
     onSuccess: (data, variables) => {
       toast.success("Transcrição concluída com sucesso!");
-      qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
+      qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
         return old.map(m => m.id === variables ? { ...m, transcription: data.text } : m);
       });
@@ -1108,21 +1101,21 @@ function ChatPanel({
       await reactToMessageAction({ data: { conversationId: conv.id, messageId, emoji } });
     },
     onMutate: async ({ messageId, emoji }) => {
-      await qc.cancelQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
-      const previousMessages = qc.getQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id]);
+      await qc.cancelQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
+      const previousMessages = qc.getQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id]);
       
-      qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
+      qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
         return old.map(m => m.id === messageId ? { ...m, reactions: emoji ? { [emoji]: 1 } : {} } : m);
       });
       return { previousMessages };
     },
     onError: (e, v, context) => {
-      if (context?.previousMessages) qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], context.previousMessages);
+      if (context?.previousMessages) qc.setQueryData(["messages", conv.contact.id, conv.whatsapp_instance_id], context.previousMessages);
       toast.error("Erro ao reagir", { description: (e as Error).message });
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
+      qc.invalidateQueries({ queryKey: ["messages", conv.contact.id, conv.whatsapp_instance_id] });
     }
   });
 
@@ -1442,10 +1435,7 @@ function ChatPanel({
   });
 
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
-  let contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
-  if (!contactName || contactName === "Desconhecido" || /^\d+$/.test(contactName)) {
-    contactName = isGroup ? "Grupo do WhatsApp" : (formatPhone(conv.contact?.phone || "") || contactName || "Desconhecido");
-  }
+  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
   const quickMsgItems = useMemo(() => {
     if (!text.startsWith('/') || !quickMessages) return { items: [], focusableCount: 0 };
@@ -1494,7 +1484,7 @@ function ChatPanel({
             <div className="relative">
               <Avatar className="h-10 w-10 ring-2 ring-primary/10 ring-offset-2">
                 <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
-                  {isGroup ? <Users className="h-4 w-4" /> : initials(contactName)}
+                  {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
                 </AvatarFallback>
               </Avatar>
               <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-success" />
