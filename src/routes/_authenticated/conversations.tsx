@@ -1676,7 +1676,7 @@ function ChatPanel({
                   </PopoverContent>
                 </Popover>
 
-                <Popover open={filteredQuickMsgs.length > 0} onOpenChange={() => {}}>
+                <Popover open={quickMsgItems.items.length > 0} onOpenChange={() => {}}>
                   <PopoverTrigger asChild>
                     <button 
                       className="rounded p-2 text-muted-foreground hover:bg-accent"
