@@ -38,6 +38,49 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       console.error("Failed to write webhook-debug.json", e);
     }
 
+    }
+
+    // --- Handle PushName (CTWA LID Resolution) ---
+    if (body.event === 'PushName') {
+      const instanceName = body.instance || body.instanceName;
+      const jid = body.data?.JID;
+      const jidAlt = body.data?.JIDAlt;
+      const newPushName = body.data?.NewPushName;
+      
+      if (instanceName && jid && jidAlt && jid.includes('@lid') && jidAlt.includes('@s.whatsapp.net')) {
+        const lidNumber = jid.split('@')[0];
+        const realNumber = jidAlt.split('@')[0];
+        
+        const { data: instance } = await supabaseAdmin
+          .from('whatsapp_instances')
+          .select('company_id')
+          .eq('instance_name', instanceName)
+          .single();
+
+        if (instance) {
+          const { data: contact } = await supabaseAdmin
+            .from('contacts')
+            .select('id, phone')
+            .eq('company_id', instance.company_id)
+            .or(`phone.eq.${lidNumber},whatsapp_lid.eq.${lidNumber}`)
+            .maybeSingle();
+
+          if (contact) {
+            const updatePayload: any = {
+              whatsapp_lid: lidNumber,
+              phone: realNumber
+            };
+            if (newPushName && newPushName !== 'Desconhecido') {
+              updatePayload.name = newPushName;
+            }
+            await supabaseAdmin.from('contacts').update(updatePayload).eq('id', contact.id);
+            console.log(`[evogo-webhook] CTWA LID Unificado: LID ${lidNumber} -> Real ${realNumber}`);
+          }
+        }
+      }
+      return;
+    }
+
     // Handle message.upsert (Baileys/Evolution API format) or Message (WhatsMeow/EvoGo format)
     if (body.event === 'messages.upsert' || body.event === 'messages.update' || body.event === 'Message') {
       const instanceName = body.instance || body.instanceName;
@@ -367,7 +410,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         .from('contacts')
         .select('id, name')
         .eq('company_id', company_id)
-        .in('phone', phoneVariants)
+        .or(`phone.in.(${phoneVariants.join(',')}),whatsapp_lid.eq.${phoneNumber}`)
         .limit(1);
 
       if (existingContacts && existingContacts.length > 0) {
@@ -654,8 +697,8 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       const { data: contactInfo } = await supabaseAdmin
         .from('contacts')
         .select('id')
-        .in('phone', phoneVariants)
         .eq('company_id', instance.company_id)
+        .or(`phone.in.(${phoneVariants.join(',')}),whatsapp_lid.eq.${phone}`)
         .maybeSingle();
         
       if (!contactInfo) return;
@@ -704,7 +747,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         .from('contacts')
         .select('id, name')
         .eq('company_id', company_id)
-        .in('phone', phoneVariants)
+        .or(`phone.in.(${phoneVariants.join(',')}),whatsapp_lid.eq.${phoneNumber}`)
         .limit(1);
 
       if (existingContacts && existingContacts.length > 0) {
