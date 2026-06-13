@@ -472,11 +472,12 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       // 5. Dedup: skip if we already have this remote_msg_id in the DB
       // This happens when we send from the platform - the EvoGo echo webhook arrives but we already saved it
-      if (remoteMsgId) {
+      if (remoteMsgId && conversationId) {
         const { data: existingMsg } = await supabaseAdmin
           .from('messages')
           .select('id, metadata')
           .eq('remote_msg_id', remoteMsgId)
+          .eq('conversation_id', conversationId)
           .maybeSingle();
         
         if (existingMsg) {
@@ -531,12 +532,13 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       if (msgErr) {
         if (msgErr.code === '23505') {
           console.log('[evogo-webhook] Duplicate remote_msg_id during insert. Updating metadata if present:', remoteMsgId);
-          if (Object.keys(metadata).length > 0 && remoteMsgId) {
+          if (Object.keys(metadata).length > 0 && remoteMsgId && conversationId) {
             // Fetch existing to merge metadata
             const { data: existing } = await supabaseAdmin
               .from('messages')
               .select('id, metadata')
               .eq('remote_msg_id', remoteMsgId)
+              .eq('conversation_id', conversationId)
               .maybeSingle();
               
             if (existing) {
