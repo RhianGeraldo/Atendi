@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -215,16 +215,15 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
         <h3 className="text-lg font-semibold">Jornada de Anúncios</h3>
       </div>
       
-      <div className="relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent space-y-6">
+      <div className="flex flex-col">
         {ads.map((ad: any, index: number) => (
-          <div key={ad.id} className="relative flex items-start gap-4">
-            <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-primary/10 text-primary shadow shrink-0 z-10">
-              <Megaphone className="h-4 w-4" />
-            </div>
-            
+          <React.Fragment key={ad.id}>
             <div className="flex-1 min-w-0 p-4 rounded-xl border bg-card text-card-foreground shadow-sm">
               <div className="flex items-center gap-2 mb-3">
-                <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary shrink-0">
+                  <Megaphone className="h-3.5 w-3.5" />
+                </div>
+                <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-1" />
                 <span className="text-xs font-medium text-muted-foreground">
                   {format(new Date(ad.createdAt), "dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: ptBR })}
                 </span>
@@ -290,7 +289,8 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
                 </div>
               </div>
             </div>
-          </div>
+            {index < ads.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+          </React.Fragment>
         ))}
       </div>
     </div>
@@ -317,7 +317,7 @@ function ContactJourney({ contactId }: { contactId: string }) {
           
         supabase
           .from("conversation_sessions" as any)
-          .select(`id, started_at, resolved_at, resolution_observation, whatsapp_instances(name), resolution_reasons(label), profiles!conversation_sessions_assigned_agent_id_fkey(name)`)
+          .select(`id, started_at, resolved_at, resolution_observation, whatsapp_instances(name), resolution_reasons(label), assigned_agent:profiles!conversation_sessions_assigned_agent_id_fkey(name)`)
           .eq("contact_id", contactId),
 
         supabase
@@ -450,19 +450,19 @@ function ContactJourney({ contactId }: { contactId: string }) {
         <h3 className="text-lg font-semibold">Jornada do Lead</h3>
       </div>
       
-      <div className="relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent space-y-6">
+      <div className="flex flex-col">
         {events.map((event: any, index: number) => {
           // AD EVENT
           if (event.type === 'ad') {
             const adData = event.data.adReply;
             return (
-              <div key={event.id} className="relative flex items-start gap-4">
-                <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-primary/10 text-primary shadow shrink-0 z-10">
-                  <Megaphone className="h-4 w-4" />
-                </div>
+              <React.Fragment key={event.id}>
                 <div className="flex-1 min-w-0 p-4 rounded-xl border bg-card text-card-foreground shadow-sm">
                   <div className="flex items-center gap-2 mb-3">
-                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <div className="flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary shrink-0">
+                      <Megaphone className="h-3.5 w-3.5" />
+                    </div>
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-1" />
                     <span className="text-xs font-medium text-muted-foreground">
                       {format(event.date, "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
                     </span>
@@ -506,7 +506,8 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     </div>
                   </div>
                 </div>
-              </div>
+                {index < events.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+              </React.Fragment>
             );
           }
 
@@ -514,17 +515,17 @@ function ContactJourney({ contactId }: { contactId: string }) {
           if (event.type === 'conversation') {
             const sess = event.data;
             return (
-              <div key={event.id} className="relative flex items-start gap-4">
-                <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-blue-500/10 text-blue-500 shadow shrink-0 z-10">
-                  <MessageCircle className="h-4 w-4" />
-                </div>
+              <React.Fragment key={event.id}>
                 <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-500/10 text-blue-500 shrink-0">
+                      <MessageCircle className="h-3.5 w-3.5" />
+                    </div>
+                    <span className="text-xs font-semibold text-blue-600">Atendimento</span>
+                    <span className="text-xs font-mono text-muted-foreground uppercase truncate">#{sess.id.substring(0, 8)}</span>
+                  </div>
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-semibold text-blue-600">Atendimento</span>
-                        <span className="text-xs font-mono text-muted-foreground uppercase truncate">#{sess.id.substring(0, 8)}</span>
-                      </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Clock className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{format(event.date, "dd/MM/yy HH:mm", { locale: ptBR })}</span>
@@ -551,7 +552,8 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     </div>
                   </div>
                 </div>
-              </div>
+                {index < events.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+              </React.Fragment>
             );
           }
 
@@ -559,13 +561,13 @@ function ContactJourney({ contactId }: { contactId: string }) {
           if (event.type === 'opportunity') {
             const opp = event.data;
             return (
-              <div key={event.id} className="relative flex items-start gap-4">
-                <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-green-500/10 text-green-600 shadow shrink-0 z-10">
-                  <Target className="h-4 w-4" />
-                </div>
+              <React.Fragment key={event.id}>
                 <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center justify-center w-7 h-7 rounded-full bg-green-500/10 text-green-600 shrink-0">
+                      <Target className="h-3.5 w-3.5" />
+                    </div>
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-1" />
                     <span className="text-xs font-medium text-muted-foreground">
                       {format(event.date, "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
                     </span>
@@ -593,7 +595,8 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     </span>
                   </div>
                 </div>
-              </div>
+                {index < events.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+              </React.Fragment>
             );
           }
 
@@ -602,13 +605,13 @@ function ContactJourney({ contactId }: { contactId: string }) {
             const task = event.data;
             const isDone = task.status === 'done';
             return (
-              <div key={event.id} className="relative flex items-start gap-4">
-                <div className={`flex items-center justify-center w-10 h-10 rounded-full border-4 border-background shadow shrink-0 z-10 ${isDone ? 'bg-emerald-500/10 text-emerald-600' : 'bg-orange-500/10 text-orange-600'}`}>
-                  {isDone ? <CheckSquare className="h-4 w-4" /> : <CalendarClock className="h-4 w-4" />}
-                </div>
+              <React.Fragment key={event.id}>
                 <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className={`flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${isDone ? 'bg-emerald-500/10 text-emerald-600' : 'bg-orange-500/10 text-orange-600'}`}>
+                      {isDone ? <CheckSquare className="h-3.5 w-3.5" /> : <CalendarClock className="h-3.5 w-3.5" />}
+                    </div>
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-1" />
                     <span className="text-xs font-medium text-muted-foreground">
                       {format(event.date, "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
                     </span>
@@ -628,7 +631,8 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     )}
                   </div>
                 </div>
-              </div>
+                {index < events.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+              </React.Fragment>
             );
           }
 
@@ -636,13 +640,13 @@ function ContactJourney({ contactId }: { contactId: string }) {
           if (event.type === 'note') {
             const note = event.data;
             return (
-              <div key={event.id} className="relative flex items-start gap-4">
-                <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-amber-500/10 text-amber-600 shadow shrink-0 z-10">
-                  <Edit2 className="h-4 w-4" />
-                </div>
+              <React.Fragment key={event.id}>
                 <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center justify-center w-7 h-7 rounded-full bg-amber-500/10 text-amber-600 shrink-0">
+                      <Edit2 className="h-3.5 w-3.5" />
+                    </div>
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-1" />
                     <span className="text-xs font-medium text-muted-foreground">
                       {format(event.date, "dd 'de' MMMM 'às' HH:mm", { locale: ptBR })}
                     </span>
@@ -667,7 +671,8 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     </div>
                   </div>
                 </div>
-              </div>
+                {index < events.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+              </React.Fragment>
             );
           }
 
@@ -679,6 +684,17 @@ function ContactJourney({ contactId }: { contactId: string }) {
 }
 
 export function ContactDetailsTabs({ contactId }: { contactId: string }) {
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+
+  const toggleSession = (id: string) => {
+    setExpandedSessions(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const { data: contact, isLoading: isLoadingContact } = useQuery({
     queryKey: ["contact-details", contactId],
     enabled: !!contactId,
@@ -715,10 +731,19 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
           ),
           assigned_agent:profiles!conversation_sessions_assigned_agent_id_fkey (
             name
+          ),
+          session_events (
+            id,
+            event_type,
+            metadata,
+            created_at,
+            actor:profiles!session_events_actor_id_fkey (
+              name
+            )
           )
         `)
         .eq("contact_id", contactId)
-        .order("resolved_at", { ascending: false });
+        .order("started_at", { ascending: false });
       if (error) throw error;
       return data;
     },
@@ -801,13 +826,13 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
   return (
     <Tabs defaultValue="jornada" className="flex-1 flex flex-col h-full min-h-0 w-full">
       <div className="px-4 pt-4 border-b w-full">
-        <TabsList className="grid w-full grid-cols-6 h-auto py-1 bg-muted/50 mb-3">
-          <TabsTrigger value="jornada" className="px-1 py-1.5 text-[10px] sm:text-[11px] font-bold">Jornada</TabsTrigger>
-          <TabsTrigger value="observacoes" className="px-1 py-1.5 text-[10px] sm:text-[11px]">Notas</TabsTrigger>
-          <TabsTrigger value="conversations" className="px-1 py-1.5 text-[10px] sm:text-[11px]">Histórico</TabsTrigger>
-          <TabsTrigger value="opportunities" className="px-1 py-1.5 text-[10px] sm:text-[11px]">CRM</TabsTrigger>
-          <TabsTrigger value="tasks" className="px-1 py-1.5 text-[10px] sm:text-[11px]">Tarefas</TabsTrigger>
-          <TabsTrigger value="ads" className="px-1 py-1.5 text-[10px] sm:text-[11px]">Anúncios</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-3 h-auto p-1 bg-muted/50 mb-3 gap-1">
+          <TabsTrigger value="jornada" className="px-1 py-1.5 text-[10px] sm:text-[11px] font-bold truncate">Jornada</TabsTrigger>
+          <TabsTrigger value="observacoes" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Notas</TabsTrigger>
+          <TabsTrigger value="conversations" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Histórico</TabsTrigger>
+          <TabsTrigger value="opportunities" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">CRM</TabsTrigger>
+          <TabsTrigger value="tasks" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Tarefas</TabsTrigger>
+          <TabsTrigger value="ads" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Anúncios</TabsTrigger>
         </TabsList>
       </div>
 
@@ -840,19 +865,19 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
               Nenhum atendimento encerrado registrado.
             </div>
           ) : (
-            <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
-              {sessions.map((session: any) => (
-                <div key={session.id} className="relative flex items-start gap-4 group is-active">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-muted text-muted-foreground shadow shrink-0 z-10">
-                    <MessageCircle className="h-4 w-4" />
-                  </div>
+            <div className="flex flex-col">
+              {sessions.map((session: any, index: number) => (
+                <React.Fragment key={session.id}>
                   <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
+                    <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                      <div className="min-w-[130px] flex-1">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <div className="flex items-center justify-center w-6 h-6 rounded-full bg-muted text-muted-foreground shrink-0">
+                            <MessageCircle className="h-3 w-3" />
+                          </div>
                           <span className="text-xs font-mono text-muted-foreground uppercase truncate">#{session.id.substring(0, 8)}</span>
-                          <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wider shrink-0", getStatusColor("resolved"))}>
-                            Resolvido
+                          <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wider", session.resolved_at ? getStatusColor("resolved") : getStatusColor("active"))}>
+                            {session.resolved_at ? "Resolvido" : "Em Andamento"}
                           </Badge>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -861,10 +886,10 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
                         </div>
                       </div>
                       
-                      <div className="flex flex-col items-end gap-1 shrink-0">
+                      <div className="flex flex-row sm:flex-col items-center sm:items-end gap-1.5 shrink-0 w-full sm:w-auto mt-1 sm:mt-0">
                         <div className="flex items-center gap-1.5 text-[10px] bg-muted px-2 py-0.5 rounded-full font-medium">
                           <Smartphone className="h-3 w-3 text-green-500 shrink-0" />
-                          <span className="truncate max-w-[80px]">{session.whatsapp_instances?.name || "WhatsApp"}</span>
+                          <span className="truncate max-w-[100px]">{session.whatsapp_instances?.name || "WhatsApp"}</span>
                         </div>
                         <div className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full">
                           {getDuration(session.started_at, session.resolved_at)}
@@ -887,20 +912,58 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
                       </div>
 
                       {/* Resolution details */}
-                      <div className="mt-2 rounded-md bg-primary/5 border border-primary/10 px-2.5 py-2 space-y-1">
-                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-primary">
-                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate">{session.resolution_reason?.label || "Atendimento Encerrado"}</span>
+                      {session.resolved_at && (
+                        <div className="mt-2 rounded-md bg-primary/5 border border-primary/10 px-2.5 py-2 space-y-1">
+                          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-primary">
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{session.resolution_reason?.label || "Atendimento Encerrado"}</span>
+                          </div>
+                          {session.resolution_observation && (
+                            <p className="text-[11px] text-muted-foreground pl-5 leading-relaxed italic line-clamp-3">
+                              "{session.resolution_observation}"
+                            </p>
+                          )}
                         </div>
-                        {session.resolution_observation && (
-                          <p className="text-[11px] text-muted-foreground pl-5 leading-relaxed italic line-clamp-3">
-                            "{session.resolution_observation}"
-                          </p>
-                        )}
-                      </div>
+                      )}
+                      
+                      {/* Timeline details (Jornada) */}
+                      {session.session_events && session.session_events.length > 0 && (
+                        <div className="mt-4 border-t pt-3">
+                          <button 
+                            onClick={() => toggleSession(session.id)}
+                            className="flex items-center justify-between w-full text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors group/toggle"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <History className="h-3.5 w-3.5" />
+                              <span>{expandedSessions.has(session.id) ? "Ocultar linha do tempo" : "Ver linha do tempo"}</span>
+                            </div>
+                            <span className="bg-muted px-1.5 py-0.5 rounded text-[9px] group-hover/toggle:bg-muted-foreground/20 transition-colors">
+                              {session.session_events.length} {session.session_events.length === 1 ? 'evento' : 'eventos'}
+                            </span>
+                          </button>
+                          
+                          {expandedSessions.has(session.id) && (
+                            <div className="mt-3 pl-2 border-l-2 border-muted space-y-3 w-full animate-in slide-in-from-top-2 fade-in duration-200">
+                              {session.session_events.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).map((event: any) => (
+                                <div key={event.id} className="flex items-start gap-2 text-xs text-muted-foreground w-full">
+                                  <span className="shrink-0 font-mono text-[10px] mt-0.5">{format(new Date(event.created_at), "HH:mm")}</span>
+                                  <div className="flex-1 min-w-0 break-words leading-relaxed pr-1">
+                                    {event.event_type === 'started' && <span>Ticket aberto</span>}
+                                    {event.event_type === 'assigned' && <span>Atribuído para <strong>{event.actor?.name || 'Sistema'}</strong></span>}
+                                    {event.event_type === 'transferred' && <span>Transferido por <strong>{event.actor?.name || 'Sistema'}</strong>{event.metadata?.targetName ? <span> para <strong>{event.metadata.targetName}</strong></span> : ''}</span>}
+                                    {event.event_type === 'returned_to_queue' && <span>Retornado à fila por <strong>{event.actor?.name || 'Sistema'}</strong></span>}
+                                    {event.event_type === 'resolved' && <span>Encerrado por <strong>{event.actor?.name || 'Sistema'}</strong></span>}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
+                  {index < sessions.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+                </React.Fragment>
               ))}
             </div>
           )}

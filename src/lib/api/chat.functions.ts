@@ -371,6 +371,25 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
           department_id: userProfile?.department_id || null,
           resolved_at: null 
         };
+        
+        const { data: convData } = await supabaseAdmin.from('conversations').select('current_session_id').eq('id', conversationId).single();
+        if (!convData?.current_session_id) {
+          let sessionId = null;
+          const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+          if (existingSession) {
+             sessionId = existingSession.id;
+          } else {
+             const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
+                conversation_id: conversationId, contact_id: contactId, whatsapp_instance_id: instance.id,
+                assigned_agent_id: userId, department_id: userProfile?.department_id || null, started_at: new Date().toISOString()
+             }).select().single();
+             if (newSession) sessionId = newSession.id;
+          }
+          if (sessionId) {
+             updatePayload.current_session_id = sessionId;
+             await supabaseAdmin.from('session_events').insert({ session_id: sessionId, event_type: 'started', actor_id: userId });
+          }
+        }
         await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
       }
     } else {
@@ -390,6 +409,23 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
         .single();
       if (convErr) throw new Error("Failed to create conversation.");
       conversationId = newConv.id;
+      
+      let sessionId = null;
+      const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+      if (existingSession) {
+         sessionId = existingSession.id;
+      } else {
+         const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
+            conversation_id: conversationId, contact_id: contactId, whatsapp_instance_id: instance.id,
+            assigned_agent_id: userId, department_id: userProfile?.department_id || null, started_at: new Date().toISOString()
+         }).select().single();
+         if (newSession) sessionId = newSession.id;
+      }
+      
+      if (sessionId) {
+         await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', conversationId);
+         await supabaseAdmin.from('session_events').insert({ session_id: sessionId, event_type: 'started', actor_id: userId });
+      }
     }
 
     // 6. Save message in DB
@@ -683,6 +719,34 @@ export const assignConversationAction = createServerFn({ method: "POST" })
       console.error("Failed to assign conversation:", error);
       throw new Error("Falha ao puxar atendimento.");
     }
+    
+    // Atualiza a sessão e gera evento na jornada
+    const { data: conv } = await supabaseAdmin.from('conversations').select('current_session_id, contact_id, whatsapp_instance_id').eq('id', data.conversationId).single();
+    if (conv?.current_session_id) {
+       await supabaseAdmin.from('conversation_sessions').update({
+          assigned_agent_id: userId, department_id: userProfile?.department_id || null
+       }).eq('id', conv.current_session_id);
+       await supabaseAdmin.from('session_events').insert({
+          session_id: conv.current_session_id, event_type: 'assigned', actor_id: userId
+       });
+    } else if (conv) {
+       // fallback caso a sessão não exista (retrocompatibilidade)
+       let sessionId = null;
+       const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', data.conversationId).is('resolved_at', null).maybeSingle();
+       if (existingSession) {
+          sessionId = existingSession.id;
+       } else {
+          const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
+             conversation_id: data.conversationId, contact_id: conv.contact_id, whatsapp_instance_id: conv.whatsapp_instance_id,
+             assigned_agent_id: userId, department_id: userProfile?.department_id || null, started_at: new Date().toISOString()
+          }).select().single();
+          if (newSession) sessionId = newSession.id;
+       }
+       if (sessionId) {
+          await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', data.conversationId);
+          await supabaseAdmin.from('session_events').insert({ session_id: sessionId, event_type: 'assigned', actor_id: userId });
+       }
+    }
 
     return { success: true };
   });
@@ -694,7 +758,8 @@ export const transferConversationAction = createServerFn({ method: "POST" })
     targetType: z.enum(["department", "agent"]),
     targetId: z.string().uuid(),
   }))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
 
     const updateData: any = {};
 
@@ -727,6 +792,46 @@ export const transferConversationAction = createServerFn({ method: "POST" })
     if (error) {
       console.error("Failed to transfer conversation:", error);
       throw new Error("Falha ao transferir atendimento.");
+    }
+    
+    // Atualiza a sessão e gera evento na jornada
+    const { data: conv } = await supabaseAdmin.from('conversations').select('current_session_id').eq('id', data.conversationId).single();
+    let targetName = null;
+    if (data.targetType === "agent") {
+       const { data: agent } = await supabaseAdmin.from('profiles').select('name').eq('id', data.targetId).single();
+       if (agent) targetName = agent.name;
+    } else if (data.targetType === "department") {
+       const { data: dept } = await supabaseAdmin.from('departments').select('name').eq('id', data.targetId).single();
+       if (dept) targetName = dept.name;
+    }
+
+    if (conv?.current_session_id) {
+       await supabaseAdmin.from('conversation_sessions').update({
+          assigned_agent_id: updateData.assigned_agent_id || null, department_id: updateData.department_id || null
+       }).eq('id', conv.current_session_id);
+       await supabaseAdmin.from('session_events').insert({
+          session_id: conv.current_session_id, event_type: 'transferred',
+          actor_id: userId,
+          metadata: { targetType: data.targetType, targetId: data.targetId, targetName }
+       });
+    } else if (conv) {
+       let sessionId = null;
+       const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', data.conversationId).is('resolved_at', null).maybeSingle();
+       if (existingSession) {
+          sessionId = existingSession.id;
+       } else {
+          const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
+             conversation_id: data.conversationId, contact_id: conv.contact_id, whatsapp_instance_id: conv.whatsapp_instance_id,
+             assigned_agent_id: updateData.assigned_agent_id || null, department_id: updateData.department_id || null, started_at: new Date().toISOString()
+          }).select().single();
+          if (newSession) sessionId = newSession.id;
+       }
+       if (sessionId) {
+          await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', data.conversationId);
+          await supabaseAdmin.from('session_events').insert({
+             session_id: sessionId, event_type: 'transferred', actor_id: userId, metadata: { targetType: data.targetType, targetId: data.targetId, targetName }
+          });
+       }
     }
 
     return { success: true };

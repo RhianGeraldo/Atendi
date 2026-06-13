@@ -103,7 +103,7 @@ function ConversationsPage() {
       let query = supabase
         .from("conversations")
         .select(
-          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), unit:units(name,color), whatsapp_instance:whatsapp_instances(name)"
+          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), unit:units(name,color), whatsapp_instance:whatsapp_instances(name)"
         );
 
       if (selectedUnitId) {
@@ -395,7 +395,7 @@ function ConversationsPage() {
 
       {/* Contact Info Sidebar */}
       {selected && showSidebar && (
-        <aside className="hidden w-[280px] shrink-0 flex-col border-l border-border bg-card lg:flex xl:w-[320px]">
+        <aside className="hidden w-[320px] shrink-0 flex-col border-l border-border bg-card lg:flex xl:w-[380px] 2xl:w-[420px] overflow-hidden">
           <ContactSidebar conv={selected} onClose={() => setShowSidebar(false)} />
         </aside>
       )}
@@ -1316,35 +1316,46 @@ function ChatPanel({
           resolved_at: resolvedAt,
           resolution_reason_id: reasonId || null,
           resolution_observation: observation.trim() || null,
+          current_session_id: null // remove o vínculo da sessão ativa
         } as any)
         .eq("id", conv.id);
       if (error) throw error;
       
-      // 2. Find when this session started (last resolved_at from sessions, or conversation started_at)
-      const { data: lastSession } = await supabase
-        .from("conversation_sessions" as any)
-        .select("resolved_at")
-        .eq("conversation_id", conv.id)
-        .order("resolved_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      
-      const sessionStartedAt = lastSession?.resolved_at || conv.started_at;
-      
-      // 3. Save the session record for attendance history
-      await supabase
-        .from("conversation_sessions" as any)
-        .insert({
-          conversation_id: conv.id,
-          contact_id: conv.contact?.id,
-          whatsapp_instance_id: conv.whatsapp_instance_id,
-          started_at: sessionStartedAt,
-          resolved_at: resolvedAt,
-          assigned_agent_id: conv.assigned_agent_id,
-          department_id: conv.department_id,
-          resolution_reason_id: reasonId || null,
-          resolution_observation: observation.trim() || null,
-        });
+      // 2. Atualiza TODAS as sessões em andamento (para garantir limpeza de zumbis criados pelo bug anterior)
+      const { data: openSessions } = await supabase.from('conversation_sessions' as any)
+         .select('id')
+         .eq('conversation_id', conv.id)
+         .is('resolved_at', null);
+
+      if (openSessions && openSessions.length > 0) {
+         for (const session of openSessions) {
+            await supabase.from("conversation_sessions" as any).update({
+               resolved_at: resolvedAt,
+               resolution_reason_id: reasonId || null,
+               resolution_observation: observation.trim() || null,
+            }).eq("id", session.id);
+            
+            await supabase.from("session_events" as any).insert({
+               session_id: session.id,
+               event_type: 'resolved',
+               actor_id: profile?.id
+            });
+         }
+      } else {
+         // Fallback retrocompatibilidade para conversas velhas sem sessão nenhuma
+         const { data: newSession, error: err } = await supabase
+           .from("conversation_sessions" as any)
+           .insert({
+             conversation_id: conv.id, contact_id: conv.contact?.id, whatsapp_instance_id: conv.whatsapp_instance_id,
+             started_at: conv.started_at || new Date().toISOString(), resolved_at: resolvedAt,
+             assigned_agent_id: conv.assigned_agent_id, department_id: conv.department_id,
+             resolution_reason_id: reasonId || null, resolution_observation: observation.trim() || null,
+           }).select().single();
+           
+         if (newSession && !err) {
+            await supabase.from("session_events" as any).insert({ session_id: newSession.id, event_type: 'resolved', actor_id: profile?.id });
+         }
+      }
     },
     onSuccess: () => {
       toast.success("Atendimento encerrado");
@@ -1365,6 +1376,30 @@ function ChatPanel({
         .from("conversations")
         .update({ status: "waiting", assigned_agent_id: null })
         .eq("id", conv.id);
+        
+      // 2. Atualiza TODAS as sessões em andamento (zumbis)
+      const { data: openSessions } = await supabase.from('conversation_sessions' as any)
+         .select('id')
+         .eq('conversation_id', conv.id)
+         .is('resolved_at', null);
+
+      if (openSessions && openSessions.length > 0) {
+         for (const session of openSessions) {
+            await supabase.from("conversation_sessions" as any).update({ assigned_agent_id: null }).eq("id", session.id);
+            await supabase.from("session_events" as any).insert({ session_id: session.id, event_type: 'returned_to_queue', actor_id: profile?.id });
+         }
+         // Update conversation to point to one of them
+         await supabase.from("conversations").update({ current_session_id: openSessions[0].id }).eq("id", conv.id);
+      } else {
+         const { data: newSession } = await supabase.from("conversation_sessions" as any).insert({
+             conversation_id: conv.id, contact_id: conv.contact?.id, whatsapp_instance_id: conv.whatsapp_instance_id,
+             assigned_agent_id: null, department_id: conv.department_id, started_at: conv.started_at || new Date().toISOString()
+         }).select().single();
+         if (newSession) {
+            await supabase.from("conversations").update({ current_session_id: newSession.id }).eq("id", conv.id);
+            await supabase.from("session_events" as any).insert({ session_id: newSession.id, event_type: 'returned_to_queue', actor_id: profile?.id });
+         }
+      }
     },
     onSuccess: () => {
       toast.success("Atendimento retornado para a fila");

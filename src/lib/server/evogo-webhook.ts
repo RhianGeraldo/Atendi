@@ -485,6 +485,30 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           updatePayload.status = 'waiting';
           updatePayload.assigned_agent_id = null;
           updatePayload.resolved_at = null;
+          
+          // Abre um novo ticket (sessão)
+          let sessionId = null;
+          const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+          
+          if (existingSession) {
+            sessionId = existingSession.id;
+          } else {
+            const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
+              conversation_id: conversationId,
+              contact_id: contactId,
+              whatsapp_instance_id: instance_id,
+              started_at: new Date().toISOString()
+            }).select().single();
+            if (newSession) sessionId = newSession.id;
+          }
+          
+          if (sessionId) {
+            updatePayload.current_session_id = sessionId;
+            await supabaseAdmin.from('session_events').insert({
+              session_id: sessionId,
+              event_type: 'started'
+            });
+          }
         } else {
           console.log(`[evogo-webhook] Found active/waiting conversation: ${conversationId}`);
         }
@@ -511,6 +535,32 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
         if (convErr) throw convErr;
         conversationId = newConv.id;
+        
+        // Abre um novo ticket (sessão) se não for resolvido já na criação
+        if (!isFromMe) {
+          let sessionId = null;
+          const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+          
+          if (existingSession) {
+             sessionId = existingSession.id;
+          } else {
+             const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
+               conversation_id: conversationId,
+               contact_id: contactId,
+               whatsapp_instance_id: instance_id,
+               started_at: new Date().toISOString()
+             }).select().single();
+             if (newSession) sessionId = newSession.id;
+          }
+          
+          if (sessionId) {
+            await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', conversationId);
+            await supabaseAdmin.from('session_events').insert({
+              session_id: sessionId,
+              event_type: 'started'
+            });
+          }
+        }
       }
 
       // 4. Resolve quoted message internal ID
