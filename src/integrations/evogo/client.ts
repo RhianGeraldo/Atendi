@@ -86,19 +86,20 @@ export class EvoGoClient {
 
   // --- Advanced Settings ---
   
-  async getAdvancedSettings(instanceName: string, instanceToken: string) {
-    return this.request(`/settings/find/${instanceName}`, {
+  async getAdvancedSettings(instanceId: string, instanceToken: string) {
+    return this.request(`/instance/${instanceId}/advanced-settings`, {
       headers: {
         'apikey': instanceToken
       }
     });
   }
 
-  async updateAdvancedSettings(instanceName: string, settings: any, instanceToken: string) {
-    return this.request(`/settings/set/${instanceName}`, {
-      method: 'POST',
+  async updateAdvancedSettings(instanceId: string, settings: any, instanceToken: string) {
+    return this.request(`/instance/${instanceId}/advanced-settings`, {
+      method: 'PUT',
       headers: {
-        'apikey': instanceToken
+        'apikey': instanceToken,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(settings)
     });

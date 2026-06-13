@@ -23,9 +23,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   
   const [webhookUrl, setWebhookUrl] = useState("");
   const [advSettings, setAdvSettings] = useState({
-    rejectCalls: false,
+    rejectCall: false,
     readMessages: false,
-    readStatus: false,
     alwaysOnline: false
   });
 
@@ -46,18 +45,17 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     const fetchSettings = async () => {
       setLoading(true);
       try {
-        if (!instance.instance_name) {
-          throw new Error("Instância local sem nome do EvoGo vinculado.");
+        if (!instance.evogo_instance_id) {
+          throw new Error("Instância local sem ID do EvoGo vinculado.");
         }
 
         const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
-        const res: any = await client.getAdvancedSettings(instance.instance_name, instance.evogo_api_key);
+        const res: any = await client.getAdvancedSettings(instance.evogo_instance_id, instance.evogo_api_key);
         
         if (res) {
           setAdvSettings({
-            rejectCalls: res.rejectCall ?? false,
+            rejectCall: res.rejectCall ?? false,
             readMessages: res.readMessages ?? false,
-            readStatus: res.readStatus ?? false,
             alwaysOnline: res.alwaysOnline ?? false
           });
         }
@@ -88,8 +86,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
       }
 
       // 2. Save Advanced Settings
-      if (instance.instance_name) {
-        await client.updateAdvancedSettings(instance.instance_name, advSettings, instance.evogo_api_key);
+      if (instance.evogo_instance_id) {
+        await client.updateAdvancedSettings(instance.evogo_instance_id, advSettings, instance.evogo_api_key);
       }
 
       toast.success("Configurações salvas com sucesso!");
@@ -146,8 +144,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                   <p className="text-xs text-muted-foreground">Recusa chamadas de voz e vídeo automaticamente.</p>
                 </div>
                 <Switch 
-                  checked={advSettings.rejectCalls}
-                  onCheckedChange={(c) => setAdvSettings(s => ({ ...s, rejectCalls: c }))}
+                  checked={advSettings.rejectCall}
+                  onCheckedChange={(c) => setAdvSettings(s => ({ ...s, rejectCall: c }))}
                 />
               </div>
 
