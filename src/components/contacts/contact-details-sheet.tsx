@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
-import { History, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users } from "lucide-react";
+import { History, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import {
@@ -138,6 +138,165 @@ function ContactTasks({ contactId }: { contactId: string }) {
   );
 }
 
+function ContactAdsHistory({ contactId }: { contactId: string }) {
+  const { data: ads, isLoading } = useQuery({
+    queryKey: ["contact-ads-history", contactId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("messages")
+        .select(`
+          id,
+          created_at,
+          metadata,
+          conversations!inner (
+            contact_id
+          )
+        `)
+        .eq("conversations.contact_id", contactId)
+        .not("metadata", "is", null)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const validAds = data.filter((msg: any) => {
+        const meta = msg.metadata;
+        if (!meta) return false;
+        
+        const adReply = meta.externalAdReply || 
+                        meta.contextInfo?.externalAdReply || 
+                        meta.extendedTextMessage?.contextInfo?.externalAdReply ||
+                        meta.Message?.extendedTextMessage?.contextInfo?.externalAdReply;
+        return !!adReply;
+      }).map((msg: any) => {
+        const meta = msg.metadata;
+        const adReply = meta.externalAdReply || 
+                        meta.contextInfo?.externalAdReply || 
+                        meta.extendedTextMessage?.contextInfo?.externalAdReply ||
+                        meta.Message?.extendedTextMessage?.contextInfo?.externalAdReply;
+        
+        const conversionSource = meta.conversionSource || 
+                                 meta.contextInfo?.conversionSource || 
+                                 meta.extendedTextMessage?.contextInfo?.conversionSource ||
+                                 meta.Message?.extendedTextMessage?.contextInfo?.conversionSource;
+
+        return {
+          id: msg.id,
+          createdAt: msg.created_at,
+          adData: adReply,
+          conversionSource,
+          sourceApp: adReply.sourceApp
+        };
+      });
+
+      return validAds;
+    }
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!ads || ads.length === 0) {
+    return (
+      <div className="text-center py-8 text-muted-foreground border rounded-lg border-dashed mt-4">
+        Nenhum histórico de anúncios encontrado para este contato.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-2 mb-6">
+        <Megaphone className="h-5 w-5 text-muted-foreground" />
+        <h3 className="text-lg font-semibold">Jornada de Anúncios</h3>
+      </div>
+      
+      <div className="relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent space-y-6">
+        {ads.map((ad: any, index: number) => (
+          <div key={ad.id} className="relative flex items-start gap-4">
+            <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-primary/10 text-primary shadow shrink-0 z-10">
+              <Megaphone className="h-4 w-4" />
+            </div>
+            
+            <div className="flex-1 min-w-0 p-4 rounded-xl border bg-card text-card-foreground shadow-sm">
+              <div className="flex items-center gap-2 mb-3">
+                <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <span className="text-xs font-medium text-muted-foreground">
+                  {format(new Date(ad.createdAt), "dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: ptBR })}
+                </span>
+                {index === 0 && (
+                  <Badge className="ml-auto text-[10px] bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 shadow-none border-none">
+                    Mais Recente
+                  </Badge>
+                )}
+              </div>
+
+              <div className="flex gap-4">
+                {ad.adData.thumbnailURL || ad.adData.originalImageURL ? (
+                  <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-md overflow-hidden bg-muted flex items-center justify-center border shrink-0">
+                    <img 
+                      src={ad.adData.thumbnailURL || ad.adData.originalImageURL} 
+                      alt="Ad thumbnail" 
+                      className="h-full w-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        e.currentTarget.parentElement?.classList.add('p-2');
+                      }}
+                    />
+                    <ImageIcon className="h-5 w-5 text-muted-foreground absolute -z-10" />
+                  </div>
+                ) : (
+                  <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-md bg-muted flex items-center justify-center border text-muted-foreground shrink-0">
+                    <ImageIcon className="h-5 w-5" />
+                  </div>
+                )}
+                
+                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                  <h4 className="font-semibold text-sm sm:text-base line-clamp-2 leading-tight" title={ad.adData.title}>
+                    {ad.adData.title || "Anúncio sem título"}
+                  </h4>
+                  {ad.adData.body && (
+                    <p className="text-xs text-muted-foreground line-clamp-2 mt-1" title={ad.adData.body}>
+                      {ad.adData.body}
+                    </p>
+                  )}
+                  
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    {ad.conversionSource && (
+                      <Badge variant="secondary" className="text-[10px]">
+                        {ad.conversionSource}
+                      </Badge>
+                    )}
+                    {ad.sourceApp && (
+                      <Badge variant="outline" className="text-[10px] capitalize">
+                        {ad.sourceApp}
+                      </Badge>
+                    )}
+                    {ad.adData.sourceURL && (
+                      <a 
+                        href={ad.adData.sourceURL} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="text-xs text-primary flex items-center gap-1 hover:underline ml-auto"
+                      >
+                        Ver anúncio <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ContactDetailsTabs({ contactId }: { contactId: string }) {
   const { data: contact, isLoading: isLoadingContact } = useQuery({
     queryKey: ["contact-details", contactId],
@@ -261,11 +420,12 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
   return (
     <Tabs defaultValue="observacoes" className="flex-1 flex flex-col h-full min-h-0 w-full">
       <div className="px-4 pt-4 border-b w-full">
-        <TabsList className="grid w-full grid-cols-4 h-auto py-1 bg-muted/50 mb-3">
-          <TabsTrigger value="observacoes" className="px-1 py-1.5 text-[11px]">Notas</TabsTrigger>
-          <TabsTrigger value="conversations" className="px-1 py-1.5 text-[11px]">Histórico</TabsTrigger>
-          <TabsTrigger value="opportunities" className="px-1 py-1.5 text-[11px]">CRM</TabsTrigger>
-          <TabsTrigger value="tasks" className="px-1 py-1.5 text-[11px]">Tarefas</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-5 h-auto py-1 bg-muted/50 mb-3">
+          <TabsTrigger value="observacoes" className="px-1 py-1.5 text-[10px] sm:text-[11px]">Notas</TabsTrigger>
+          <TabsTrigger value="conversations" className="px-1 py-1.5 text-[10px] sm:text-[11px]">Histórico</TabsTrigger>
+          <TabsTrigger value="opportunities" className="px-1 py-1.5 text-[10px] sm:text-[11px]">CRM</TabsTrigger>
+          <TabsTrigger value="tasks" className="px-1 py-1.5 text-[10px] sm:text-[11px]">Tarefas</TabsTrigger>
+          <TabsTrigger value="ads" className="px-1 py-1.5 text-[10px] sm:text-[11px]">Anúncios</TabsTrigger>
         </TabsList>
       </div>
 
@@ -423,6 +583,10 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
 
         <TabsContent value="tasks" className="mt-0">
           <ContactTasks contactId={contactId} />
+        </TabsContent>
+
+        <TabsContent value="ads" className="mt-0">
+          <ContactAdsHistory contactId={contactId} />
         </TabsContent>
       </ScrollArea>
     </Tabs>
