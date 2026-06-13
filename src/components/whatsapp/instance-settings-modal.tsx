@@ -77,13 +77,11 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
 
     try {
       // 1. Save Webhook
-      if (webhookUrl !== instance.webhook_url) {
-        await client.connectInstance(webhookUrl, instance.evogo_api_key);
-        await supabase
-          .from("whatsapp_instances")
-          .update({ webhook_url: webhookUrl })
-          .eq("id", instance.id);
-      }
+      await client.connectInstance(webhookUrl, instance.evogo_api_key);
+      await supabase
+        .from("whatsapp_instances")
+        .update({ webhook_url: webhookUrl })
+        .eq("id", instance.id);
 
       // 2. Save Advanced Settings
       if (instance.evogo_instance_id) {
