@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
 import { getPhoneVariants } from '@/lib/utils';
+import { enqueueAiMessage } from './ai-queue';
 
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
@@ -463,7 +464,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       let conversationId;
       let convQuery = supabaseAdmin
         .from('conversations')
-        .select('id, status')
+        .select('id, status, ai_active, ai_agent_id')
         .eq('contact_id', contactId)
         .eq('whatsapp_instance_id', instance_id)
         .order('started_at', { ascending: false })
@@ -473,16 +474,37 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       console.log(`[evogo-webhook] Lookup conversation: instance_id=${instance_id}, contact_id=${contactId}, result=${JSON.stringify(latestConvs)}`);
 
+      let aiActive = false;
+
       if (latestConvs && latestConvs.length > 0) {
         const conv = latestConvs[0];
         conversationId = conv.id;
+        if (conv.ai_active) {
+          if (conv.ai_agent_id) {
+            aiActive = true;
+          } else {
+            // Find agent mapped to this instance, or any active agent
+            const { data: fallbackAgents } = await supabaseAdmin
+              .from('ai_agents')
+              .select('id')
+              .eq('company_id', company_id)
+              .eq('is_active', true)
+              .order('instance_id', { ascending: false })
+              .limit(1);
+            
+            if (fallbackAgents && fallbackAgents.length > 0) {
+              aiActive = true;
+              await supabaseAdmin.from('conversations').update({ ai_agent_id: fallbackAgents[0].id }).eq('id', conversationId);
+            }
+          }
+        }
         
         const updatePayload: any = { last_message_at: new Date().toISOString() };
         
-        // Se a conversa estava resolvida, reabre ela como 'waiting'
+        // Se a conversa estava resolvida, reabre ela como 'waiting' (ou 'active' se a IA for atender)
         if (conv.status === 'resolved') {
           console.log(`[evogo-webhook] Reopening resolved conversation: ${conversationId}`);
-          updatePayload.status = 'waiting';
+          updatePayload.status = aiActive ? 'active' : 'waiting';
           updatePayload.assigned_agent_id = null;
           updatePayload.resolved_at = null;
           
@@ -504,10 +526,11 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           
           if (sessionId) {
             updatePayload.current_session_id = sessionId;
-            await supabaseAdmin.from('session_events').insert({
-              session_id: sessionId,
-              event_type: 'started'
-            });
+            const events: any[] = [{ session_id: sessionId, event_type: 'started' }];
+            if (aiActive) {
+              events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true } });
+            }
+            await supabaseAdmin.from('session_events').insert(events);
           }
         } else {
           console.log(`[evogo-webhook] Found active/waiting conversation: ${conversationId}`);
@@ -518,6 +541,17 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           .eq('id', conversationId);
       } else {
         console.log(`[evogo-webhook] No existing conversation found. Creating new one.`);
+        // Check for default AI agent (prefer agent mapped to this instance)
+        const { data: defaultAgents } = await supabaseAdmin
+          .from('ai_agents')
+          .select('id')
+          .eq('company_id', company_id)
+          .eq('active_by_default', true)
+          .order('instance_id', { ascending: false })
+          .limit(1);
+        const defaultAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
+        if (defaultAgentId) aiActive = true;
+
         // Create new conversation
         const { data: newConv, error: convErr } = await supabaseAdmin
           .from('conversations')
@@ -526,9 +560,11 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             whatsapp_instance_id: instance_id,
             contact_id: contactId,
             channel: 'whatsapp',
-            status: isFromMe ? 'resolved' : 'waiting',
+            status: isFromMe ? 'resolved' : (!!defaultAgentId ? 'active' : 'waiting'),
             last_message_at: new Date().toISOString(),
-            resolved_at: isFromMe ? new Date().toISOString() : null
+            resolved_at: isFromMe ? new Date().toISOString() : null,
+            ai_active: !!defaultAgentId,
+            ai_agent_id: defaultAgentId
           })
           .select()
           .single();
@@ -555,10 +591,11 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           
           if (sessionId) {
             await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', conversationId);
-            await supabaseAdmin.from('session_events').insert({
-              session_id: sessionId,
-              event_type: 'started'
-            });
+            const events: any[] = [{ session_id: sessionId, event_type: 'started' }];
+            if (!!defaultAgentId) {
+              events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true } });
+            }
+            await supabaseAdmin.from('session_events').insert(events);
           }
         }
       }
@@ -680,6 +717,12 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         await triggerAudioTranscription(newMessage.id, audioBase64, instance.company_id);
       }
 
+      // 7. Check if we need to queue AI response
+      if (aiActive && newMessage && !isFromMe) {
+        console.log(`[evogo-webhook] Queueing AI response for conversation ${conversationId}, message ${newMessage.id}`);
+        enqueueAiMessage(conversationId, newMessage.id, company_id);
+      }
+
       return;
     }
 
@@ -741,13 +784,15 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       
       // 2. Find Contact
       const phoneVariants = getPhoneVariants(phone);
+      
       const { data: contactInfo } = await supabaseAdmin
         .from('contacts')
-        .select('id')
+        .select('id, whatsapp_lid, name')
         .eq('company_id', instance.company_id)
         .or(`phone.in.(${phoneVariants.join(',')}),whatsapp_lid.eq.${phone}`)
+        .limit(1)
         .maybeSingle();
-        
+
       if (!contactInfo) return;
 
       // 3. Insert association

@@ -10,12 +10,13 @@ export const sendMessageAction = createServerFn({ method: "POST" })
   .inputValidator(z.object({
     conversationId: z.string().uuid(),
     text: z.string().optional(),
-    mediaType: z.enum(['image', 'video', 'audio', 'document', 'text']).optional(),
+    mediaType: z.enum(["text", "image", "video", "audio", "document"]).optional().default("text"),
     mediaBase64: z.string().optional(),
     quotedMessageId: z.string().optional(),
     quotedParticipant: z.string().optional(),
-    quotedInternalId: z.string().uuid().optional(),
+    quotedInternalId: z.string().optional(),
     quotedContent: z.string().optional(),
+    isInternal: z.boolean().optional().default(false)
   }))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
@@ -72,7 +73,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       }
     }
 
-    if (!host || !token || !instanceName) {
+    if (!data.isInternal && (!host || !token || !instanceName)) {
       throw new Error("EvoGo is not configured for this conversation.");
     }
 
@@ -84,12 +85,13 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       .single();
 
     let textToSend = data.text || '';
-    if (userProfile?.use_signature && userProfile?.name) {
+    if (!data.isInternal && userProfile?.use_signature && userProfile?.name) {
       textToSend = textToSend.trim() ? `*${userProfile.name}*:\n${textToSend}` : `*${userProfile.name}*:`;
     }
 
     // 4. Send message via EvoGo
-    let evogoResponse;
+    let evogoResponse: any = null;
+    let mediaUrlToSend = data.mediaBase64;
     let finalParticipant = data.quotedParticipant;
     let finalMessageId = data.quotedMessageId;
     
@@ -115,102 +117,89 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       ...(finalParticipant && { participant: finalParticipant })
     } : undefined;
 
-    console.log('[sendMessageAction] Sending message:', {
-      host,
-      token: token.substring(0, 5) + '...',
-      instanceName,
-      number: phone,
-      text: textToSend,
-      quoted,
-      originalQuotedMessageId: data.quotedMessageId,
-      finalMessageId,
-      originalQuotedParticipant: data.quotedParticipant,
-      finalParticipant
-    });
-
-    let mediaUrlToSend = data.mediaBase64;
-
-    if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
-      // Tentar fazer o upload pro Supabase Storage antes de enviar
-      try {
-        if (data.mediaBase64.startsWith('data:')) {
-          const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-          if (match) {
-            const mimeType = match[1];
-            const base64Data = match[2];
-            const buffer = Buffer.from(base64Data, 'base64');
-            const ext = mimeType.split('/')[1] || 'bin';
-            const fileName = `${targetConversationId}/${Date.now()}.${ext}`;
-            
-            const { data: uploadData, error: uploadError } = await supabaseAdmin
-              .storage
-              .from('media')
-              .upload(fileName, buffer, {
-                contentType: mimeType,
-                upsert: false
-              });
+    if (!data.isInternal) {
+      if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
+        try {
+          if (data.mediaBase64.startsWith('data:')) {
+            const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+            if (match) {
+              const mimeType = match[1];
+              const base64Data = match[2];
+              const buffer = Buffer.from(base64Data, 'base64');
+              const ext = mimeType.split('/')[1] || 'bin';
+              const fileName = `${targetConversationId}/${Date.now()}.${ext}`;
               
-            if (!uploadError && uploadData) {
-              const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
-              mediaUrlToSend = publicUrlData.publicUrl;
-              console.log('Successfully uploaded media to Supabase:', mediaUrlToSend);
-            } else {
-              console.error('Error uploading to Supabase:', uploadError);
+              const { data: uploadData, error: uploadError } = await supabaseAdmin
+                .storage
+                .from('media')
+                .upload(fileName, buffer, {
+                  contentType: mimeType,
+                  upsert: false
+                });
+                
+              if (!uploadError && uploadData) {
+                const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
+                mediaUrlToSend = publicUrlData.publicUrl;
+              }
             }
           }
+        } catch (e) {
+          console.error('Failed to parse or upload base64 to Supabase', e);
         }
-      } catch (e) {
-        console.error('Failed to parse or upload base64 to Supabase', e);
-      }
 
-      evogoResponse = await sendEvogoMedia({
-        host,
-        token,
-        instanceName,
-        number: phone,
-        base64: mediaUrlToSend!,
-        mediatype: data.mediaType as any,
-        caption: textToSend,
-        quoted,
-      });
-    } else if (textToSend.match(/https?:\/\//)) {
-      evogoResponse = await sendEvogoLink({
-        host,
-        token,
-        instanceName,
-        number: phone,
-        text: textToSend,
-        quoted,
-      });
-    } else {
-      evogoResponse = await sendEvogoText({
-        host,
-        token,
-        instanceName,
-        number: phone,
-        text: textToSend,
-        quoted,
-      });
+        evogoResponse = await sendEvogoMedia({
+          host,
+          token,
+          instanceName,
+          number: phone,
+          base64: mediaUrlToSend!,
+          mediatype: data.mediaType as any,
+          caption: textToSend,
+          quoted,
+        });
+      } else if (textToSend.match(/https?:\/\//)) {
+        evogoResponse = await sendEvogoLink({
+          host,
+          token,
+          instanceName,
+          number: phone,
+          text: textToSend,
+          quoted,
+        });
+      } else {
+        evogoResponse = await sendEvogoText({
+          host,
+          token,
+          instanceName,
+          number: phone,
+          text: textToSend,
+          quoted,
+        });
+      }
     }
 
     // Extract remote message id if available
     const remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
 
     // 4. Save message in DB
+    const insertPayload: any = {
+      conversation_id: targetConversationId,
+      sender_id: userId,
+      sender_type: "agent",
+      content: textToSend || null,
+      media_type: data.mediaType || "text",
+      media_url: mediaUrlToSend || null,
+      is_internal: data.isInternal,
+    };
+
+    if (remoteMsgId && !data.isInternal) insertPayload.remote_msg_id = remoteMsgId;
+    if (data.quotedInternalId) insertPayload.quoted_message_id = data.quotedInternalId;
+    if (data.quotedContent) insertPayload.quoted_content = data.quotedContent;
+    if (evogoResponse?.data?.Info?.Sender) insertPayload.participant_jid = evogoResponse.data.Info.Sender;
+
     const { data: msg, error: msgErr } = await supabase
       .from("messages")
-      .insert({
-        conversation_id: targetConversationId,
-        sender_type: "agent",
-        sender_id: userId,
-        content: textToSend || null,
-        media_type: data.mediaType || "text",
-        media_url: mediaUrlToSend || null,
-        remote_msg_id: remoteMsgId,
-        quoted_message_id: data.quotedInternalId,
-        quoted_content: data.quotedContent,
-        participant_jid: evogoResponse?.data?.Info?.Sender || null,
-      })
+      .insert(insertPayload)
       .select()
       .single();
 
@@ -371,25 +360,38 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
           department_id: userProfile?.department_id || null,
           resolved_at: null 
         };
-        
+
         const { data: convData } = await supabaseAdmin.from('conversations').select('current_session_id').eq('id', conversationId).single();
-        if (!convData?.current_session_id) {
-          let sessionId = null;
-          const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
-          if (existingSession) {
-             sessionId = existingSession.id;
-          } else {
-             const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
-                conversation_id: conversationId, contact_id: contactId, whatsapp_instance_id: instance.id,
-                assigned_agent_id: userId, department_id: userProfile?.department_id || null, started_at: new Date().toISOString()
-             }).select().single();
-             if (newSession) sessionId = newSession.id;
+        let currentSessionId = convData?.current_session_id;
+        
+        // Force new session if resolved, or if missing session
+        if (conv.status === 'resolved' || !currentSessionId) {
+          const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
+            conversation_id: conversationId,
+            contact_id: contactId,
+            whatsapp_instance_id: instance.id,
+            assigned_agent_id: userId,
+            department_id: userProfile?.department_id || null,
+            started_at: new Date().toISOString()
+          }).select().single();
+
+          if (newSession) {
+            updatePayload.current_session_id = newSession.id;
+            await supabaseAdmin.from('session_events').insert([
+              { session_id: newSession.id, event_type: 'started', actor_id: userId },
+              { session_id: newSession.id, event_type: 'assigned', actor_id: userId, metadata: { assigned_to: userId } }
+            ]);
           }
-          if (sessionId) {
-             updatePayload.current_session_id = sessionId;
-             await supabaseAdmin.from('session_events').insert({ session_id: sessionId, event_type: 'started', actor_id: userId });
-          }
+        } else if (currentSessionId && conv.status === 'waiting') {
+          // Record assignment event for existing waiting session
+          await supabaseAdmin.from('session_events').insert({
+             session_id: currentSessionId,
+             event_type: 'assigned',
+             actor_id: userId,
+             metadata: { assigned_to: userId }
+          });
         }
+        
         await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
       }
     } else {

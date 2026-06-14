@@ -14,6 +14,95 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_agents: {
+        Row: {
+          id: string
+          company_id: string
+          name: string
+          instance_id: string | null
+          department_id: string | null
+          unit_id: string | null
+          handoff_department_id: string | null
+          allow_handoff: boolean
+          allow_resolution: boolean
+          resolution_reason_id: string | null
+          ai_type: string
+          model: string
+          provider: string
+          prompt_personality: string | null
+          prompt_instructions: string | null
+          prompt_extra_info: string | null
+          is_active: boolean
+          active_by_default: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          name: string
+          instance_id?: string | null
+          department_id?: string | null
+          unit_id?: string | null
+          handoff_department_id?: string | null
+          allow_handoff?: boolean
+          allow_resolution?: boolean
+          resolution_reason_id?: string | null
+          ai_type: string
+          model: string
+          prompt_personality?: string | null
+          prompt_instructions?: string | null
+          prompt_extra_info?: string | null
+          is_active?: boolean
+          active_by_default?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          name?: string
+          instance_id?: string | null
+          department_id?: string | null
+          unit_id?: string | null
+          handoff_department_id?: string | null
+          allow_handoff?: boolean
+          allow_resolution?: boolean
+          resolution_reason_id?: string | null
+          ai_type?: string
+          model?: string
+          prompt_personality?: string | null
+          prompt_instructions?: string | null
+          prompt_extra_info?: string | null
+          is_active?: boolean
+          active_by_default?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_agents_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_agents_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_agents_instance_id_fkey"
+            columns: ["instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       companies: {
         Row: {
           created_at: string
@@ -123,6 +212,8 @@ export type Database = {
           tags: string[]
           unit_id: string
           whatsapp_instance_id: string | null
+          ai_active: boolean
+          ai_agent_id: string | null
         }
         Insert: {
           assigned_agent_id?: string | null
@@ -137,6 +228,8 @@ export type Database = {
           tags?: string[]
           unit_id: string
           whatsapp_instance_id?: string | null
+          ai_active?: boolean
+          ai_agent_id?: string | null
         }
         Update: {
           assigned_agent_id?: string | null
@@ -151,6 +244,8 @@ export type Database = {
           tags?: string[]
           unit_id?: string
           whatsapp_instance_id?: string | null
+          ai_active?: boolean
+          ai_agent_id?: string | null
         }
         Relationships: [
           {
@@ -265,6 +360,7 @@ export type Database = {
           conversation_id: string
           created_at: string
           id: string
+          is_internal: boolean
           media_type: Database["public"]["Enums"]["media_type"]
           media_url: string | null
           read_at: string | null
@@ -276,6 +372,7 @@ export type Database = {
           conversation_id: string
           created_at?: string
           id?: string
+          is_internal?: boolean
           media_type?: Database["public"]["Enums"]["media_type"]
           media_url?: string | null
           read_at?: string | null
@@ -287,6 +384,7 @@ export type Database = {
           conversation_id?: string
           created_at?: string
           id?: string
+          is_internal?: boolean
           media_type?: Database["public"]["Enums"]["media_type"]
           media_url?: string | null
           read_at?: string | null

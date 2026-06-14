@@ -318,7 +318,7 @@ function ContactJourney({ contactId }: { contactId: string }) {
           
         supabase
           .from("conversation_sessions" as any)
-          .select(`id, started_at, resolved_at, resolution_observation, whatsapp_instances(name), resolution_reasons(label), assigned_agent:profiles!conversation_sessions_assigned_agent_id_fkey(name)`)
+          .select(`id, started_at, resolved_at, resolution_observation, whatsapp_instances(name), resolution_reasons(label), assigned_agent:profiles!conversation_sessions_assigned_agent_id_fkey(name), conversation:conversations!conversation_sessions_conversation_id_fkey(ai_active, ai_agent:ai_agents(name))`)
           .eq("contact_id", contactId),
 
         supabase
@@ -548,7 +548,11 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     <div className="flex-1 min-w-0">
                       <span className="text-[11px] font-semibold block mb-0.5 text-foreground/80">Atendido por</span>
                       <span className="text-[11px] text-muted-foreground truncate block">
-                        {sess.assigned_agent?.name || "Bot / Não atribuído"}
+                        {sess.assigned_agent?.name 
+                          ? sess.assigned_agent.name 
+                          : sess.conversation?.ai_active && sess.conversation?.ai_agent?.name
+                            ? `🤖 ${sess.conversation.ai_agent.name}`
+                            : "Bot / Não atribuído"}
                       </span>
                     </div>
                   </div>
@@ -741,6 +745,12 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
             actor:profiles!session_events_actor_id_fkey (
               name
             )
+          ),
+          conversation:conversations!conversation_sessions_conversation_id_fkey (
+            ai_active,
+            ai_agent:ai_agents (
+              name
+            )
           )
         `)
         .eq("contact_id", contactId)
@@ -835,7 +845,7 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
         <TabsList className="grid w-full grid-cols-3 h-auto p-1 bg-muted/50 mb-3 gap-1">
           <TabsTrigger value="jornada" className="px-1 py-1.5 text-[10px] sm:text-[11px] font-bold truncate">Jornada</TabsTrigger>
           <TabsTrigger value="observacoes" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Notas</TabsTrigger>
-          <TabsTrigger value="conversations" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Histórico</TabsTrigger>
+          <TabsTrigger value="conversations" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Atendimentos</TabsTrigger>
           <TabsTrigger value="opportunities" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">CRM</TabsTrigger>
           <TabsTrigger value="tasks" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Tarefas</TabsTrigger>
           <TabsTrigger value="ads" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Anúncios</TabsTrigger>
@@ -859,7 +869,7 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
         <TabsContent value="conversations" className="mt-0">
           <div className="flex items-center gap-2 mb-6">
             <History className="h-5 w-5 text-muted-foreground" />
-            <h3 className="text-lg font-semibold">Histórico de Atendimentos</h3>
+            <h3 className="text-lg font-semibold">Atendimentos</h3>
           </div>
 
           {isLoadingSessions ? (
@@ -912,7 +922,11 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
                         <div className="flex-1 min-w-0">
                           <span className="text-[11px] font-semibold block mb-0.5 text-foreground/80">Atendente</span>
                           <span className="text-[11px] text-muted-foreground truncate block">
-                            {session.assigned_agent?.name || "Não atribuído"}
+                            {session.assigned_agent?.name 
+                              ? session.assigned_agent.name 
+                              : session.conversation?.ai_active && session.conversation?.ai_agent?.name
+                                ? `🤖 ${session.conversation.ai_agent.name}`
+                                : "Não atribuído"}
                           </span>
                         </div>
                       </div>
@@ -950,18 +964,24 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
                           
                           {expandedSessions.has(session.id) && (
                             <div className="mt-3 pl-2 border-l-2 border-muted space-y-3 w-full animate-in slide-in-from-top-2 fade-in duration-200">
-                              {session.session_events.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).map((event: any) => (
-                                <div key={event.id} className="flex items-start gap-2 text-xs text-muted-foreground w-full">
-                                  <span className="shrink-0 font-mono text-[10px] mt-0.5">{format(new Date(event.created_at), "HH:mm")}</span>
-                                  <div className="flex-1 min-w-0 break-words leading-relaxed pr-1">
-                                    {event.event_type === 'started' && <span>Ticket aberto</span>}
-                                    {event.event_type === 'assigned' && <span>Atribuído para <strong>{event.actor?.name || 'Sistema'}</strong></span>}
-                                    {event.event_type === 'transferred' && <span>Transferido por <strong>{event.actor?.name || 'Sistema'}</strong>{event.metadata?.targetName ? <span> para <strong>{event.metadata.targetName}</strong></span> : ''}</span>}
-                                    {event.event_type === 'returned_to_queue' && <span>Retornado à fila por <strong>{event.actor?.name || 'Sistema'}</strong></span>}
-                                    {event.event_type === 'resolved' && <span>Encerrado por <strong>{event.actor?.name || 'Sistema'}</strong></span>}
+                              {session.session_events.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).map((event: any) => {
+                                const actorName = event.metadata?.by_ai && session.conversation?.ai_agent?.name
+                                  ? `🤖 ${session.conversation.ai_agent.name}`
+                                  : event.actor?.name || 'Sistema';
+                                
+                                return (
+                                  <div key={event.id} className="flex items-start gap-2 text-xs text-muted-foreground w-full">
+                                    <span className="shrink-0 font-mono text-[10px] mt-0.5">{format(new Date(event.created_at), "HH:mm")}</span>
+                                    <div className="flex-1 min-w-0 break-words leading-relaxed pr-1">
+                                      {event.event_type === 'started' && <span>Ticket aberto</span>}
+                                      {event.event_type === 'assigned' && <span>Atribuído para <strong>{actorName}</strong></span>}
+                                      {event.event_type === 'transferred' && <span>Transferido por <strong>{actorName}</strong>{event.metadata?.targetName ? <span> para <strong>{event.metadata.targetName}</strong></span> : ''}</span>}
+                                      {event.event_type === 'returned_to_queue' && <span>Retornado à fila por <strong>{actorName}</strong></span>}
+                                      {event.event_type === 'resolved' && <span>Encerrado por <strong>{actorName}</strong></span>}
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </div>

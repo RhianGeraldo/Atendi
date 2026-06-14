@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, FileText, Sparkles, Folder, FolderOpen, Video, Headphones } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -21,6 +21,7 @@ import { formatRelative, initials, formatPhone, formatMessageTime } from "@/lib/
 import { useUnit } from "@/lib/unit-context";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -65,6 +66,9 @@ interface ConvRow {
   assigned_agent?: { name: string } | null;
   department_id: string | null;
   assigned_agent_id: string | null;
+  ai_active?: boolean;
+  ai_agent_id?: string | null;
+  ai_agent?: { name: string } | null;
   unit_id: string;
   whatsapp_instance_id: string | null;
   unit?: { name: string; color?: string | null } | null;
@@ -104,7 +108,7 @@ function ConversationsPage() {
       let query = supabase
         .from("conversations")
         .select(
-          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), unit:units(name,color), whatsapp_instance:whatsapp_instances(name)"
+          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color), whatsapp_instance:whatsapp_instances(name)"
         );
 
       if (selectedUnitId) {
@@ -432,6 +436,17 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
     enabled: !!profile?.company_id
   });
 
+  const toggleAi = useMutation({
+    mutationFn: async (active: boolean) => {
+      const { error } = await supabase.from("conversations").update({ ai_active: active }).eq("id", conv.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e) => toast.error("Erro ao alterar IA", { description: (e as Error).message })
+  });
+
   const toggleLabel = useMutation({
     mutationFn: async ({ labelId, action }: { labelId: string, action: "add" | "remove" }) => {
       if (!selectedUnitId || !conv.contact?.id) return;
@@ -551,6 +566,28 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
 
       <ScrollArea className="flex-1">
         <div className="px-4 pb-6 space-y-4">
+          {/* AI Status Container */}
+          {!isGroup && (
+            <div className="bg-card border border-border/60 rounded-xl p-4 shadow-sm flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={cn("p-2 rounded-lg", conv.ai_active ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+                  <Bot className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground">Inteligência Artificial</h4>
+                  <p className="text-xs text-muted-foreground">
+                    {conv.ai_active ? "A IA está respondendo" : "IA pausada neste ticket"}
+                  </p>
+                </div>
+              </div>
+              <Switch 
+                checked={conv.ai_active || false} 
+                onCheckedChange={(v) => toggleAi.mutate(v)} 
+                disabled={toggleAi.isPending}
+              />
+            </div>
+          )}
+
           {/* Etiquetas Container */}
           <div className="bg-card border border-border/60 rounded-xl p-4 shadow-sm">
             <div className="flex items-center justify-between mb-3">
@@ -849,9 +886,9 @@ function ConversationItem({
               {conv.department.name}
             </Badge>
           )}
-          {conv.status === "active" && conv.assigned_agent?.name && (
+          {conv.status === "active" && (conv.ai_active || conv.assigned_agent?.name) && (
             <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal text-muted-foreground bg-muted/30">
-              {conv.assigned_agent.name}
+              {conv.ai_active ? `🤖 ${conv.ai_agent?.name || 'IA'}` : conv.assigned_agent?.name}
             </Badge>
           )}
           {conv.status === "waiting" && conv.assigned_agent_id && conv.assigned_agent_id === currentUserId && (
@@ -893,6 +930,7 @@ interface MessageRow {
   id: string;
   conversation_id: string;
   sender_type: "agent" | "contact" | "system";
+  is_internal?: boolean;
   content: string | null;
   media_type: "text" | "image" | "audio" | "video" | "document";
   media_url?: string | null;
@@ -922,6 +960,7 @@ function ChatPanel({
   const qc = useQueryClient();
   const { selectedUnitId } = useUnit();
   const [text, setText] = useState("");
+  const [isInternalNote, setIsInternalNote] = useState(false);
   const [selectedFile, setSelectedFile] = useState<{ file: File; base64: string; type: string } | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
   const [editingMessage, setEditingMessage] = useState<MessageRow | null>(null);
@@ -956,7 +995,7 @@ function ChatPanel({
       // 2. Fetch all messages for these conversations
       const { data, error } = await supabase
         .from("messages")
-        .select("id, conversation_id, sender_type, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
+        .select("id, conversation_id, sender_type, is_internal, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
         .in("conversation_id", convIds)
         .order("created_at", { ascending: true });
         
@@ -1014,11 +1053,9 @@ function ChatPanel({
     return () => clearTimeout(timeout);
   }, [messages?.length, conv.id, conv.unread_count, qc]);
 
-  const navigate = Route.useNavigate();
-
   const send = useMutation({
     mutationFn: async (payload: { content: string; mediaType?: "text"|"image"|"video"|"audio"|"document"; mediaBase64?: string; quotedMessageId?: string; quotedParticipant?: string; quotedInternalId?: string; quotedContent?: string }) => {
-      return await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent } });
+      return await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent, isInternal: isInternalNote } });
     },
     onMutate: async (payload) => {
       await qc.cancelQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
@@ -1028,6 +1065,7 @@ function ChatPanel({
         id: crypto.randomUUID(),
         conversation_id: conv.id,
         sender_type: "agent",
+        is_internal: isInternalNote,
         content: payload.content,
         media_type: payload.mediaType || "text",
         media_url: payload.mediaBase64 || null,
@@ -1040,6 +1078,7 @@ function ChatPanel({
       setText("");
       setSelectedFile(null);
       setReplyingTo(null);
+      setIsInternalNote(false);
       
       setTimeout(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -1271,7 +1310,6 @@ function ChatPanel({
       return;
     }
 
-    const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
     const participant = replyingTo ? (replyingTo.participant_jid || (replyingTo.sender_type === "contact" ? (replyingTo.sender_id ? undefined : (conv.contact?.phone ? `${conv.contact.phone}@s.whatsapp.net` : undefined)) : undefined)) : undefined;
 
     const quotedPayload = replyingTo ? {
@@ -1331,12 +1369,14 @@ function ChatPanel({
         .update({
           status: "resolved",
           resolved_at: resolvedAt,
-          resolution_reason_id: reasonId || null,
-          resolution_observation: observation.trim() || null,
-          current_session_id: null // remove o vínculo da sessão ativa
+          current_session_id: null,
+          assigned_agent_id: null
         } as any)
         .eq("id", conv.id);
-      if (error) throw error;
+      if (error) {
+        console.error("Error updating conversation:", error);
+        throw error;
+      }
       
       // 2. Atualiza TODAS as sessões em andamento (para garantir limpeza de zumbis criados pelo bug anterior)
       const { data: openSessions } = await supabase.from('conversation_sessions' as any)
@@ -1427,6 +1467,7 @@ function ChatPanel({
   const assignConv = useMutation({
     mutationFn: async () => {
       await assignConversationAction({ data: { conversationId: conv.id } });
+      await supabase.from("conversations").update({ ai_active: false }).eq("id", conv.id);
     },
     onSuccess: () => {
       toast.success("Atendimento puxado para você.");
@@ -1436,6 +1477,17 @@ function ChatPanel({
     onError: (e) => {
       toast.error("Erro ao puxar atendimento", { description: (e as Error).message });
     }
+  });
+
+  const toggleAi = useMutation({
+    mutationFn: async (active: boolean) => {
+      const { error } = await supabase.from("conversations").update({ ai_active: active }).eq("id", conv.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e) => toast.error("Erro ao alterar IA", { description: (e as Error).message })
   });
 
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
@@ -1631,28 +1683,28 @@ function ChatPanel({
 
         {/* Input */}
         <div className="border-t border-border bg-card p-3 flex flex-col gap-2 relative">
-          {(conv.status === 'waiting' || (conv.status === 'active' && conv.assigned_agent_id && conv.assigned_agent_id !== profile?.id)) && !isGroup && (
+          {(conv.status === 'waiting' || (conv.status === 'active' && ((conv.assigned_agent_id && conv.assigned_agent_id !== profile?.id) || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card gap-2">
               {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || profile?.role === 'admin_company' || profile?.role === 'manager') ? (
                 <>
                   <p className="text-sm font-medium text-muted-foreground text-center px-4">
-                    {!conv.assigned_agent_id 
+                    {(!conv.assigned_agent_id && !conv.ai_active)
                       ? "Esta conversa está na fila e aguardando um agente." 
                       : conv.assigned_agent_id === profile?.id 
                         ? "Esta conversa foi transferida para você." 
                         : conv.status === 'active'
-                          ? `Esta conversa está sendo atendida por ${conv.assigned_agent?.name || 'outro agente'}.`
+                          ? `Esta conversa está sendo atendida por ${conv.ai_active ? `🤖 ${conv.ai_agent?.name || 'IA'}` : conv.assigned_agent?.name || 'outro agente'}.`
                           : `Esta conversa foi transferida para ${conv.assigned_agent?.name || 'outro agente'}.`}
                   </p>
                   <Button onClick={() => assignConv.mutate()} disabled={assignConv.isPending}>
                     {assignConv.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {!conv.assigned_agent_id ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
+                    {(!conv.assigned_agent_id && !conv.ai_active) ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
                   </Button>
                 </>
               ) : (
                 <p className="text-sm font-medium text-muted-foreground">
                   {conv.status === 'active' 
-                    ? `Em atendimento por ${conv.assigned_agent?.name || 'outro agente'}.` 
+                    ? `Em atendimento por ${conv.ai_active ? `🤖 ${conv.ai_agent?.name || 'IA'}` : conv.assigned_agent?.name || 'outro agente'}.` 
                     : `Aguardando aceite de ${conv.assigned_agent?.name || 'outro agente'}.`}
                 </p>
               )}
@@ -1813,6 +1865,16 @@ function ChatPanel({
                   </PopoverContent>
                 </Popover>
                 
+                <Button 
+                  variant={isInternalNote ? "default" : "ghost"} 
+                  size="icon" 
+                  className={cn("shrink-0 h-9 w-9 rounded-full", isInternalNote ? "bg-amber-400 text-amber-950 hover:bg-amber-500" : "text-muted-foreground")}
+                  title="Nota Interna"
+                  onClick={() => setIsInternalNote(!isInternalNote)}
+                >
+                  <FileText className="h-5 w-5" />
+                </Button>
+
                 <TextareaAutosize
                   id="chat-input"
                   value={text}
@@ -1848,14 +1910,17 @@ function ChatPanel({
                   placeholder="Digite uma mensagem..."
                   minRows={1}
                   maxRows={6}
-                  className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+                  className={cn(
+                    "flex w-full rounded-xl border-transparent bg-muted/50 px-4 py-3 pb-3 text-base shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 resize-none",
+                    isInternalNote && "bg-amber-100/50 dark:bg-amber-900/20 placeholder:text-amber-700/50 dark:placeholder:text-amber-400/50 border-amber-200 dark:border-amber-800/50"
+                  )}
                 />
-                
                 {(text.trim() || selectedFile) ? (
                   <Button
                     size="icon"
                     onClick={handleSend}
                     disabled={send.isPending}
+                    className={cn(isInternalNote && "bg-amber-500 hover:bg-amber-600 text-amber-950")}
                   >
                     <Send className="h-4 w-4" />
                   </Button>
@@ -1863,7 +1928,7 @@ function ChatPanel({
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="text-muted-foreground hover:text-foreground"
+                    className={cn("text-muted-foreground hover:text-foreground", isInternalNote && "hover:bg-amber-200")}
                     onClick={startRecording}
                   >
                     <Mic className="h-4 w-4" />
@@ -2021,7 +2086,18 @@ function PdfViewer({ url }: { url: string }) {
 }
 
 function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onTranscribe, isTranscribingId }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void, onReply?: (m: MessageRow) => void, onEdit?: (m: MessageRow) => void, onTranscribe?: (id: string) => void, isTranscribingId?: string | null }) {
+  if (m.sender_type === "system") {
+    return (
+      <div className="flex justify-center my-4 w-full">
+        <div className="bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 text-xs px-4 py-1.5 rounded-full text-center border border-amber-200 dark:border-amber-800/50 font-medium">
+          {m.content}
+        </div>
+      </div>
+    );
+  }
+
   const mine = m.sender_type === "agent";
+  const isInternal = m.is_internal;
   
   let senderName = null;
   let displayContent = m.content || "";
@@ -2058,16 +2134,22 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onTranscribe, isT
         className={cn(
           "max-w-[70%] flex flex-col rounded-2xl px-3.5 py-2 text-sm shadow-sm relative group",
           mine
-            ? "rounded-br-sm bg-primary text-primary-foreground"
+            ? (isInternal ? "rounded-br-sm bg-amber-100 dark:bg-amber-900/30 text-amber-900 dark:text-amber-100 border border-amber-200 dark:border-amber-800/50" : "rounded-br-sm bg-primary text-primary-foreground")
             : "rounded-bl-sm bg-card text-foreground border border-border",
           m.is_deleted && "opacity-60",
           m.isOptimistic && "opacity-70"
         )}
       >
+        {isInternal && (
+          <div className="flex items-center gap-1 mb-1 text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+            <FileText className="h-3 w-3" />
+            Nota Interna
+          </div>
+        )}
         {senderName && (
           <div className={cn(
             "mb-1 text-xs font-bold",
-            mine ? "text-primary-foreground/90" : "text-primary/80 dark:text-primary/90"
+            mine ? (isInternal ? "text-amber-700 dark:text-amber-300" : "text-primary-foreground/90") : "text-primary/80 dark:text-primary/90"
           )}>
             {senderName}
           </div>

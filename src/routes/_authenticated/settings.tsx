@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle } from "lucide-react";
+import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2 } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -34,6 +42,7 @@ import { DepartmentsTab } from "@/components/settings/departments-tab";
 import { UsersTab } from "@/components/settings/users-tab";
 import { LabelsTab } from "@/components/settings/labels-tab";
 import { CrmTab } from "@/components/settings/crm-tab";
+import { AiAgentsTab } from "@/components/settings/ai-agents-tab";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
@@ -65,6 +74,7 @@ function SettingsPage() {
   const [selectedInstance, setSelectedInstance] = useState<any>(null);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   const { data: company, isLoading: isLoadingCompany } = useQuery({
     queryKey: ["company", profile?.company_id],
@@ -285,6 +295,7 @@ function SettingsPage() {
     onSuccess: () => {
       toast.success("Instância global criada!");
       setInstanceName("");
+      setCreateModalOpen(false);
       qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
     },
     onError: (e) => toast.error("Erro ao criar", { description: (e as Error).message })
@@ -332,15 +343,11 @@ function SettingsPage() {
       
       <Tabs defaultValue="general" className="space-y-6">
         <TabsList className="flex flex-wrap h-auto gap-1 justify-start">
-          <TabsTrigger value="general">Geral e Integrações</TabsTrigger>
-          <TabsTrigger value="profile">Meu Perfil</TabsTrigger>
-          <TabsTrigger value="departments">Departamentos</TabsTrigger>
-          <TabsTrigger value="users">Equipe e Acessos</TabsTrigger>
-          <TabsTrigger value="labels">Etiquetas</TabsTrigger>
-          <TabsTrigger value="ai-transcription">Inteligência Artificial</TabsTrigger>
-          <TabsTrigger value="crm">CRM e Funis</TabsTrigger>
-          <TabsTrigger value="quick-messages">Mensagens Rápidas</TabsTrigger>
-          <TabsTrigger value="resolution-reasons">Motivos de Encerramento</TabsTrigger>
+          <TabsTrigger value="general">Empresa & API</TabsTrigger>
+          <TabsTrigger value="channels">Canais & Atendimento</TabsTrigger>
+          <TabsTrigger value="ai">Inteligência Artificial</TabsTrigger>
+          <TabsTrigger value="crm">CRM & Funis</TabsTrigger>
+          <TabsTrigger value="team">Equipe & Perfis</TabsTrigger>
         </TabsList>
         
         <TabsContent value="general" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -426,76 +433,119 @@ function SettingsPage() {
           </CardContent>
         </Card>
         )}
-
-        {/* Global Instances Card */}
-        <Card className={cn("col-span-full", !selectedUnitId && "lg:col-span-2")}>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Smartphone className="h-5 w-5" />
-              Instâncias de WhatsApp
-            </CardTitle>
-            <CardDescription>
-              {selectedUnitId 
-                ? "Instâncias de atendimento desta unidade específica."
-                : "Instâncias vinculadas diretamente à Empresa Mãe (sem unidade)."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="flex items-end gap-3">
-              <div className="flex-1 space-y-1">
-                <label className="text-sm font-medium">Nova Instância</label>
-                <Input 
-                  placeholder="Nome da conexão (ex: Suporte Central)" 
-                  value={instanceName}
-                  onChange={(e) => setInstanceName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && instanceName && company?.evogo_host && !createInstance.isPending) {
-                      createInstance.mutate(instanceName);
-                    }
-                  }}
-                />
-              </div>
-              <Button 
-                onClick={() => createInstance.mutate(instanceName)}
-                disabled={!instanceName || createInstance.isPending || !company?.evogo_host}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Criar
-              </Button>
-            </div>
-
-            <div className="space-y-4">
-              <h3 className="text-sm font-medium text-muted-foreground">Instâncias Ativas</h3>
-              {isLoadingInstances ? (
-                <div className="text-sm text-muted-foreground">Carregando...</div>
-              ) : instances?.length ? (
-                instances.map((inst) => (
-                  <InstanceRow 
-                    key={inst.id} 
-                    instance={inst} 
-                    company={company}
-                    onConnect={() => {
-                      setSelectedInstance(inst);
-                      setQrModalOpen(true);
-                    }} 
-                    onSettings={() => {
-                      setSelectedInstance(inst);
-                      setSettingsModalOpen(true);
-                    }}
-                  />
-                ))
-              ) : (
-                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  Nenhuma instância global configurada no momento.
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
         </TabsContent>
 
-        <TabsContent value="profile" className="grid gap-4 md:grid-cols-2">
-          <Card>
+        <TabsContent value="channels" className="space-y-4">
+          <Tabs defaultValue="whatsapp" orientation="vertical" className="flex flex-col md:flex-row gap-6 w-full">
+            <TabsList className="flex md:flex-col h-auto w-full md:w-56 bg-transparent gap-1 justify-start">
+              <TabsTrigger value="whatsapp" className="w-full justify-start data-[state=active]:bg-muted">
+                <Smartphone className="mr-2 h-4 w-4" />
+                WhatsApp
+              </TabsTrigger>
+              <TabsTrigger value="quick-messages" className="w-full justify-start data-[state=active]:bg-muted">
+                <Zap className="mr-2 h-4 w-4" />
+                Mensagens Rápidas
+              </TabsTrigger>
+              <TabsTrigger value="labels" className="w-full justify-start data-[state=active]:bg-muted">
+                <Tags className="mr-2 h-4 w-4" />
+                Etiquetas
+              </TabsTrigger>
+              <TabsTrigger value="reasons" className="w-full justify-start data-[state=active]:bg-muted">
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+                Encerramento
+              </TabsTrigger>
+            </TabsList>
+            
+            <div className="flex-1 w-full min-w-0">
+              <TabsContent value="whatsapp" className="mt-0 border-none p-0">
+                {/* Global Instances Card */}
+          <Card className={cn("col-span-full", !selectedUnitId && "lg:col-span-2")}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Smartphone className="h-5 w-5" />
+                Instâncias de WhatsApp
+              </CardTitle>
+              <CardDescription>
+                {selectedUnitId 
+                  ? "Instâncias de atendimento desta unidade específica."
+                  : "Instâncias vinculadas diretamente à Empresa Mãe (sem unidade)."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-medium text-muted-foreground">Instâncias Ativas</h3>
+                </div>
+                <Button onClick={() => setCreateModalOpen(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Criar Instância
+                </Button>
+              </div>
+
+              <div className="space-y-4">
+                {isLoadingInstances ? (
+                  <div className="text-sm text-muted-foreground">Carregando...</div>
+                ) : instances?.length ? (
+                  instances.map((inst) => (
+                    <InstanceRow 
+                      key={inst.id} 
+                      instance={inst} 
+                      company={company}
+                      onConnect={() => {
+                        setSelectedInstance(inst);
+                        setQrModalOpen(true);
+                      }} 
+                      onSettings={() => {
+                        setSelectedInstance(inst);
+                        setSettingsModalOpen(true);
+                      }}
+                    />
+                  ))
+                ) : (
+                  <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    Nenhuma instância global configurada no momento.
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+          </TabsContent>
+
+          <TabsContent value="quick-messages" className="mt-0 border-none p-0">
+            <QuickMessagesTab />
+          </TabsContent>
+          
+          <TabsContent value="reasons" className="mt-0 border-none p-0">
+            <ResolutionReasonsTab />
+          </TabsContent>
+          
+          <TabsContent value="labels" className="mt-0 border-none p-0">
+            <LabelsTab />
+          </TabsContent>
+        </div>
+      </Tabs>
+    </TabsContent>
+
+    <TabsContent value="team" className="space-y-4">
+      <Tabs defaultValue="profile" orientation="vertical" className="flex flex-col md:flex-row gap-6 w-full">
+        <TabsList className="flex md:flex-col h-auto w-full md:w-56 bg-transparent gap-1 justify-start">
+          <TabsTrigger value="profile" className="w-full justify-start data-[state=active]:bg-muted">
+            <User className="mr-2 h-4 w-4" />
+            Minha Conta
+          </TabsTrigger>
+          <TabsTrigger value="users" className="w-full justify-start data-[state=active]:bg-muted">
+            <Users className="mr-2 h-4 w-4" />
+            Membros
+          </TabsTrigger>
+          <TabsTrigger value="departments" className="w-full justify-start data-[state=active]:bg-muted">
+            <Building2 className="mr-2 h-4 w-4" />
+            Departamentos
+          </TabsTrigger>
+        </TabsList>
+        
+        <div className="flex-1 w-full min-w-0">
+          <TabsContent value="profile" className="mt-0 border-none p-0">
+            <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <User className="h-5 w-5" />
@@ -522,20 +572,33 @@ function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
-
-        <TabsContent value="departments">
-          <DepartmentsTab />
-        </TabsContent>
-
-        <TabsContent value="users">
+          
+        <TabsContent value="users" className="mt-0 border-none p-0">
           <UsersTab />
         </TabsContent>
 
-        <TabsContent value="labels">
-          <LabelsTab />
+        <TabsContent value="departments" className="mt-0 border-none p-0">
+          <DepartmentsTab />
         </TabsContent>
+      </div>
+    </Tabs>
+  </TabsContent>
 
-        <TabsContent value="ai-transcription" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+  <TabsContent value="ai" className="space-y-4">
+    <Tabs defaultValue="integrations" orientation="vertical" className="flex flex-col md:flex-row gap-6 w-full">
+      <TabsList className="flex md:flex-col h-auto w-full md:w-56 bg-transparent gap-1 justify-start">
+        <TabsTrigger value="integrations" className="w-full justify-start data-[state=active]:bg-muted">
+          <Key className="mr-2 h-4 w-4" />
+          Integrações Globais
+        </TabsTrigger>
+        <TabsTrigger value="agents" className="w-full justify-start data-[state=active]:bg-muted">
+          <Bot className="mr-2 h-4 w-4" />
+          Agentes de IA
+        </TabsTrigger>
+      </TabsList>
+
+      <div className="flex-1 w-full min-w-0">
+        <TabsContent value="integrations" className="mt-0 border-none p-0 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {!selectedUnitId && (
             <>
               {/* Card de Chaves de API */}
@@ -707,16 +770,15 @@ function SettingsPage() {
           )}
         </TabsContent>
 
+        <TabsContent value="agents" className="mt-0 border-none p-0">
+          <AiAgentsTab />
+        </TabsContent>
+      </div>
+    </Tabs>
+  </TabsContent>
+
         <TabsContent value="crm" className="grid gap-4">
           <CrmTab />
-        </TabsContent>
-
-        <TabsContent value="quick-messages" className="grid gap-4 md:grid-cols-2">
-          <QuickMessagesTab />
-        </TabsContent>
-
-        <TabsContent value="resolution-reasons">
-          <ResolutionReasonsTab />
         </TabsContent>
       </Tabs>
 
@@ -732,6 +794,44 @@ function SettingsPage() {
         instance={selectedInstance}
         company={company}
       />
+      
+      <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nova Instância de WhatsApp</DialogTitle>
+            <DialogDescription>
+              Digite um nome para a nova conexão que será criada na EvoGo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Nome da Conexão</label>
+              <Input 
+                placeholder="Ex: Suporte Central" 
+                value={instanceName}
+                onChange={(e) => setInstanceName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && instanceName && company?.evogo_host && !createInstance.isPending) {
+                    createInstance.mutate(instanceName);
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              onClick={() => createInstance.mutate(instanceName)}
+              disabled={!instanceName || createInstance.isPending || !company?.evogo_host}
+            >
+              {createInstance.isPending ? "Criando..." : "Criar Instância"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
