@@ -31,7 +31,7 @@ import { TransferDialog } from "@/components/chat/transfer-dialog";
 import { LinkPreview } from "@/components/chat/link-preview";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 export const Route = createFileRoute("/_authenticated/conversations")({
   component: ConversationsPage,
   validateSearch: (search: Record<string, unknown>) => {
@@ -1698,11 +1698,7 @@ function ChatPanel({
               onReact={(emoji) => react.mutate({ messageId: m.id, emoji })} 
               onReply={(msg) => { setReplyingTo(msg); document.getElementById('chat-input')?.focus(); }}
               onEdit={startEdit}
-              onDelete={(msg) => {
-                if (window.confirm("Deseja realmente apagar esta mensagem para todos?")) {
-                  deleteMsg.mutate(msg.id);
-                }
-              }}
+              onDelete={(msg) => deleteMsg.mutate(msg.id)}
               onTranscribe={(id) => transcribeAudio.mutate(id)}
               isTranscribingId={transcribeAudio.isPending ? transcribeAudio.variables : null}
             />
@@ -2208,13 +2204,30 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
               </button>
             )}
             {onDelete && mine && m.remote_msg_id && (
-              <button 
-                onClick={() => onDelete(m)}
-                className="hover:text-red-500 hover:bg-red-500/10 p-1.5 rounded-full transition-colors"
-                title="Apagar"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <button 
+                    className="hover:text-red-500 hover:bg-red-500/10 p-1.5 rounded-full transition-colors"
+                    title="Apagar"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </AlertDialogTrigger>
+                <AlertDialogContent className="max-w-md">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Apagar Mensagem</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Deseja realmente apagar esta mensagem para todos? Esta ação não pode ser desfeita e a mensagem será removida do WhatsApp do cliente.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => onDelete(m)} className="bg-red-500 hover:bg-red-600">
+                      Apagar para todos
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             )}
             <Popover>
               <PopoverTrigger asChild>
