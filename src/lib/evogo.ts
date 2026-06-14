@@ -31,6 +31,7 @@ export async function sendEvogoText({
       text,
       delay,
       preview: true,
+      linkPreview: true,
       ...(quoted && { quoted }),
     }),
   });

@@ -90,19 +90,9 @@ export async function sendPlatformMessage({
         base64: mediaUrlToSend!, mediatype: mediaType as any, caption: text,
       });
     } else {
-      const messageText = text || '';
-      // Regex to detect if there's any URL in the text
-      const hasUrl = /(https?:\/\/[^\s]+)/g.test(messageText);
-
-      if (hasUrl) {
-        evogoResponse = await sendEvogoLink({
-          host, token, instanceName, number: phone, text: messageText,
-        });
-      } else {
-        evogoResponse = await sendEvogoText({
-          host, token, instanceName, number: phone, text: messageText,
-        });
-      }
+      evogoResponse = await sendEvogoText({
+        host, token, instanceName, number: phone, text: text || '',
+      });
     }
 
     remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
