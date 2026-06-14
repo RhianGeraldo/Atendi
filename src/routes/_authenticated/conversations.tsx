@@ -1054,8 +1054,8 @@ function ChatPanel({
   }, [messages?.length, conv.id, conv.unread_count, qc]);
 
   const send = useMutation({
-    mutationFn: async (payload: { content: string; mediaType?: "text"|"image"|"video"|"audio"|"document"; mediaBase64?: string; quotedMessageId?: string; quotedParticipant?: string; quotedInternalId?: string; quotedContent?: string }) => {
-      return await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent, isInternal: isInternalNote } });
+    mutationFn: async (payload: { content: string; isInternal?: boolean; mediaType?: "text"|"image"|"video"|"audio"|"document"; mediaBase64?: string; quotedMessageId?: string; quotedParticipant?: string; quotedInternalId?: string; quotedContent?: string }) => {
+      return await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent, isInternal: payload.isInternal } });
     },
     onMutate: async (payload) => {
       await qc.cancelQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
@@ -1065,7 +1065,7 @@ function ChatPanel({
         id: crypto.randomUUID(),
         conversation_id: conv.id,
         sender_type: "agent",
-        is_internal: isInternalNote,
+        is_internal: payload.isInternal,
         content: payload.content,
         media_type: payload.mediaType || "text",
         media_url: payload.mediaBase64 || null,
@@ -1231,7 +1231,7 @@ function ChatPanel({
         const reader = new FileReader();
         reader.onloadend = () => {
           const base64data = reader.result as string;
-          send.mutate({ content: "", mediaType: "audio", mediaBase64: base64data });
+          send.mutate({ content: "", isInternal: isInternalNote, mediaType: "audio", mediaBase64: base64data });
         };
         reader.readAsDataURL(audioBlob);
         
@@ -1320,9 +1320,9 @@ function ChatPanel({
     } : {};
 
     if (selectedFile) {
-      send.mutate({ content: text.trim(), mediaType: selectedFile.type as any, mediaBase64: selectedFile.base64, ...quotedPayload });
+      send.mutate({ content: text.trim(), isInternal: isInternalNote, mediaType: selectedFile.type as any, mediaBase64: selectedFile.base64, ...quotedPayload });
     } else if (text.trim()) {
-      send.mutate({ content: text.trim(), ...quotedPayload });
+      send.mutate({ content: text.trim(), isInternal: isInternalNote, ...quotedPayload });
     }
   };
 
