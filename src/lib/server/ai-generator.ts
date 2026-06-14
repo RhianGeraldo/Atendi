@@ -122,7 +122,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         model: agent.model.replace('openrouter/', '').replace('groq/', ''),
         messages: formattedMessages,
         temperature: 0.7,
-        max_tokens: 1000
+        max_tokens: 4096
       })
     });
 
