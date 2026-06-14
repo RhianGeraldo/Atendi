@@ -79,8 +79,8 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       return;
     }
 
-    // Handle message.upsert (Baileys/Evolution API format) or Message (WhatsMeow/EvoGo format)
-    if (body.event === 'messages.upsert' || body.event === 'messages.update' || body.event === 'Message') {
+    // Handle message.upsert (Baileys/Evolution API format) or Message/SendMessage (WhatsMeow/EvoGo format)
+    if (body.event === 'messages.upsert' || body.event === 'messages.update' || body.event === 'Message' || body.event === 'SendMessage') {
       const instanceName = body.instance || body.instanceName;
       
       let messageData;
@@ -99,7 +99,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       let metadata: any = {};
 
-      if (body.event === 'Message') {
+      if (body.event === 'Message' || body.event === 'SendMessage') {
         // WhatsMeow / EvoGo native format
         const info = body.data?.Info;
         const msg = body.data?.Message;
@@ -719,8 +719,9 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       // 7. Check if we need to queue AI response
       if (aiActive && newMessage && !isFromMe) {
+        // Enqueue the AI message generator to allow for 10s buffer
         console.log(`[evogo-webhook] Queueing AI response for conversation ${conversationId}, message ${newMessage.id}`);
-        enqueueAiMessage(conversationId, newMessage.id, company_id);
+        await enqueueAiMessage(conversationId, newMessage.id, instance.company_id);
       }
 
       return;
