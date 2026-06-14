@@ -225,7 +225,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         conversation_id: conversationId,
         sender_type: 'agent',
         is_internal: true,
-        content: handoffNote
+        content: handoffNote,
+        metadata: { ai_generated: true, ai_agent_id: agent.id, ai_agent_name: agent.name }
       });
       
       const { data: conv } = await supabaseAdmin.from('conversations').select('current_session_id').eq('id', conversationId).single();

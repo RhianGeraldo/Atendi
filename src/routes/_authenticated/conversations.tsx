@@ -2111,6 +2111,8 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onTranscribe, isT
   } else if (mine) {
     if (m.profiles?.name) {
       senderName = m.profiles.name;
+    } else if (m.metadata?.ai_agent_name) {
+      senderName = m.metadata.ai_agent_name;
     }
     
     // Check if user has signature enabled (it would be manually inserted as *Name*:\n...)
@@ -2352,7 +2354,7 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onTranscribe, isT
         <div
           className={cn(
             "mt-1 flex items-center justify-end gap-1.5 text-[10px]",
-            mine ? "text-primary-foreground/70" : "text-muted-foreground",
+            mine ? (isInternal ? "text-amber-700/70 dark:text-amber-300/70" : "text-primary-foreground/70") : "text-muted-foreground",
           )}
         >
           {m.is_edited && <span className="italic">Editado</span>}
