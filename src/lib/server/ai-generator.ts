@@ -80,7 +80,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     if (agent.prompt_extra_info) systemPromptParts.push(agent.prompt_extra_info);
     
     if (agent.allow_handoff) {
-      systemPromptParts.push(`INSTRUÇÃO CRÍTICA PARA TRANSFERÊNCIA:\nSe você não souber como resolver o problema, não tiver informações suficientes, ou se o cliente pedir para falar com um humano, você DEVE transferir o atendimento. Para isso, inclua EXATAMENTE a tag [TRANSFERIR: motivo detalhado] no final da sua resposta. Substitua "motivo detalhado" por uma breve explicação do porquê está transferindo.`);
+      systemPromptParts.push(`INSTRUÇÃO CRÍTICA PARA TRANSFERÊNCIA:\nSe você não souber como resolver o problema, TENTE ajudar primeiro fazendo perguntas para entender melhor a situação. NÃO transfira imediatamente na primeira dúvida. Transfira APENAS se: 1) O cliente pedir explicitamente para falar com um humano, OU 2) Após tentar ajudar, você tiver certeza absoluta que o problema requer suporte técnico/humano que foge totalmente da sua base de conhecimento. Para transferir, inclua EXATAMENTE a tag [TRANSFERIR: motivo detalhado] no final da sua resposta (e não faça perguntas ao cliente se for transferir, pois você não poderá mais responder).`);
     }
 
     if (agent.allow_resolution) {
