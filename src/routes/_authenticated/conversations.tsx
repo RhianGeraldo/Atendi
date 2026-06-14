@@ -1926,7 +1926,7 @@ function ChatPanel({
                 <TextareaAutosize
                   id="chat-input"
                   spellCheck={true}
-                  lang="pt-BR"
+                  autoCorrect="on"
                   value={text}
                   onChange={(e) => {
                     setText(e.target.value);

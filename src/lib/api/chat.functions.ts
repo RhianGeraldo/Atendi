@@ -1279,12 +1279,20 @@ export const fixMessageTextAction = createServerFn({ method: "POST" })
       .eq('id', companyId)
       .single();
 
-    if (!company?.ai_settings?.engines?.text || company.ai_settings.engines.text === 'none') {
+    const aiSettings = company?.ai_settings as any || {};
+    let provider = aiSettings.engines?.text;
+
+    if (!provider || provider === 'none') {
+      if (aiSettings.keys?.openai) provider = 'openai';
+      else if (aiSettings.keys?.openrouter) provider = 'openrouter';
+      else if (aiSettings.keys?.groq) provider = 'groq';
+    }
+
+    if (!provider || provider === 'none') {
       throw new Error("Geração de IA não está habilitada.");
     }
 
-    const provider = company.ai_settings.engines.text;
-    const apiKey = company.ai_settings.keys?.[provider as keyof typeof company.ai_settings.keys];
+    const apiKey = aiSettings.keys?.[provider];
 
     if (!apiKey) {
       throw new Error(`Nenhuma chave de API configurada para o provedor: ${provider}`);
@@ -1316,6 +1324,26 @@ export const fixMessageTextAction = createServerFn({ method: "POST" })
     } else if (provider === 'openrouter') {
       const model = company.ai_settings.models?.text || 'openai/gpt-4o';
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: data.text }
+          ],
+          temperature: 0.3
+        })
+      });
+      const json = await response.json();
+      if (!response.ok) throw new Error(json.error?.message || "Failed to fix text");
+      correctedText = json.choices[0]?.message?.content || data.text;
+    } else if (provider === 'groq') {
+      const model = aiSettings.models?.text || 'llama3-70b-8192';
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
