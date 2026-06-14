@@ -28,6 +28,7 @@ export function AiAgentsTab() {
   const [unitId, setUnitId] = useState<string>("all");
   const [provider, setProvider] = useState<string>("openai");
   const [model, setModel] = useState("");
+  const [maxTokens, setMaxTokens] = useState<number>(4096);
   const [promptPersonality, setPromptPersonality] = useState("");
   const [promptInstructions, setPromptInstructions] = useState("");
   const [promptExtraInfo, setPromptExtraInfo] = useState("");
@@ -118,6 +119,7 @@ export function AiAgentsTab() {
     setUnitId("all");
     setProvider("openai");
     setModel("");
+    setMaxTokens(4096);
     setPromptPersonality("");
     setPromptInstructions("");
     setPromptExtraInfo("");
@@ -138,6 +140,7 @@ export function AiAgentsTab() {
     setUnitId(agent.unit_id || "all");
     setProvider(agent.provider || "openai");
     setModel(agent.model);
+    setMaxTokens(agent.max_tokens || 4096);
     setPromptPersonality(agent.prompt_personality || "");
     setPromptInstructions(agent.prompt_instructions || "");
     setPromptExtraInfo(agent.prompt_extra_info || "");
@@ -163,6 +166,7 @@ export function AiAgentsTab() {
         unit_id: unitId === "all" ? null : unitId,
         provider,
         model,
+        max_tokens: maxTokens,
         prompt_personality: promptPersonality,
         prompt_instructions: promptInstructions,
         prompt_extra_info: promptExtraInfo,
@@ -269,6 +273,17 @@ export function AiAgentsTab() {
                       ))}
                     </datalist>
                   </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Máx Tokens (Saída)</label>
+                    <Input 
+                      type="number" 
+                      placeholder="Ex: 4096" 
+                      value={maxTokens} 
+                      onChange={e => setMaxTokens(parseInt(e.target.value) || 4096)} 
+                    />
+                  </div>
+
 
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Instância do WhatsApp</label>
