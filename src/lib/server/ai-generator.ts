@@ -108,7 +108,12 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       })
     ];
 
-    console.log(`[ai-generator] Calling LLM (${provider} - ${agent.model})...`);
+    let finalModel = agent.model || 'default';
+    if (finalModel === 'default') {
+      finalModel = aiSettings.active_chatbot_model || 'meta-llama/llama-3-8b-instruct:free';
+    }
+
+    console.log(`[ai-generator] Calling LLM (${provider} - ${finalModel})...`);
 
     // 6. Call LLM API
     const response = await fetch(baseUrl, {
@@ -122,7 +127,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         })
       },
       body: JSON.stringify({
-        model: agent.model.replace('openrouter/', '').replace('groq/', ''),
+        model: finalModel.replace('openrouter/', '').replace('groq/', ''),
         messages: formattedMessages,
         temperature: 0.7,
         max_tokens: agent.max_tokens || 4096

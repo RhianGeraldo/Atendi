@@ -120,7 +120,7 @@ export function AiAgentsTab() {
     setDepartmentId("all");
     setUnitId("all");
     setProvider("default");
-    setModel("");
+    setModel("default");
     setMaxTokens(4096);
     setPromptPersonality("");
     setPromptInstructions("");
@@ -143,7 +143,7 @@ export function AiAgentsTab() {
     setDepartmentId(agent.department_id || "all");
     setUnitId(agent.unit_id || "all");
     setProvider(agent.provider || "default");
-    setModel(agent.model);
+    setModel(agent.model || "default");
     setMaxTokens(agent.max_tokens || 4096);
     setPromptPersonality(agent.prompt_personality || "");
     setPromptInstructions(agent.prompt_instructions || "");
@@ -270,17 +270,15 @@ export function AiAgentsTab() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Modelo de IA *</label>
-                    <Input 
-                      placeholder="Ex: gpt-4o, llama-3-8b-instruct" 
-                      value={model} 
-                      onChange={e => setModel(e.target.value)} 
-                      list="available-models"
-                    />
-                    <datalist id="available-models">
-                      {availableModels.map((mod: string) => (
-                        <option key={mod} value={mod} />
-                      ))}
-                    </datalist>
+                    <Select value={model} onValueChange={setModel}>
+                      <SelectTrigger><SelectValue placeholder="Selecione o modelo" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">Padrão da Plataforma</SelectItem>
+                        {availableModels.map((mod: string) => (
+                          <SelectItem key={mod} value={mod}>{mod}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="space-y-2">
