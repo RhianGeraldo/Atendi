@@ -1099,6 +1099,29 @@ function ChatPanel({
     },
   });
 
+  const deleteMsg = useMutation({
+    mutationFn: async (messageId: string) => {
+      await deleteMessageAction({ data: { messageId } });
+    },
+    onMutate: async (messageId) => {
+      await qc.cancelQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
+      const previousMessages = qc.getQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id]);
+      
+      qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
+        if (!old) return old;
+        return old.map(m => m.id === messageId ? { ...m, is_deleted: true } : m);
+      });
+      return { previousMessages };
+    },
+    onError: (e, v, context) => {
+      if (context?.previousMessages) qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], context.previousMessages);
+      toast.error("Erro ao apagar mensagem", { description: (e as Error).message });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
+    }
+  });
+
   const editMsg = useMutation({
     mutationFn: async (payload: { messageId: string; content: string }) => {
       await editMessageAction({ data: { conversationId: conv.id, messageId: payload.messageId, newContent: payload.content } });
@@ -1675,6 +1698,11 @@ function ChatPanel({
               onReact={(emoji) => react.mutate({ messageId: m.id, emoji })} 
               onReply={(msg) => { setReplyingTo(msg); document.getElementById('chat-input')?.focus(); }}
               onEdit={startEdit}
+              onDelete={(msg) => {
+                if (window.confirm("Deseja realmente apagar esta mensagem para todos?")) {
+                  deleteMsg.mutate(msg.id);
+                }
+              }}
               onTranscribe={(id) => transcribeAudio.mutate(id)}
               isTranscribingId={transcribeAudio.isPending ? transcribeAudio.variables : null}
             />
@@ -2085,7 +2113,7 @@ function PdfViewer({ url }: { url: string }) {
   return <iframe src={blobUrl} className="w-full h-full rounded-md border-0 min-h-[70vh]" title="PDF Viewer" />;
 }
 
-function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onTranscribe, isTranscribingId }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void, onReply?: (m: MessageRow) => void, onEdit?: (m: MessageRow) => void, onTranscribe?: (id: string) => void, isTranscribingId?: string | null }) {
+function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTranscribe, isTranscribingId }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void, onReply?: (m: MessageRow) => void, onEdit?: (m: MessageRow) => void, onDelete?: (m: MessageRow) => void, onTranscribe?: (id: string) => void, isTranscribingId?: string | null }) {
   if (m.sender_type === "system") {
     return (
       <div className="flex justify-center my-4 w-full">
@@ -2177,6 +2205,15 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onTranscribe, isT
                 title="Editar"
               >
                 <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {onDelete && mine && m.remote_msg_id && (
+              <button 
+                onClick={() => onDelete(m)}
+                className="hover:text-red-500 hover:bg-red-500/10 p-1.5 rounded-full transition-colors"
+                title="Apagar"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
               </button>
             )}
             <Popover>

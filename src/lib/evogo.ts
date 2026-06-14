@@ -244,3 +244,42 @@ export async function editEvogoMessage({
 
   return response.json();
 }
+
+export type DeleteMessageParams = {
+  host: string;
+  token: string;
+  number: string;
+  remoteMsgId: string;
+};
+
+export async function deleteEvogoMessage({
+  host,
+  token,
+  number,
+  remoteMsgId,
+}: DeleteMessageParams) {
+  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/message/delete`;
+
+  const body = {
+    chat: number.includes('@') ? number : `${number}@s.whatsapp.net`,
+    messageId: remoteMsgId,
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('EvoGo Delete API Error:', errorText);
+    throw new Error(`Failed to delete message via EvoGo: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}

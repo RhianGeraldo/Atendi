@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { sendEvogoText, sendEvogoLink, sendEvogoMedia, sendEvogoReaction, editEvogoMessage } from "../evogo";
+import { sendEvogoText, sendEvogoLink, sendEvogoMedia, sendEvogoReaction, editEvogoMessage, deleteEvogoMessage } from "../evogo";
 import { getPhoneVariants } from "@/lib/utils";
 
 export const sendMessageAction = createServerFn({ method: "POST" })
@@ -1054,6 +1054,96 @@ export const editMessageAction = createServerFn({ method: "POST" })
 
     if (updateErr) {
       console.error("Failed to update edited message in DB", updateErr);
+    }
+
+    return { success: true };
+  });
+
+export const deleteMessageAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    messageId: z.string().uuid(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+
+    // 1. Get message
+    const { data: msg } = await supabaseAdmin
+      .from("messages")
+      .select("*, conversations(*, contacts(*))")
+      .eq("id", data.messageId)
+      .single();
+
+    if (!msg || msg.sender_id !== userId) {
+      throw new Error("Message not found or access denied.");
+    }
+
+    if (!msg.remote_msg_id) {
+      throw new Error("Cannot delete a message that was not sent via WhatsApp");
+    }
+
+    const conv = msg.conversations;
+    if (!conv || !conv.contacts?.phone) throw new Error("Conversation or contact not found");
+
+    // 2. Fetch EvoGo Credentials
+    let host, token, instanceName;
+
+    if (conv.whatsapp_instance_id) {
+      const { data: instance } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .eq("id", conv.whatsapp_instance_id)
+        .single();
+
+      if (instance) {
+        host = instance.companies?.evogo_host;
+        token = instance.evogo_api_key;
+        instanceName = instance.instance_name;
+      }
+    }
+
+    if (!host && conv.unit_id) {
+      const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+      if (unitData) {
+        const { data: companyInstance } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("instance_name, evogo_api_key, companies(evogo_host)")
+          .eq("company_id", unitData.company_id)
+          .limit(1)
+          .maybeSingle();
+        if (companyInstance) {
+          host = companyInstance.companies?.evogo_host;
+          token = companyInstance.evogo_api_key;
+          instanceName = companyInstance.instance_name;
+        }
+      }
+    }
+
+    if (!host || !token || !instanceName) throw new Error("EvoGo is not configured");
+
+    // 3. Send Delete Request via EvoGo API
+    try {
+      await deleteEvogoMessage({
+        host,
+        token,
+        number: conv.contacts.phone,
+        remoteMsgId: msg.remote_msg_id,
+      });
+    } catch (err: any) {
+      console.error("EvoGo Delete failed:", err);
+      throw new Error(`Failed to delete message in WhatsApp: ${err.message || String(err)}`);
+    }
+
+    // 4. Update DB
+    const { error: updateErr } = await supabaseAdmin
+      .from("messages")
+      .update({
+        is_deleted: true
+      })
+      .eq("id", data.messageId);
+
+    if (updateErr) {
+      console.error("Failed to update deleted message in DB", updateErr);
     }
 
     return { success: true };
