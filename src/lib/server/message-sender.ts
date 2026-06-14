@@ -90,9 +90,19 @@ export async function sendPlatformMessage({
         base64: mediaUrlToSend!, mediatype: mediaType as any, caption: text,
       });
     } else {
-      evogoResponse = await sendEvogoText({
-        host, token, instanceName, number: phone, text: text || '',
-      });
+      const messageText = text || '';
+      // Regex to detect if there's any URL in the text
+      const hasUrl = /(https?:\/\/[^\s]+)/g.test(messageText);
+
+      if (hasUrl) {
+        evogoResponse = await sendEvogoLink({
+          host, token, instanceName, number: phone, text: messageText,
+        });
+      } else {
+        evogoResponse = await sendEvogoText({
+          host, token, instanceName, number: phone, text: messageText,
+        });
+      }
     }
 
     remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
@@ -105,7 +115,7 @@ export async function sendPlatformMessage({
   }
 
   // Save to DB
-  const { data: msg } = await supabaseAdmin
+  const { data: msg, error: dbErr } = await supabaseAdmin
     .from("messages")
     .insert({
       conversation_id: conversationId,
@@ -120,6 +130,10 @@ export async function sendPlatformMessage({
     })
     .select()
     .single();
+
+  if (dbErr) {
+    console.error("[sendPlatformMessage] Failed to save message to DB:", dbErr);
+  }
 
   // Update conversation status
   const convUpdate: any = { last_message_at: new Date().toISOString() };
