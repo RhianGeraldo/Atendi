@@ -47,7 +47,10 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     const aiSettings = company.ai_settings as any;
     
     // Determine provider and API key
-    let provider = agent.provider || 'openai';
+    let provider = agent.provider || 'default';
+    if (provider === 'default') {
+      provider = aiSettings.engines?.chatbot || 'openai';
+    }
 
     const apiKey = aiSettings.keys?.[provider];
     if (!apiKey) {

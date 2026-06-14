@@ -119,7 +119,7 @@ export function AiAgentsTab() {
     setInstanceId("all");
     setDepartmentId("all");
     setUnitId("all");
-    setProvider("openai");
+    setProvider("default");
     setModel("");
     setMaxTokens(4096);
     setPromptPersonality("");
@@ -142,7 +142,7 @@ export function AiAgentsTab() {
     setInstanceId(agent.instance_id || "all");
     setDepartmentId(agent.department_id || "all");
     setUnitId(agent.unit_id || "all");
-    setProvider(agent.provider || "openai");
+    setProvider(agent.provider || "default");
     setModel(agent.model);
     setMaxTokens(agent.max_tokens || 4096);
     setPromptPersonality(agent.prompt_personality || "");
@@ -261,6 +261,7 @@ export function AiAgentsTab() {
                     <Select value={provider} onValueChange={setProvider}>
                       <SelectTrigger><SelectValue placeholder="Selecione o provedor" /></SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="default">Padrão da Empresa (Recomendado)</SelectItem>
                         <SelectItem value="openai">OpenAI</SelectItem>
                         <SelectItem value="groq">Groq</SelectItem>
                         <SelectItem value="openrouter">OpenRouter</SelectItem>
