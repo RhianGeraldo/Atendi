@@ -80,11 +80,11 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     if (agent.prompt_extra_info) systemPromptParts.push(agent.prompt_extra_info);
     
     if (agent.allow_handoff) {
-      systemPromptParts.push(`INSTRUÇÃO CRÍTICA PARA TRANSFERÊNCIA:\nSe você não souber como resolver o problema, TENTE ajudar primeiro fazendo perguntas para entender melhor a situação. NÃO transfira imediatamente na primeira dúvida. Transfira APENAS se: 1) O cliente pedir explicitamente para falar com um humano, OU 2) Após tentar ajudar, você tiver certeza absoluta que o problema requer suporte técnico/humano que foge totalmente da sua base de conhecimento. Para transferir, inclua EXATAMENTE a tag [TRANSFERIR: motivo detalhado] no final da sua resposta (e não faça perguntas ao cliente se for transferir, pois você não poderá mais responder).`);
+      systemPromptParts.push(agent.prompt_handoff || `INSTRUÇÃO CRÍTICA PARA TRANSFERÊNCIA:\nSe você não souber como resolver o problema, TENTE ajudar primeiro fazendo perguntas para entender melhor a situação. NÃO transfira imediatamente na primeira dúvida. Transfira APENAS se: 1) O cliente pedir explicitamente para falar com um humano, OU 2) Após tentar ajudar, você tiver certeza absoluta que o problema requer suporte técnico/humano que foge totalmente da sua base de conhecimento. Para transferir, inclua EXATAMENTE a tag [TRANSFERIR: motivo detalhado] no final da sua resposta (e não faça perguntas ao cliente se for transferir, pois você não poderá mais responder).`);
     }
 
     if (agent.allow_resolution) {
-      systemPromptParts.push(`INSTRUÇÃO CRÍTICA PARA ENCERRAMENTO:\nSe você resolveu completamente o problema do cliente e não há mais nada a ser feito, você DEVE encerrar o atendimento. Para isso, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] no final da sua resposta. Substitua "resumo" por uma breve observação do que foi feito.`);
+      systemPromptParts.push(agent.prompt_resolution || `INSTRUÇÃO CRÍTICA PARA ENCERRAMENTO:\nSe você resolveu completamente o problema do cliente e não há mais nada a ser feito, você DEVE encerrar o atendimento. Para isso, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] no final da sua resposta. Substitua "resumo" por uma breve observação do que foi feito.`);
     }
 
     const systemPrompt = systemPromptParts.join('\n\n');

@@ -32,6 +32,8 @@ export function AiAgentsTab() {
   const [promptPersonality, setPromptPersonality] = useState("");
   const [promptInstructions, setPromptInstructions] = useState("");
   const [promptExtraInfo, setPromptExtraInfo] = useState("");
+  const [promptHandoff, setPromptHandoff] = useState("");
+  const [promptResolution, setPromptResolution] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [activeByDefault, setActiveByDefault] = useState(false);
   const [allowHandoff, setAllowHandoff] = useState(false);
@@ -123,6 +125,8 @@ export function AiAgentsTab() {
     setPromptPersonality("");
     setPromptInstructions("");
     setPromptExtraInfo("");
+    setPromptHandoff("");
+    setPromptResolution("");
     setIsActive(true);
     setActiveByDefault(false);
     setAllowHandoff(false);
@@ -144,6 +148,8 @@ export function AiAgentsTab() {
     setPromptPersonality(agent.prompt_personality || "");
     setPromptInstructions(agent.prompt_instructions || "");
     setPromptExtraInfo(agent.prompt_extra_info || "");
+    setPromptHandoff(agent.prompt_handoff || "");
+    setPromptResolution(agent.prompt_resolution || "");
     setIsActive(agent.is_active);
     setActiveByDefault(agent.active_by_default);
     setAllowHandoff(agent.allow_handoff || false);
@@ -170,6 +176,8 @@ export function AiAgentsTab() {
         prompt_personality: promptPersonality,
         prompt_instructions: promptInstructions,
         prompt_extra_info: promptExtraInfo,
+        prompt_handoff: promptHandoff,
+        prompt_resolution: promptResolution,
         is_active: isActive,
         active_by_default: activeByDefault,
         allow_handoff: allowHandoff,
@@ -385,7 +393,8 @@ export function AiAgentsTab() {
                       <Switch checked={allowHandoff} onCheckedChange={setAllowHandoff} />
                     </div>
                     {allowHandoff && (
-                      <div className="space-y-2 pt-2 border-t">
+                      <>
+                        <div className="space-y-2 pt-2 border-t">
                         <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                           <CornerDownRight className="h-3 w-3" />
                           Departamento de Destino
@@ -400,6 +409,22 @@ export function AiAgentsTab() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <div className="space-y-2 pt-2 border-t">
+                        <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                          <CornerDownRight className="h-3 w-3" />
+                          Instrução de Transferência [TRANSFERIR]
+                        </label>
+                        <Textarea 
+                          className="min-h-[120px] text-xs font-mono" 
+                          placeholder="Ex: Se não souber resolver, use a tag [TRANSFERIR: motivo]..." 
+                          value={promptHandoff} 
+                          onChange={e => setPromptHandoff(e.target.value)} 
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Deixe em branco para usar o comportamento padrão do sistema.
+                        </p>
+                      </div>
+                    </>
                     )}
                   </div>
                   
@@ -416,7 +441,8 @@ export function AiAgentsTab() {
                     </div>
                     
                     {allowResolution && (
-                      <div className="space-y-2 pt-2 border-t">
+                      <>
+                        <div className="space-y-2 pt-2 border-t">
                         <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                           <CornerDownRight className="h-3 w-3" />
                           Motivo de Encerramento (Sucesso)
@@ -431,6 +457,22 @@ export function AiAgentsTab() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <div className="space-y-2 pt-2 border-t">
+                        <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                          <CornerDownRight className="h-3 w-3" />
+                          Instrução de Encerramento [ENCERRAR]
+                        </label>
+                        <Textarea 
+                          className="min-h-[120px] text-xs font-mono" 
+                          placeholder="Ex: Se o problema for resolvido, use a tag [ENCERRAR: resumo]..." 
+                          value={promptResolution} 
+                          onChange={e => setPromptResolution(e.target.value)} 
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Deixe em branco para usar o comportamento padrão do sistema.
+                        </p>
+                      </div>
+                    </>
                     )}
                   </div>
                 </div>
