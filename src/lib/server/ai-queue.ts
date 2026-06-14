@@ -3,11 +3,23 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const BUFFER_MS = 10000; // 10 seconds
 
+// Armazena os timers ativos por conversa para poder cancelá-los (debounce)
+const activeTimers = new Map<string, NodeJS.Timeout>();
+
 export function enqueueAiMessage(conversationId: string, messageId: string, companyId: string) {
   console.log(`[ai-queue] AI response queued for conversation ${conversationId}. Waiting ${BUFFER_MS/1000}s for silence...`);
 
-  // Fire and forget timer
-  setTimeout(async () => {
+  // Se já existia um timer rodando para esta conversa, cancela ele! (Resetando os 10 segundos)
+  if (activeTimers.has(conversationId)) {
+    console.log(`[ai-queue] Cancelando timer anterior para a conversa ${conversationId} (Debounce reset)`);
+    clearTimeout(activeTimers.get(conversationId));
+  }
+
+  // Cria um novo timer e salva no mapa
+  const timer = setTimeout(async () => {
+    // Remove do mapa quando começar a executar
+    activeTimers.delete(conversationId);
+
     try {
       // After 10 seconds, query the DB to check if any NEW messages arrived
       const { data: latestMsg } = await supabaseAdmin
