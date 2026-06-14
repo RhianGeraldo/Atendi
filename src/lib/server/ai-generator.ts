@@ -151,7 +151,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     // Strip any signature the AI might have generated itself (e.g. "**Agente**: Olá")
     let cleanResponse = aiResponseText.trim();
     const selfSignatureMatch = cleanResponse.match(/^([A-Za-z0-9 _\-\*]+):\s*([\s\S]*)$/);
-    if (selfSignatureMatch) {
+    if (selfSignatureMatch && !selfSignatureMatch[1].toLowerCase().includes('http')) {
       cleanResponse = selfSignatureMatch[2].trim();
     }
 
