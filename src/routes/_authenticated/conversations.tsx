@@ -5,7 +5,7 @@ import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Ph
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, toggleContactLabelAction, createLabelAction, assignConversationAction, transferConversationAction, updateContactFromWhatsappAction, editMessageAction, deleteMessageAction, transcribeAudioAction } from "@/lib/api/chat.functions";
+import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, toggleContactLabelAction, createLabelAction, assignConversationAction, transferConversationAction, updateContactFromWhatsappAction, editMessageAction, deleteMessageAction, transcribeAudioAction, fixMessageTextAction } from "@/lib/api/chat.functions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -1162,6 +1162,19 @@ function ChatPanel({
     onError: (e) => toast.error("Erro na transcrição", { description: (e as Error).message })
   });
 
+  const fixTextMutation = useMutation({
+    mutationFn: async (textToFix: string) => {
+      return fixMessageTextAction({ data: { conversationId: conv.id, text: textToFix } });
+    },
+    onSuccess: (data) => {
+      setText(data.text);
+      toast.success("Texto corrigido!");
+    },
+    onError: (e) => {
+      toast.error("Erro ao corrigir texto", { description: (e as Error).message });
+    }
+  });
+
   const react = useMutation({
     mutationFn: async ({ messageId, emoji }: { messageId: string, emoji: string }) => {
       await reactToMessageAction({ data: { conversationId: conv.id, messageId, emoji } });
@@ -1899,8 +1912,21 @@ function ChatPanel({
                   <FileText className="h-5 w-5" />
                 </Button>
 
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="shrink-0 h-9 w-9 rounded-full text-muted-foreground hover:text-amber-500"
+                  title="Corrigir com IA"
+                  onClick={() => fixTextMutation.mutate(text)}
+                  disabled={fixTextMutation.isPending || !text.trim()}
+                >
+                  {fixTextMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                </Button>
+
                 <TextareaAutosize
                   id="chat-input"
+                  spellCheck={true}
+                  lang="pt-BR"
                   value={text}
                   onChange={(e) => {
                     setText(e.target.value);
