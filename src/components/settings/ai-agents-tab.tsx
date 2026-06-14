@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/lib/auth-context";
 
@@ -224,185 +225,202 @@ export function AiAgentsTab() {
               <DialogTitle>{editingId ? "Editar Agente" : "Novo Agente de IA"}</DialogTitle>
               <DialogDescription>Configure as informações e o comportamento do agente.</DialogDescription>
             </DialogHeader>
-            <div className="grid grid-cols-2 gap-4 py-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Provedor *</label>
-                <Select value={provider} onValueChange={setProvider}>
-                  <SelectTrigger><SelectValue placeholder="Selecione o provedor" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="openai">OpenAI</SelectItem>
-                    <SelectItem value="groq">Groq</SelectItem>
-                    <SelectItem value="openrouter">OpenRouter</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Modelo *</label>
-                <Input placeholder="Ex: gpt-4o, llama-3-8b-instruct" value={model} onChange={e => setModel(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Tipo / Função *</label>
-                <Input placeholder="Ex: SDR, Suporte, Agendamento..." value={aiType} onChange={e => setAiType(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Nome do Agente *</label>
-                <Input placeholder="Ex: SDR Financeiro" value={name} onChange={e => setName(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Instância do WhatsApp</label>
-                <Select value={instanceId} onValueChange={setInstanceId}>
-                  <SelectTrigger><SelectValue placeholder="Todas as instâncias" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as Instâncias</SelectItem>
-                    {instances?.map((inst: any) => (
-                      <SelectItem key={inst.id} value={inst.id}>{inst.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Departamento</label>
-                <Select value={departmentId} onValueChange={setDepartmentId}>
-                  <SelectTrigger><SelectValue placeholder="Todos os departamentos" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os Departamentos</SelectItem>
-                    {departments?.map((dept: any) => (
-                      <SelectItem key={dept.id} value={dept.id}>{dept.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Unidade</label>
-                <Select value={unitId} onValueChange={setUnitId}>
-                  <SelectTrigger><SelectValue placeholder="Todas as unidades" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as Unidades</SelectItem>
-                    {units?.map((unit: any) => (
-                      <SelectItem key={unit.id} value={unit.id}>{unit.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2 col-span-2">
-                <label className="text-sm font-medium">Modelo de IA *</label>
-                <Select value={model} onValueChange={setModel}>
-                  <SelectTrigger><SelectValue placeholder="Selecione um modelo configurado" /></SelectTrigger>
-                  <SelectContent>
-                    {availableModels.map((mod: string) => (
-                      <SelectItem key={mod} value={mod}>{mod}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">Modelos disponíveis vêm da sua configuração geral de IA.</p>
-              </div>
-              <div className="space-y-2 col-span-2">
-                <label className="text-sm font-medium">1. Personalidade do Agente</label>
-                <Textarea 
-                  placeholder="Ex: Você é um assistente de suporte gentil e prestativo..." 
-                  value={promptPersonality} 
-                  onChange={e => setPromptPersonality(e.target.value)}
-                  className="min-h-[80px]"
-                />
-              </div>
-              <div className="space-y-2 col-span-2">
-                <label className="text-sm font-medium">2. Instruções de Atendimento</label>
-                <Textarea 
-                  placeholder="Ex: Peça o CPF do cliente antes de responder. Responda em no máximo 2 parágrafos..." 
-                  value={promptInstructions} 
-                  onChange={e => setPromptInstructions(e.target.value)}
-                  className="min-h-[100px]"
-                />
-              </div>
-              <div className="space-y-2 col-span-2">
-                <label className="text-sm font-medium">3. Informações Adicionais (Base de Conhecimento)</label>
-                <Textarea 
-                  placeholder="Ex: Nossos horários de atendimento são de segunda a sexta, das 8h às 18h..." 
-                  value={promptExtraInfo} 
-                  onChange={e => setPromptExtraInfo(e.target.value)}
-                  className="min-h-[100px]"
-                />
-              </div>
-              <div className="flex items-center justify-between col-span-2 border p-3 rounded-lg mt-2">
-                <div className="space-y-0.5">
-                  <label className="text-sm font-medium">Ativar automaticamente para novas conversas</label>
-                  <p className="text-xs text-muted-foreground">Se desativado, a IA começará desligada e precisará ser ativada manualmente na conversa (ideal para testes).</p>
-                </div>
-                <Switch checked={activeByDefault} onCheckedChange={setActiveByDefault} />
-              </div>
+            <Tabs defaultValue="general" className="w-full py-4">
+              <TabsList className="grid w-full grid-cols-3 mb-4">
+                <TabsTrigger value="general">Geral</TabsTrigger>
+                <TabsTrigger value="behavior">Comportamento</TabsTrigger>
+                <TabsTrigger value="automation">Automação e Regras</TabsTrigger>
+              </TabsList>
 
-              <div className="col-span-2 border rounded-md p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <label className="text-sm font-medium">Permitir Transferência (Handoff)</label>
-                    <p className="text-xs text-muted-foreground">Permite que a IA transfira o atendimento quando não souber resolver.</p>
+              {/* Aba Geral */}
+              <TabsContent value="general" className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Nome do Agente *</label>
+                    <Input placeholder="Ex: Agente - Agendamento" value={name} onChange={e => setName(e.target.value)} />
                   </div>
-                  <Switch checked={allowHandoff} onCheckedChange={setAllowHandoff} />
-                </div>
-                {allowHandoff && (
-                  <div className="space-y-2 mt-2 border border-border p-3 rounded-md bg-muted/20">
-                    <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                      <CornerDownRight className="h-3 w-3" />
-                      Departamento de Destino
-                    </label>
-                    <Select value={handoffDepartmentId} onValueChange={setHandoffDepartmentId}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Mesmo departamento atual" /></SelectTrigger>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Tipo / Função *</label>
+                    <Input placeholder="Ex: Agendamentos, Suporte..." value={aiType} onChange={e => setAiType(e.target.value)} />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Provedor *</label>
+                    <Select value={provider} onValueChange={setProvider}>
+                      <SelectTrigger><SelectValue placeholder="Selecione o provedor" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">Mesmo departamento atual</SelectItem>
+                        <SelectItem value="openai">OpenAI</SelectItem>
+                        <SelectItem value="groq">Groq</SelectItem>
+                        <SelectItem value="openrouter">OpenRouter</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Modelo de IA *</label>
+                    <Input 
+                      placeholder="Ex: gpt-4o, llama-3-8b-instruct" 
+                      value={model} 
+                      onChange={e => setModel(e.target.value)} 
+                      list="available-models"
+                    />
+                    <datalist id="available-models">
+                      {availableModels.map((mod: string) => (
+                        <option key={mod} value={mod} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Instância do WhatsApp</label>
+                    <Select value={instanceId} onValueChange={setInstanceId}>
+                      <SelectTrigger><SelectValue placeholder="Todas as instâncias" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas as Instâncias</SelectItem>
+                        {instances?.map((inst: any) => (
+                          <SelectItem key={inst.id} value={inst.id}>{inst.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Departamento</label>
+                    <Select value={departmentId} onValueChange={setDepartmentId}>
+                      <SelectTrigger><SelectValue placeholder="Todos os departamentos" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos os Departamentos</SelectItem>
                         {departments?.map((dept: any) => (
                           <SelectItem key={dept.id} value={dept.id}>{dept.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <p className="text-[10px] text-muted-foreground leading-tight">
-                      Quando a IA pedir para transferir o atendimento (usando a tag [TRANSFERIR: motivo]), a conversa será movida automaticamente para a fila do departamento selecionado, ou permanecerá na mesma fila atual caso não selecione nenhum.
-                    </p>
                   </div>
-                )}
-                
-                <div className="space-y-2 mt-2 bg-muted/30 p-3 rounded-lg border border-border/50">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label className="text-sm font-medium flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        Permitir Encerramento Automático
-                      </label>
-                      <p className="text-xs text-muted-foreground">A IA pode encerrar o ticket se resolver o problema do cliente.</p>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Unidade</label>
+                    <Select value={unitId} onValueChange={setUnitId}>
+                      <SelectTrigger><SelectValue placeholder="Todas as unidades" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas as Unidades</SelectItem>
+                        {units?.map((unit: any) => (
+                          <SelectItem key={unit.id} value={unit.id}>{unit.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* Aba Comportamento */}
+              <TabsContent value="behavior" className="space-y-4">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">1. Personalidade do Agente</label>
+                    <Textarea 
+                      placeholder="Ex: Você é um assistente de suporte gentil e prestativo..." 
+                      value={promptPersonality} 
+                      onChange={e => setPromptPersonality(e.target.value)}
+                      className="min-h-[100px]"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">2. Instruções de Atendimento</label>
+                    <Textarea 
+                      placeholder="Ex: Peça o CPF do cliente antes de responder. Responda em no máximo 2 parágrafos..." 
+                      value={promptInstructions} 
+                      onChange={e => setPromptInstructions(e.target.value)}
+                      className="min-h-[120px]"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">3. Informações Adicionais (Base de Conhecimento)</label>
+                    <Textarea 
+                      placeholder="Ex: Nossos horários de atendimento são de segunda a sexta, das 8h às 18h..." 
+                      value={promptExtraInfo} 
+                      onChange={e => setPromptExtraInfo(e.target.value)}
+                      className="min-h-[120px]"
+                    />
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* Aba Automação */}
+              <TabsContent value="automation" className="space-y-4">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between border p-3 rounded-lg">
+                    <div className="space-y-0.5">
+                      <label className="text-sm font-medium">Ativar Agente Geral</label>
+                      <p className="text-xs text-muted-foreground">Desligue para pausar o agente completamente. Ele não responderá nenhuma mensagem.</p>
                     </div>
-                    <Switch checked={allowResolution} onCheckedChange={setAllowResolution} />
+                    <Switch checked={isActive} onCheckedChange={setIsActive} />
+                  </div>
+
+                  <div className="flex items-center justify-between border p-3 rounded-lg">
+                    <div className="space-y-0.5">
+                      <label className="text-sm font-medium">Assumir novas conversas automaticamente</label>
+                      <p className="text-xs text-muted-foreground">Se desativado, a IA começará desligada e precisará ser ativada manualmente na tela de chat.</p>
+                    </div>
+                    <Switch checked={activeByDefault} onCheckedChange={setActiveByDefault} />
+                  </div>
+
+                  <div className="border rounded-md p-4 space-y-4 bg-muted/10">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <label className="text-sm font-medium">Permitir Transferência (Handoff)</label>
+                        <p className="text-xs text-muted-foreground">A IA poderá transferir o atendimento para um humano caso não saiba responder.</p>
+                      </div>
+                      <Switch checked={allowHandoff} onCheckedChange={setAllowHandoff} />
+                    </div>
+                    {allowHandoff && (
+                      <div className="space-y-2 pt-2 border-t">
+                        <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                          <CornerDownRight className="h-3 w-3" />
+                          Departamento de Destino
+                        </label>
+                        <Select value={handoffDepartmentId} onValueChange={setHandoffDepartmentId}>
+                          <SelectTrigger className="h-9"><SelectValue placeholder="Mesmo departamento atual" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Mesmo departamento atual</SelectItem>
+                            {departments?.map((dept: any) => (
+                              <SelectItem key={dept.id} value={dept.id}>{dept.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
                   
-                  {allowResolution && (
-                    <div className="space-y-2 mt-2 border border-border p-3 rounded-md bg-muted/20">
-                      <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                        <CornerDownRight className="h-3 w-3" />
-                        Motivo de Encerramento (Sucesso)
-                      </label>
-                      <Select value={resolutionReasonId} onValueChange={setResolutionReasonId}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Selecione um motivo de encerramento" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Padrão (Sem Motivo Especifico)</SelectItem>
-                          {resolutionReasons?.map((reason: any) => (
-                            <SelectItem key={reason.id} value={reason.id}>{reason.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-[10px] text-muted-foreground leading-tight">
-                        Quando a IA concluir o atendimento e usar a tag [ENCERRAR: observação], o ticket será marcado como resolvido utilizando o motivo escolhido acima.
-                      </p>
+                  <div className="border rounded-md p-4 space-y-4 bg-muted/10">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-500" />
+                          Permitir Encerramento Automático
+                        </label>
+                        <p className="text-xs text-muted-foreground">A IA poderá finalizar o ticket sozinha se concluir a solicitação com sucesso.</p>
+                      </div>
+                      <Switch checked={allowResolution} onCheckedChange={setAllowResolution} />
                     </div>
-                  )}
+                    
+                    {allowResolution && (
+                      <div className="space-y-2 pt-2 border-t">
+                        <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                          <CornerDownRight className="h-3 w-3" />
+                          Motivo de Encerramento (Sucesso)
+                        </label>
+                        <Select value={resolutionReasonId} onValueChange={setResolutionReasonId}>
+                          <SelectTrigger className="h-9"><SelectValue placeholder="Selecione um motivo de encerramento" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Padrão (Sem Motivo Especifico)</SelectItem>
+                            {resolutionReasons?.map((reason: any) => (
+                              <SelectItem key={reason.id} value={reason.id}>{reason.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-between col-span-2 border p-3 rounded-lg">
-                <div className="space-y-0.5">
-                  <label className="text-sm font-medium">Ativar Agente Geral</label>
-                  <p className="text-xs text-muted-foreground">Agentes inativos não responderão mensagens de forma alguma.</p>
-                </div>
-                <Switch checked={isActive} onCheckedChange={setIsActive} />
-              </div>
-            </div>
+              </TabsContent>
+            </Tabs>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
               <Button onClick={() => saveAgent.mutate()} disabled={saveAgent.isPending || !name || !aiType || !model}>
