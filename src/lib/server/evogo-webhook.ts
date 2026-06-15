@@ -96,6 +96,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       let quotedStanzaId: string | null = null;
       let quotedContent: string | null = null;
       let actualGroupName: string | null = null;
+      let extractedLid: string | null = null;
 
       let metadata: any = {};
 
@@ -125,8 +126,6 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           if (lid) return lid.split('@')[0];
           return null;
         };
-
-        let extractedLid: string | null = null;
 
         if (isFromMe) {
           remoteJid = info.Chat || info.RecipientAlt;
