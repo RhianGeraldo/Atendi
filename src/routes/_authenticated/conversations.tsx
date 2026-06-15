@@ -71,7 +71,7 @@ interface ConvRow {
   ai_agent?: { name: string } | null;
   unit_id: string;
   whatsapp_instance_id: string | null;
-  unit?: { name: string; color?: string | null } | null;
+  unit?: { name: string; color?: string | null; custom_variables?: any } | null;
   whatsapp_instance?: { name: string } | null;
 }
 
@@ -108,7 +108,7 @@ function ConversationsPage() {
       let query = supabase
         .from("conversations")
         .select(
-          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color), whatsapp_instance:whatsapp_instances(name)"
+          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)"
         );
 
       if (selectedUnitId) {
@@ -1323,6 +1323,16 @@ function ChatPanel({
     t = t.replace(/\{\{protocolo\}\}/g, conv.id.substring(0, 8).toUpperCase());
     t = t.replace(/\{\{data\}\}/g, now.toLocaleDateString('pt-BR'));
     t = t.replace(/\{\{hora\}\}/g, now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+
+    if (conv.unit?.custom_variables && typeof conv.unit.custom_variables === 'object') {
+      Object.entries(conv.unit.custom_variables).forEach(([key, val]) => {
+        if (typeof key === 'string' && val) {
+          const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+          t = t.replace(regex, String(val));
+        }
+      });
+    }
+
     setText(t);
     
     if (qm.media_url && qm.media_type) {
