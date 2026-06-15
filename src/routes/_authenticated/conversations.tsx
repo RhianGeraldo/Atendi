@@ -943,6 +943,7 @@ interface MessageRow {
   remote_msg_id?: string | null;
   profiles?: { name: string };
   metadata?: any;
+  quoted_message_id?: string | null;
 }
 
 function ChatPanel({ 
@@ -995,7 +996,7 @@ function ChatPanel({
       // 2. Fetch all messages for these conversations
       const { data, error } = await supabase
         .from("messages")
-        .select("id, conversation_id, sender_type, is_internal, content, media_type, media_url, created_at, quoted_content, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
+        .select("id, conversation_id, sender_type, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
         .in("conversation_id", convIds)
         .order("created_at", { ascending: true });
         
@@ -2181,7 +2182,7 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
   const adReply = m.metadata?.externalAdReply;
 
   return (
-    <div className={cn("flex relative", mine ? "justify-end" : "justify-start")}>
+    <div className={cn("flex relative", mine ? "justify-end" : "justify-start")} id={`msg-${m.id}`}>
       <div
         className={cn(
           "max-w-[70%] flex flex-col rounded-2xl px-3.5 py-2 text-sm shadow-sm relative group",
@@ -2277,8 +2278,23 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
         )}
 
         {m.quoted_content && !m.is_deleted && (
-          <div className="mb-2 rounded bg-black/10 dark:bg-white/10 p-2 text-xs border-l-4 opacity-90 border-l-current">
-            <span className="font-semibold block mb-0.5 text-[10px] uppercase opacity-70">Mensagem Respondida</span>
+          <div 
+            className="mb-2 rounded bg-black/10 dark:bg-white/10 p-2 text-xs border-l-4 opacity-90 border-l-current cursor-pointer hover:opacity-100 transition-opacity"
+            onClick={() => {
+              if (m.quoted_message_id) {
+                const el = document.getElementById(`msg-${m.quoted_message_id}`);
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  el.classList.add('bg-primary/20', 'transition-colors', 'duration-500');
+                  setTimeout(() => el.classList.remove('bg-primary/20', 'transition-colors', 'duration-500'), 2000);
+                }
+              }
+            }}
+          >
+            <span className="font-semibold flex items-center gap-1 mb-0.5 text-[10px] uppercase opacity-70">
+              <CornerUpLeft className="h-3 w-3" />
+              Mensagem Respondida
+            </span>
             <span className="line-clamp-3 opacity-90">{m.quoted_content}</span>
           </div>
         )}

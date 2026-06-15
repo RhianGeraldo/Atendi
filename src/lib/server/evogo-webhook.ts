@@ -147,11 +147,11 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         if (body.data?.isQuoted && body.data?.quoted) {
           quotedStanzaId = body.data.quoted.stanzaID;
           const qm = body.data.quoted.quotedMessage;
-          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || 'Anexo';
+          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || (qm?.audioMessage || qm?.ptvMessage ? '🎵 Áudio' : qm?.videoMessage ? '🎥 Vídeo' : qm?.documentMessage ? '📄 Documento' : qm?.stickerMessage ? '🖼️ Figurinha' : 'Anexo');
         } else if (msg.extendedTextMessage?.contextInfo?.stanzaId) {
           quotedStanzaId = msg.extendedTextMessage.contextInfo.stanzaId;
           const qm = msg.extendedTextMessage.contextInfo.quotedMessage;
-          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || 'Anexo';
+          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || (qm?.audioMessage || qm?.ptvMessage ? '🎵 Áudio' : qm?.videoMessage ? '🎥 Vídeo' : qm?.documentMessage ? '📄 Documento' : qm?.stickerMessage ? '🖼️ Figurinha' : 'Anexo');
         }
 
         const ci = msg.extendedTextMessage?.contextInfo;
@@ -284,7 +284,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         if (msgType?.extendedTextMessage?.contextInfo?.stanzaId) {
           quotedStanzaId = msgType.extendedTextMessage.contextInfo.stanzaId;
           const qm = msgType.extendedTextMessage.contextInfo.quotedMessage;
-          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || 'Anexo';
+          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || (qm?.audioMessage || qm?.ptvMessage ? '🎵 Áudio' : qm?.videoMessage ? '🎥 Vídeo' : qm?.documentMessage ? '📄 Documento' : qm?.stickerMessage ? '🖼️ Figurinha' : 'Anexo');
         }
 
         const ci2 = msgType?.extendedTextMessage?.contextInfo;
