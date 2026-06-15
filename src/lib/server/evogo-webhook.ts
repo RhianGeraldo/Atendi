@@ -557,7 +557,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           // Re-route to the Main Agent for new interactions
           const { data: defaultAgents } = await supabaseAdmin
             .from('ai_agents')
-            .select('id')
+            .select('id, active_by_default')
             .eq('company_id', company_id)
             .eq('is_active', true)
             .or('is_main_agent.eq.true,active_by_default.eq.true')
@@ -566,14 +566,15 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             .limit(1);
             
           const mainAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
+          const isActiveByDefault = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
           
-          updatePayload.status = mainAgentId ? 'active' : 'waiting';
-          updatePayload.ai_active = !!mainAgentId;
+          updatePayload.status = (mainAgentId && isActiveByDefault) ? 'active' : 'waiting';
+          updatePayload.ai_active = isActiveByDefault;
           updatePayload.ai_agent_id = mainAgentId;
           updatePayload.assigned_agent_id = null;
           updatePayload.resolved_at = null;
           
-          aiActive = !!mainAgentId;
+          aiActive = isActiveByDefault;
           
           // Abre um novo ticket (sessão)
           let sessionId = null;
@@ -632,7 +633,8 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           .order('instance_id', { ascending: false })
           .limit(1);
         const defaultAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
-        if (defaultAgentId) aiActive = true;
+        const isActiveByDefault = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
+        if (isActiveByDefault) aiActive = true;
 
         // Create new conversation
         const { data: newConv, error: convErr } = await supabaseAdmin
@@ -642,10 +644,10 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             whatsapp_instance_id: instance_id,
             contact_id: contactId,
             channel: 'whatsapp',
-            status: isFromMe ? 'resolved' : (!!defaultAgentId ? 'active' : 'waiting'),
+            status: isFromMe ? 'resolved' : (isActiveByDefault ? 'active' : 'waiting'),
             last_message_at: new Date().toISOString(),
             resolved_at: isFromMe ? new Date().toISOString() : null,
-            ai_active: !!defaultAgentId,
+            ai_active: isActiveByDefault,
             ai_agent_id: defaultAgentId
           })
           .select()
@@ -685,7 +687,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', conversationId);
             if (!existingSession) {
               const events: any[] = [{ session_id: sessionId, event_type: 'started' }];
-              if (!!defaultAgentId) {
+              if (isActiveByDefault && defaultAgentId) {
                 const { data: defaultAgentData } = await supabaseAdmin.from('ai_agents').select('name').eq('id', defaultAgentId).single();
                 events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true, ai_agent_id: defaultAgentId, ai_agent_name: defaultAgentData?.name || 'IA' } });
               }
