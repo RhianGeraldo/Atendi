@@ -34,6 +34,16 @@ export type Database = {
           prompt_extra_info: string | null
           is_active: boolean
           active_by_default: boolean
+          is_main_agent: boolean
+          allow_tasks: boolean
+          prompt_tasks: string | null
+          allow_opportunities: boolean
+          prompt_opportunities: string | null
+          pipeline_id: string | null
+          allowed_agent_ids: string[] | null
+          prompt_handoff: string | null
+          prompt_resolution: string | null
+          prompt_receive_handoff: string | null
           created_at: string
           updated_at: string
         }
@@ -55,6 +65,16 @@ export type Database = {
           prompt_extra_info?: string | null
           is_active?: boolean
           active_by_default?: boolean
+          is_main_agent?: boolean
+          allow_tasks?: boolean
+          prompt_tasks?: string | null
+          allow_opportunities?: boolean
+          prompt_opportunities?: string | null
+          pipeline_id?: string | null
+          allowed_agent_ids?: string[] | null
+          prompt_handoff?: string | null
+          prompt_resolution?: string | null
+          prompt_receive_handoff?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -76,6 +96,16 @@ export type Database = {
           prompt_extra_info?: string | null
           is_active?: boolean
           active_by_default?: boolean
+          is_main_agent?: boolean
+          allow_tasks?: boolean
+          prompt_tasks?: string | null
+          allow_opportunities?: boolean
+          prompt_opportunities?: string | null
+          pipeline_id?: string | null
+          allowed_agent_ids?: string[] | null
+          prompt_handoff?: string | null
+          prompt_resolution?: string | null
+          prompt_receive_handoff?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -110,6 +140,13 @@ export type Database = {
           logo_url: string | null
           name: string
           slug: string
+          evogo_host: string | null
+          evogo_global_token: string | null
+          ai_settings: Json | null
+          document: string | null
+          address: string | null
+          business_hours: string | null
+          custom_variables: Json | null
         }
         Insert: {
           created_at?: string
@@ -117,6 +154,13 @@ export type Database = {
           logo_url?: string | null
           name: string
           slug: string
+          evogo_host?: string | null
+          evogo_global_token?: string | null
+          ai_settings?: Json | null
+          document?: string | null
+          address?: string | null
+          business_hours?: string | null
+          custom_variables?: Json | null
         }
         Update: {
           created_at?: string
@@ -124,6 +168,13 @@ export type Database = {
           logo_url?: string | null
           name?: string
           slug?: string
+          evogo_host?: string | null
+          evogo_global_token?: string | null
+          ai_settings?: Json | null
+          document?: string | null
+          address?: string | null
+          business_hours?: string | null
+          custom_variables?: Json | null
         }
         Relationships: []
       }
@@ -680,6 +731,10 @@ export type Database = {
           name: string
           slug: string
           color: string
+          document: string | null
+          address: string | null
+          business_hours: string | null
+          custom_variables: Json | null
         }
         Insert: {
           active?: boolean
@@ -689,6 +744,10 @@ export type Database = {
           name: string
           slug: string
           color?: string
+          document?: string | null
+          address?: string | null
+          business_hours?: string | null
+          custom_variables?: Json | null
         }
         Update: {
           active?: boolean
@@ -698,6 +757,10 @@ export type Database = {
           name?: string
           slug?: string
           color?: string
+          document?: string | null
+          address?: string | null
+          business_hours?: string | null
+          custom_variables?: Json | null
         }
         Relationships: [
           {

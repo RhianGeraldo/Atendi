@@ -6,7 +6,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     // 1. Fetch conversation details to verify AI is still active
     const { data: conv, error: convErr } = await supabaseAdmin
       .from("conversations")
-      .select("ai_active, ai_agent_id, whatsapp_instance_id, contact_id, status")
+      .select("ai_active, ai_agent_id, whatsapp_instance_id, contact_id, status, contacts(name, phone)")
       .eq("id", conversationId)
       .single();
 
@@ -35,7 +35,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     // 3. Fetch Company AI Settings for API Keys
     const { data: company, error: companyErr } = await supabaseAdmin
       .from("companies")
-      .select("ai_settings")
+      .select("ai_settings, document, address, business_hours, custom_variables, name")
       .eq("id", companyId)
       .single();
 
@@ -44,7 +44,31 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       return;
     }
 
+    // Fetch Unit if applicable
+    let unitData: any = null;
+    if (conv.unit_id) {
+      const { data: unit } = await supabaseAdmin
+        .from("units")
+        .select("document, address, business_hours, custom_variables, name")
+        .eq("id", conv.unit_id)
+        .single();
+      unitData = unit;
+    }
+
     const aiSettings = company.ai_settings as any;
+    
+    // Fetch colleagues (only the allowed agents configured as skills)
+    let colleagues: any[] = [];
+    if (agent.allowed_agent_ids && agent.allowed_agent_ids.length > 0) {
+      const { data } = await supabaseAdmin
+        .from('ai_agents')
+        .select('id, name, ai_type, description')
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .in('id', agent.allowed_agent_ids)
+        .neq('id', agent.id);
+      colleagues = data || [];
+    }
     
     // Determine provider and API key
     let provider = agent.provider || 'default';
@@ -65,7 +89,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     // 4. Fetch Conversation History (last 20 messages)
     const { data: messages } = await supabaseAdmin
       .from("messages")
-      .select("content, sender_type, created_at")
+      .select("content, sender_type, created_at, media_type, transcription")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: false })
       .limit(20);
@@ -75,19 +99,85 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     // Sort to ascending order (oldest first)
     messages.reverse();
 
+    // Merge custom variables, Unit overrides Company
+    const compVars = typeof company.custom_variables === 'object' && company.custom_variables !== null ? company.custom_variables : {};
+    const unitVars = (unitData && typeof unitData.custom_variables === 'object' && unitData.custom_variables !== null) ? unitData.custom_variables : {};
+    const mergedCustomVars = { ...compVars, ...unitVars };
+
+    // Format Info blocks
+    const infoEmpresa = `EMPRESA: ${company.name || ''}\nCNPJ: ${company.document || ''}\nEndereço: ${company.address || ''}\nHorários: ${company.business_hours || ''}\n${Object.entries(compVars).length ? `Variáveis:\n${Object.entries(compVars).map(([k,v]) => `- ${k}: ${v}`).join('\n')}` : ''}`.trim();
+    
+    let infoUnidade = "";
+    if (unitData) {
+      infoUnidade = `UNIDADE: ${unitData.name || ''}\nCNPJ: ${unitData.document || ''}\nEndereço: ${unitData.address || ''}\nHorários: ${unitData.business_hours || ''}\n${Object.entries(unitVars).length ? `Variáveis:\n${Object.entries(unitVars).map(([k,v]) => `- ${k}: ${v}`).join('\n')}` : ''}`.trim();
+    }
+
+    // Helper to replace variables
+    const applyVars = (text: string | null | undefined) => {
+      if (!text) return "";
+      let t = text;
+      // Built-in vars
+      if (conv.contacts?.name) t = t.replace(/\{\{nome_cliente\}\}/g, conv.contacts.name);
+      if (conv.contacts?.phone) t = t.replace(/\{\{telefone\}\}/g, conv.contacts.phone);
+      
+      // Info Blocks
+      t = t.replace(/\{\{info_empresa\}\}/g, infoEmpresa);
+      t = t.replace(/\{\{info_unidade\}\}/g, infoUnidade || infoEmpresa); // fallback to empresa
+      
+      // Standard Fields (Unit fallback to Company)
+      t = t.replace(/\{\{cnpj\}\}/g, unitData?.document || company.document || '');
+      t = t.replace(/\{\{endereco\}\}/g, unitData?.address || company.address || '');
+      t = t.replace(/\{\{horarios\}\}/g, unitData?.business_hours || company.business_hours || '');
+      
+      // Custom Vars
+      for (const [key, value] of Object.entries(mergedCustomVars)) {
+        const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+        t = t.replace(regex, String(value));
+      }
+      
+      return t;
+    };
+
     // 5. Construct Prompts
     const systemPromptParts = [];
     systemPromptParts.push(`Você é ${agent.name}.`);
-    if (agent.prompt_personality) systemPromptParts.push(agent.prompt_personality);
-    if (agent.prompt_instructions) systemPromptParts.push(agent.prompt_instructions);
-    if (agent.prompt_extra_info) systemPromptParts.push(agent.prompt_extra_info);
+    if (agent.prompt_personality) systemPromptParts.push(applyVars(agent.prompt_personality));
+    if (agent.prompt_instructions) systemPromptParts.push(applyVars(agent.prompt_instructions));
+    if (agent.prompt_extra_info) systemPromptParts.push(applyVars(agent.prompt_extra_info));
     
     if (agent.allow_handoff) {
-      systemPromptParts.push(agent.prompt_handoff || `INSTRUÇÃO CRÍTICA PARA TRANSFERÊNCIA:\nSe você não souber como resolver o problema, TENTE ajudar primeiro fazendo perguntas para entender melhor a situação. NÃO transfira imediatamente na primeira dúvida. Transfira APENAS se: 1) O cliente pedir explicitamente para falar com um humano, OU 2) Após tentar ajudar, você tiver certeza absoluta que o problema requer suporte técnico/humano que foge totalmente da sua base de conhecimento. Para transferir, inclua EXATAMENTE a tag [TRANSFERIR: motivo detalhado] no final da sua resposta (e não faça perguntas ao cliente se for transferir, pois você não poderá mais responder).`);
+      systemPromptParts.push(applyVars(agent.prompt_handoff) || `INSTRUÇÃO CRÍTICA PARA TRANSFERÊNCIA:\nSe você não souber como resolver o problema, TENTE ajudar primeiro fazendo perguntas para entender melhor a situação. NÃO transfira imediatamente na primeira dúvida. Transfira APENAS se: 1) O cliente pedir explicitamente para falar com um humano, OU 2) Após tentar ajudar, você tiver certeza absoluta que o problema requer suporte técnico/humano que foge totalmente da sua base de conhecimento. Para transferir, inclua EXATAMENTE a tag [TRANSFERIR: motivo detalhado] no final da sua resposta (e não faça perguntas ao cliente se for transferir, pois você não poderá mais responder).`);
     }
 
     if (agent.allow_resolution) {
-      systemPromptParts.push(agent.prompt_resolution || `INSTRUÇÃO CRÍTICA PARA ENCERRAMENTO:\nSe você resolveu completamente o problema do cliente e não há mais nada a ser feito, você DEVE encerrar o atendimento. Para isso, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] no final da sua resposta. Substitua "resumo" por uma breve observação do que foi feito.`);
+      systemPromptParts.push(applyVars(agent.prompt_resolution) || `INSTRUÇÃO CRÍTICA PARA ENCERRAMENTO:\nSe você resolveu completamente o problema do cliente e não há mais nada a ser feito, você DEVE encerrar o atendimento. Para isso, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] no final da sua resposta. Substitua "resumo" por uma breve observação do que foi feito.`);
+    }
+
+    if (colleagues && colleagues.length > 0) {
+      const colleaguesList = colleagues.map(c => `- ${c.name} (ID: ${c.id}) - O que ele faz: ${c.description || c.ai_type}`).join('\n');
+      systemPromptParts.push(`INSTRUÇÃO CRÍTICA PARA TRABALHO EM EQUIPE (MULTI-AGENTES):\nVocê trabalha em uma equipe. Se o assunto do cliente for de competência de outro agente, você DEVE transferir a conversa para ele. Para transferir para outro agente, inclua a tag [TRANSFERIR_AGENTE: X] no final da sua resposta, substituindo X pelo ID exato do colega desejado.\nNUNCA crie um loop infinito de transferências (não devolva para quem acabou de enviar).\nColegas disponíveis:\n${colleaguesList}`);
+    }
+
+    if (agent.allow_tasks) {
+      systemPromptParts.push(applyVars(agent.prompt_tasks) || `INSTRUÇÃO PARA CRIAR TAREFA:\nVocê tem acesso direto ao CRM para criar tarefas de acompanhamento. Para criar uma tarefa, use a tag [CRIAR_TAREFA: Título | Descrição | YYYY-MM-DD HH:MM] no final da sua resposta.`);
+    }
+
+    if (agent.allow_opportunities) {
+      systemPromptParts.push(applyVars(agent.prompt_opportunities) || `INSTRUÇÃO PARA CRIAR OPORTUNIDADE:\nVocê pode criar e gerenciar oportunidades de negócio. Use a tag [CRIAR_OPORTUNIDADE: Título da Venda | Valor Numérico | id_da_etapa]. Para atualizar use [ATUALIZAR_OPORTUNIDADE: id_oportunidade | id_nova_etapa].`);
+
+      if (agent.pipeline_id) {
+        const { data: stages } = await supabaseAdmin.from("pipeline_stages").select("id, name").eq("pipeline_id", agent.pipeline_id).order("order_index");
+        if (stages && stages.length > 0) {
+          const stagesList = stages.map(s => `- ${s.name} (ID: ${s.id})`).join('\n');
+          systemPromptParts.push(`CONTEXTO DO SEU FUNIL:\nVocê opera no funil atual. As etapas disponíveis são:\n${stagesList}`);
+        }
+
+        const { data: opps } = await supabaseAdmin.from("opportunities").select("id, title, value, stage_id").eq("contact_id", conv.contact_id);
+        if (opps && opps.length > 0) {
+          const oppsList = opps.map(o => `- ID Oportunidade: ${o.id} | Título: ${o.title} | Etapa Atual: ${o.stage_id}`).join('\n');
+          systemPromptParts.push(`OPORTUNIDADES ATUAIS DO CLIENTE:\n${oppsList}\nSe o cliente já tiver uma oportunidade sobre o assunto, você deve ATUALIZAR a existente movendo de etapa com [ATUALIZAR_OPORTUNIDADE: id_oportunidade | etapa_id | id_nova_etapa], e NÃO criar uma nova.`);
+        }
+      }
     }
 
     const systemPrompt = systemPromptParts.join('\n\n');
@@ -95,14 +185,35 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     const formattedMessages = [
       { role: 'system', content: systemPrompt },
       ...messages.map((msg) => {
-        let content = msg.content || '[Anexo ou Mídia]';
+        let content = msg.content || '';
+        
+        // Include audio transcription if available
+        if (msg.media_type === 'audio' && msg.transcription) {
+          content = `[Áudio Transcrito Pelo Sistema]: "${msg.transcription}"`;
+        } else if (!content) {
+          content = '[Anexo ou Mídia]';
+        }
+
         // Strip signature from history so AI doesn't learn to generate it
         if (msg.sender_type === 'agent') {
           const match = content.match(/^\*?.+?\*?:\s*([\s\S]*)$/);
           if (match) content = match[1];
         }
+        let role = msg.sender_type === 'contact' ? 'user' : 'assistant';
+        
+        // Treat system messages as user context so the AI knows what just happened internally
+        if (msg.sender_type === 'system') {
+          role = 'user';
+          content = `[MENSAGEM INTERNA DO SISTEMA]: ${content}`;
+          if (content.includes('transferido pela IA para o colega')) {
+             const defaultHandoffReceiveInstruction = `Um colega de equipe transferiu este cliente para você. Leia o histórico acima para entender o contexto e continue o atendimento a partir de agora de acordo com a sua especialidade. NÃO transfira de volta sem antes tentar ajudar o cliente.`;
+             const instructionToUse = agent.prompt_receive_handoff ? applyVars(agent.prompt_receive_handoff) : defaultHandoffReceiveInstruction;
+             content += `\n[INSTRUÇÃO CRÍTICA]: ${instructionToUse}`;
+          }
+        }
+        
         return {
-          role: msg.sender_type === 'contact' ? 'user' : 'assistant',
+          role: role as any,
           content: content,
         };
       })
@@ -168,10 +279,56 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       }
     }
 
+    // Check for Multi-Agent Transfer Tag
+    let transferAgentId = null;
+    const transferAgentMatch = cleanResponse.match(/\[TRANSFERIR_?AGENTE:\s*([a-zA-Z0-9\-]+)\]/i);
+    if (transferAgentMatch) {
+      transferAgentId = transferAgentMatch[1].trim();
+      cleanResponse = cleanResponse.replace(/\[TRANSFERIR_?AGENTE:\s*[a-zA-Z0-9\-]+\]/gi, '').trim();
+    }
+
+    // Check for CRM Tasks Tag
+    let crmTaskDetails = null;
+    if (agent.allow_tasks) {
+      const taskMatch = cleanResponse.match(/\[CRIAR_TAREFA:\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\]/i);
+      if (taskMatch) {
+        crmTaskDetails = {
+          title: taskMatch[1].trim(),
+          description: taskMatch[2].trim(),
+          dueDate: taskMatch[3].trim()
+        };
+        cleanResponse = cleanResponse.replace(/\[CRIAR_TAREFA:\s*.*?\s*\|\s*.*?\s*\|\s*.*?\]/gi, '').trim();
+      }
+    }
+
+    // Check for CRM Opportunity Tag
+    let crmOpportunityDetails = null;
+    let crmUpdateOppDetails = null;
+    if (agent.allow_opportunities) {
+      const oppMatch = cleanResponse.match(/\[CRIAR_OPORTUNIDADE:\s*(.*?)\s*\|\s*([0-9\.,]+)\s*\|\s*([a-zA-Z0-9\-]+)\]/i);
+      if (oppMatch) {
+        crmOpportunityDetails = {
+          title: oppMatch[1].trim(),
+          value: parseFloat(oppMatch[2].trim().replace(',', '.')),
+          stageId: oppMatch[3].trim()
+        };
+        cleanResponse = cleanResponse.replace(/\[CRIAR_OPORTUNIDADE:\s*.*?\s*\|\s*[0-9\.,]+\s*\|\s*[a-zA-Z0-9\-]+\]/gi, '').trim();
+      }
+
+      const updateOppMatch = cleanResponse.match(/\[ATUALIZAR_OPORTUNIDADE:\s*([a-zA-Z0-9\-]+)\s*\|\s*([a-zA-Z0-9\-]+)\]/i);
+      if (updateOppMatch) {
+        crmUpdateOppDetails = {
+          opportunityId: updateOppMatch[1].trim(),
+          stageId: updateOppMatch[2].trim()
+        };
+        cleanResponse = cleanResponse.replace(/\[ATUALIZAR_OPORTUNIDADE:\s*[a-zA-Z0-9\-]+\s*\|\s*[a-zA-Z0-9\-]+\]/gi, '').trim();
+      }
+    }
+
     // Check for Resolve Tag
     let isResolve = false;
     let resolveNote = "";
-    if (agent.allow_resolution && !isHandoff) {
+    if (agent.allow_resolution && !isHandoff && !transferAgentId) {
       const resolveMatch = cleanResponse.match(/\[ENCERRAR(?::\s*(.*?))?\]/i);
       if (resolveMatch) {
         isResolve = true;
@@ -195,7 +352,136 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       console.log(`[ai-generator] AI Response successfully sent and saved.`);
     }
 
-    // Execute Handoff if requested
+    // 8. Execute Backend Actions based on Extracted Tags
+
+    // A. Multi-Agent Transfer
+    if (transferAgentId) {
+      // Loop protection: check how many agent transfers occurred recently
+      const { data: recentSystemMsgs } = await supabaseAdmin
+        .from('messages')
+        .select('content, created_at')
+        .eq('conversation_id', conversationId)
+        .eq('sender_type', 'system')
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      const fiveMinutesAgo = new Date().getTime() - 5 * 60 * 1000;
+      const transferCount = recentSystemMsgs?.filter(m => 
+        m.content.includes('Atendimento transferido pela IA para o colega') &&
+        new Date(m.created_at).getTime() > fiveMinutesAgo
+      ).length || 0;
+
+      if (transferCount >= 3) {
+        console.warn(`[ai-generator] Infinite loop detected! Transferring to human fallback.`);
+        isHandoff = true;
+        handoffNote = "Loop infinito de IAs detectado. Transferido para humanos.";
+      } else {
+        // Fetch target agent name
+        const { data: targetAgent } = await supabaseAdmin.from('ai_agents').select('name').eq('id', transferAgentId).single();
+        const targetName = targetAgent?.name || 'Desconhecido';
+
+        console.log(`[ai-generator] Transferring from ${agent.name} to ${targetName} (${transferAgentId})`);
+
+        await supabaseAdmin
+          .from('conversations')
+          .update({ ai_agent_id: transferAgentId })
+          .eq('id', conversationId);
+
+        const { data: conv } = await supabaseAdmin.from('conversations').select('current_session_id').eq('id', conversationId).single();
+        if (conv?.current_session_id) {
+           await supabaseAdmin.from('session_events').insert({
+              session_id: conv.current_session_id,
+              event_type: 'transferred',
+              metadata: { by_ai: true, targetType: 'agent', targetId: transferAgentId, targetName: targetName, ai_agent_id: agent.id, ai_agent_name: agent.name }
+           });
+        }
+
+        const systemMsg = `Atendimento transferido pela IA para o colega de equipe: ${targetName}`;
+        const { data: insertedMsg } = await supabaseAdmin.from('messages').insert({
+          conversation_id: conversationId,
+          sender_type: 'system',
+          content: systemMsg
+        }).select('id').single();
+
+        // Enqueue the new AI agent to respond immediately to this system message
+        if (insertedMsg) {
+           const { enqueueAiMessage } = await import('./ai-queue');
+           enqueueAiMessage(conversationId, insertedMsg.id, companyId);
+        }
+      }
+    }
+
+    // B. Create Task
+    if (crmTaskDetails) {
+      const { data: convData } = await supabaseAdmin.from('conversations').select('contact_id, unit_id').eq('id', conversationId).single();
+      if (convData && convData.contact_id && convData.unit_id) {
+        await supabaseAdmin.from('tasks').insert({
+          title: crmTaskDetails.title,
+          description: crmTaskDetails.description,
+          due_date: crmTaskDetails.dueDate, // Must be parseable by Postgres (e.g., YYYY-MM-DD HH:MM)
+          contact_id: convData.contact_id,
+          unit_id: convData.unit_id,
+          status: 'pending',
+          priority: 'medium',
+          task_type: 'follow_up'
+        });
+        await supabaseAdmin.from('messages').insert({
+          conversation_id: conversationId,
+          sender_type: 'agent',
+          is_internal: true,
+          content: `Tarefa criada pela IA: ${crmTaskDetails.title} (Para: ${crmTaskDetails.dueDate})`
+        });
+      }
+    }
+
+    // C. Create Opportunity
+    if (crmOpportunityDetails) {
+      const { data: convData } = await supabaseAdmin.from('conversations').select('contact_id, unit_id').eq('id', conversationId).single();
+      if (convData && convData.contact_id && convData.unit_id) {
+        let stageId = crmOpportunityDetails.stageId;
+        if (!stageId && agent.pipeline_id) {
+            const { data: firstStage } = await supabaseAdmin
+              .from('pipeline_stages')
+              .select('id')
+              .eq('pipeline_id', agent.pipeline_id)
+              .order('order_index', { ascending: true })
+              .limit(1)
+              .single();
+             stageId = firstStage?.id;
+        }
+
+        await supabaseAdmin.from('opportunities').insert({
+          title: crmOpportunityDetails.title,
+          value: crmOpportunityDetails.value,
+          contact_id: convData.contact_id,
+          unit_id: convData.unit_id,
+          conversation_id: conversationId,
+          stage_id: stageId || null
+        });
+        await supabaseAdmin.from('messages').insert({
+          conversation_id: conversationId,
+          sender_type: 'agent',
+          is_internal: true,
+          content: `Oportunidade criada pela IA: ${crmOpportunityDetails.title} (Valor: ${crmOpportunityDetails.value})`
+        });
+      }
+    }
+
+    // D. Update Opportunity
+    if (crmUpdateOppDetails) {
+      await supabaseAdmin.from('opportunities')
+        .update({ stage_id: crmUpdateOppDetails.stageId })
+        .eq('id', crmUpdateOppDetails.opportunityId);
+        
+      await supabaseAdmin.from('messages').insert({
+        conversation_id: conversationId,
+        sender_type: 'agent',
+        is_internal: true,
+        content: `Oportunidade atualizada pela IA (Movida para etapa: ${crmUpdateOppDetails.stageId}).`
+      });
+    }
+
+    // C. Execute Handoff if requested
     if (isHandoff) {
       console.log(`[ai-generator] Handoff requested for conversation ${conversationId}`);
       

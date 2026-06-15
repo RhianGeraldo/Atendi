@@ -69,7 +69,10 @@ function SettingsPage() {
   const [newModelInput, setNewModelInput] = useState("");
 
   const [newCompanyName, setNewCompanyName] = useState("");
-  
+  const [companyDocument, setCompanyDocument] = useState("");
+  const [companyAddress, setCompanyAddress] = useState("");
+  const [companyBusinessHours, setCompanyBusinessHours] = useState("");
+  const [companyCustomVars, setCompanyCustomVars] = useState<{key: string, value: string}[]>([]);
   // QrCode Modal State
   const [selectedInstance, setSelectedInstance] = useState<any>(null);
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -82,7 +85,7 @@ function SettingsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("id, name, evogo_host, evogo_global_token, ai_settings")
+        .select("id, name, evogo_host, evogo_global_token, ai_settings, document, address, business_hours, custom_variables")
         .eq("id", profile!.company_id!)
         .single();
       if (error) throw error;
@@ -114,6 +117,17 @@ function SettingsPage() {
       setHost(company.evogo_host || "");
       setToken(company.evogo_global_token || "");
       setNewCompanyName(company.name || "");
+      setCompanyDocument(company.document || "");
+      setCompanyAddress(company.address || "");
+      setCompanyBusinessHours(company.business_hours || "");
+      
+      const vars = company.custom_variables as Record<string, string>;
+      if (vars && typeof vars === 'object') {
+        setCompanyCustomVars(Object.entries(vars).map(([k, v]) => ({ key: k, value: v as string })));
+      } else {
+        setCompanyCustomVars([]);
+      }
+
       if (company.ai_settings) {
         setAiSettings({
           keys: {
@@ -169,12 +183,26 @@ function SettingsPage() {
     onError: (e) => toast.error("Erro ao salvar", { description: (e as Error).message })
   });
 
-  const saveCompanyName = useMutation({
+  const saveCompanyDetails = useMutation({
     mutationFn: async () => {
       if (!profile?.company_id) throw new Error("Sem empresa vinculada");
+      
+      const customVarsObj = companyCustomVars.reduce((acc, curr) => {
+        if (curr.key.trim()) {
+          acc[curr.key.trim()] = curr.value;
+        }
+        return acc;
+      }, {} as Record<string, string>);
+
       const { error } = await supabase
         .from("companies")
-        .update({ name: newCompanyName })
+        .update({ 
+          name: newCompanyName,
+          document: companyDocument,
+          address: companyAddress,
+          business_hours: companyBusinessHours,
+          custom_variables: customVarsObj
+        })
         .eq("id", profile.company_id);
       if (error) throw error;
     },
@@ -372,10 +400,87 @@ function SettingsPage() {
                     onChange={(e) => setNewCompanyName(e.target.value)}
                   />
                 </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Documento (CNPJ/CPF)</label>
+                  <Input 
+                    placeholder="00.000.000/0000-00" 
+                    value={companyDocument}
+                    onChange={(e) => setCompanyDocument(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Endereço</label>
+                  <Input 
+                    placeholder="Av. Exemplo, 123" 
+                    value={companyAddress}
+                    onChange={(e) => setCompanyAddress(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Horário de Funcionamento</label>
+                  <Input 
+                    placeholder="Seg a Sex: 08h as 18h" 
+                    value={companyBusinessHours}
+                    onChange={(e) => setCompanyBusinessHours(e.target.value)}
+                  />
+                </div>
+
+                <div className="pt-4 border-t">
+                  <label className="text-sm font-medium mb-2 block">Variáveis Personalizadas</label>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Essas variáveis podem ser usadas nos prompts da IA com chaves duplas: {'{{nome_da_variavel}}'}.
+                  </p>
+                  
+                  <div className="space-y-2 mb-3">
+                    {companyCustomVars.map((v, i) => (
+                      <div key={i} className="flex gap-2 items-center">
+                        <Input 
+                          placeholder="chave (ex: link_pgto)" 
+                          className="w-1/3 text-xs"
+                          value={v.key}
+                          onChange={(e) => {
+                            const newVars = [...companyCustomVars];
+                            newVars[i].key = e.target.value;
+                            setCompanyCustomVars(newVars);
+                          }}
+                        />
+                        <Input 
+                          placeholder="valor" 
+                          className="flex-1 text-xs"
+                          value={v.value}
+                          onChange={(e) => {
+                            const newVars = [...companyCustomVars];
+                            newVars[i].value = e.target.value;
+                            setCompanyCustomVars(newVars);
+                          }}
+                        />
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-8 w-8 text-destructive"
+                          onClick={() => {
+                            setCompanyCustomVars(companyCustomVars.filter((_, idx) => idx !== i));
+                          }}
+                        >
+                          X
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="w-full text-xs"
+                    onClick={() => setCompanyCustomVars([...companyCustomVars, { key: "", value: "" }])}
+                  >
+                    + Adicionar Variável
+                  </Button>
+                </div>
+
                 <Button 
-                  className="w-full" 
-                  onClick={() => saveCompanyName.mutate()}
-                  disabled={saveCompanyName.isPending || !newCompanyName}
+                  className="w-full mt-4" 
+                  onClick={() => saveCompanyDetails.mutate()}
+                  disabled={saveCompanyDetails.isPending || !newCompanyName}
                 >
                   <Save className="mr-2 h-4 w-4" />
                   Salvar Alterações

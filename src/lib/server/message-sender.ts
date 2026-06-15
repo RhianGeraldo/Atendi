@@ -91,13 +91,20 @@ export async function sendPlatformMessage({
       });
     } else {
       const messageText = text || '';
-      // Regex to detect if there's any URL in the text
-      const hasUrl = /(https?:\/\/[^\s]+)/g.test(messageText);
+      // Regex to detect if there's any URL in the text, avoiding trailing punctuation or markdown chars like *, ), ], }
+      const hasUrl = /(https?:\/\/[^\s*()\[\]{}]+)/g.test(messageText);
 
       if (hasUrl) {
-        evogoResponse = await sendEvogoLink({
-          host, token, instanceName, number: phone, text: messageText,
-        });
+        try {
+          evogoResponse = await sendEvogoLink({
+            host, token, instanceName, number: phone, text: messageText,
+          });
+        } catch (linkErr) {
+          console.warn('[message-sender] sendEvogoLink failed (possibly invalid URL format), falling back to text:', linkErr);
+          evogoResponse = await sendEvogoText({
+            host, token, instanceName, number: phone, text: messageText,
+          });
+        }
       } else {
         evogoResponse = await sendEvogoText({
           host, token, instanceName, number: phone, text: messageText,

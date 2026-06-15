@@ -53,6 +53,10 @@ function UnitsPage() {
   const [editingUnit, setEditingUnit] = useState<any>(null);
   const [editUnitName, setEditUnitName] = useState("");
   const [editUnitColor, setEditUnitColor] = useState("");
+  const [editUnitDocument, setEditUnitDocument] = useState("");
+  const [editUnitAddress, setEditUnitAddress] = useState("");
+  const [editUnitBusinessHours, setEditUnitBusinessHours] = useState("");
+  const [editUnitCustomVars, setEditUnitCustomVars] = useState<{key: string, value: string}[]>([]);
 
   // Delete state
   const [deletingUnit, setDeletingUnit] = useState<any>(null);
@@ -101,8 +105,10 @@ function UnitsPage() {
   });
 
   const updateUnit = useMutation({
-    mutationFn: async ({ id, name, color }: { id: string, name: string, color: string }) => {
-      const { error } = await supabase.from("units").update({ name, color }).eq("id", id);
+    mutationFn: async ({ id, name, color, document, address, business_hours, custom_variables }: any) => {
+      const { error } = await supabase.from("units").update({ 
+        name, color, document, address, business_hours, custom_variables 
+      }).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -206,6 +212,16 @@ function UnitsPage() {
                       setEditingUnit(unit);
                       setEditUnitName(unit.name);
                       setEditUnitColor(unit.color || '#6366f1');
+                      setEditUnitDocument(unit.document || "");
+                      setEditUnitAddress(unit.address || "");
+                      setEditUnitBusinessHours(unit.business_hours || "");
+                      
+                      const vars = unit.custom_variables as Record<string, string>;
+                      if (vars && typeof vars === 'object') {
+                        setEditUnitCustomVars(Object.entries(vars).map(([k, v]) => ({ key: k, value: v as string })));
+                      } else {
+                        setEditUnitCustomVars([]);
+                      }
                     }}>
                       <Edit2 className="mr-2 h-4 w-4" />
                       Editar Unidade
@@ -268,10 +284,63 @@ function UnitsPage() {
                 <span className="text-sm font-mono text-muted-foreground">{editUnitColor}</span>
               </div>
             </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Documento (CNPJ/CPF)</label>
+              <Input value={editUnitDocument} onChange={(e) => setEditUnitDocument(e.target.value)} placeholder="00.000.000/0000-00" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Endereço</label>
+              <Input value={editUnitAddress} onChange={(e) => setEditUnitAddress(e.target.value)} placeholder="Av. Exemplo, 123" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Horário de Funcionamento</label>
+              <Input value={editUnitBusinessHours} onChange={(e) => setEditUnitBusinessHours(e.target.value)} placeholder="Seg a Sex: 08h as 18h" />
+            </div>
+            <div className="pt-2 border-t mt-2">
+              <label className="text-sm font-medium mb-2 block">Variáveis Personalizadas</label>
+              <p className="text-xs text-muted-foreground mb-3">
+                Sobrescreve as variáveis da empresa matriz quando a IA atender nesta unidade.
+              </p>
+              <div className="space-y-2 mb-3 max-h-40 overflow-y-auto">
+                {editUnitCustomVars.map((v, i) => (
+                  <div key={i} className="flex gap-2 items-center">
+                    <Input placeholder="chave" className="w-1/3 text-xs h-8" value={v.key} onChange={(e) => {
+                      const newVars = [...editUnitCustomVars];
+                      newVars[i].key = e.target.value;
+                      setEditUnitCustomVars(newVars);
+                    }}/>
+                    <Input placeholder="valor" className="flex-1 text-xs h-8" value={v.value} onChange={(e) => {
+                      const newVars = [...editUnitCustomVars];
+                      newVars[i].value = e.target.value;
+                      setEditUnitCustomVars(newVars);
+                    }}/>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive shrink-0" onClick={() => setEditUnitCustomVars(editUnitCustomVars.filter((_, idx) => idx !== i))}>X</Button>
+                  </div>
+                ))}
+              </div>
+              <Button variant="outline" size="sm" className="w-full text-xs h-8" onClick={() => setEditUnitCustomVars([...editUnitCustomVars, { key: "", value: "" }])}>
+                + Adicionar Variável
+              </Button>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingUnit(null)}>Cancelar</Button>
-            <Button onClick={() => updateUnit.mutate({ id: editingUnit.id, name: editUnitName, color: editUnitColor })} disabled={updateUnit.isPending || !editUnitName}>
+            <Button onClick={() => {
+              const customVarsObj = editUnitCustomVars.reduce((acc, curr) => {
+                if (curr.key.trim()) acc[curr.key.trim()] = curr.value;
+                return acc;
+              }, {} as Record<string, string>);
+              
+              updateUnit.mutate({ 
+                id: editingUnit.id, 
+                name: editUnitName, 
+                color: editUnitColor,
+                document: editUnitDocument,
+                address: editUnitAddress,
+                business_hours: editUnitBusinessHours,
+                custom_variables: customVarsObj
+              });
+            }} disabled={updateUnit.isPending || !editUnitName}>
               Salvar Alterações
             </Button>
           </DialogFooter>

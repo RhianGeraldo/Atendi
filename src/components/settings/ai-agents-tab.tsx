@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit, Bot, CheckCircle2, CornerDownRight } from "lucide-react";
+import { Plus, Trash2, Edit, Bot, CheckCircle2, CornerDownRight, Info, CalendarCheck, BadgeDollarSign, HelpCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,8 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth } from "@/lib/auth-context";
 
 export function AiAgentsTab() {
@@ -22,7 +24,8 @@ export function AiAgentsTab() {
   // Form State
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [aiType, setAiType] = useState("");
+  const [aiType, setAiType] = useState("Vendedor / SDR");
+  const [description, setDescription] = useState("");
   const [instanceId, setInstanceId] = useState<string>("all");
   const [departmentId, setDepartmentId] = useState<string>("all");
   const [unitId, setUnitId] = useState<string>("all");
@@ -34,12 +37,20 @@ export function AiAgentsTab() {
   const [promptExtraInfo, setPromptExtraInfo] = useState("");
   const [promptHandoff, setPromptHandoff] = useState("");
   const [promptResolution, setPromptResolution] = useState("");
+  const [promptReceiveHandoff, setPromptReceiveHandoff] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [activeByDefault, setActiveByDefault] = useState(false);
+  const [isMainAgent, setIsMainAgent] = useState(false);
   const [allowHandoff, setAllowHandoff] = useState(false);
   const [handoffDepartmentId, setHandoffDepartmentId] = useState<string>("none");
   const [allowResolution, setAllowResolution] = useState(false);
   const [resolutionReasonId, setResolutionReasonId] = useState<string>("none");
+  const [allowTasks, setAllowTasks] = useState(false);
+  const [promptTasks, setPromptTasks] = useState("");
+  const [allowOpportunities, setAllowOpportunities] = useState(false);
+  const [promptOpportunities, setPromptOpportunities] = useState("");
+  const [pipelineId, setPipelineId] = useState<string>("none");
+  const [allowedAgentIds, setAllowedAgentIds] = useState<string[]>([]);
 
   // Data Fetching
   const { data: agents, isLoading } = useQuery({
@@ -90,6 +101,16 @@ export function AiAgentsTab() {
     }
   });
 
+  const { data: pipelines } = useQuery({
+    queryKey: ["pipelines_list", profile?.company_id],
+    enabled: !!profile?.company_id,
+    queryFn: async () => {
+      const { data, error } = await supabase.from("pipelines").select("id, name").eq("company_id", profile!.company_id!);
+      if (error) throw error;
+      return data;
+    }
+  });
+
   const { data: companySettings } = useQuery({
     queryKey: ["company_ai_settings", profile?.company_id],
     enabled: !!profile?.company_id,
@@ -115,7 +136,8 @@ export function AiAgentsTab() {
   const resetForm = () => {
     setEditingId(null);
     setName("");
-    setAiType("");
+    setAiType("Vendedor / SDR");
+    setDescription("");
     setInstanceId("all");
     setDepartmentId("all");
     setUnitId("all");
@@ -127,18 +149,26 @@ export function AiAgentsTab() {
     setPromptExtraInfo("");
     setPromptHandoff("");
     setPromptResolution("");
+    setPromptReceiveHandoff("");
     setIsActive(true);
     setActiveByDefault(false);
     setAllowHandoff(false);
     setHandoffDepartmentId("none");
     setAllowResolution(false);
     setResolutionReasonId("none");
+    setAllowTasks(false);
+    setPromptTasks("");
+    setAllowOpportunities(false);
+    setPromptOpportunities("");
+    setPipelineId("none");
+    setAllowedAgentIds([]);
   };
 
   const handleEdit = (agent: any) => {
     setEditingId(agent.id);
     setName(agent.name);
     setAiType(agent.ai_type);
+    setDescription(agent.description || "");
     setInstanceId(agent.instance_id || "all");
     setDepartmentId(agent.department_id || "all");
     setUnitId(agent.unit_id || "all");
@@ -150,12 +180,20 @@ export function AiAgentsTab() {
     setPromptExtraInfo(agent.prompt_extra_info || "");
     setPromptHandoff(agent.prompt_handoff || "");
     setPromptResolution(agent.prompt_resolution || "");
+    setPromptReceiveHandoff(agent.prompt_receive_handoff || "");
     setIsActive(agent.is_active);
     setActiveByDefault(agent.active_by_default);
+    setIsMainAgent(agent.is_main_agent || false);
     setAllowHandoff(agent.allow_handoff || false);
     setHandoffDepartmentId(agent.handoff_department_id || "none");
     setAllowResolution(agent.allow_resolution || false);
     setResolutionReasonId(agent.resolution_reason_id || "none");
+    setAllowTasks(agent.allow_tasks || false);
+    setPromptTasks(agent.prompt_tasks || "");
+    setAllowOpportunities(agent.allow_opportunities || false);
+    setPromptOpportunities(agent.prompt_opportunities || "");
+    setPipelineId(agent.pipeline_id || "none");
+    setAllowedAgentIds(agent.allowed_agent_ids || []);
     setIsModalOpen(true);
   };
 
@@ -167,6 +205,7 @@ export function AiAgentsTab() {
         company_id: profile!.company_id!,
         name,
         ai_type: aiType,
+        description,
         instance_id: instanceId === "all" ? null : instanceId,
         department_id: departmentId === "all" ? null : departmentId,
         unit_id: unitId === "all" ? null : unitId,
@@ -178,12 +217,20 @@ export function AiAgentsTab() {
         prompt_extra_info: promptExtraInfo,
         prompt_handoff: promptHandoff,
         prompt_resolution: promptResolution,
+        prompt_receive_handoff: promptReceiveHandoff,
         is_active: isActive,
         active_by_default: activeByDefault,
+        is_main_agent: isMainAgent,
         allow_handoff: allowHandoff,
         handoff_department_id: handoffDepartmentId === "none" ? null : handoffDepartmentId,
         allow_resolution: allowResolution,
-        resolution_reason_id: resolutionReasonId === "none" ? null : resolutionReasonId
+        resolution_reason_id: resolutionReasonId === "none" ? null : resolutionReasonId,
+        allow_tasks: allowTasks,
+        prompt_tasks: promptTasks,
+        allow_opportunities: allowOpportunities,
+        prompt_opportunities: promptOpportunities,
+        pipeline_id: pipelineId === "none" ? null : pipelineId,
+        allowed_agent_ids: allowedAgentIds.length > 0 ? allowedAgentIds : null
       };
 
       if (editingId) {
@@ -237,11 +284,12 @@ export function AiAgentsTab() {
               <DialogTitle>{editingId ? "Editar Agente" : "Novo Agente de IA"}</DialogTitle>
               <DialogDescription>Configure as informações e o comportamento do agente.</DialogDescription>
             </DialogHeader>
+            <TooltipProvider>
             <Tabs defaultValue="general" className="w-full py-4">
               <TabsList className="grid w-full grid-cols-3 mb-4">
                 <TabsTrigger value="general">Geral</TabsTrigger>
                 <TabsTrigger value="behavior">Comportamento</TabsTrigger>
-                <TabsTrigger value="automation">Automação e Regras</TabsTrigger>
+                <TabsTrigger value="automation">Skills</TabsTrigger>
               </TabsList>
 
               {/* Aba Geral */}
@@ -254,6 +302,19 @@ export function AiAgentsTab() {
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Tipo / Função *</label>
                     <Input placeholder="Ex: Agendamentos, Suporte..." value={aiType} onChange={e => setAiType(e.target.value)} />
+                  </div>
+                  
+                  <div className="space-y-2 col-span-2">
+                    <label className="text-sm font-medium">
+                      Resumo da Função (Para colegas de IA)
+                      <Tooltip>
+                        <TooltipTrigger asChild><HelpCircle className="h-4 w-4 ml-1 inline text-muted-foreground" /></TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          Descreva o que este agente faz em 1 frase. Isso será enviado para outras IAs saberem quando devem transferir para ele. Ex: "Responsável por lidar com finanças, boletos e pagamentos."
+                        </TooltipContent>
+                      </Tooltip>
+                    </label>
+                    <Input placeholder="Ex: Responsável por gerenciar agendamentos e horários..." value={description} onChange={e => setDescription(e.target.value)} />
                   </div>
                   
                   <div className="space-y-2">
@@ -316,26 +377,61 @@ export function AiAgentsTab() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Unidade</label>
-                    <Select value={unitId} onValueChange={setUnitId}>
-                      <SelectTrigger><SelectValue placeholder="Todas as unidades" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Todas as Unidades</SelectItem>
-                        {units?.map((unit: any) => (
-                          <SelectItem key={unit.id} value={unit.id}>{unit.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Unidade</label>
+                      <Select value={unitId} onValueChange={setUnitId}>
+                        <SelectTrigger><SelectValue placeholder="Todas as unidades" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todas as Unidades</SelectItem>
+                          {units?.map((unit: any) => (
+                            <SelectItem key={unit.id} value={unit.id}>{unit.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                </div>
+
+                  <div className="flex items-center justify-between border p-3 rounded-lg">
+                    <div className="space-y-0.5">
+                      <label className="text-sm font-medium">Ativar Agente Geral</label>
+                      <p className="text-xs text-muted-foreground">Desligue para pausar o agente completamente. Ele não responderá nenhuma mensagem.</p>
+                    </div>
+                    <Switch checked={isActive} onCheckedChange={setIsActive} />
+                  </div>
+
+                  <div className="flex items-center justify-between border p-3 rounded-lg">
+                    <div className="space-y-0.5">
+                      <label className="text-sm font-medium">Assumir novas conversas automaticamente</label>
+                      <p className="text-xs text-muted-foreground">Se desativado, a IA começará desligada e precisará ser ativada manualmente na tela de chat.</p>
+                    </div>
+                    <Switch checked={activeByDefault} onCheckedChange={setActiveByDefault} />
+                  </div>
+
+                  <div className="flex items-center justify-between border p-3 rounded-lg border-primary/20 bg-primary/5">
+                    <div className="space-y-0.5">
+                      <label className="text-sm font-medium text-primary">Agente Principal (Triagem)</label>
+                      <p className="text-xs text-muted-foreground">Este é o agente principal que recebe o cliente inicialmente. Ao ativar este, outros agentes principais desta instância serão desativados (recomendável apenas 1 por unidade/instância).</p>
+                    </div>
+                    <Switch checked={isMainAgent} onCheckedChange={setIsMainAgent} />
+                  </div>
               </TabsContent>
 
               {/* Aba Comportamento */}
               <TabsContent value="behavior" className="space-y-4">
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">1. Personalidade do Agente</label>
+                    <label className="text-sm font-medium flex items-center gap-2">
+                      1. Personalidade do Agente
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-muted-foreground cursor-pointer" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs space-y-2 text-xs">
+                          <p><strong>Exemplo:</strong> Você é o assistente principal de vendas. Você deve ser educado e amigável.</p>
+                          <p>Neste campo, você define o tom e as diretrizes principais de comportamento da IA.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </label>
                     <Textarea 
                       placeholder="Ex: Você é um assistente de suporte gentil e prestativo..." 
                       value={promptPersonality} 
@@ -344,7 +440,19 @@ export function AiAgentsTab() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">2. Instruções de Atendimento</label>
+                    <label className="text-sm font-medium flex items-center gap-2">
+                      2. Instruções de Atendimento e Ações
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-muted-foreground cursor-pointer" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-sm space-y-2 text-xs">
+                          <p>Aqui você instrui as permissões especiais da IA.</p>
+                          <p><strong>Transferir IA:</strong> O agente detecta outras IAs ativas automaticamente. Você pode pedir para ele: <em>"Se o cliente quiser agendar, transfira usando a tag [TRANSFERIR_AGENTE: id_da_ia]"</em>.</p>
+                          <p><strong>Criar Tarefa/Oportunidade:</strong> <em>"Use [CRIAR_TAREFA: Titulo | Descricao | 2024-12-01 10:00]"</em> ou <em>"[CRIAR_OPORTUNIDADE: Venda | 100.50]"</em>.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </label>
                     <Textarea 
                       placeholder="Ex: Peça o CPF do cliente antes de responder. Responda em no máximo 2 parágrafos..." 
                       value={promptInstructions} 
@@ -364,23 +472,41 @@ export function AiAgentsTab() {
                 </div>
               </TabsContent>
 
-              {/* Aba Automação */}
+              {/* Aba Skills */}
               <TabsContent value="automation" className="space-y-4">
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between border p-3 rounded-lg">
-                    <div className="space-y-0.5">
-                      <label className="text-sm font-medium">Ativar Agente Geral</label>
-                      <p className="text-xs text-muted-foreground">Desligue para pausar o agente completamente. Ele não responderá nenhuma mensagem.</p>
+                  <div className="border rounded-md p-4 space-y-4 bg-muted/10">
+                    <div className="flex flex-col space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Bot className="h-4 w-4 text-primary" />
+                        <label className="text-sm font-medium">Delegação para Outros Agentes (Skills)</label>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Selecione quais outros agentes esta IA pode acessar e transferir o atendimento. Se nenhum for selecionado, ela não conhecerá os outros agentes da empresa.</p>
+                      
+                      <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t">
+                        {agents?.filter((a: any) => a.id !== editingId).map((a: any) => (
+                          <div key={a.id} className="flex items-center space-x-2">
+                            <Checkbox 
+                              id={`agent-${a.id}`} 
+                              checked={allowedAgentIds.includes(a.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setAllowedAgentIds(prev => [...prev, a.id]);
+                                } else {
+                                  setAllowedAgentIds(prev => prev.filter(id => id !== a.id));
+                                }
+                              }}
+                            />
+                            <label htmlFor={`agent-${a.id}`} className="text-xs font-medium leading-none cursor-pointer">
+                              {a.name} <span className="text-muted-foreground">({a.ai_type})</span>
+                            </label>
+                          </div>
+                        ))}
+                        {agents?.filter((a: any) => a.id !== editingId).length === 0 && (
+                          <p className="text-xs text-muted-foreground col-span-2">Nenhum outro agente disponível na empresa.</p>
+                        )}
+                      </div>
                     </div>
-                    <Switch checked={isActive} onCheckedChange={setIsActive} />
-                  </div>
-
-                  <div className="flex items-center justify-between border p-3 rounded-lg">
-                    <div className="space-y-0.5">
-                      <label className="text-sm font-medium">Assumir novas conversas automaticamente</label>
-                      <p className="text-xs text-muted-foreground">Se desativado, a IA começará desligada e precisará ser ativada manualmente na tela de chat.</p>
-                    </div>
-                    <Switch checked={activeByDefault} onCheckedChange={setActiveByDefault} />
                   </div>
 
                   <div className="border rounded-md p-4 space-y-4 bg-muted/10">
@@ -412,12 +538,46 @@ export function AiAgentsTab() {
                         <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                           <CornerDownRight className="h-3 w-3" />
                           Instrução de Transferência [TRANSFERIR]
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs space-y-2 text-xs">
+                              <p>Quando a IA não souber resolver, ela pode transferir para um humano ou enviar para uma fila.</p>
+                              <p><strong>Exemplo:</strong> Se não conseguir ajudar, encerre sua frase com <code>[TRANSFERIR: Precisa de suporte financeiro]</code>.</p>
+                              <p>Não confunda com <code>[TRANSFERIR_AGENTE]</code> (que envia para outra IA de forma autônoma).</p>
+                            </TooltipContent>
+                          </Tooltip>
                         </label>
                         <Textarea 
                           className="min-h-[120px] text-xs font-mono" 
                           placeholder="Ex: Se não souber resolver, use a tag [TRANSFERIR: motivo]..." 
                           value={promptHandoff} 
                           onChange={e => setPromptHandoff(e.target.value)} 
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Deixe em branco para usar o comportamento padrão do sistema.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2 pt-2 border-t">
+                        <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                          <CornerDownRight className="h-3 w-3" />
+                          Instrução ao Receber Transferência
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs space-y-2 text-xs">
+                              <p>Instrução que a IA recebe no momento em que um colega transfere um atendimento para ela.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </label>
+                        <Textarea 
+                          className="min-h-[100px] text-xs font-mono" 
+                          placeholder="Ex: Um colega transferiu para você. Continue o atendimento da sua área de especialidade." 
+                          value={promptReceiveHandoff} 
+                          onChange={e => setPromptReceiveHandoff(e.target.value)} 
                         />
                         <p className="text-[10px] text-muted-foreground">
                           Deixe em branco para usar o comportamento padrão do sistema.
@@ -460,6 +620,15 @@ export function AiAgentsTab() {
                         <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                           <CornerDownRight className="h-3 w-3" />
                           Instrução de Encerramento [ENCERRAR]
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs space-y-2 text-xs">
+                              <p>Usado quando a IA resolveu com sucesso e o ticket pode ser finalizado.</p>
+                              <p><strong>Exemplo:</strong> Quando todas as dúvidas forem sanadas, escreva <code>[ENCERRAR: Dúvidas tiradas com sucesso]</code>.</p>
+                            </TooltipContent>
+                          </Tooltip>
                         </label>
                         <Textarea 
                           className="min-h-[120px] text-xs font-mono" 
@@ -474,9 +643,112 @@ export function AiAgentsTab() {
                     </>
                     )}
                   </div>
+
+                  <div className="border rounded-md p-4 space-y-4 bg-muted/10">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium flex items-center gap-2">
+                          <CalendarCheck className="h-4 w-4 text-blue-600 dark:text-blue-500" />
+                          Permitir Criação de Tarefas
+                        </label>
+                        <p className="text-xs text-muted-foreground">A IA poderá criar tarefas de follow-up diretamente no CRM.</p>
+                      </div>
+                      <Switch checked={allowTasks} onCheckedChange={setAllowTasks} />
+                    </div>
+                    {allowTasks && (
+                      <div className="space-y-2 pt-2 border-t">
+                        <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                          <CornerDownRight className="h-3 w-3" />
+                          Instrução de Tarefas [CRIAR_TAREFA]
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs space-y-2 text-xs">
+                              <p>Ensine a IA sobre como criar as tarefas.</p>
+                              <p><strong>Formato Obrigatório:</strong> <code>[CRIAR_TAREFA: Título | Descrição | YYYY-MM-DD HH:MM]</code>.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </label>
+                        <Textarea 
+                          className="min-h-[100px] text-xs font-mono" 
+                          placeholder="Ex: Para criar uma tarefa, use a tag [CRIAR_TAREFA: Título | Descrição | 2026-12-31 14:00]..." 
+                          value={promptTasks} 
+                          onChange={e => setPromptTasks(e.target.value)} 
+                        />
+                        <p className="text-[10px] text-muted-foreground">Deixe em branco para usar o texto padrão do sistema.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border rounded-md p-4 space-y-4 bg-muted/10">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-sm font-medium flex items-center gap-2">
+                          <BadgeDollarSign className="h-4 w-4 text-amber-600 dark:text-amber-500" />
+                          Permitir Criação de Oportunidades
+                        </label>
+                        <p className="text-xs text-muted-foreground">A IA poderá criar oportunidades de negócio (vendas) no funil do contato.</p>
+                      </div>
+                      <Switch checked={allowOpportunities} onCheckedChange={setAllowOpportunities} />
+                    </div>
+                    {allowOpportunities && (
+                      <>
+                        <div className="space-y-2 pt-2 border-t">
+                          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                            <CornerDownRight className="h-3 w-3" />
+                            Funil (Pipeline) do Agente
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-xs space-y-2 text-xs">
+                                <p>Selecione em qual Funil este agente irá operar.</p>
+                                <p>O agente receberá as etapas deste funil para usar nas tags.</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </label>
+                          <Select value={pipelineId} onValueChange={setPipelineId}>
+                            <SelectTrigger className="h-9"><SelectValue placeholder="Selecione o Funil" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Nenhum (Sem Contexto de Funil)</SelectItem>
+                              {pipelines?.map((pipe: any) => (
+                                <SelectItem key={pipe.id} value={pipe.id}>{pipe.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2 pt-2 border-t">
+                          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                            <CornerDownRight className="h-3 w-3" />
+                            Instrução de Oportunidades
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-xs space-y-2 text-xs">
+                                <p>Ensine a IA sobre como criar e gerenciar a oportunidade.</p>
+                                <p><strong>Formato Criação:</strong> <code>[CRIAR_OPORTUNIDADE: Título da Venda | Valor Numérico | etapa_id]</code>.</p>
+                                <p><strong>Formato Atualização:</strong> <code>[ATUALIZAR_OPORTUNIDADE: oportunidade_id | etapa_id | id_nova_etapa]</code>.</p>
+                                <p>A IA receberá os IDs de etapa automaticamente no contexto.</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </label>
+                          <Textarea 
+                            className="min-h-[140px] text-xs font-mono" 
+                            placeholder="Ex: Quando um lead chegar, crie uma oportunidade usando [CRIAR_OPORTUNIDADE: Nome | 100 | etapa_id]..." 
+                            value={promptOpportunities} 
+                            onChange={e => setPromptOpportunities(e.target.value)} 
+                          />
+                          <p className="text-[10px] text-muted-foreground">Você pode usar variáveis no prompt como {`{{nome_cliente}}`} e {`{{telefone}}`}.</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </TabsContent>
             </Tabs>
+            </TooltipProvider>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
               <Button onClick={() => saveAgent.mutate()} disabled={saveAgent.isPending || !name || !aiType || !model}>
@@ -496,10 +768,13 @@ export function AiAgentsTab() {
               <CardHeader className="pb-2">
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-2">
-                    <Bot className="h-5 w-5 text-primary" />
-                    <CardTitle className="text-base">{agent.name}</CardTitle>
+                    <Bot className="h-5 w-5 text-primary shrink-0" />
+                    <CardTitle className="text-base truncate">{agent.name}</CardTitle>
+                    {agent.is_main_agent && (
+                      <Badge className="text-[10px] h-5 bg-blue-600 hover:bg-blue-700 shrink-0">Principal</Badge>
+                    )}
                   </div>
-                  {!agent.is_active && <Badge variant="secondary" className="text-[10px]">Inativo</Badge>}
+                  {!agent.is_active && <Badge variant="secondary" className="text-[10px] shrink-0">Inativo</Badge>}
                 </div>
                 <CardDescription className="text-xs font-medium">Tipo: {agent.ai_type}</CardDescription>
               </CardHeader>

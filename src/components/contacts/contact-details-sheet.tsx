@@ -965,8 +965,8 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
                           {expandedSessions.has(session.id) && (
                             <div className="mt-3 pl-2 border-l-2 border-muted space-y-3 w-full animate-in slide-in-from-top-2 fade-in duration-200">
                               {session.session_events.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).map((event: any) => {
-                                const actorName = event.metadata?.by_ai && session.conversation?.ai_agent?.name
-                                  ? `🤖 ${session.conversation.ai_agent.name}`
+                                const actorName = event.metadata?.by_ai 
+                                  ? `🤖 ${event.metadata.ai_agent_name || session.conversation?.ai_agent?.name || 'IA'}`
                                   : event.actor?.name || 'Sistema';
                                 
                                 return (

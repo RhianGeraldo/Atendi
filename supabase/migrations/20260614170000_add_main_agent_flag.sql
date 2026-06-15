@@ -1,0 +1,1 @@
+ALTER TABLE public.ai_agents ADD COLUMN IF NOT EXISTS is_main_agent BOOLEAN NOT NULL DEFAULT false;

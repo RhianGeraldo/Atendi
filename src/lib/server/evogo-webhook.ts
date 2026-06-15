@@ -115,17 +115,27 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           const real = jids.find(j => j && j.includes('@s.whatsapp.net'));
           if (real) return real.split('@')[0];
           
-          const fallback = jids.find(j => j && j.trim() !== '');
+          const fallback = jids.find(j => j && !j.includes('@lid') && j.trim() !== '');
           if (fallback) return fallback.split('@')[0];
           return null;
         };
 
+        const getLid = (jids: (string | undefined)[]) => {
+          const lid = jids.find(j => j && j.includes('@lid'));
+          if (lid) return lid.split('@')[0];
+          return null;
+        };
+
+        let extractedLid: string | null = null;
+
         if (isFromMe) {
           remoteJid = info.Chat || info.RecipientAlt;
           phoneNumber = getPhone([info.Chat, info.RecipientAlt]);
+          extractedLid = getLid([info.Chat, info.RecipientAlt]);
         } else {
           remoteJid = info.Chat || info.Sender || info.SenderAlt;
           phoneNumber = getPhone([info.Chat, info.Sender, info.SenderAlt]);
+          extractedLid = getLid([info.Chat, info.Sender, info.SenderAlt]);
         }
         pushName = info.PushName || 'Desconhecido';
         remoteMsgId = info.ID;
@@ -406,34 +416,42 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       const phoneVariants = getPhoneVariants(phoneNumber || '');
       const { data: existingContacts } = await supabaseAdmin
         .from('contacts')
-        .select('id, name')
+        .select('id, name, whatsapp_lid')
         .eq('company_id', company_id)
-        .or(`phone.in.(${phoneVariants.join(',')}),whatsapp_lid.eq.${phoneNumber}`)
+        .or(`phone.in.(${phoneVariants.join(',')})${extractedLid ? `,whatsapp_lid.eq.${extractedLid}` : ''}`)
         .limit(1);
 
       if (existingContacts && existingContacts.length > 0) {
         contactId = existingContacts[0].id;
         
+        const updates: any = {};
+        
         // Update contact name
         if (remoteJid.includes('@g.us')) {
           // If it's a group and we got the actual name, update it if it differs
           if (actualGroupName && existingContacts[0].name !== actualGroupName && existingContacts[0].name === 'Grupo do WhatsApp') {
-            await supabaseAdmin
-              .from('contacts')
-              .update({ name: actualGroupName })
-              .eq('id', contactId);
+            updates.name = actualGroupName;
           }
         } else {
           // It's a direct contact
           if (!isFromMe && pushName && pushName !== 'Desconhecido') {
             const currentName = existingContacts[0].name;
             if (currentName === phoneNumber || currentName === 'Desconhecido') {
-              await supabaseAdmin
-                .from('contacts')
-                .update({ name: pushName })
-                .eq('id', contactId);
+              updates.name = pushName;
             }
           }
+        }
+
+        // Lock in the LID if we discovered it
+        if (extractedLid && existingContacts[0].whatsapp_lid !== extractedLid) {
+          updates.whatsapp_lid = extractedLid;
+        }
+
+        if (Object.keys(updates).length > 0) {
+          await supabaseAdmin
+            .from('contacts')
+            .update(updates)
+            .eq('id', contactId);
         }
       } else {
         // Create new contact
@@ -452,6 +470,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             unit_id: unit_id,
             name: newContactName,
             phone: phoneNumber,
+            whatsapp_lid: extractedLid || null,
           })
           .select()
           .single();
@@ -499,38 +518,100 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           }
         }
         
+        // 3.5 Dedup: skip if we already have this remote_msg_id in the DB
+        // This MUST happen before we process 'resolved' status, otherwise echoes will reopen tickets
+        if (remoteMsgId && conversationId) {
+          const { data: existingMsg } = await supabaseAdmin
+            .from('messages')
+            .select('id, metadata')
+            .eq('remote_msg_id', remoteMsgId)
+            .eq('conversation_id', conversationId)
+            .maybeSingle();
+          
+          if (existingMsg) {
+            // Already saved - just update conversation timestamp
+            await supabaseAdmin
+              .from('conversations')
+              .update({ last_message_at: new Date().toISOString() })
+              .eq('id', conversationId);
+
+            // Update metadata if the new payload has metadata that might have been missing initially
+            if (Object.keys(metadata).length > 0) {
+              const currentMeta = typeof existingMsg.metadata === 'object' && existingMsg.metadata !== null ? existingMsg.metadata : {};
+              const newMetadata = { ...currentMeta, ...metadata };
+              await supabaseAdmin
+                .from('messages')
+                .update({ metadata: newMetadata })
+                .eq('id', existingMsg.id);
+            }
+            return;
+          }
+        }
+
+        
         const updatePayload: any = { last_message_at: new Date().toISOString() };
         
         // Se a conversa estava resolvida, reabre ela como 'waiting' (ou 'active' se a IA for atender)
         if (conv.status === 'resolved') {
           console.log(`[evogo-webhook] Reopening resolved conversation: ${conversationId}`);
-          updatePayload.status = aiActive ? 'active' : 'waiting';
+          
+          // Re-route to the Main Agent for new interactions
+          const { data: defaultAgents } = await supabaseAdmin
+            .from('ai_agents')
+            .select('id')
+            .eq('company_id', company_id)
+            .eq('is_active', true)
+            .or('is_main_agent.eq.true,active_by_default.eq.true')
+            .order('is_main_agent', { ascending: false })
+            .order('instance_id', { ascending: false })
+            .limit(1);
+            
+          const mainAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
+          
+          updatePayload.status = mainAgentId ? 'active' : 'waiting';
+          updatePayload.ai_active = !!mainAgentId;
+          updatePayload.ai_agent_id = mainAgentId;
           updatePayload.assigned_agent_id = null;
           updatePayload.resolved_at = null;
           
+          aiActive = !!mainAgentId;
+          
           // Abre um novo ticket (sessão)
           let sessionId = null;
-          const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+          let { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
           
           if (existingSession) {
             sessionId = existingSession.id;
           } else {
-            const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
+            const { data: newSession, error: sessionErr } = await supabaseAdmin.from('conversation_sessions').insert({
               conversation_id: conversationId,
               contact_id: contactId,
               whatsapp_instance_id: instance_id,
               started_at: new Date().toISOString()
             }).select().single();
-            if (newSession) sessionId = newSession.id;
+            if (sessionErr) {
+              if (sessionErr.code === '23505') {
+                const { data: concSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+                if (concSession) sessionId = concSession.id;
+                existingSession = concSession; // Mark as existing so we don't duplicate events
+              } else {
+                console.error('[evogo-webhook] Error creating session:', sessionErr);
+              }
+            } else if (newSession) {
+              sessionId = newSession.id;
+            }
           }
           
           if (sessionId) {
             updatePayload.current_session_id = sessionId;
-            const events: any[] = [{ session_id: sessionId, event_type: 'started' }];
-            if (aiActive) {
-              events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true } });
+            if (!existingSession) {
+              const events: any[] = [{ session_id: sessionId, event_type: 'started' }];
+              if (aiActive) {
+                const { data: mainAgentData } = await supabaseAdmin.from('ai_agents').select('name').eq('id', mainAgentId).single();
+                events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true, ai_agent_id: mainAgentId, ai_agent_name: mainAgentData?.name || 'IA' } });
+              }
+              await supabaseAdmin.from('session_events').insert(events);
             }
-            await supabaseAdmin.from('session_events').insert(events);
           }
         } else {
           console.log(`[evogo-webhook] Found active/waiting conversation: ${conversationId}`);
@@ -544,9 +625,11 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         // Check for default AI agent (prefer agent mapped to this instance)
         const { data: defaultAgents } = await supabaseAdmin
           .from('ai_agents')
-          .select('id')
+          .select('id, is_main_agent, active_by_default')
           .eq('company_id', company_id)
-          .eq('active_by_default', true)
+          .eq('is_active', true)
+          .or('is_main_agent.eq.true,active_by_default.eq.true')
+          .order('is_main_agent', { ascending: false })
           .order('instance_id', { ascending: false })
           .limit(1);
         const defaultAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
@@ -575,27 +658,40 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         // Abre um novo ticket (sessão) se não for resolvido já na criação
         if (!isFromMe) {
           let sessionId = null;
-          const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+          let { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
           
           if (existingSession) {
              sessionId = existingSession.id;
           } else {
-             const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
+             const { data: newSession, error: sessionErr } = await supabaseAdmin.from('conversation_sessions').insert({
                conversation_id: conversationId,
                contact_id: contactId,
                whatsapp_instance_id: instance_id,
                started_at: new Date().toISOString()
              }).select().single();
-             if (newSession) sessionId = newSession.id;
+             if (sessionErr) {
+               if (sessionErr.code === '23505') {
+                 const { data: concSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+                 if (concSession) sessionId = concSession.id;
+                 existingSession = concSession;
+               } else {
+                 console.error('[evogo-webhook] Error creating session:', sessionErr);
+               }
+             } else if (newSession) {
+               sessionId = newSession.id;
+             }
           }
           
           if (sessionId) {
             await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', conversationId);
-            const events: any[] = [{ session_id: sessionId, event_type: 'started' }];
-            if (!!defaultAgentId) {
-              events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true } });
+            if (!existingSession) {
+              const events: any[] = [{ session_id: sessionId, event_type: 'started' }];
+              if (!!defaultAgentId) {
+                const { data: defaultAgentData } = await supabaseAdmin.from('ai_agents').select('name').eq('id', defaultAgentId).single();
+                events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true, ai_agent_id: defaultAgentId, ai_agent_name: defaultAgentData?.name || 'IA' } });
+              }
+              await supabaseAdmin.from('session_events').insert(events);
             }
-            await supabaseAdmin.from('session_events').insert(events);
           }
         }
       }
@@ -610,36 +706,6 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           .single();
         if (quotedMsg) {
           quotedInternalId = quotedMsg.id;
-        }
-      }
-
-      // 5. Dedup: skip if we already have this remote_msg_id in the DB
-      // This happens when we send from the platform - the EvoGo echo webhook arrives but we already saved it
-      if (remoteMsgId && conversationId) {
-        const { data: existingMsg } = await supabaseAdmin
-          .from('messages')
-          .select('id, metadata')
-          .eq('remote_msg_id', remoteMsgId)
-          .eq('conversation_id', conversationId)
-          .maybeSingle();
-        
-        if (existingMsg) {
-          // Already saved - just update conversation timestamp
-          await supabaseAdmin
-            .from('conversations')
-            .update({ last_message_at: new Date().toISOString() })
-            .eq('id', conversationId);
-
-          // Update metadata if the new payload has metadata that might have been missing initially
-          if (Object.keys(metadata).length > 0) {
-            const currentMeta = typeof existingMsg.metadata === 'object' && existingMsg.metadata !== null ? existingMsg.metadata : {};
-            const newMetadata = { ...currentMeta, ...metadata };
-            await supabaseAdmin
-              .from('messages')
-              .update({ metadata: newMetadata })
-              .eq('id', existingMsg.id);
-          }
-          return;
         }
       }
 
