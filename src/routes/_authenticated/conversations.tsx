@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -687,13 +687,25 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
   );
 }
 
-function NewConversationDialog({ onCreated }: { onCreated: (id: string) => void }) {
+function NewConversationDialog({ 
+  onCreated,
+  trigger,
+  initialPhone
+}: { 
+  onCreated?: (id: string) => void;
+  trigger?: React.ReactNode;
+  initialPhone?: string;
+}) {
   const qc = useQueryClient();
   const { profile } = useAuth();
   const [open, setOpen] = useState(false);
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(initialPhone || "");
   const [text, setText] = useState("");
   const [instanceName, setInstanceName] = useState("");
+
+  useEffect(() => {
+    if (open && initialPhone) setPhone(initialPhone);
+  }, [open, initialPhone]);
 
   const { data: instances } = useQuery({
     queryKey: ["whatsapp_instances"],
@@ -723,11 +735,11 @@ function NewConversationDialog({ onCreated }: { onCreated: (id: string) => void 
       return res;
     },
     onSuccess: (res) => {
-      if (res.conversationId) {
+      if (res.conversationId && onCreated) {
         onCreated(res.conversationId);
       }
       setOpen(false);
-      setPhone("");
+      setPhone(initialPhone || "");
       setText("");
       setInstanceName("");
       qc.invalidateQueries({ queryKey: ["conversations"] });
@@ -741,9 +753,11 @@ function NewConversationDialog({ onCreated }: { onCreated: (id: string) => void 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="icon" variant="outline" className="h-9 w-9 shrink-0">
-          <MessageSquarePlus className="h-4 w-4" />
-        </Button>
+        {trigger || (
+          <Button size="icon" variant="outline" className="h-9 w-9 shrink-0">
+            <MessageSquarePlus className="h-4 w-4" />
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -2439,6 +2453,111 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
                 </DialogContent>
               )}
             </Dialog>
+          </div>
+        ) : m.metadata?.location ? (
+          <div className="mb-1">
+            <a 
+              href={`https://www.google.com/maps/search/?api=1&query=${m.metadata.location.lat},${m.metadata.location.lng}`} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className={cn(
+                "mt-1 flex flex-col overflow-hidden rounded-md border transition-opacity hover:opacity-90 group w-full sm:w-[350px]",
+                mine ? "border-transparent bg-black/10 dark:bg-white/10 text-white" : "border-border/50 bg-card/50 text-foreground"
+              )}
+            >
+              {m.metadata.location.thumbnail && (
+                <div className="h-40 w-full overflow-hidden bg-black/5">
+                  <img src={`data:image/jpeg;base64,${m.metadata.location.thumbnail}`} alt="Mapa" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                </div>
+              )}
+              <div className="flex flex-col p-3 text-left">
+                <span className="font-semibold text-sm mb-1 truncate">{m.metadata.location.name || "Localização"}</span>
+                <span className={cn(
+                  "text-xs mb-2 truncate opacity-90",
+                  mine ? "text-white/80" : "text-muted-foreground"
+                )}>{m.metadata.location.address || "Ver no mapa"}</span>
+                
+                <div className={cn(
+                  "flex items-center gap-1.5 text-[10px] opacity-70 mt-1",
+                  mine ? "text-white/70" : "text-muted-foreground"
+                )}>
+                  <MapPin className="h-3 w-3" />
+                  <span>Google Maps</span>
+                </div>
+              </div>
+            </a>
+            {displayContent && displayContent !== "📍 Localização recebida" && <div className="text-xs mt-2"><FormattedText text={displayContent} mine={mine} /></div>}
+          </div>
+        ) : m.metadata?.contacts ? (
+          <div className="mb-1 flex flex-col gap-2">
+            {m.metadata.contacts.map((contact: any, i: number) => (
+              <div 
+                key={i}
+                className={cn(
+                  "flex items-center gap-3 p-3 rounded-lg border max-w-[260px]",
+                  mine ? "border-transparent bg-black/10 dark:bg-white/10 text-white" : "border-border bg-background text-foreground"
+                )}
+              >
+                <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full shadow-sm overflow-hidden", mine ? "bg-white/20 text-white" : "bg-primary/10 text-primary")}>
+                  {contact.photo ? (
+                    <img src={`data:image/jpeg;base64,${contact.photo}`} alt={contact.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <User className="h-5 w-5" />
+                  )}
+                </div>
+                <div className="flex flex-col overflow-hidden min-w-0">
+                  <span className="font-semibold text-[13px] leading-tight truncate">{contact.name || "Contato"}</span>
+                  {(contact.phone || contact.waid) && (
+                    <div className="flex flex-col items-start gap-1.5 mt-0.5">
+                      <a 
+                        href={`https://wa.me/${contact.waid || (contact.phone || '').replace(/\D/g, '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer" 
+                        className="text-[11px] opacity-70 truncate hover:underline"
+                      >
+                        {contact.phone || contact.waid}
+                      </a>
+                      <NewConversationDialog 
+                        initialPhone={contact.waid || (contact.phone || '').replace(/\D/g, '')}
+                        trigger={
+                          <Button size="sm" variant="secondary" className={cn("h-6 text-[10px] px-2 w-fit", mine ? "bg-white/20 text-white hover:bg-white/30" : "bg-primary/10 text-primary hover:bg-primary/20")}>
+                            <MessageSquarePlus className="h-3 w-3 mr-1.5" />
+                            Iniciar Conversa
+                          </Button>
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {displayContent && displayContent !== "👤 Contato(s) recebido(s)" && <div className="text-xs mt-1"><FormattedText text={displayContent} mine={mine} /></div>}
+          </div>
+        ) : m.metadata?.poll ? (
+          <div className="mb-1 flex flex-col gap-2">
+            <div className={cn(
+              "p-3 rounded-lg border min-w-[200px] max-w-[280px]",
+              mine ? "border-transparent bg-black/10 dark:bg-white/10 text-white" : "border-border bg-background text-foreground"
+            )}>
+              <div className="flex items-start gap-2.5 mb-3 pb-3 border-b border-border/20">
+                <div className={cn("p-1.5 rounded-full shrink-0", mine ? "bg-white/20 text-white" : "bg-primary/10 text-primary")}>
+                  <List className="h-4 w-4" />
+                </div>
+                <span className="font-semibold text-[13px] leading-snug break-words mt-0.5">{m.metadata.poll.name}</span>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {m.metadata.poll.options?.map((opt: string, i: number) => (
+                  <div key={i} className={cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-md text-[13px] border transition-colors",
+                    mine ? "bg-black/20 border-white/10 hover:bg-black/30" : "bg-muted/50 border-border/50 hover:bg-muted"
+                  )}>
+                    <div className="h-3.5 w-3.5 rounded-full border border-current opacity-40 shrink-0" />
+                    <span className="truncate opacity-90">{opt}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {displayContent && !displayContent.startsWith("📊 Enquete:") && <div className="text-xs mt-1"><FormattedText text={displayContent} mine={mine} /></div>}
           </div>
         ) : (
           <FormattedText text={displayContent} mine={mine} />

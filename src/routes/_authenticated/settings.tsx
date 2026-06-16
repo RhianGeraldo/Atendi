@@ -55,7 +55,7 @@ function SettingsPage() {
   const [instanceName, setInstanceName] = useState("");
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
-  const [useSignature, setUseSignature] = useState(profile?.use_signature || false);
+  const [useSignature, setUseSignature] = useState(profile?.use_signature ?? true);
 
   const [aiSettings, setAiSettings] = useState({
     keys: { openai: "", groq: "", openrouter: "" },

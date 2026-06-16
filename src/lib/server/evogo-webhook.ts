@@ -210,12 +210,61 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         } else if (msg.contactMessage || msg.contactsArrayMessage) {
           mediaType = 'text';
           textContent = '👤 Contato(s) recebido(s)';
+          
+          let contactsList = [];
+          if (msg.contactMessage) {
+            contactsList.push(msg.contactMessage);
+          } else if (msg.contactsArrayMessage?.contacts) {
+            contactsList = msg.contactsArrayMessage.contacts;
+          }
+          
+          const parsedContacts = [];
+          for (const c of contactsList) {
+            if (c.vcard) {
+              const nameMatch = c.vcard.match(/FN:(.+)/);
+              const waidMatch = c.vcard.match(/waid=(\d+)/);
+              const phoneMatch = c.vcard.match(/TEL.*:(.+)/);
+              const photoMatch = c.vcard.match(/PHOTO.*?BASE64:([^\n\r]+)/i);
+              
+              const name = nameMatch ? nameMatch[1].trim() : c.displayName;
+              const waid = waidMatch ? waidMatch[1].trim() : null;
+              const phone = phoneMatch ? phoneMatch[1].trim() : null;
+              const photo = photoMatch ? photoMatch[1].trim() : null;
+              
+              if (name || waid || phone) {
+                parsedContacts.push({ name, waid, phone, photo });
+              }
+            }
+          }
+          if (parsedContacts.length > 0) {
+            metadata.contacts = parsedContacts;
+          }
         } else if (msg.locationMessage || msg.liveLocationMessage) {
           mediaType = 'text';
           textContent = '📍 Localização recebida';
+          const locMsg = msg.locationMessage || msg.liveLocationMessage;
+          if (locMsg.degreesLatitude && locMsg.degreesLongitude) {
+            metadata.location = {
+              lat: locMsg.degreesLatitude,
+              lng: locMsg.degreesLongitude
+            };
+            if (locMsg.name) metadata.location.name = locMsg.name;
+            if (locMsg.address) metadata.location.address = locMsg.address;
+            if (locMsg.jpegThumbnail || locMsg.JPEGThumbnail) metadata.location.thumbnail = locMsg.jpegThumbnail || locMsg.JPEGThumbnail;
+          }
         } else if (msg.pollCreationMessage || msg.pollCreationMessageV2 || msg.pollCreationMessageV3) {
           mediaType = 'text';
-          textContent = '📊 Enquete: ' + (msg.pollCreationMessage?.name || msg.pollCreationMessageV2?.name || msg.pollCreationMessageV3?.name || 'Votação');
+          const pollObj = msg.pollCreationMessage || msg.pollCreationMessageV2 || msg.pollCreationMessageV3;
+          textContent = '📊 Enquete: ' + (pollObj?.name || 'Votação');
+          if (pollObj?.options) {
+            metadata.poll = {
+              name: pollObj.name || 'Votação',
+              options: pollObj.options.map((o: any) => o.optionName),
+              messageSecret: msg.messageContextInfo?.messageSecret || null
+            };
+          }
+        } else if (msg.pollUpdateMessage) {
+          return;
         } else if (info?.Type === 'call' || msg.messageStubType === 'CALL_MISSED_VOICE' || msg.messageStubType === 'CALL_MISSED_VIDEO' || msg.messageStubType === 40 || msg.messageStubType === 41) {
           mediaType = 'text';
           textContent = '📞 Chamada de voz/vídeo perdida';
@@ -339,6 +388,64 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             if (base64Content) {
               mediaUrl = `data:${msgType.stickerMessage.mimetype || 'image/webp'};base64,${base64Content}`;
             }
+          } else if (msgType.locationMessage || msgType.liveLocationMessage) {
+            mediaType = 'text';
+            textContent = '📍 Localização recebida';
+            const locMsg = msgType.locationMessage || msgType.liveLocationMessage;
+            if (locMsg.degreesLatitude && locMsg.degreesLongitude) {
+              metadata.location = {
+                lat: locMsg.degreesLatitude,
+                lng: locMsg.degreesLongitude
+              };
+              if (locMsg.name) metadata.location.name = locMsg.name;
+              if (locMsg.address) metadata.location.address = locMsg.address;
+              if (locMsg.jpegThumbnail || locMsg.JPEGThumbnail) metadata.location.thumbnail = locMsg.jpegThumbnail || locMsg.JPEGThumbnail;
+            }
+          } else if (msgType.contactMessage || msgType.contactsArrayMessage) {
+            mediaType = 'text';
+            textContent = '👤 Contato(s) recebido(s)';
+            
+            let contactsList = [];
+            if (msgType.contactMessage) {
+              contactsList.push(msgType.contactMessage);
+            } else if (msgType.contactsArrayMessage?.contacts) {
+              contactsList = msgType.contactsArrayMessage.contacts;
+            }
+            
+            const parsedContacts = [];
+            for (const c of contactsList) {
+              if (c.vcard) {
+                const nameMatch = c.vcard.match(/FN:(.+)/);
+                const waidMatch = c.vcard.match(/waid=(\d+)/);
+                const phoneMatch = c.vcard.match(/TEL.*:(.+)/);
+                const photoMatch = c.vcard.match(/PHOTO.*?BASE64:([^\n\r]+)/i);
+                
+                const name = nameMatch ? nameMatch[1].trim() : c.displayName;
+                const waid = waidMatch ? waidMatch[1].trim() : null;
+                const phone = phoneMatch ? phoneMatch[1].trim() : null;
+                const photo = photoMatch ? photoMatch[1].trim() : null;
+                
+                if (name || waid || phone) {
+                  parsedContacts.push({ name, waid, phone, photo });
+                }
+              }
+            }
+            if (parsedContacts.length > 0) {
+              metadata.contacts = parsedContacts;
+            }
+          } else if (msgType.pollCreationMessage || msgType.pollCreationMessageV2 || msgType.pollCreationMessageV3) {
+            mediaType = 'text';
+            const pollObj = msgType.pollCreationMessage || msgType.pollCreationMessageV2 || msgType.pollCreationMessageV3;
+            textContent = '📊 Enquete: ' + (pollObj?.name || 'Votação');
+            if (pollObj?.options) {
+              metadata.poll = {
+                name: pollObj.name || 'Votação',
+                options: pollObj.options.map((o: any) => o.optionName),
+                messageSecret: msgType.messageContextInfo?.messageSecret || null
+              };
+            }
+          } else if (msgType.pollUpdateMessage) {
+            return;
           } else if (msgType.reactionMessage) {
             const targetId = msgType.reactionMessage?.key?.id || msgType.reactionMessage?.key?.ID;
             const emoji = msgType.reactionMessage?.text || '';
