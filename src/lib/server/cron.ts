@@ -18,7 +18,7 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
     // Find active conversations that are handled by AI
     const { data: conversations, error } = await supabaseAdmin
       .from('conversations')
-      .select('id, last_message_at, ai_followup_count, ai_agent_id, contacts(company_id)')
+      .select('id, last_message_at, ai_followup_count, ai_last_followup_at, ai_agent_id, contacts(company_id)')
       .eq('ai_active', true)
       .in('status', ['active', 'waiting']);
 
@@ -49,53 +49,81 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
       const timeoutMs = (agent.followup_interval_minutes || 15) * 60 * 1000;
       const maxAttempts = agent.followup_max_attempts || 2;
 
-      const lastMsgTime = new Date(conv.last_message_at || 0).getTime();
-      const timeSinceLastMsg = now - lastMsgTime;
+      // ✅ FIX: measure inactivity from the last CLIENT message, not conversation.last_message_at
+      // When AI sends a follow-up, it updates last_message_at but the client still hasn't replied.
+      const { data: lastContactMsg } = await supabaseAdmin
+        .from('messages')
+        .select('created_at, sender_type')
+        .eq('conversation_id', conv.id)
+        .eq('sender_type', 'contact')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
 
-      if (timeSinceLastMsg >= timeoutMs) {
-        // We need to check who sent the last message. We only follow up if the AI was the last to send
-        const { data: lastMsg } = await supabaseAdmin
-          .from('messages')
-          .select('sender_type')
-          .eq('conversation_id', conv.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+      // Also fetch the last message overall to check who sent it
+      const { data: lastMsg } = await supabaseAdmin
+        .from('messages')
+        .select('sender_type')
+        .eq('conversation_id', conv.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
 
-        // If the user sent the last message, the AI is probably already processing it or failed.
-        // We only trigger follow-up if the AI (agent) or system sent the last message and the user didn't reply.
-        if (lastMsg && (lastMsg.sender_type === 'agent' || lastMsg.sender_type === 'system')) {
+      // Only follow up if client was the last to NOT send (i.e., AI or system sent last)
+      if (!lastMsg || lastMsg.sender_type === 'contact') continue;
+
+      // Use last contact message time as the inactivity baseline
+      // If there's no contact message yet, use conversation start
+      const baselineTime = lastContactMsg
+        ? new Date(lastContactMsg.created_at).getTime()
+        : new Date(conv.last_message_at || 0).getTime();
+
+      const timeSinceClientMsg = now - baselineTime;
+
+      if (timeSinceClientMsg >= timeoutMs) {
+        const currentCount = conv.ai_followup_count || 0;
+
+        // ✅ FIX 2: Also enforce interval between follow-up attempts.
+        // After sending follow-up 1, the next cron run (1 min later) must NOT immediately
+        // fire follow-up 2 — it should wait another full interval since the last follow-up sent.
+        const lastFollowupAt = (conv as any).ai_last_followup_at
+          ? new Date((conv as any).ai_last_followup_at).getTime()
+          : null;
+
+        // If a follow-up was already sent, require another full interval before the next one
+        if (lastFollowupAt && (now - lastFollowupAt) < timeoutMs) {
+          console.log(`[cron] Skipping conv ${conv.id} — waiting for next interval (${Math.round((timeoutMs - (now - lastFollowupAt)) / 60000)}min remaining)`);
+          continue;
+        }
+
+        let systemInstruction = null;
+
+        if (currentCount === 0) {
+          systemInstruction = 'SYSTEM_FOLLOW_UP_1';
+          await supabaseAdmin.from('conversations').update({ ai_followup_count: 1, ai_last_followup_at: new Date().toISOString() } as any).eq('id', conv.id);
+        } else if (currentCount > 0 && currentCount < maxAttempts) {
+          systemInstruction = 'SYSTEM_FOLLOW_UP_2';
+          await supabaseAdmin.from('conversations').update({ ai_followup_count: currentCount + 1, ai_last_followup_at: new Date().toISOString() } as any).eq('id', conv.id);
+        } else if (currentCount >= maxAttempts) {
+          systemInstruction = 'SYSTEM_RESOLVE_INACTIVE';
+          // Don't increment — AI will resolve the conversation in its response
+        }
+
+        if (systemInstruction) {
+          console.log(`[cron] Triggering ${systemInstruction} for conversation ${conv.id} (count=${currentCount}, timeSinceClient=${Math.round(timeSinceClientMsg/60000)}min)`);
           
-          const currentCount = conv.ai_followup_count || 0;
-          let systemInstruction = null;
+          // Insert the invisible system message
+          const { data: insertedMsg } = await supabaseAdmin.from('messages').insert({
+            conversation_id: conv.id,
+            sender_type: 'system',
+            content: `[SISTEMA]: ${systemInstruction}`,
+            is_internal: true
+          }).select('id').single();
 
-          if (currentCount === 0) {
-            systemInstruction = 'SYSTEM_FOLLOW_UP_1';
-            await supabaseAdmin.from('conversations').update({ ai_followup_count: 1 }).eq('id', conv.id);
-          } else if (currentCount > 0 && currentCount < maxAttempts) {
-            systemInstruction = 'SYSTEM_FOLLOW_UP_2'; // Used for all subsequent attempts before max
-            await supabaseAdmin.from('conversations').update({ ai_followup_count: currentCount + 1 }).eq('id', conv.id);
-          } else if (currentCount >= maxAttempts) {
-            systemInstruction = 'SYSTEM_RESOLVE_INACTIVE';
-            // We don't increment anymore, the AI will resolve the conversation in its response
-          }
-
-          if (systemInstruction) {
-            console.log(`[cron] Triggering ${systemInstruction} for conversation ${conv.id}`);
-            
-            // Insert the invisible system message
-            const { data: insertedMsg } = await supabaseAdmin.from('messages').insert({
-              conversation_id: conv.id,
-              sender_type: 'system',
-              content: `[SISTEMA]: ${systemInstruction}`,
-              is_internal: true
-            }).select('id').single();
-
-            if (insertedMsg && conv.contacts?.company_id) {
-              // Trigger AI queue
-              enqueueAiMessage(conv.id, insertedMsg.id, conv.contacts.company_id);
-              processedCount++;
-            }
+          if (insertedMsg && conv.contacts?.company_id) {
+            // Trigger AI queue
+            enqueueAiMessage(conv.id, insertedMsg.id, conv.contacts.company_id);
+            processedCount++;
           }
         }
       }
