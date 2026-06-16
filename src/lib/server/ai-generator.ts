@@ -185,6 +185,9 @@ Para encerrar, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] n
 
     const systemPrompt = systemPromptParts.join('\n\n');
 
+    // Flag to detect if this response was triggered by an inactivity close instruction
+    let isInactivityClose = false;
+
     const formattedMessages = [
       { role: 'system', content: systemPrompt },
       ...messages.map((msg) => {
@@ -223,6 +226,7 @@ Para encerrar, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] n
           }
           if (content.includes('SYSTEM_RESOLVE_INACTIVE')) {
             content = `[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente ignorou todas as tentativas de contato. Despeça-se cordialmente e encerre o atendimento AGORA usando a tag [ENCERRAR: Encerrado por falta de comunicação do cliente].`;
+            isInactivityClose = true; // flag to use followup resolution reason
           }
         }
         
@@ -568,7 +572,9 @@ Para encerrar, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] n
       if (sessionId) {
         await supabaseAdmin.from('conversation_sessions').update({
           resolved_at: new Date().toISOString(),
-          resolution_reason_id: agent.resolution_reason_id || null,
+          resolution_reason_id: isInactivityClose
+            ? (agent.followup_resolution_reason_id || agent.resolution_reason_id || null)
+            : (agent.resolution_reason_id || null),
           resolution_observation: resolveNote
         }).eq('id', sessionId);
 

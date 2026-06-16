@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
 import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List } from "lucide-react";
 import { toast } from "sonner";
@@ -102,58 +102,78 @@ function ConversationsPage() {
     enabled: !!profile?.company_id,
   });
   
-  const { data: conversations } = useQuery({
+  const PAGE_SIZE = 20;
+
+  const {
+    data: conversationsData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetching: isConvFetching,
+  } = useInfiniteQuery({
     queryKey: ["conversations", tab, selectedUnitId, profile?.id, profile?.role, profile?.department_id],
-    queryFn: async () => {
+    initialPageParam: 0,
+    queryFn: async ({ pageParam = 0 }) => {
+      const from = pageParam as number;
+      const to = from + PAGE_SIZE - 1;
+
       let query = supabase
         .from("conversations")
         .select(
           "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)"
-        );
+        )
+        .order("last_message_at", { ascending: false })
+        .range(from, to);
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
       }
 
-      const { data, error } = await query.order("last_message_at", { ascending: false });
+      // Server-side status filter for non-group tabs
+      if (tab === "waiting") {
+        query = query.eq("status", "waiting");
+        // Non-admin: only see conversations in their dept or assigned to them
+        if (profile?.role !== "admin_company" && profile?.role !== "manager") {
+          if (profile?.department_id) {
+            query = query.or(`department_id.eq.${profile.department_id},assigned_agent_id.eq.${profile.id},department_id.is.null`);
+          } else {
+            query = query.or(`assigned_agent_id.eq.${profile?.id},department_id.is.null`);
+          }
+        }
+      } else if (tab === "active") {
+        query = query.eq("status", "active");
+        if (profile?.role !== "admin_company" && profile?.role !== "manager") {
+          query = query.eq("assigned_agent_id", profile?.id ?? "");
+        }
+      } else if (tab === "resolved") {
+        query = query.eq("status", "resolved");
+        if (profile?.role !== "admin_company" && profile?.role !== "manager") {
+          query = query.eq("assigned_agent_id", profile?.id ?? "");
+        }
+      }
+      // "groups" tab: no status filter here — filtered client-side below
+
+      const { data, error } = await query;
       if (error) throw error;
-      
-      const allConvs = (data ?? []) as unknown as ConvRow[];
-      
-      const filtered = allConvs.filter(c => {
-        const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'));
-        if (tab === "groups") return isGroup;
-        if (isGroup) return false;
 
-        const isAdmin = profile?.role === "admin_company";
-        const isManager = profile?.role === "manager";
-        const isMyDept = c.department_id === profile?.department_id;
-        const isGeneral = !c.department_id;
-        const isAssignedToMe = c.assigned_agent_id === profile?.id;
+      let rows = (data ?? []) as unknown as ConvRow[];
 
-        if (tab === "waiting") {
-          const canSeeWaiting = isAdmin || isGeneral || isMyDept || isAssignedToMe;
-          if (!canSeeWaiting) return false;
-          if (isAdmin || isManager) return c.status === "waiting";
-          return c.status === "waiting" && (!c.assigned_agent_id || c.assigned_agent_id === profile?.id);
-        }
-        if (tab === "active") {
-          const canSeeActive = isAdmin || (isManager && isMyDept) || isAssignedToMe;
-          return c.status === "active" && canSeeActive;
-        }
-        if (tab === "resolved") {
-          const canSeeResolved = isAdmin || (isManager && isMyDept) || isAssignedToMe;
-          return c.status === "resolved" && canSeeResolved;
-        }
-        return false;
-      });
+      // Client-side: separate groups from regular convs
+      if (tab === "groups") {
+        rows = rows.filter(c =>
+          c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'))
+        );
+      } else {
+        // Exclude groups from all other tabs
+        rows = rows.filter(c =>
+          !(c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-')))
+        );
+      }
 
-      // Para a aba "resolved", deduplificar: exibir apenas a conversa mais recente
-      // por contato + instância. A query já está ordenada por last_message_at DESC,
-      // então o primeiro encontrado em cada grupo é sempre o mais recente.
+      // Resolved: deduplicate by contact+instance (keep most recent — already ordered DESC)
       if (tab === "resolved") {
         const seen = new Set<string>();
-        return filtered.filter(c => {
+        rows = rows.filter(c => {
           const key = `${c.contact?.id ?? 'no-contact'}__${c.whatsapp_instance_id ?? 'no-instance'}`;
           if (seen.has(key)) return false;
           seen.add(key);
@@ -161,9 +181,24 @@ function ConversationsPage() {
         });
       }
 
-      return filtered;
+      return { rows, rawCount: (data ?? []).length };
     },
+    getNextPageParam: (lastPage, allPages) =>
+      // Use raw DB count (before client-side filtering) to detect more pages
+      lastPage.rawCount === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
+    enabled: !!profile,
   });
+
+  // Flatten all pages into a single list — guard against stale cache pages in old format
+  const conversations = useMemo(
+    () => conversationsData?.pages.flatMap(p => {
+      // p may be in old format (array) or new format ({rows, rawCount})
+      const rows = Array.isArray(p) ? p : p?.rows;
+      return (rows ?? []).filter(Boolean);
+    }) ?? [],
+    [conversationsData]
+  );
+
 
   useEffect(() => {
     if (searchTab && searchTab !== tab) {
@@ -275,14 +310,16 @@ function ConversationsPage() {
     return () => { supabase.removeChannel(ch); };
   }, [qc]);
 
-  const filtered = (conversations ?? []).filter((c) => {
+
+  const filtered = conversations.filter((c) => {
+    if (!c?.id) return false; // guard against undefined items
     if (instanceFilter && instanceFilter !== "all") {
       if (c.whatsapp_instance_id !== instanceFilter) return false;
     }
     if (!search) return true;
     const s = search.toLowerCase();
     return (
-      c.contact?.name.toLowerCase().includes(s) ||
+      c.contact?.name?.toLowerCase().includes(s) ||
       (c.contact?.phone ?? "").includes(s)
     );
   });
@@ -305,6 +342,24 @@ function ConversationsPage() {
     <div className="flex h-full overflow-hidden">
       {/* List */}
       <aside className="flex w-[360px] shrink-0 flex-col border-r border-border bg-card">
+        {/* Loading bar — shows on any active fetch (initial, realtime refresh, next page) */}
+        <div className="relative h-0.5 w-full overflow-hidden bg-transparent">
+          {isConvFetching && (
+            <div
+              className="absolute inset-0 bg-primary"
+              style={{
+                animation: 'conv-loading-bar 1.2s ease-in-out infinite',
+              }}
+            />
+          )}
+        </div>
+        <style>{`
+          @keyframes conv-loading-bar {
+            0%   { transform: translateX(-100%); }
+            50%  { transform: translateX(0%); }
+            100% { transform: translateX(100%); }
+          }
+        `}</style>
         <div className="border-b border-border p-3">
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -377,7 +432,9 @@ function ConversationsPage() {
             </TabsList>
           </Tabs>
         </div>
-        <ScrollArea className="flex-1">
+        <div
+          className="flex-1 overflow-y-auto"
+        >
           {filtered.map((c) => (
             <ConversationItem
               key={c.id}
@@ -388,12 +445,46 @@ function ConversationsPage() {
               showUnitInfo={!selectedUnitId}
             />
           ))}
-          {!filtered.length && (
+          {!filtered.length && !isConvFetching && (
             <div className="p-6 text-center text-sm text-muted-foreground">
               Nada por aqui ainda.
             </div>
           )}
-        </ScrollArea>
+          {/* Skeleton cards while loading next page */}
+          {isFetchingNextPage && (
+            <>
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex items-start gap-3 px-3 py-3 border-b border-border animate-pulse">
+                  <div className="h-10 w-10 rounded-full bg-muted shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="flex justify-between">
+                      <div className="h-3 w-32 rounded bg-muted" />
+                      <div className="h-3 w-16 rounded bg-muted" />
+                    </div>
+                    <div className="h-3 w-full rounded bg-muted" />
+                    <div className="flex gap-1">
+                      <div className="h-4 w-14 rounded-full bg-muted" />
+                      <div className="h-4 w-14 rounded-full bg-muted" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+          {/* Load more button */}
+          {hasNextPage && !isFetchingNextPage && (
+            <div className="flex justify-center p-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => fetchNextPage()}
+              >
+                Carregar mais
+              </Button>
+            </div>
+          )}
+        </div>
       </aside>
 
       {/* Chat */}
@@ -2162,10 +2253,19 @@ function PdfViewer({ url }: { url: string }) {
 
 function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTranscribe, isTranscribingId }: { m: MessageRow, isGroup?: boolean, onReact?: (emoji: string) => void, onReply?: (m: MessageRow) => void, onEdit?: (m: MessageRow) => void, onDelete?: (m: MessageRow) => void, onTranscribe?: (id: string) => void, isTranscribingId?: string | null }) {
   if (m.sender_type === "system") {
+    const SYSTEM_LABELS: Record<string, string> = {
+      "SYSTEM_FOLLOW_UP_1": "🤖 IA enviou follow-up automático (1º aviso)",
+      "SYSTEM_FOLLOW_UP_2": "🤖 IA enviou follow-up automático (2º aviso)",
+      "SYSTEM_RESOLVE_INACTIVE": "🤖 IA encerrou por inatividade do cliente",
+    };
+    const rawContent = m.content || "";
+    // Check for known instruction codes inside the content
+    const matchedKey = Object.keys(SYSTEM_LABELS).find((k) => rawContent.includes(k));
+    const displayContent = matchedKey ? SYSTEM_LABELS[matchedKey] : rawContent;
     return (
       <div className="flex justify-center my-4 w-full">
         <div className="bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 text-xs px-4 py-1.5 rounded-full text-center border border-amber-200 dark:border-amber-800/50 font-medium">
-          {m.content}
+          {displayContent}
         </div>
       </div>
     );

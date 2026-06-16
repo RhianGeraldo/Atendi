@@ -57,6 +57,7 @@ export function AiAgentsTab() {
   const [followupIntervalMinutes, setFollowupIntervalMinutes] = useState<number>(15);
   const [followupMaxAttempts, setFollowupMaxAttempts] = useState<number>(2);
   const [promptFollowup, setPromptFollowup] = useState("");
+  const [followupResolutionReasonId, setFollowupResolutionReasonId] = useState<string>("none");
 
   // Data Fetching
   const { data: agents, isLoading } = useQuery({
@@ -172,6 +173,7 @@ export function AiAgentsTab() {
     setFollowupIntervalMinutes(15);
     setFollowupMaxAttempts(2);
     setPromptFollowup("");
+    setFollowupResolutionReasonId("none");
   };
 
   const handleEdit = (agent: any) => {
@@ -208,6 +210,7 @@ export function AiAgentsTab() {
     setFollowupIntervalMinutes(agent.followup_interval_minutes || 15);
     setFollowupMaxAttempts(agent.followup_max_attempts || 2);
     setPromptFollowup(agent.prompt_followup || "");
+    setFollowupResolutionReasonId(agent.followup_resolution_reason_id || "none");
     setIsModalOpen(true);
   };
 
@@ -248,7 +251,8 @@ export function AiAgentsTab() {
         allow_followup: allowFollowup,
         followup_interval_minutes: followupIntervalMinutes,
         followup_max_attempts: followupMaxAttempts,
-        prompt_followup: promptFollowup
+        prompt_followup: promptFollowup,
+        followup_resolution_reason_id: followupResolutionReasonId === "none" ? null : followupResolutionReasonId,
       };
 
       if (editingId) {
@@ -543,6 +547,31 @@ export function AiAgentsTab() {
                             </SelectContent>
                           </Select>
                         </div>
+                      </div>
+
+                      <div className="space-y-2 pt-4 border-t">
+                        <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                          <CornerDownRight className="h-3 w-3" />
+                          Motivo de Encerramento por Inatividade
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs space-y-2 text-xs">
+                              <p>Quando a IA encerrar a conversa por falta de resposta do cliente, este motivo será registrado na sessão.</p>
+                              <p>Diferente do motivo de encerramento de sucesso configurado na aba Skills.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </label>
+                        <Select value={followupResolutionReasonId} onValueChange={setFollowupResolutionReasonId}>
+                          <SelectTrigger className="h-9"><SelectValue placeholder="Selecione um motivo" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Padrão (Sem motivo específico)</SelectItem>
+                            {resolutionReasons?.map((reason: any) => (
+                              <SelectItem key={reason.id} value={reason.id}>{reason.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
 
                       <div className="space-y-2 pt-4 border-t">

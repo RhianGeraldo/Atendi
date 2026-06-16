@@ -127,6 +127,7 @@ export type Database = {
           followup_interval_minutes: number
           followup_max_attempts: number
           prompt_followup: string | null
+          followup_resolution_reason_id: string | null
           created_at: string
           updated_at: string
         }
@@ -162,6 +163,7 @@ export type Database = {
           followup_interval_minutes?: number
           followup_max_attempts?: number
           prompt_followup?: string | null
+          followup_resolution_reason_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -198,6 +200,7 @@ export type Database = {
           followup_interval_minutes?: number
           followup_max_attempts?: number
           prompt_followup?: string | null
+          followup_resolution_reason_id?: string | null
           created_at?: string
           updated_at?: string
         }
