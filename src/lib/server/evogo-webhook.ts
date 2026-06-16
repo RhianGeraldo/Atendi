@@ -661,27 +661,31 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         if (conv.status === 'resolved') {
           console.log(`[evogo-webhook] Reopening resolved conversation: ${conversationId}`);
           
-          // Re-route to the Main Agent for new interactions
-          const { data: defaultAgents } = await supabaseAdmin
-            .from('ai_agents')
-            .select('id, active_by_default')
-            .eq('company_id', company_id)
-            .eq('is_active', true)
-            .or('is_main_agent.eq.true,active_by_default.eq.true')
-            .order('is_main_agent', { ascending: false })
-            .order('instance_id', { ascending: false })
-            .limit(1);
-            
-          const mainAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
-          const isActiveByDefault = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
-          
-          updatePayload.status = (mainAgentId && isActiveByDefault) ? 'active' : 'waiting';
-          updatePayload.ai_active = isActiveByDefault;
-          updatePayload.ai_agent_id = mainAgentId;
+          // ✅ FIX: Preserve the ai_active and ai_agent_id from before resolution.
+          // The user may have manually enabled/disabled AI — that preference must survive ticket close/reopen.
+          const previouslyAiActive = conv.ai_active ?? false;
+          let resolvedAgentId = conv.ai_agent_id ?? null;
+
+          // Only look up default agent if there was no agent previously assigned
+          if (!resolvedAgentId) {
+            const { data: defaultAgents } = await supabaseAdmin
+              .from('ai_agents')
+              .select('id, active_by_default')
+              .eq('company_id', company_id)
+              .eq('is_active', true)
+              .or('is_main_agent.eq.true,active_by_default.eq.true')
+              .order('is_main_agent', { ascending: false })
+              .limit(1);
+            resolvedAgentId = defaultAgents?.[0]?.id ?? null;
+          }
+
+          updatePayload.status = previouslyAiActive ? 'active' : 'waiting';
+          updatePayload.ai_active = previouslyAiActive;
+          updatePayload.ai_agent_id = resolvedAgentId;
           updatePayload.assigned_agent_id = null;
           updatePayload.resolved_at = null;
           
-          aiActive = isActiveByDefault;
+          aiActive = previouslyAiActive;
           
           // Abre um novo ticket (sessão)
           let sessionId = null;
@@ -713,9 +717,9 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             updatePayload.current_session_id = sessionId;
             if (!existingSession) {
               const events: any[] = [{ session_id: sessionId, event_type: 'started' }];
-              if (aiActive) {
-                const { data: mainAgentData } = await supabaseAdmin.from('ai_agents').select('name').eq('id', mainAgentId).single();
-                events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true, ai_agent_id: mainAgentId, ai_agent_name: mainAgentData?.name || 'IA' } });
+              if (aiActive && resolvedAgentId) {
+                const { data: agentData } = await supabaseAdmin.from('ai_agents').select('name').eq('id', resolvedAgentId).single();
+                events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true, ai_agent_id: resolvedAgentId, ai_agent_name: agentData?.name || 'IA' } });
               }
               await supabaseAdmin.from('session_events').insert(events);
             }
@@ -723,6 +727,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         } else {
           console.log(`[evogo-webhook] Found active/waiting conversation: ${conversationId}`);
         }
+
         
         await supabaseAdmin.from('conversations')
           .update(updatePayload)
