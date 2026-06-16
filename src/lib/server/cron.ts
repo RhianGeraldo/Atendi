@@ -18,7 +18,7 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
     // Find active conversations that are handled by AI
     const { data: conversations, error } = await supabaseAdmin
       .from('conversations')
-      .select('id, last_message_at, ai_followup_count, company_id, ai_agent_id')
+      .select('id, last_message_at, ai_followup_count, ai_agent_id, contacts(company_id)')
       .eq('ai_active', true)
       .in('status', ['active', 'waiting']);
 
@@ -91,9 +91,9 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
               is_internal: true
             }).select('id').single();
 
-            if (insertedMsg && conv.company_id) {
+            if (insertedMsg && conv.contacts?.company_id) {
               // Trigger AI queue
-              enqueueAiMessage(conv.id, insertedMsg.id, conv.company_id);
+              enqueueAiMessage(conv.id, insertedMsg.id, conv.contacts.company_id);
               processedCount++;
             }
           }
