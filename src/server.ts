@@ -10,6 +10,19 @@ type ServerEntry = {
 import { handleEvogoWebhook } from "./lib/server/evogo-webhook";
 import { handleCronFollowUps } from "./lib/server/cron";
 
+// Auto-trigger cron jobs every 1 minute while server is running
+let cronIntervalStarted = false;
+if (typeof global !== 'undefined') {
+  if (!(global as any).__cronStarted) {
+    (global as any).__cronStarted = true;
+    console.log('[cron] Auto-trigger interval started (every 1 minute)');
+    setInterval(() => {
+      const mockReq = new Request('http://localhost/api/cron/follow-ups?secret=atendi-cron-secret-123');
+      handleCronFollowUps(mockReq).catch(err => console.error('[cron] Auto-trigger error:', err));
+    }, 60 * 1000);
+  }
+}
+
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 
 async function getServerEntry(): Promise<ServerEntry> {
