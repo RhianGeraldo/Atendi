@@ -78,79 +78,66 @@ function ContactsPage() {
     enabled: !!profile?.company_id,
     queryFn: async () => {
       let query = supabase
-        .from("messages")
+        .from("ad_leads")
         .select(`
           id,
           created_at,
-          metadata,
-          conversations!inner (
-            unit_id,
-            contacts!inner (
-              id,
-              name,
-              phone,
-              company_id
-            )
+          ad_title,
+          ad_body,
+          source_url,
+          thumbnail_url,
+          conversion_source,
+          source_app,
+          contact:contacts!inner (
+            id,
+            name,
+            phone,
+            company_id
           )
         `)
-        .not('metadata', 'is', null)
-        .eq('conversations.contacts.company_id', profile!.company_id!)
+        .eq('company_id', profile!.company_id!)
         .order('created_at', { ascending: false });
 
       if (selectedUnitId) {
-        query = query.eq("conversations.unit_id", selectedUnitId);
+        query = query.eq("unit_id", selectedUnitId);
       }
 
       const { data, error } = await query;
       if (error) throw error;
 
-      // Filter and map the data
-      const validAdLeads = data.filter((msg: any) => {
-        const meta = msg.metadata;
-        if (!meta) return false;
+      let validAdLeads = data.filter((lead: any) => {
+        // Ensure we only process contacts, not groups (groups usually have > 15 chars)
+        const phone = lead.contact?.phone;
+        if (phone && phone.length > 15) return false;
+
+        if (searchTerm) {
+          const searchLower = searchTerm.toLowerCase();
+          const nameMatch = lead.contact?.name?.toLowerCase().includes(searchLower);
+          const phoneMatch = lead.contact?.phone?.toLowerCase().includes(searchLower);
+          if (!nameMatch && !phoneMatch) return false;
+        }
         
-        // Check for externalAdReply in possible structures
-        const adReply = meta.externalAdReply || 
-                        meta.contextInfo?.externalAdReply || 
-                        meta.extendedTextMessage?.contextInfo?.externalAdReply ||
-                        meta.Message?.extendedTextMessage?.contextInfo?.externalAdReply;
-        return !!adReply;
+        return true;
       });
 
+      // Deduplicate by contactId so we only show the latest ad interaction per contact
       const uniqueLeadsMap = new Map();
-      for (const msg of validAdLeads) {
-        const contactId = msg.conversations.contacts.id;
-        
-        // Ensure we only process groups not related to a group chat (groups usually have > 15 chars)
-        const phone = msg.conversations.contacts.phone;
-        if (phone && phone.length > 15) continue;
-
+      for (const lead of validAdLeads) {
+        const contactId = lead.contact.id;
         if (!uniqueLeadsMap.has(contactId)) {
-          const meta = msg.metadata;
-          const adReply = meta.externalAdReply || 
-                          meta.contextInfo?.externalAdReply || 
-                          meta.extendedTextMessage?.contextInfo?.externalAdReply ||
-                          meta.Message?.extendedTextMessage?.contextInfo?.externalAdReply;
-          
-          const conversionSource = meta.conversionSource || 
-                                   meta.contextInfo?.conversionSource || 
-                                   meta.extendedTextMessage?.contextInfo?.conversionSource ||
-                                   meta.Message?.extendedTextMessage?.contextInfo?.conversionSource;
-
-          if (searchTerm) {
-            const searchLower = searchTerm.toLowerCase();
-            const nameMatch = msg.conversations.contacts.name?.toLowerCase().includes(searchLower);
-            const phoneMatch = msg.conversations.contacts.phone?.toLowerCase().includes(searchLower);
-            if (!nameMatch && !phoneMatch) continue;
-          }
-
           uniqueLeadsMap.set(contactId, {
-            contact: msg.conversations.contacts,
-            messageId: msg.id,
-            createdAt: msg.created_at,
-            adData: adReply,
-            conversionSource: conversionSource,
-            sourceApp: adReply.sourceApp
+            contact: lead.contact,
+            messageId: lead.id, // Using ad_lead id as key for React list
+            createdAt: lead.created_at,
+            adData: {
+              title: lead.ad_title,
+              body: lead.ad_body,
+              sourceURL: lead.source_url,
+              thumbnailURL: lead.thumbnail_url,
+              originalImageURL: lead.thumbnail_url
+            },
+            conversionSource: lead.conversion_source,
+            sourceApp: lead.source_app
           });
         }
       }

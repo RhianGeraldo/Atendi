@@ -891,6 +891,45 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         await triggerAudioTranscription(newMessage.id, audioBase64, instance.company_id);
       }
 
+      // 6.5. Check for Ad Lead and save to ad_leads table
+      if (Object.keys(metadata).length > 0 && metadata.externalAdReply && !isFromMe) {
+        try {
+          // Utiliza source_id do ad ou fallback para a URL
+          const sourceId = metadata.externalAdReply.sourceID || metadata.externalAdReply.sourceURL;
+          
+          if (sourceId) {
+            const { data: existingAdLead } = await supabaseAdmin
+              .from('ad_leads')
+              .select('id')
+              .eq('contact_id', contactId)
+              .eq('source_id', sourceId)
+              .maybeSingle();
+
+            if (!existingAdLead) {
+              await supabaseAdmin.from('ad_leads').insert({
+                company_id: company_id,
+                unit_id: unit_id || null,
+                contact_id: contactId,
+                ad_title: metadata.externalAdReply.title || null,
+                ad_body: metadata.externalAdReply.body || null,
+                source_url: metadata.externalAdReply.sourceURL || null,
+                thumbnail_url: metadata.externalAdReply.thumbnailURL || metadata.externalAdReply.originalImageURL || null,
+                source_id: sourceId,
+                ctwa_clid: metadata.externalAdReply.ctwaClid || null,
+                conversion_source: metadata.conversionSource || null,
+                conversion_data: metadata.conversionData || null,
+                ctwa_payload: metadata.ctwaPayload || null,
+                source_app: metadata.externalAdReply.sourceApp || metadata.entryPointConversionApp || null,
+                media_type: metadata.externalAdReply.mediaType || null,
+              });
+              console.log(`[evogo-webhook] Registered new ad lead for contact ${contactId} and ad ${sourceId}`);
+            }
+          }
+        } catch (e) {
+          console.error('[evogo-webhook] Failed to register ad lead:', e);
+        }
+      }
+
       // 7. Check if we need to queue AI response
       if (aiActive && newMessage && !isFromMe) {
         // Enqueue the AI message generator to allow for 10s buffer

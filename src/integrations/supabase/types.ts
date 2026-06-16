@@ -14,6 +14,85 @@ export type Database = {
   }
   public: {
     Tables: {
+      ad_leads: {
+        Row: {
+          id: string
+          company_id: string
+          unit_id: string | null
+          contact_id: string
+          ad_title: string | null
+          ad_body: string | null
+          source_url: string | null
+          thumbnail_url: string | null
+          source_id: string | null
+          ctwa_clid: string | null
+          conversion_source: string | null
+          conversion_data: string | null
+          ctwa_payload: string | null
+          source_app: string | null
+          media_type: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          unit_id?: string | null
+          contact_id: string
+          ad_title?: string | null
+          ad_body?: string | null
+          source_url?: string | null
+          thumbnail_url?: string | null
+          source_id?: string | null
+          ctwa_clid?: string | null
+          conversion_source?: string | null
+          conversion_data?: string | null
+          ctwa_payload?: string | null
+          source_app?: string | null
+          media_type?: number | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          unit_id?: string | null
+          contact_id?: string
+          ad_title?: string | null
+          ad_body?: string | null
+          source_url?: string | null
+          thumbnail_url?: string | null
+          source_id?: string | null
+          ctwa_clid?: string | null
+          conversion_source?: string | null
+          conversion_data?: string | null
+          ctwa_payload?: string | null
+          source_app?: string | null
+          media_type?: number | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_leads_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ad_leads_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ad_leads_unit_id_fkey"
+            columns: ["unit_id"]
+            isOneToOne: false
+            referencedRelation: "units"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       ai_agents: {
         Row: {
           id: string
