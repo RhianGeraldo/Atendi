@@ -51,6 +51,12 @@ export function AiAgentsTab() {
   const [promptOpportunities, setPromptOpportunities] = useState("");
   const [pipelineId, setPipelineId] = useState<string>("none");
   const [allowedAgentIds, setAllowedAgentIds] = useState<string[]>([]);
+  
+  // Follow-up state
+  const [allowFollowup, setAllowFollowup] = useState(false);
+  const [followupIntervalMinutes, setFollowupIntervalMinutes] = useState<number>(15);
+  const [followupMaxAttempts, setFollowupMaxAttempts] = useState<number>(2);
+  const [promptFollowup, setPromptFollowup] = useState("");
 
   // Data Fetching
   const { data: agents, isLoading } = useQuery({
@@ -162,6 +168,10 @@ export function AiAgentsTab() {
     setPromptOpportunities("");
     setPipelineId("none");
     setAllowedAgentIds([]);
+    setAllowFollowup(false);
+    setFollowupIntervalMinutes(15);
+    setFollowupMaxAttempts(2);
+    setPromptFollowup("");
   };
 
   const handleEdit = (agent: any) => {
@@ -194,6 +204,10 @@ export function AiAgentsTab() {
     setPromptOpportunities(agent.prompt_opportunities || "");
     setPipelineId(agent.pipeline_id || "none");
     setAllowedAgentIds(agent.allowed_agent_ids || []);
+    setAllowFollowup(agent.allow_followup || false);
+    setFollowupIntervalMinutes(agent.followup_interval_minutes || 15);
+    setFollowupMaxAttempts(agent.followup_max_attempts || 2);
+    setPromptFollowup(agent.prompt_followup || "");
     setIsModalOpen(true);
   };
 
@@ -230,7 +244,11 @@ export function AiAgentsTab() {
         allow_opportunities: allowOpportunities,
         prompt_opportunities: promptOpportunities,
         pipeline_id: pipelineId === "none" ? null : pipelineId,
-        allowed_agent_ids: allowedAgentIds.length > 0 ? allowedAgentIds : null
+        allowed_agent_ids: allowedAgentIds.length > 0 ? allowedAgentIds : null,
+        allow_followup: allowFollowup,
+        followup_interval_minutes: followupIntervalMinutes,
+        followup_max_attempts: followupMaxAttempts,
+        prompt_followup: promptFollowup
       };
 
       if (editingId) {
@@ -286,9 +304,10 @@ export function AiAgentsTab() {
             </DialogHeader>
             <TooltipProvider>
             <Tabs defaultValue="general" className="w-full py-4">
-              <TabsList className="grid w-full grid-cols-3 mb-4">
+              <TabsList className="grid w-full grid-cols-4 mb-4">
                 <TabsTrigger value="general">Geral</TabsTrigger>
                 <TabsTrigger value="behavior">Comportamento</TabsTrigger>
+                <TabsTrigger value="followup">Follow-ups</TabsTrigger>
                 <TabsTrigger value="automation">Skills</TabsTrigger>
               </TabsList>
 
@@ -469,6 +488,89 @@ export function AiAgentsTab() {
                       className="min-h-[120px]"
                     />
                   </div>
+                </div>
+              </TabsContent>
+
+              {/* Aba Follow-ups */}
+              <TabsContent value="followup" className="space-y-4">
+                <div className="border rounded-md p-4 space-y-4 bg-muted/10">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm font-medium flex items-center gap-2">
+                        Ativar Follow-ups Automáticos
+                      </label>
+                      <p className="text-xs text-muted-foreground">A IA mandará mensagens cobrando o cliente se ele não responder após um tempo.</p>
+                    </div>
+                    <Switch checked={allowFollowup} onCheckedChange={setAllowFollowup} />
+                  </div>
+
+                  {allowFollowup && (
+                    <>
+                      <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                            <CornerDownRight className="h-3 w-3" />
+                            Intervalo de Espera (minutos)
+                          </label>
+                          <Select 
+                            value={followupIntervalMinutes.toString()} 
+                            onValueChange={(val) => setFollowupIntervalMinutes(parseInt(val))}
+                          >
+                            <SelectTrigger className="h-9"><SelectValue placeholder="Selecione o tempo" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="5">5 minutos</SelectItem>
+                              <SelectItem value="10">10 minutos</SelectItem>
+                              <SelectItem value="15">15 minutos (Padrão)</SelectItem>
+                              <SelectItem value="30">30 minutos</SelectItem>
+                              <SelectItem value="60">60 minutos (1 hora)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                            <CornerDownRight className="h-3 w-3" />
+                            Máximo de Tentativas
+                          </label>
+                          <Select 
+                            value={followupMaxAttempts.toString()} 
+                            onValueChange={(val) => setFollowupMaxAttempts(parseInt(val))}
+                          >
+                            <SelectTrigger className="h-9"><SelectValue placeholder="Selecione as tentativas" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="1">1 tentativa</SelectItem>
+                              <SelectItem value="2">2 tentativas (Padrão)</SelectItem>
+                              <SelectItem value="3">3 tentativas</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 pt-4 border-t">
+                        <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                          <CornerDownRight className="h-3 w-3" />
+                          Instrução de Comportamento do Follow-up
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs space-y-2 text-xs">
+                              <p>Quando o sistema acionar o follow-up, a IA usará este contexto para saber como falar com o cliente.</p>
+                              <p>Você pode pedir para ela ser insistente, gentil, ou usar algum argumento de escassez.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </label>
+                        <Textarea 
+                          className="min-h-[120px] text-xs font-mono" 
+                          placeholder="Ex: Ao cobrar o cliente, seja muito amigável. Pergunte se deu certo e se ele precisa de ajuda..." 
+                          value={promptFollowup} 
+                          onChange={e => setPromptFollowup(e.target.value)} 
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Deixe em branco para usar o comportamento padrão (amigável/direto).
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
               </TabsContent>
 

@@ -150,7 +150,10 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     }
 
     if (agent.allow_resolution) {
-      systemPromptParts.push(applyVars(agent.prompt_resolution) || `INSTRUÇÃO CRÍTICA PARA ENCERRAMENTO:\nSe você resolveu completamente o problema do cliente e não há mais nada a ser feito, você DEVE encerrar o atendimento. Para isso, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] no final da sua resposta. Substitua "resumo" por uma breve observação do que foi feito.`);
+      systemPromptParts.push(applyVars(agent.prompt_resolution) || `INSTRUÇÃO CRÍTICA PARA ENCERRAMENTO:
+1. Se você acabou de oferecer uma solução ou instrução, NÃO encerre. Termine sua mensagem perguntando se funcionou e AGUARDE a resposta do cliente.
+2. Só encerre se o cliente confirmar que o problema foi resolvido, ou se despedir, OU se você for instruído pelo [SISTEMA] a encerrar por falta de resposta.
+Para encerrar, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] no final da sua resposta.`);
     }
 
     if (colleagues && colleagues.length > 0) {
@@ -209,6 +212,17 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
              const defaultHandoffReceiveInstruction = `Um colega de equipe transferiu este cliente para você. Leia o histórico acima para entender o contexto e continue o atendimento a partir de agora de acordo com a sua especialidade. NÃO transfira de volta sem antes tentar ajudar o cliente.`;
              const instructionToUse = agent.prompt_receive_handoff ? applyVars(agent.prompt_receive_handoff) : defaultHandoffReceiveInstruction;
              content += `\n[INSTRUÇÃO CRÍTICA]: ${instructionToUse}`;
+          }
+          if (content.includes('SYSTEM_FOLLOW_UP_1')) {
+            const defaultFollowup = `[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente está há muito tempo sem responder. Envie UMA mensagem curta, amigável e natural perguntando se ele conseguiu resolver a questão anterior ou se precisa de ajuda. NÃO encerre o atendimento ainda.`;
+            content = agent.prompt_followup ? `[INSTRUÇÃO CRÍTICA DE SISTEMA: ACOMPANHAMENTO]\n${applyVars(agent.prompt_followup)}` : defaultFollowup;
+          }
+          if (content.includes('SYSTEM_FOLLOW_UP_2')) {
+            const defaultFollowup2 = `[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente não respondeu ao seu primeiro follow-up. Envie um aviso amigável informando que, se não houver resposta, o atendimento será encerrado em breve. NÃO encerre o atendimento ainda.`;
+            content = agent.prompt_followup ? `[INSTRUÇÃO CRÍTICA DE SISTEMA: ACOMPANHAMENTO (2º AVISO)]\n${applyVars(agent.prompt_followup)}` : defaultFollowup2;
+          }
+          if (content.includes('SYSTEM_RESOLVE_INACTIVE')) {
+            content = `[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente ignorou todas as tentativas de contato. Despeça-se cordialmente e encerre o atendimento AGORA usando a tag [ENCERRAR: Encerrado por falta de comunicação do cliente].`;
           }
         }
         

@@ -123,6 +123,10 @@ export type Database = {
           prompt_handoff: string | null
           prompt_resolution: string | null
           prompt_receive_handoff: string | null
+          allow_followup: boolean
+          followup_interval_minutes: number
+          followup_max_attempts: number
+          prompt_followup: string | null
           created_at: string
           updated_at: string
         }
@@ -154,6 +158,10 @@ export type Database = {
           prompt_handoff?: string | null
           prompt_resolution?: string | null
           prompt_receive_handoff?: string | null
+          allow_followup?: boolean
+          followup_interval_minutes?: number
+          followup_max_attempts?: number
+          prompt_followup?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -170,6 +178,7 @@ export type Database = {
           resolution_reason_id?: string | null
           ai_type?: string
           model?: string
+          provider?: string
           prompt_personality?: string | null
           prompt_instructions?: string | null
           prompt_extra_info?: string | null
@@ -185,6 +194,10 @@ export type Database = {
           prompt_handoff?: string | null
           prompt_resolution?: string | null
           prompt_receive_handoff?: string | null
+          allow_followup?: boolean
+          followup_interval_minutes?: number
+          followup_max_attempts?: number
+          prompt_followup?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -344,6 +357,7 @@ export type Database = {
           whatsapp_instance_id: string | null
           ai_active: boolean
           ai_agent_id: string | null
+          ai_followup_count: number | null
         }
         Insert: {
           assigned_agent_id?: string | null
@@ -360,6 +374,7 @@ export type Database = {
           whatsapp_instance_id?: string | null
           ai_active?: boolean
           ai_agent_id?: string | null
+          ai_followup_count?: number | null
         }
         Update: {
           assigned_agent_id?: string | null
@@ -376,6 +391,7 @@ export type Database = {
           whatsapp_instance_id?: string | null
           ai_active?: boolean
           ai_agent_id?: string | null
+          ai_followup_count?: number | null
         }
         Relationships: [
           {

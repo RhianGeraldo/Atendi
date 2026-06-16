@@ -8,6 +8,7 @@ type ServerEntry = {
 };
 
 import { handleEvogoWebhook } from "./lib/server/evogo-webhook";
+import { handleCronFollowUps } from "./lib/server/cron";
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 
@@ -45,6 +46,9 @@ export default {
       const url = new URL(request.url);
       if (url.pathname === '/api/evogo/webhook' && request.method === 'POST') {
         return await handleEvogoWebhook(request);
+      }
+      if (url.pathname === '/api/cron/follow-ups') {
+        return await handleCronFollowUps(request);
       }
 
       const handler = await getServerEntry();
