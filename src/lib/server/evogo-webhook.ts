@@ -638,7 +638,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             // Already saved - just update conversation timestamp
             await supabaseAdmin
               .from('conversations')
-              .update({ last_message_at: new Date().toISOString() })
+              .update({ last_message_at: new Date().toISOString(), ai_followup_count: 0 })
               .eq('id', conversationId);
 
             // Update metadata if the new payload has metadata that might have been missing initially
@@ -655,7 +655,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         }
 
         
-        const updatePayload: any = { last_message_at: new Date().toISOString() };
+        const updatePayload: any = { last_message_at: new Date().toISOString(), ai_followup_count: 0 };
         
         // Se a conversa estava resolvida, reabre ela como 'waiting' (ou 'active' se a IA for atender)
         if (conv.status === 'resolved') {
