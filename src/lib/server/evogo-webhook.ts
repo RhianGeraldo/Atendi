@@ -765,8 +765,35 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           .select()
           .single();
 
-        if (convErr) throw convErr;
-        conversationId = newConv.id;
+        if (convErr) {
+          // Race condition: another webhook call may have created the conversation in parallel.
+          // Re-query for an open conversation before giving up.
+          console.warn('[evogo-webhook] Conversation insert failed, checking for race condition:', convErr.message);
+          const { data: racedConv } = await supabaseAdmin
+            .from('conversations')
+            .select('id, status, ai_active, ai_agent_id')
+            .eq('contact_id', contactId)
+            .eq('whatsapp_instance_id', instance_id)
+            .in('status', ['waiting', 'active'])
+            .order('started_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (racedConv) {
+            console.log('[evogo-webhook] Found conversation created by parallel call:', racedConv.id);
+            conversationId = racedConv.id;
+            aiActive = racedConv.ai_active ?? false;
+            // Update last_message_at on the raced conversation
+            await supabaseAdmin.from('conversations')
+              .update({ last_message_at: new Date().toISOString(), ai_followup_count: 0 })
+              .eq('id', conversationId);
+          } else {
+            throw convErr;
+          }
+        } else {
+          conversationId = newConv.id;
+        }
+
         
         // Abre um novo ticket (sessão) se não for resolvido já na criação
         if (!isFromMe) {
