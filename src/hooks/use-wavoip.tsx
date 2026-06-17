@@ -126,33 +126,39 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
             console.log(`[Wavoip] Encontrados ${contactIds.length} contatos para o telefone. IDs:`, contactIds);
 
             // Busca TODAS as conversas ativas/em espera para esses contatos
-            const { data: activeConvs, error } = await supabase
+            const { data: activeConvs, error: convError } = await supabase
               .from("conversations")
-              .select(`
-                id,
-                assigned_agent_id,
-                conversation_sessions (id, whatsapp_instance_id)
-              `)
+              .select("id, assigned_agent_id")
               .in("contact_id", contactIds)
               .in("status", ["waiting", "active"]);
 
-            if (error) {
-              console.error("[Wavoip] Erro ao buscar conversas do contato na instância:", error);
+            if (convError) {
+              console.error("[Wavoip] Erro ao buscar conversas do contato:", convError);
             }
 
             console.log(`[Wavoip] Conversas ativas no banco para o contato:`, activeConvs);
 
-            // Filtra no JS para ser à prova de falhas de sintaxe e relacionamentos nulos
-            const convsInThisInstance = (activeConvs || []).filter((c: any) => {
-              if (!c.conversation_sessions) return false;
-              // Verifica se a conversa possui ALGUMA sessão ligada à instância que está tocando
-              // Lida tanto com array quanto com objeto, por garantia
-              if (Array.isArray(c.conversation_sessions)) {
-                 return c.conversation_sessions.some((s: any) => s.whatsapp_instance_id === instance.id);
-              } else {
-                 return c.conversation_sessions.whatsapp_instance_id === instance.id;
+            let convsInThisInstance: any[] = [];
+
+            if (activeConvs && activeConvs.length > 0) {
+              const convIds = activeConvs.map((c: any) => c.id);
+              
+              // Agora busca apenas as sessões dessas conversas que pertencem a esta instância
+              const { data: sessions, error: sessError } = await supabase
+                .from("conversation_sessions")
+                .select("conversation_id")
+                .in("conversation_id", convIds)
+                .eq("whatsapp_instance_id", instance.id);
+
+              if (sessError) {
+                 console.error("[Wavoip] Erro ao buscar sessões:", sessError);
               }
-            });
+
+              // Filtra as conversas para manter apenas as que têm sessão nesta instância
+              convsInThisInstance = activeConvs.filter((c: any) => 
+                 sessions?.some((s: any) => s.conversation_id === c.id)
+              );
+            }
 
             console.log(`[Wavoip] Conversas filtradas para a instância atual (${instance.name}):`, convsInThisInstance);
 
