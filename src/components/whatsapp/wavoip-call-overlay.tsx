@@ -1,13 +1,15 @@
 import { useWavoip } from "@/hooks/use-wavoip";
-import { Phone, PhoneOff, Mic, MicOff, PhoneCall, User } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { PhoneOff, Mic, MicOff, PhoneCall, User, Pause, Video, PhoneForwarded, Grip, Bell, Settings, X, MessageCircle } from "lucide-react";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useDraggable } from "@/hooks/use-draggable";
 
 export function WavoipCallOverlay() {
-  const { incomingOffer, activeCall, callStatus, acceptCall, rejectCall, endCall, mute, unmute, isMuted } = useWavoip();
+  const { incomingOffer, activeCall, callStatus, acceptCall, rejectCall, endCall, mute, unmute, isMuted, activeContactName, isConnecting, connectingPhone } = useWavoip();
 
   const [callDuration, setCallDuration] = useState(0);
+  const { position, handleMouseDown, dragRef, isDragging } = useDraggable();
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -27,81 +29,230 @@ export function WavoipCallOverlay() {
     return `${m}:${s}`;
   };
 
-  if (!incomingOffer && !activeCall) return null;
+  if (!incomingOffer && !activeCall && !isConnecting) return null;
+
+  // Header comum
+  const Header = () => (
+    <div className={`flex justify-end items-center p-4 pb-2 shrink-0 gap-4 text-slate-600 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}>
+      <Bell className="w-4 h-4 cursor-pointer hover:text-slate-900 transition-colors" />
+      <Settings className="w-4 h-4 cursor-pointer hover:text-slate-900 transition-colors" />
+      <button className="hover:text-slate-900 transition-colors">
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
 
   // Chamada recebida
   if (incomingOffer && !activeCall) {
     const caller = incomingOffer.peer;
-    return (
-      <div className="fixed bottom-6 right-6 z-[100] w-80 bg-background border shadow-xl rounded-xl overflow-hidden animate-in slide-in-from-bottom-5">
-        <div className="bg-primary/10 p-4 text-center">
-          <Avatar className="w-16 h-16 mx-auto mb-3 border-2 border-background shadow-sm">
-            <AvatarImage src={caller.profilePicture || ""} alt={caller.displayName || caller.phone} />
-            <AvatarFallback><User className="w-8 h-8 text-muted-foreground" /></AvatarFallback>
-          </Avatar>
-          <h3 className="font-semibold text-lg">{caller.displayName || "Desconhecido"}</h3>
-          <p className="text-sm text-muted-foreground">{caller.phone}</p>
-          <div className="mt-2 text-xs font-medium text-primary animate-pulse flex items-center justify-center gap-1">
-            <PhoneCall className="w-3 h-3" /> Chamada de Áudio
+    return createPortal(
+      <div 
+        ref={dragRef}
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleMouseDown}
+        style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
+        className={`fixed bottom-6 right-6 z-[100] w-[320px] sm:w-[340px] h-[550px] bg-white border border-slate-200 shadow-2xl rounded-3xl overflow-hidden animate-in slide-in-from-bottom-5 text-slate-800 flex flex-col font-sans ${isDragging ? 'cursor-grabbing select-none' : 'cursor-default'}`}
+      >
+        <Header />
+        
+        <div className="flex flex-col items-center mt-2 mb-6 gap-2">
+          <div className="flex items-center gap-2 text-slate-500 text-sm mb-4">
+            <MessageCircle className="w-4 h-4" /> Whatsapp Audio
+          </div>
+          
+          <div className="text-slate-400 text-sm mb-2 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Recebendo chamada...
+          </div>
+          
+          <div className="relative mb-4">
+            <div className="absolute inset-0 rounded-2xl border-[3px] border-green-500/30 animate-ping" />
+            <div className="w-24 h-24 rounded-2xl bg-slate-100 border-2 border-slate-200 flex items-center justify-center relative z-10 overflow-hidden shadow-sm">
+              {caller.profilePicture ? (
+                <img src={caller.profilePicture} alt="Caller" className="w-full h-full object-cover" />
+              ) : (
+                <User className="w-10 h-10 text-slate-400" />
+              )}
+            </div>
+          </div>
+          <h3 className="text-2xl font-light text-slate-800">{caller.displayName || "Desconhecido"}</h3>
+          <p className="text-lg text-slate-500 font-light">{caller.phone}</p>
+        </div>
+
+        <div className="p-8 flex justify-around items-center mt-auto mb-8">
+          <div className="flex flex-col items-center gap-2">
+            <button 
+              onClick={rejectCall}
+              className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 flex items-center justify-center transition-transform hover:scale-105 shadow-md"
+            >
+              <PhoneOff className="w-6 h-6 text-white" />
+            </button>
+            <span className="text-[10px] text-slate-400 uppercase tracking-wider">Recusar</span>
+          </div>
+
+          <div className="flex flex-col items-center gap-2">
+            <button 
+              onClick={acceptCall}
+              className="w-14 h-14 rounded-full bg-[#10b981] hover:bg-[#059669] flex items-center justify-center transition-transform hover:scale-105 shadow-md"
+            >
+              <PhoneCall className="w-6 h-6 text-white fill-white" />
+            </button>
+            <span className="text-[10px] text-slate-400 uppercase tracking-wider">Aceitar</span>
           </div>
         </div>
-        <div className="p-4 flex gap-3">
-          <Button variant="destructive" className="flex-1 rounded-full h-12" onClick={rejectCall}>
-            <PhoneOff className="w-5 h-5 mr-2" /> Recusar
-          </Button>
-          <Button className="flex-1 rounded-full h-12 bg-green-600 hover:bg-green-700" onClick={acceptCall}>
-            <Phone className="w-5 h-5 mr-2" /> Aceitar
-          </Button>
-        </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
   // Chamada ativa ou saindo
   if (activeCall) {
     const peer = activeCall.peer;
-    return (
-      <div className="fixed bottom-6 right-6 z-[100] w-80 bg-background border shadow-xl rounded-xl overflow-hidden animate-in slide-in-from-bottom-5">
-        <div className="p-4 flex items-center justify-between border-b">
-          <div className="flex items-center gap-3">
-            <Avatar className="w-10 h-10 border shadow-sm">
-              <AvatarImage src={peer.profilePicture || ""} alt={peer.displayName || peer.phone} />
-              <AvatarFallback><User className="w-5 h-5 text-muted-foreground" /></AvatarFallback>
-            </Avatar>
-            <div>
-              <h3 className="font-semibold text-sm leading-tight line-clamp-1">{peer.displayName || peer.phone}</h3>
-              <div className="text-xs font-mono text-muted-foreground mt-0.5">
-                {callStatus === "CALLING" && "Discando..."}
+    const displayName = activeContactName || peer.displayName || "Desconhecido";
+    
+    return createPortal(
+      <div 
+        ref={dragRef}
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleMouseDown}
+        style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
+        className={`fixed bottom-6 right-6 z-[100] w-[320px] sm:w-[340px] h-[550px] bg-white border border-slate-200 shadow-2xl rounded-3xl overflow-hidden animate-in slide-in-from-bottom-5 text-slate-800 flex flex-col font-sans ${isDragging ? 'cursor-grabbing select-none' : 'cursor-default'}`}
+      >
+        <Header />
+        
+        <div className="flex flex-col items-center mt-2 mb-8 gap-2">
+          <div className="flex items-center gap-2 text-slate-500 text-sm mb-4">
+            <MessageCircle className="w-4 h-4" /> Whatsapp Audio
+          </div>
+          
+          <div className="flex items-center justify-center gap-4 w-full px-8">
+            <div className="w-16 h-16 shrink-0 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm">
+              {peer.profilePicture ? (
+                <img src={peer.profilePicture} alt={displayName} className="w-full h-full object-cover" />
+              ) : (
+                <User className="w-8 h-8 text-slate-400" />
+              )}
+            </div>
+            
+            <div className="flex flex-col flex-1 overflow-hidden">
+              <div className="text-slate-400 text-xs mb-0.5 truncate">
+                {callStatus === "CALLING" && "Chamando..."}
                 {callStatus === "CONNECTING" && "Conectando..."}
                 {callStatus === "CONNECTED" && formatDuration(callDuration)}
                 {!["CALLING", "CONNECTING", "CONNECTED"].includes(callStatus || "") && (callStatus || "Aguardando")}
               </div>
+              <h3 className="text-xl font-light text-slate-800 truncate">{displayName}</h3>
+              {displayName !== peer.phone && (
+                <p className="text-sm text-slate-500 font-light truncate">{peer.phone}</p>
+              )}
             </div>
           </div>
         </div>
-        <div className="bg-muted/30 p-3 flex justify-center gap-4">
-          <Button 
-            variant="outline" 
-            size="icon" 
-            className={`rounded-full h-12 w-12 border-2 ${isMuted ? 'bg-muted border-muted-foreground/30' : ''}`}
-            onClick={isMuted ? unmute : mute}
-            disabled={callStatus !== "CONNECTED"}
-          >
-            {isMuted ? <MicOff className="w-5 h-5 text-muted-foreground" /> : <Mic className="w-5 h-5" />}
-          </Button>
-          
-          <Button 
-            variant="destructive" 
-            size="icon" 
-            className="rounded-full h-12 w-12 shadow-md hover:scale-105 transition-transform"
-            onClick={endCall}
-          >
-            <PhoneOff className="w-5 h-5" />
-          </Button>
+
+        {/* 3x2 Grid Controls */}
+        <div className="px-8 mt-auto mb-10">
+          <div className="grid grid-cols-3 gap-y-6 gap-x-4">
+            <div className="flex flex-col items-center gap-2">
+              <button className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] flex items-center justify-center transition-colors text-slate-700">
+                <Pause className="w-5 h-5 fill-current" />
+              </button>
+              <span className="text-[10px] text-slate-400 tracking-wider">Espera</span>
+            </div>
+            
+            <div className="flex flex-col items-center gap-2">
+              <button className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] flex items-center justify-center transition-colors text-slate-700">
+                <Video className="w-5 h-5 fill-current" />
+              </button>
+              <span className="text-[10px] text-slate-400 tracking-wider">Vídeo</span>
+            </div>
+            
+            <div className="flex flex-col items-center gap-2">
+              <button 
+                onClick={isMuted ? unmute : mute}
+                className={`w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors ${
+                  isMuted ? 'bg-slate-800 text-white' : 'bg-[#f3f4f6] hover:bg-[#e5e7eb] text-slate-700'
+                }`}
+              >
+                {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5 fill-current" />}
+              </button>
+              <span className="text-[10px] text-slate-400 tracking-wider">Silenciar</span>
+            </div>
+
+            <div className="flex flex-col items-center gap-2">
+              <button className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] flex items-center justify-center transition-colors text-slate-700">
+                <PhoneForwarded className="w-5 h-5 fill-current" />
+              </button>
+              <span className="text-[10px] text-slate-400 tracking-wider">Transferir</span>
+            </div>
+            
+            <div className="flex flex-col items-center gap-2">
+              <button 
+                onClick={endCall}
+                className="w-[52px] h-[52px] rounded-full bg-[#ef4444] hover:bg-[#dc2626] flex items-center justify-center transition-transform hover:scale-105 shadow-md text-white"
+              >
+                <PhoneOff className="w-5 h-5 fill-current" />
+              </button>
+              <span className="text-[10px] text-slate-400 tracking-wider">Finalizar</span>
+            </div>
+            
+            <div className="flex flex-col items-center gap-2">
+              <button className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] flex items-center justify-center transition-colors text-slate-700">
+                <Grip className="w-5 h-5 fill-current" />
+              </button>
+              <span className="text-[10px] text-slate-400 tracking-wider">Teclado</span>
+            </div>
+          </div>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
+  // Chamada iniciando (dialing)
+  if (isConnecting) {
+    const displayName = activeContactName || "Desconhecido";
+    
+    return createPortal(
+      <div 
+        ref={dragRef}
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleMouseDown}
+        style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
+        className={`fixed bottom-6 right-6 z-[100] w-[320px] sm:w-[340px] h-[550px] bg-white border border-slate-200 shadow-2xl rounded-3xl overflow-hidden animate-in slide-in-from-bottom-5 text-slate-800 flex flex-col font-sans ${isDragging ? 'cursor-grabbing select-none' : 'cursor-default'}`}
+      >
+        <Header />
+        
+        <div className="flex flex-col items-center mt-2 mb-8 gap-2">
+          <div className="flex items-center gap-2 text-slate-500 text-sm mb-4">
+            <MessageCircle className="w-4 h-4" /> Whatsapp Audio
+          </div>
+          
+          <div className="text-slate-400 text-sm mb-2 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-slate-300 animate-pulse" /> Iniciando chamada...
+          </div>
+          
+          <div className="relative mb-4">
+            <div className="w-24 h-24 rounded-2xl bg-slate-100 border-2 border-slate-200 flex items-center justify-center relative z-10 overflow-hidden shadow-sm">
+              <User className="w-10 h-10 text-slate-400" />
+            </div>
+          </div>
+          <h3 className="text-2xl font-light text-slate-800">{displayName}</h3>
+          <p className="text-lg text-slate-500 font-light">{connectingPhone}</p>
+        </div>
+
+        <div className="p-8 flex justify-center items-center mt-auto mb-8">
+          <div className="flex flex-col items-center gap-2">
+            <button 
+              className="w-[52px] h-[52px] rounded-full bg-[#ef4444] opacity-50 cursor-not-allowed flex items-center justify-center shadow-md text-white"
+            >
+              <PhoneOff className="w-5 h-5 fill-current" />
+            </button>
+            <span className="text-[10px] text-slate-400 tracking-wider">Cancelando...</span>
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  }
+  
   return null;
 }

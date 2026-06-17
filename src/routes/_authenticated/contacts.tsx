@@ -52,7 +52,7 @@ function ContactsPage() {
       }
 
       if (searchTerm) {
-        query = query.or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`);
+        query = query.ilike("name", `%${searchTerm}%`);
       }
 
       const { data, error } = await query;

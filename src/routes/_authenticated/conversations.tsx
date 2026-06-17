@@ -32,6 +32,8 @@ import { LinkPreview } from "@/components/chat/link-preview";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { WavoipCallOverlay } from "@/components/whatsapp/wavoip-call-overlay";
+import { WavoipDialer } from "@/components/whatsapp/wavoip-dialer";
 import { useWavoip } from "@/hooks/use-wavoip";
 export const Route = createFileRoute("/_authenticated/conversations")({
   component: ConversationsPage,
@@ -97,6 +99,8 @@ function ConversationsPage() {
   const [lastSelectedConv, setLastSelectedConv] = useState<ConvRow | null>(null);
 
   const { profile } = useAuth();
+  const { startCall } = useWavoip();
+  const [dialerOpen, setDialerOpen] = useState(false);
   
   const { data: instances } = useQuery({
     queryKey: ["whatsapp_instances_filter"],
@@ -415,6 +419,16 @@ function ConversationsPage() {
               setTab("active");
               setSelectedId(id);
             }} />
+            <Button 
+              size="icon" 
+              variant="outline" 
+              className="h-9 w-9 shrink-0" 
+              title="Discar / Ligar para novo número"
+              onClick={() => setDialerOpen(true)}
+            >
+              <Phone className="h-4 w-4" />
+            </Button>
+            <WavoipDialer open={dialerOpen} onOpenChange={setDialerOpen} />
           </div>
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)} className="mt-3">
             <TabsList className="grid w-full grid-cols-4 h-auto py-1">
@@ -1723,17 +1737,19 @@ function ChatPanel({
             {conv.status === "active" && !isGroup && (
               <>
                 <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="rounded-full text-green-600 hover:text-green-700 hover:bg-green-50"
+                  variant="outline" 
+                  size="sm" 
+                  className="h-9 gap-2 border-green-200 text-green-600 hover:bg-green-50 hover:text-green-700 font-medium"
                   onClick={() => {
                     if (conv.contact?.phone) {
-                      startCall(conv.contact.phone);
+                      const name = conv.contact.name !== "Desconhecido" ? conv.contact.name : undefined;
+                      startCall(conv.contact.phone, name);
                     }
                   }}
                   title="Ligar para contato"
                 >
                   <Phone className="h-4 w-4" />
+                  <span className="hidden sm:inline">Ligar</span>
                 </Button>
                 <TransferDialog conv={conv} />
                 <Button
@@ -2173,7 +2189,10 @@ function FormattedText({ text, mine }: { text: string, mine?: boolean }) {
   const parts = text.split(/(\*[^*]+\*|_{1}[^_]+_{1}|~[^~]+~|https?:\/\/[^\s]+)/g);
   
   const firstUrlMatch = text.match(/https?:\/\/[^\s]+/);
-  const firstUrl = firstUrlMatch ? firstUrlMatch[0] : null;
+  let firstUrl = firstUrlMatch ? firstUrlMatch[0] : null;
+  if (firstUrl) {
+    firstUrl = firstUrl.replace(/[*_~.)\]>]+$/, '');
+  }
 
   return (
     <div className="whitespace-pre-wrap break-words flex flex-col gap-1">
