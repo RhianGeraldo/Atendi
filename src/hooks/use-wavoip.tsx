@@ -123,50 +123,33 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
           if (contacts && contacts.length > 0) {
             const contact = contacts[0];
             
-            // Busca conversa ativa tentando primeiro a instância exata (para multi-instâncias na mesma unidade)
-            let { data: conv } = await supabase
+            // Busca TODAS as conversas ativas/em espera para esse contato
+            const { data: activeConvs, error } = await supabase
               .from("conversations")
-              .select("assigned_agent_id, conversation_sessions!inner(whatsapp_instance_id)")
+              .select("assigned_agent_id")
               .eq("contact_id", contact.id)
-              .eq("conversation_sessions.whatsapp_instance_id", instance.id)
-              .in("status", ["waiting", "active"])
-              .order("started_at", { ascending: false })
-              .limit(1);
+              .in("status", ["waiting", "active"]);
 
-            // Fallback: se não achar pela instância (ex: ticket criado manualmente sem ID da instância salvo),
-            // busca APENAS pelo contato e status, ignorando restrições de unidade. 
-            // Se o contato está sendo atendido por alguém na empresa, queremos achar essa pessoa!
-            if (!conv || conv.length === 0) {
-              console.log(`[Wavoip] Conversa não encontrada pela instância ${instance.id}. Tentando fallback geral pelo contato ${contact.id}...`);
-              const { data: fallbackConv, error } = await supabase
-                .from("conversations")
-                .select("assigned_agent_id")
-                .eq("contact_id", contact.id)
-                .in("status", ["waiting", "active"])
-                .order("started_at", { ascending: false })
-                .limit(1);
-              
-              if (error) {
-                 console.error("[Wavoip] Erro no fallback query:", error);
-              }
-              
-              if (!error && fallbackConv) {
-                conv = fallbackConv as any;
-                console.log(`[Wavoip] Fallback encontrou conversa:`, conv);
-              }
+            if (error) {
+              console.error("[Wavoip] Erro ao buscar conversas do contato:", error);
             }
 
-            if (conv && conv.length > 0) {
-              const assignedAgent = conv[0].assigned_agent_id;
-              console.log(`[Wavoip] Avaliando dono da chamada: Dono do ticket=${assignedAgent} | Meu perfil=${profile.id}`);
+            if (activeConvs && activeConvs.length > 0) {
+              // Verifica se o usuário logado é dono de ALGUMA das conversas ativas
+              const myConv = activeConvs.find((c: any) => c.assigned_agent_id === profile.id);
               
-              // Se a conversa já tem um dono e não é o usuário atual, silencia.
-              if (assignedAgent && assignedAgent !== profile.id) {
-                console.log(`[Wavoip] Chamada de ${offer.peer.phone} ignorada localmente. Pertence ao atendente ${assignedAgent} na instância ${instance.name}`);
-                return;
+              if (!myConv) {
+                // Se não é meu, verifica se ALGUÉM é dono (ticket não está apenas na fila)
+                const otherConv = activeConvs.find((c: any) => c.assigned_agent_id !== null);
+                if (otherConv) {
+                  console.log(`[Wavoip] Chamada de ${offer.peer.phone} ignorada localmente. Pertence ao atendente ${otherConv.assigned_agent_id}`);
+                  return;
+                }
+              } else {
+                console.log(`[Wavoip] Chamada permitida: Usuário atual (${profile.id}) é o dono do contato.`);
               }
             } else {
-              console.log(`[Wavoip] Nenhuma conversa ativa/waiting encontrada para o contato. Toca para todos!`);
+              console.log(`[Wavoip] Nenhuma conversa ativa encontrada para o contato. Toca para todos!`);
             }
             
             // Define o nome do contato que ligou
