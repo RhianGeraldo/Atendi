@@ -101,8 +101,11 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
 
       try {
         if (offer.peer.phone && profile?.company_id) {
-          // Busca o contato (usando os últimos 8 dígitos por segurança)
-          const phoneSuffix = offer.peer.phone.slice(-8);
+          // Remove todos os caracteres que não sejam números (ex: @s.whatsapp.net, +, -)
+          const cleanPhone = offer.peer.phone.replace(/\D/g, "");
+          // Pega os últimos 8 dígitos do telefone numérico limpo
+          const phoneSuffix = cleanPhone.slice(-8);
+
           const { data: contacts } = await supabase
             .from("contacts")
             .select("id, name")
