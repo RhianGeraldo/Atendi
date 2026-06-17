@@ -195,24 +195,13 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
   const rejectCall = useCallback(async () => {
     if (!incomingOffer) return;
     try {
-      console.log("Forçando rejeição da chamada (Accept -> End)...", incomingOffer.id);
-      
-      // A API de Reject do Wavoip apresenta instabilidades, 
-      // então a forma mais garantida de derrubar a ligação para o cliente
-      // é aceitar a chamada no background e encerrar imediatamente.
-      const { call, err } = await incomingOffer.accept();
-      
-      if (call) {
-        await call.end();
-        console.log("Chamada derrubada com sucesso.");
-      } else if (err) {
-        // Fallback caso o accept falhe por algum motivo bizarro
-        if (typeof incomingOffer.reject === "function") {
-          await incomingOffer.reject();
-        }
+      console.log("Rejeitando chamada API Wavoip...", incomingOffer.id);
+      if (typeof incomingOffer.reject === "function") {
+        await incomingOffer.reject();
+        console.log("Chamada rejeitada na API Wavoip.");
       }
     } catch (e) {
-      console.error("Erro ao tentar recusar a chamada forçadamente:", e);
+      console.error("Erro ao recusar chamada:", e);
     } finally {
       setIncomingOffer(null);
       setActiveContactName(null);
