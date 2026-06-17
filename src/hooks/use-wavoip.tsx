@@ -210,9 +210,20 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
 
   const rejectCall = useCallback(async () => {
     if (!incomingOffer) return;
-    await incomingOffer.reject();
-    setIncomingOffer(null);
-    setActiveContactName(null);
+    try {
+      console.log("Rejeitando chamada API Wavoip...", incomingOffer.id);
+      if (typeof incomingOffer.reject === "function") {
+        await incomingOffer.reject();
+      } else {
+        console.warn("incomingOffer.reject não é uma função no SDK do Wavoip.");
+      }
+    } catch (e) {
+      console.error("Erro ao tentar recusar a chamada:", e);
+    } finally {
+      setIncomingOffer(null);
+      setActiveContactName(null);
+      setCallStatus(null);
+    }
   }, [incomingOffer]);
 
   const startCall = useCallback(async (phone: string, contactName?: string, fromToken?: string) => {
