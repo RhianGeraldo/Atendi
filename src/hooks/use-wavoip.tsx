@@ -74,7 +74,9 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
       if (error) throw error;
       return data;
     },
-    refetchInterval: 30000,
+    // Removido refetchInterval para evitar que o hook useEffect remonte a cada 30 segundos,
+    // o que causava a desconexão do socket do Wavoip e orfanava as ligações ativas.
+    staleTime: Infinity,
   });
 
   // Handle incoming calls
@@ -119,41 +121,23 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
           if (contacts && contacts.length > 0) {
             const contact = contacts[0];
             
-            // Busca se há conversas ativas/em espera para este contato na MESMA unidade
+            // Busca conversa ativa garantindo que ELA PERTENCE à exata instância que está tocando
             const { data: conv } = await supabase
               .from("conversations")
-              .select(`
-                id,
-                assigned_agent_id,
-                current_session_id,
-                conversation_sessions (id, whatsapp_instance_id)
-              `)
+              .select("assigned_agent_id, conversation_sessions!inner(whatsapp_instance_id)")
               .eq("contact_id", contact.id)
               .eq("unit_id", instance.unit_id as string)
+              .eq("conversation_sessions.whatsapp_instance_id", instance.id)
               .in("status", ["waiting", "active"])
-              .order("started_at", { ascending: false });
+              .order("started_at", { ascending: false })
+              .limit(1);
 
             if (conv && conv.length > 0) {
-              // Procura se alguma dessas conversas pertence à MESMA instância que o telefone tocou
-              const matchingConv = conv.find((c: any) => {
-                if (c.current_session_id && c.conversation_sessions) {
-                  const session = c.conversation_sessions.find((s: any) => s.id === c.current_session_id);
-                  if (session && session.whatsapp_instance_id === instance.id) return true;
-                }
-                // Se não tem current_session_id claro, mas tem sessões nesta instância
-                if (c.conversation_sessions) {
-                  return c.conversation_sessions.some((s: any) => s.whatsapp_instance_id === instance.id);
-                }
-                return false;
-              });
-
-              if (matchingConv) {
-                const assignedAgent = matchingConv.assigned_agent_id;
-                // Se a conversa desta instância exata já tem um dono e não é o usuário atual, silencia.
-                if (assignedAgent && assignedAgent !== profile.id) {
-                  console.log(`Chamada de ${offer.peer.phone} ignorada localmente. Pertence ao atendente ${assignedAgent} na instância ${instance.name}`);
-                  return;
-                }
+              const assignedAgent = conv[0].assigned_agent_id;
+              // Se a conversa desta instância exata já tem um dono e não é o usuário atual, silencia.
+              if (assignedAgent && assignedAgent !== profile.id) {
+                console.log(`Chamada de ${offer.peer.phone} ignorada localmente. Pertence ao atendente ${assignedAgent} na instância ${instance.name}`);
+                return;
               }
             }
             
