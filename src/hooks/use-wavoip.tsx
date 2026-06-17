@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useCallback, createContext, useContext, useRef } from "react";
 import { toast } from "sonner";
-import { Wavoip, CallOffer, CallActive, CallOutgoing, CallStatus } from "@wavoip/wavoip-api";
+import { Wavoip, Offer as CallOffer, CallActive, CallOutgoing, CallStatus } from "@wavoip/wavoip-api";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
@@ -10,7 +10,7 @@ interface WavoipContextType {
   wavoip: Wavoip | null;
   incomingOffer: CallOffer | null;
   activeCall: CallActive | CallOutgoing | null;
-  callStatus: CallStatus | null;
+  callStatus: CallStatus | "CONNECTING" | null;
   instances: any[] | undefined;
   isConnecting: boolean;
   connectingPhone: string | null;
@@ -35,12 +35,25 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
   const [wavoip, setWavoip] = useState<Wavoip | null>(null);
   const [incomingOffer, setIncomingOffer] = useState<CallOffer | null>(null);
   const [activeCall, setActiveCall] = useState<CallActive | CallOutgoing | null>(null);
-  const [callStatus, setCallStatus] = useState<CallStatus | null>(null);
+  const [callStatus, setCallStatus] = useState<CallStatus | "CONNECTING" | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [activeContactName, setActiveContactName] = useState<string | null>(null);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectingPhone, setConnectingPhone] = useState<string | null>(null);
+  const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const closeCallWithDelay = useCallback(() => {
+    setCallStatus("ENDED" as any);
+    if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    closeTimeoutRef.current = setTimeout(() => {
+      setActiveCall(null);
+      setCallStatus(null);
+      setIsMuted(false);
+      setIsSpeakerOn(false);
+      setActiveContactName(null);
+    }, 2000);
+  }, []);
 
   // Fetch tokens for the current unit
   const { data: instances } = useQuery({
@@ -76,22 +89,76 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
 
     const wavoipInstance = new Wavoip({ tokens, platform: "atendi-crm" });
     setWavoip(wavoipInstance);
+    
+    wavoipInstance.getDevices().forEach((device: any) => {
+      device.onStatus((status: string) => {
+        console.log(`[Wavoip] Dispositivo ${device.token.substring(0, 8)}... status: ${status}`);
+      });
+    });
 
-    const unsubOffer = wavoipInstance.on("offer", (offer) => {
+    const unsubOffer = wavoipInstance.on("offer", async (offer: any) => {
       console.log("Chamada recebida de", offer.peer.phone);
+
+      try {
+        if (offer.peer.phone && profile?.company_id) {
+          // Busca o contato (usando os últimos 8 dígitos por segurança)
+          const phoneSuffix = offer.peer.phone.slice(-8);
+          const { data: contacts } = await supabase
+            .from("contacts")
+            .select("id, name")
+            .eq("company_id", profile.company_id)
+            .ilike("phone", `%${phoneSuffix}%`)
+            .limit(1);
+
+          if (contacts && contacts.length > 0) {
+            const contact = contacts[0];
+            
+            // Busca se há uma conversa ativa para este contato
+            const { data: conv } = await supabase
+              .from("conversations")
+              .select("assigned_agent_id")
+              .eq("contact_id", contact.id)
+              .in("status", ["waiting", "active"])
+              .order("started_at", { ascending: false })
+              .limit(1);
+
+            if (conv && conv.length > 0) {
+              const assignedAgent = conv[0].assigned_agent_id;
+              // Se a conversa já tem um dono e não é o usuário atual, ignora a ligação na tela dele
+              if (assignedAgent && assignedAgent !== profile.id) {
+                console.log(`Chamada de ${offer.peer.phone} ignorada na interface local. Pertence a outro atendente.`);
+                return;
+              }
+            }
+            
+            // Opcional: Define o nome do contato que ligou caso seja deste atendente
+            setActiveContactName(contact.name);
+          }
+        }
+      } catch (err) {
+        console.error("Erro ao verificar dono do contato para chamada:", err);
+      }
+
+      toast.info(`Recebendo chamada de ${offer.peer.phone}...`);
       setIncomingOffer(offer);
       setCallStatus(offer.status);
-      setActiveContactName(null);
-
+      
       offer.on("status", setCallStatus);
       offer.on("acceptedElsewhere", () => setIncomingOffer(null));
       offer.on("unanswered", () => setIncomingOffer(null));
       offer.on("ended", () => setIncomingOffer(null));
     });
 
+    Promise.all(wavoipInstance.wakeUpDevices()).then((results) => {
+      console.log("Wavoip devices awakened for incoming calls:", results);
+    }).catch(err => {
+      console.error("Failed to wake up Wavoip devices:", err);
+    });
+
     return () => {
       unsubOffer();
-      // Optionally clean up wavoip connections if supported by the library
+      const allTokens = wavoipInstance.getDevices().map((d: any) => d.token);
+      wavoipInstance.removeDevices(allTokens);
     };
   }, [instances]);
 
@@ -108,13 +175,7 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         setActiveCall(call);
         setCallStatus(call.status);
         call.on("status", setCallStatus);
-        call.on("ended", () => {
-          setActiveCall(null);
-          setCallStatus(null);
-          setIsMuted(false);
-          setIsSpeakerOn(false);
-          setActiveContactName(null);
-        });
+        call.on("ended", closeCallWithDelay);
       }
     } catch (e) {
       console.error(e);
@@ -137,6 +198,7 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
     toast.info(`Iniciando chamada para ${contactName || finalPhone}...`);
     console.log("📞 Tentando ligar para o número do contato:", finalPhone);
     setActiveContactName(contactName || null);
+    if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
     setIsConnecting(true);
     setConnectingPhone(finalPhone);
     try {
@@ -170,29 +232,11 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
            setActiveCall(active);
            setCallStatus(active.status);
            active.on("status", setCallStatus);
-           active.on("ended", () => {
-             setActiveCall(null);
-             setCallStatus(null);
-             setIsMuted(false);
-             setIsSpeakerOn(false);
-             setActiveContactName(null);
-           });
+           active.on("ended", closeCallWithDelay);
         });
-        call.on("peerReject", () => {
-          setActiveCall(null);
-          setCallStatus(null);
-          setActiveContactName(null);
-        });
-        call.on("unanswered", () => {
-          setActiveCall(null);
-          setCallStatus(null);
-          setActiveContactName(null);
-        });
-        call.on("ended", () => {
-          setActiveCall(null);
-          setCallStatus(null);
-          setActiveContactName(null);
-        });
+        call.on("peerReject", closeCallWithDelay);
+        call.on("unanswered", closeCallWithDelay);
+        call.on("ended", closeCallWithDelay);
       }
     } catch (e) {
       console.error(e);
@@ -208,17 +252,13 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.error(e);
     }
-    setActiveCall(null);
-    setCallStatus(null);
-    setIsMuted(false);
-    setIsSpeakerOn(false);
-    setActiveContactName(null);
+    closeCallWithDelay();
   }, [activeCall]);
 
   const mute = useCallback(async () => {
     if (!activeCall) return;
     try {
-      if ((activeCall as any).status === "CONNECTED") {
+      if ((activeCall as any).status === "ACTIVE") {
         await (activeCall as CallActive).mute();
       }
       setIsMuted(true);
@@ -230,7 +270,7 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
   const unmute = useCallback(async () => {
     if (!activeCall) return;
     try {
-      if ((activeCall as any).status === "CONNECTED") {
+      if ((activeCall as any).status === "ACTIVE") {
         await (activeCall as CallActive).unmute();
       }
       setIsMuted(false);

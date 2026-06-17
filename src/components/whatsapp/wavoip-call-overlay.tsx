@@ -13,7 +13,7 @@ export function WavoipCallOverlay() {
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (callStatus === "CONNECTED") {
+    if (callStatus === "ACTIVE") {
       interval = setInterval(() => {
         setCallDuration((prev) => prev + 1);
       }, 1000);
@@ -104,8 +104,8 @@ export function WavoipCallOverlay() {
     );
   }
 
-  // Chamada ativa ou saindo
-  if (activeCall) {
+  // Chamada ativa e conectada
+  if (activeCall && callStatus === "ACTIVE") {
     const peer = activeCall.peer;
     const displayName = activeContactName || peer.displayName || "Desconhecido";
     
@@ -135,10 +135,7 @@ export function WavoipCallOverlay() {
             
             <div className="flex flex-col flex-1 overflow-hidden">
               <div className="text-slate-400 text-xs mb-0.5 truncate">
-                {callStatus === "CALLING" && "Chamando..."}
-                {callStatus === "CONNECTING" && "Conectando..."}
-                {callStatus === "CONNECTED" && formatDuration(callDuration)}
-                {!["CALLING", "CONNECTING", "CONNECTED"].includes(callStatus || "") && (callStatus || "Aguardando")}
+                {formatDuration(callDuration)}
               </div>
               <h3 className="text-xl font-light text-slate-800 truncate">{displayName}</h3>
               {displayName !== peer.phone && (
@@ -207,10 +204,18 @@ export function WavoipCallOverlay() {
     );
   }
 
-  // Chamada iniciando (dialing)
-  if (isConnecting) {
-    const displayName = activeContactName || "Desconhecido";
+  // Chamada iniciando (dialing) ou chamando (ringing)
+  if (isConnecting || (activeCall && callStatus !== "ACTIVE")) {
+    const peer = activeCall?.peer;
+    const displayName = activeContactName || peer?.displayName || "Desconhecido";
+    const phone = connectingPhone || peer?.phone;
     
+    let statusText = "Iniciando chamada...";
+    if (callStatus === "CALLING" || callStatus === "RINGING") statusText = "Chamando...";
+    else if (callStatus === "CONNECTING") statusText = "Conectando...";
+    else if (callStatus === "ENDED") statusText = "Finalizada";
+    else if (callStatus) statusText = callStatus;
+
     return createPortal(
       <div 
         ref={dragRef}
@@ -227,26 +232,33 @@ export function WavoipCallOverlay() {
           </div>
           
           <div className="text-slate-400 text-sm mb-2 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-slate-300 animate-pulse" /> Iniciando chamada...
+            <span className="w-2 h-2 rounded-full bg-slate-300 animate-pulse" /> {statusText}
           </div>
           
           <div className="relative mb-4">
             <div className="w-24 h-24 rounded-2xl bg-slate-100 border-2 border-slate-200 flex items-center justify-center relative z-10 overflow-hidden shadow-sm">
-              <User className="w-10 h-10 text-slate-400" />
+              {peer?.profilePicture ? (
+                <img src={peer.profilePicture} alt={displayName} className="w-full h-full object-cover" />
+              ) : (
+                <User className="w-10 h-10 text-slate-400" />
+              )}
             </div>
           </div>
           <h3 className="text-2xl font-light text-slate-800">{displayName}</h3>
-          <p className="text-lg text-slate-500 font-light">{connectingPhone}</p>
+          <p className="text-lg text-slate-500 font-light">{phone}</p>
         </div>
 
         <div className="p-8 flex justify-center items-center mt-auto mb-8">
           <div className="flex flex-col items-center gap-2">
             <button 
-              className="w-[52px] h-[52px] rounded-full bg-[#ef4444] opacity-50 cursor-not-allowed flex items-center justify-center shadow-md text-white"
+              onClick={activeCall ? endCall : undefined}
+              className={`w-[52px] h-[52px] rounded-full bg-[#ef4444] ${!activeCall ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#dc2626] transition-transform hover:scale-105'} flex items-center justify-center shadow-md text-white`}
             >
               <PhoneOff className="w-5 h-5 fill-current" />
             </button>
-            <span className="text-[10px] text-slate-400 tracking-wider">Cancelando...</span>
+            <span className="text-[10px] text-slate-400 tracking-wider">
+              {activeCall ? "Finalizar" : "Cancelando..."}
+            </span>
           </div>
         </div>
       </div>,
