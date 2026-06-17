@@ -67,7 +67,9 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         .not("wavoip_token", "is", null);
 
       if (selectedUnitId) {
-        q = q.eq("unit_id", selectedUnitId);
+        // Busca as instâncias da unidade selecionada OU as instâncias globais da empresa (Sede, unit_id null)
+        // Isso garante que se o cliente ligar no número principal, o atendente consiga receber.
+        q = q.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
       }
 
       const { data, error } = await q;
@@ -132,9 +134,11 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
               .limit(1);
 
             // Fallback: se não achar pela instância (ex: ticket criado manualmente sem ID da instância salvo),
-            // busca pela unidade da instância. Trata corretamente unit_id nulo (Sede/Matriz).
+            // busca APENAS pelo contato e status, ignorando restrições de unidade. 
+            // Se o contato está sendo atendido por alguém na empresa, queremos achar essa pessoa!
             if (!conv || conv.length === 0) {
-              let fallbackQuery = supabase
+              console.log(`[Wavoip] Conversa não encontrada pela instância ${instance.id}. Tentando fallback geral pelo contato ${contact.id}...`);
+              const { data: fallbackConv, error } = await supabase
                 .from("conversations")
                 .select("assigned_agent_id")
                 .eq("contact_id", contact.id)
@@ -142,25 +146,27 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
                 .order("started_at", { ascending: false })
                 .limit(1);
               
-              if (instance.unit_id) {
-                fallbackQuery = fallbackQuery.eq("unit_id", instance.unit_id);
-              } else {
-                fallbackQuery = fallbackQuery.is("unit_id", null);
+              if (error) {
+                 console.error("[Wavoip] Erro no fallback query:", error);
               }
               
-              const { data: fallbackConv, error } = await fallbackQuery;
               if (!error && fallbackConv) {
                 conv = fallbackConv as any;
+                console.log(`[Wavoip] Fallback encontrou conversa:`, conv);
               }
             }
 
             if (conv && conv.length > 0) {
               const assignedAgent = conv[0].assigned_agent_id;
-              // Se a conversa desta instância exata já tem um dono e não é o usuário atual, silencia.
+              console.log(`[Wavoip] Avaliando dono da chamada: Dono do ticket=${assignedAgent} | Meu perfil=${profile.id}`);
+              
+              // Se a conversa já tem um dono e não é o usuário atual, silencia.
               if (assignedAgent && assignedAgent !== profile.id) {
-                console.log(`Chamada de ${offer.peer.phone} ignorada localmente. Pertence ao atendente ${assignedAgent} na instância ${instance.name}`);
+                console.log(`[Wavoip] Chamada de ${offer.peer.phone} ignorada localmente. Pertence ao atendente ${assignedAgent} na instância ${instance.name}`);
                 return;
               }
+            } else {
+              console.log(`[Wavoip] Nenhuma conversa ativa/waiting encontrada para o contato. Toca para todos!`);
             }
             
             // Define o nome do contato que ligou
