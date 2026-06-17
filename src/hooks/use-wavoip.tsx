@@ -62,7 +62,7 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
     queryFn: async () => {
       let q = supabase
         .from("whatsapp_instances")
-        .select("id, wavoip_token, name")
+        .select("id, wavoip_token, name, unit_id")
         .eq("company_id", profile!.company_id!)
         .not("wavoip_token", "is", null);
 
@@ -74,17 +74,14 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
       if (error) throw error;
       return data;
     },
+    refetchInterval: 30000,
   });
 
+  // Handle incoming calls
   useEffect(() => {
-    if (!instances || instances.length === 0) {
-      if (wavoip) {
-        // cleanup if possible or wait for re-init
-      }
-      return;
-    }
+    if (!instances || instances.length === 0) return;
 
-    const tokens = instances.map(i => i.wavoip_token).filter(Boolean) as string[];
+    const tokens = instances.map((i: any) => i.wavoip_token).filter(Boolean) as string[];
     if (tokens.length === 0) return;
 
     const wavoipInstance = new Wavoip({ tokens, platform: "atendi-crm" });
@@ -101,9 +98,15 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
 
       try {
         if (offer.peer.phone && profile?.company_id) {
-          // Remove todos os caracteres que não sejam números (ex: @s.whatsapp.net, +, -)
+          // Encontra a instância exata que recebeu a chamada
+          const instance = instances.find((i: any) => i.wavoip_token === offer.device_token);
+          if (!instance) {
+            console.warn("Chamada recebida para um token não carregado nesta sessão.");
+            return;
+          }
+
+          // Remove todos os caracteres que não sejam números
           const cleanPhone = offer.peer.phone.replace(/\D/g, "");
-          // Pega os últimos 8 dígitos do telefone numérico limpo
           const phoneSuffix = cleanPhone.slice(-8);
 
           const { data: contacts } = await supabase
@@ -116,25 +119,45 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
           if (contacts && contacts.length > 0) {
             const contact = contacts[0];
             
-            // Busca se há uma conversa ativa para este contato
+            // Busca se há conversas ativas/em espera para este contato na MESMA unidade
             const { data: conv } = await supabase
               .from("conversations")
-              .select("assigned_agent_id")
+              .select(`
+                id,
+                assigned_agent_id,
+                current_session_id,
+                conversation_sessions (id, whatsapp_instance_id)
+              `)
               .eq("contact_id", contact.id)
+              .eq("unit_id", instance.unit_id as string)
               .in("status", ["waiting", "active"])
-              .order("started_at", { ascending: false })
-              .limit(1);
+              .order("started_at", { ascending: false });
 
             if (conv && conv.length > 0) {
-              const assignedAgent = conv[0].assigned_agent_id;
-              // Se a conversa já tem um dono e não é o usuário atual, ignora a ligação na tela dele
-              if (assignedAgent && assignedAgent !== profile.id) {
-                console.log(`Chamada de ${offer.peer.phone} ignorada na interface local. Pertence a outro atendente.`);
-                return;
+              // Procura se alguma dessas conversas pertence à MESMA instância que o telefone tocou
+              const matchingConv = conv.find((c: any) => {
+                if (c.current_session_id && c.conversation_sessions) {
+                  const session = c.conversation_sessions.find((s: any) => s.id === c.current_session_id);
+                  if (session && session.whatsapp_instance_id === instance.id) return true;
+                }
+                // Se não tem current_session_id claro, mas tem sessões nesta instância
+                if (c.conversation_sessions) {
+                  return c.conversation_sessions.some((s: any) => s.whatsapp_instance_id === instance.id);
+                }
+                return false;
+              });
+
+              if (matchingConv) {
+                const assignedAgent = matchingConv.assigned_agent_id;
+                // Se a conversa desta instância exata já tem um dono e não é o usuário atual, silencia.
+                if (assignedAgent && assignedAgent !== profile.id) {
+                  console.log(`Chamada de ${offer.peer.phone} ignorada localmente. Pertence ao atendente ${assignedAgent} na instância ${instance.name}`);
+                  return;
+                }
               }
             }
             
-            // Opcional: Define o nome do contato que ligou caso seja deste atendente
+            // Define o nome do contato que ligou
             setActiveContactName(contact.name);
           }
         }
