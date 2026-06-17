@@ -41,6 +41,40 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectingPhone, setConnectingPhone] = useState<string | null>(null);
+
+  const upsertCallLog = async (data: any) => {
+    if (!profile?.company_id) return;
+    try {
+      let contact_id = data.contact_id;
+      if (!contact_id && data.peer_number) {
+        const phoneSuffix = data.peer_number.replace(/\D/g, "").slice(-8);
+        const { data: contacts } = await supabase.from('contacts').select('id').eq('company_id', profile.company_id).ilike('phone', `%${phoneSuffix}%`).limit(1);
+        if (contacts && contacts.length > 0) contact_id = contacts[0].id;
+      }
+      
+      const payload: any = {
+        wavoip_call_id: data.wavoip_call_id,
+        company_id: profile.company_id,
+        direction: data.direction,
+        status: data.status,
+      };
+      
+      if (data.whatsapp_instance_id !== undefined) payload.whatsapp_instance_id = data.whatsapp_instance_id;
+      if (contact_id !== undefined) payload.contact_id = contact_id;
+      if (data.assigned_agent_id !== undefined) payload.assigned_agent_id = data.assigned_agent_id;
+      if (data.started_at !== undefined) payload.started_at = data.started_at;
+      if (data.ended_at !== undefined) payload.ended_at = data.ended_at;
+      if (data.duration_seconds !== undefined) payload.duration_seconds = data.duration_seconds;
+      if (data.recording_url !== undefined) payload.recording_url = data.recording_url;
+      if (data.peer_number !== undefined) payload.peer_number = data.peer_number;
+
+      const { error } = await supabase.from('call_logs').upsert(payload, { onConflict: 'wavoip_call_id' });
+      if (error) console.error("[Wavoip] Erro ao salvar log:", error);
+    } catch (e) {
+      console.error("[Wavoip] Exceção log:", e);
+    }
+  };
+
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const closeCallWithDelay = useCallback(() => {
@@ -224,7 +258,35 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         setActiveCall(call);
         setCallStatus(call.status);
         call.on("status", setCallStatus);
-        call.on("ended", closeCallWithDelay);
+        const instance = instances.find((i: any) => i.wavoip_token === call.device_token);
+        upsertCallLog({
+          wavoip_call_id: call.id,
+          whatsapp_instance_id: instance?.id,
+          assigned_agent_id: profile?.id,
+          direction: 'OUTGOING',
+          status: call.status,
+          peer_number: call.peer.phone,
+          started_at: new Date().toISOString(),
+        });
+        call.on("ended", () => {
+             upsertCallLog({
+               wavoip_call_id: call.id,
+               status: 'ENDED',
+               ended_at: new Date().toISOString(),
+               recording_url: `https://storage.wavoip.com/${call.id}`
+             });
+             closeCallWithDelay();
+          });
+          const instance = instances.find((i: any) => i.wavoip_token === call.device_token);
+          upsertCallLog({
+            wavoip_call_id: call.id,
+            whatsapp_instance_id: instance?.id,
+            assigned_agent_id: profile?.id,
+            direction: 'INCOMING',
+            status: call.status,
+            peer_number: call.peer.phone,
+            started_at: new Date().toISOString(),
+          });
       }
     } catch (e) {
       console.error(e);
@@ -238,6 +300,16 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
       if (typeof incomingOffer.reject === "function") {
         await incomingOffer.reject();
         console.log("Chamada rejeitada na API Wavoip.");
+        const instance = instances.find((i: any) => i.wavoip_token === incomingOffer.device_token);
+        upsertCallLog({
+          wavoip_call_id: incomingOffer.id,
+          whatsapp_instance_id: instance?.id,
+          assigned_agent_id: profile?.id,
+          direction: 'INCOMING',
+          status: 'REJECTED',
+          peer_number: incomingOffer.peer.phone,
+          ended_at: new Date().toISOString(),
+        });
       }
     } catch (e) {
       console.error("Erro ao recusar chamada:", e);
@@ -291,7 +363,19 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
            setActiveCall(active);
            setCallStatus(active.status);
            active.on("status", setCallStatus);
-           active.on("ended", closeCallWithDelay);
+           active.on("ended", () => {
+               upsertCallLog({
+                 wavoip_call_id: active.id,
+                 status: 'ENDED',
+                 ended_at: new Date().toISOString(),
+                 recording_url: `https://storage.wavoip.com/${active.id}`
+               });
+               closeCallWithDelay();
+             });
+             upsertCallLog({
+               wavoip_call_id: active.id,
+               status: 'ACTIVE'
+             });
         });
         call.on("peerReject", closeCallWithDelay);
         call.on("unanswered", closeCallWithDelay);

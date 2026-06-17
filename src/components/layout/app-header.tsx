@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 const titles: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/conversations": "Atendimentos",
+  "/calls": "Histórico de Ligações",
   "/contacts": "Contatos",
   "/pipeline": "Funil de Vendas",
   "/tasks": "Tarefas",

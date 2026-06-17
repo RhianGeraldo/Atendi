@@ -11,7 +11,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  LogOut,
+  LogOut, Phone,
   Building2,
   ChevronsUpDown,
   MapPin,
@@ -35,6 +35,7 @@ import { supabase } from "@/integrations/supabase/client";
 const items = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/conversations", label: "Atendimentos", icon: MessageSquare },
+  { to: "/calls", label: "Ligações", icon: Phone },
   { to: "/contacts", label: "Contatos", icon: Users },
   { to: "/pipeline", label: "Funil de Vendas", icon: KanbanSquare },
   { to: "/tasks", label: "Tarefas", icon: CheckSquare },
