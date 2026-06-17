@@ -123,33 +123,34 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
           if (contacts && contacts.length > 0) {
             const contact = contacts[0];
             
-            // Busca TODAS as conversas ativas/em espera para esse contato
+            // Busca TODAS as conversas ativas/em espera para esse contato NA MESMA INSTÂNCIA que está recebendo a ligação
             const { data: activeConvs, error } = await supabase
               .from("conversations")
-              .select("assigned_agent_id")
+              .select("assigned_agent_id, conversation_sessions!inner(whatsapp_instance_id)")
               .eq("contact_id", contact.id)
+              .eq("conversation_sessions.whatsapp_instance_id", instance.id)
               .in("status", ["waiting", "active"]);
 
             if (error) {
-              console.error("[Wavoip] Erro ao buscar conversas do contato:", error);
+              console.error("[Wavoip] Erro ao buscar conversas do contato na instância:", error);
             }
 
             if (activeConvs && activeConvs.length > 0) {
-              // Verifica se o usuário logado é dono de ALGUMA das conversas ativas
+              // Verifica se o usuário atual é o dono de alguma das conversas nesta instância
               const myConv = activeConvs.find((c: any) => c.assigned_agent_id === profile.id);
               
               if (!myConv) {
-                // Se não é meu, verifica se ALGUÉM é dono (ticket não está apenas na fila)
+                // Se o usuário atual não é o dono, verifica se existe OUTRO dono
                 const otherConv = activeConvs.find((c: any) => c.assigned_agent_id !== null);
                 if (otherConv) {
-                  console.log(`[Wavoip] Chamada de ${offer.peer.phone} ignorada localmente. Pertence ao atendente ${otherConv.assigned_agent_id}`);
-                  return;
+                  console.log(`[Wavoip] Chamada ignorada. O contato já está sendo atendido por ${otherConv.assigned_agent_id} na instância ${instance.name}.`);
+                  return; // Silencia para este usuário
                 }
               } else {
-                console.log(`[Wavoip] Chamada permitida: Usuário atual (${profile.id}) é o dono do contato.`);
+                console.log(`[Wavoip] Chamada permitida. Usuário atual é o dono do ticket na instância ${instance.name}.`);
               }
             } else {
-              console.log(`[Wavoip] Nenhuma conversa ativa encontrada para o contato. Toca para todos!`);
+              console.log(`[Wavoip] Nenhum ticket em andamento na instância ${instance.name}. Tocando para todos os usuários com acesso a ela!`);
             }
             
             // Define o nome do contato que ligou
