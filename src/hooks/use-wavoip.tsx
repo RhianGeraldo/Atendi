@@ -258,16 +258,6 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         setActiveCall(call);
         setCallStatus(call.status);
         call.on("status", setCallStatus);
-        const instance = instances.find((i: any) => i.wavoip_token === call.device_token);
-        upsertCallLog({
-          wavoip_call_id: call.id,
-          whatsapp_instance_id: instance?.id,
-          assigned_agent_id: profile?.id,
-          direction: 'OUTGOING',
-          status: call.status,
-          peer_number: call.peer.phone,
-          started_at: new Date().toISOString(),
-        });
         call.on("ended", () => {
              upsertCallLog({
                wavoip_call_id: call.id,
@@ -359,6 +349,16 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         setActiveCall(call);
         setCallStatus(call.status);
         call.on("status", setCallStatus);
+        const instance = instances.find((i: any) => i.wavoip_token === call.device_token);
+        upsertCallLog({
+          wavoip_call_id: call.id,
+          whatsapp_instance_id: instance?.id,
+          assigned_agent_id: profile?.id,
+          direction: 'OUTGOING',
+          status: call.status,
+          peer_number: call.peer.phone,
+          started_at: new Date().toISOString(),
+        });
         call.on("peerAccept", (active) => {
            setActiveCall(active);
            setCallStatus(active.status);
