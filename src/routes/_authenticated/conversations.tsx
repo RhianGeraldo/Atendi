@@ -32,6 +32,7 @@ import { LinkPreview } from "@/components/chat/link-preview";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { useWavoip } from "@/hooks/use-wavoip";
 export const Route = createFileRoute("/_authenticated/conversations")({
   component: ConversationsPage,
   validateSearch: (search: Record<string, unknown>) => {
@@ -80,7 +81,16 @@ function ConversationsPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<TabType>(searchTab || "waiting");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(searchConvId || null);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [search]);
+
   const [showSidebar, setShowSidebar] = useState(false);
   const { selectedUnitId } = useUnit();
   const [instanceFilter, setInstanceFilter] = useState<string | null>(null);
@@ -111,22 +121,34 @@ function ConversationsPage() {
     isFetchingNextPage,
     isFetching: isConvFetching,
   } = useInfiniteQuery({
-    queryKey: ["conversations", tab, selectedUnitId, profile?.id, profile?.role, profile?.department_id],
+    queryKey: ["conversations", tab, selectedUnitId, profile?.id, profile?.role, profile?.department_id, debouncedSearch, instanceFilter],
     initialPageParam: 0,
     queryFn: async ({ pageParam = 0 }) => {
       const from = pageParam as number;
       const to = from + PAGE_SIZE - 1;
 
+      let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+      
+      if (debouncedSearch) {
+        selectString = selectString.replace("contact:contacts(", "contact:contacts!inner(");
+      }
+
       let query = supabase
         .from("conversations")
-        .select(
-          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)"
-        )
+        .select(selectString)
         .order("last_message_at", { ascending: false })
         .range(from, to);
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
+      }
+      
+      if (instanceFilter && instanceFilter !== "all") {
+        query = query.eq("whatsapp_instance_id", instanceFilter);
+      }
+
+      if (debouncedSearch) {
+        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`, { foreignTable: "contacts" });
       }
 
       // Server-side status filter for non-group tabs
@@ -213,14 +235,24 @@ function ConversationsPage() {
   }, [searchConvId]);
 
   const { data: unreadCounts } = useQuery({
-    queryKey: ["unread-counts", selectedUnitId, profile?.id, profile?.department_id, instanceFilter],
+    queryKey: ["unread-counts", selectedUnitId, profile?.id, profile?.department_id, instanceFilter, debouncedSearch],
     queryFn: async () => {
+      let selectString = "id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts(id, phone, name)";
+
+      if (debouncedSearch) {
+        selectString = selectString.replace("contact:contacts(", "contact:contacts!inner(");
+      }
+
       let query = supabase
         .from("conversations")
-        .select("id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts(id, phone)");
+        .select(selectString);
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
+      }
+
+      if (debouncedSearch) {
+        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`, { foreignTable: "contacts" });
       }
 
       const { data, error } = await query.order("last_message_at", { ascending: false });
@@ -311,18 +343,7 @@ function ConversationsPage() {
   }, [qc]);
 
 
-  const filtered = conversations.filter((c) => {
-    if (!c?.id) return false; // guard against undefined items
-    if (instanceFilter && instanceFilter !== "all") {
-      if (c.whatsapp_instance_id !== instanceFilter) return false;
-    }
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return (
-      c.contact?.name?.toLowerCase().includes(s) ||
-      (c.contact?.phone ?? "").includes(s)
-    );
-  });
+  const filtered = conversations.filter(c => !!c?.id);
 
   useEffect(() => {
     const current = filtered.find((c) => c.id === selectedId);
@@ -1064,6 +1085,7 @@ function ChatPanel({
 }) {
   const { profile } = useAuth();
   const qc = useQueryClient();
+  const { startCall } = useWavoip();
   const { selectedUnitId } = useUnit();
   const [text, setText] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
@@ -1083,26 +1105,14 @@ function ChatPanel({
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const { data: messages } = useQuery({
-    queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id],
+    queryKey: ["messages", conv.id],
     queryFn: async () => {
       // 1. Get all conversation IDs for this contact on this instance
-      let convIds = [conv.id];
-      if (conv.contact?.id) {
-        const { data: convs, error: convErr } = await supabase
-          .from("conversations")
-          .select("id")
-          .eq("contact_id", conv.contact?.id)
-          .eq("whatsapp_instance_id", conv.whatsapp_instance_id);
-          
-        if (convErr) throw convErr;
-        convIds = convs?.map(c => c.id) || [conv.id];
-      }
-
-      // 2. Fetch all messages for these conversations
+      // Fetch messages for this conversation
       const { data, error } = await supabase
         .from("messages")
         .select("id, conversation_id, sender_type, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
-        .in("conversation_id", convIds)
+        .eq("conversation_id", conv.id)
         .order("created_at", { ascending: true });
         
       if (error) throw error;
@@ -1164,8 +1174,8 @@ function ChatPanel({
       return await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: payload.mediaType, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent, isInternal: payload.isInternal } });
     },
     onMutate: async (payload) => {
-      await qc.cancelQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
-      const previousMessages = qc.getQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id]);
+      await qc.cancelQueries({ queryKey: ["messages", conv.id] });
+      const previousMessages = qc.getQueryData(["messages", conv.id]);
       
       const optimisticMsg: MessageRow = {
         id: crypto.randomUUID(),
@@ -1180,7 +1190,7 @@ function ChatPanel({
         profiles: profile?.name ? { name: profile.name } : undefined
       };
 
-      qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
+      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
       setText("");
       setSelectedFile(null);
       setReplyingTo(null);
@@ -1194,13 +1204,13 @@ function ChatPanel({
     },
     onError: (e, variables, context) => {
       if (context?.previousMessages) {
-        qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], context.previousMessages);
+        qc.setQueryData(["messages", conv.id], context.previousMessages);
       }
       setText(context?.content || "");
       toast.error("Erro ao enviar", { description: (e as Error).message });
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
+      qc.invalidateQueries({ queryKey: ["messages", conv.id] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
@@ -1210,21 +1220,21 @@ function ChatPanel({
       await deleteMessageAction({ data: { messageId } });
     },
     onMutate: async (messageId) => {
-      await qc.cancelQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
-      const previousMessages = qc.getQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id]);
+      await qc.cancelQueries({ queryKey: ["messages", conv.id] });
+      const previousMessages = qc.getQueryData(["messages", conv.id]);
       
-      qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
+      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
         return old.map(m => m.id === messageId ? { ...m, is_deleted: true } : m);
       });
       return { previousMessages };
     },
     onError: (e, v, context) => {
-      if (context?.previousMessages) qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], context.previousMessages);
+      if (context?.previousMessages) qc.setQueryData(["messages", conv.id], context.previousMessages);
       toast.error("Erro ao apagar mensagem", { description: (e as Error).message });
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
+      qc.invalidateQueries({ queryKey: ["messages", conv.id] });
     }
   });
 
@@ -1233,10 +1243,10 @@ function ChatPanel({
       await editMessageAction({ data: { conversationId: conv.id, messageId: payload.messageId, newContent: payload.content } });
     },
     onMutate: async (payload) => {
-      await qc.cancelQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
-      const previousMessages = qc.getQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id]);
+      await qc.cancelQueries({ queryKey: ["messages", conv.id] });
+      const previousMessages = qc.getQueryData(["messages", conv.id]);
       
-      qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
+      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
         return old.map(m => m.id === payload.messageId ? { ...m, content: payload.content, is_edited: true } : m);
       });
@@ -1245,11 +1255,11 @@ function ChatPanel({
       return { previousMessages };
     },
     onError: (e, v, context) => {
-      if (context?.previousMessages) qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], context.previousMessages);
+      if (context?.previousMessages) qc.setQueryData(["messages", conv.id], context.previousMessages);
       toast.error("Erro ao editar", { description: (e as Error).message });
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
+      qc.invalidateQueries({ queryKey: ["messages", conv.id] });
     }
   });
 
@@ -1259,7 +1269,7 @@ function ChatPanel({
     },
     onSuccess: (data, variables) => {
       toast.success("Transcrição concluída com sucesso!");
-      qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
+      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
         return old.map(m => m.id === variables ? { ...m, transcription: data.text } : m);
       });
@@ -1286,21 +1296,21 @@ function ChatPanel({
       await reactToMessageAction({ data: { conversationId: conv.id, messageId, emoji } });
     },
     onMutate: async ({ messageId, emoji }) => {
-      await qc.cancelQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
-      const previousMessages = qc.getQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id]);
+      await qc.cancelQueries({ queryKey: ["messages", conv.id] });
+      const previousMessages = qc.getQueryData(["messages", conv.id]);
       
-      qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], (old: MessageRow[] | undefined) => {
+      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
         return old.map(m => m.id === messageId ? { ...m, reactions: emoji ? { [emoji]: 1 } : {} } : m);
       });
       return { previousMessages };
     },
     onError: (e, v, context) => {
-      if (context?.previousMessages) qc.setQueryData(["messages", conv.contact?.id, conv.whatsapp_instance_id], context.previousMessages);
+      if (context?.previousMessages) qc.setQueryData(["messages", conv.id], context.previousMessages);
       toast.error("Erro ao reagir", { description: (e as Error).message });
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["messages", conv.contact?.id, conv.whatsapp_instance_id] });
+      qc.invalidateQueries({ queryKey: ["messages", conv.id] });
     }
   });
 
@@ -1712,6 +1722,19 @@ function ChatPanel({
           <div className="flex items-center gap-1.5">
             {conv.status === "active" && !isGroup && (
               <>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="rounded-full text-green-600 hover:text-green-700 hover:bg-green-50"
+                  onClick={() => {
+                    if (conv.contact?.phone) {
+                      startCall(conv.contact.phone);
+                    }
+                  }}
+                  title="Ligar para contato"
+                >
+                  <Phone className="h-4 w-4" />
+                </Button>
                 <TransferDialog conv={conv} />
                 <Button
                   variant="default"

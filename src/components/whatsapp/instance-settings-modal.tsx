@@ -22,6 +22,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const [saving, setSaving] = useState(false);
   
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [wavoipToken, setWavoipToken] = useState("");
   const [advSettings, setAdvSettings] = useState({
     rejectCall: false,
     readMessages: false,
@@ -40,6 +41,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     }
 
     setWebhookUrl(defaultWebhook);
+    setWavoipToken(instance.wavoip_token || "");
     
     // Fetch advanced settings from EvoGo
     const fetchSettings = async () => {
@@ -76,11 +78,11 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
 
     try {
-      // 1. Save Webhook
+      // 1. Save Webhook and Wavoip Token
       await client.connectInstance(webhookUrl, instance.evogo_api_key);
       await supabase
         .from("whatsapp_instances")
-        .update({ webhook_url: webhookUrl })
+        .update({ webhook_url: webhookUrl, wavoip_token: wavoipToken || null })
         .eq("id", instance.id);
 
       // 2. Save Advanced Settings
@@ -129,6 +131,14 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                   placeholder="https://sua-api.com/webhook" 
                   value={webhookUrl}
                   onChange={(e) => setWebhookUrl(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1 mt-2">
+                <label className="text-xs text-muted-foreground">Wavoip Token (Chamadas)</label>
+                <Input 
+                  placeholder="Seu token de dispositivo Wavoip" 
+                  value={wavoipToken}
+                  onChange={(e) => setWavoipToken(e.target.value)}
                 />
               </div>
             </div>

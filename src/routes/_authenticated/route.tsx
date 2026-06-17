@@ -1,6 +1,8 @@
 import { createFileRoute, Outlet, Navigate } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/app-shell";
 import { useAuth } from "@/lib/auth-context";
+import { WavoipProvider } from "@/hooks/use-wavoip";
+import { WavoipCallOverlay } from "@/components/whatsapp/wavoip-call-overlay";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -21,8 +23,11 @@ function AuthenticatedLayout() {
   if (!session) return <Navigate to="/auth" replace />;
 
   return (
-    <AppShell>
-      <Outlet />
-    </AppShell>
+    <WavoipProvider>
+      <AppShell>
+        <Outlet />
+      </AppShell>
+      <WavoipCallOverlay />
+    </WavoipProvider>
   );
 }
