@@ -117,31 +117,52 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
             .from("contacts")
             .select("id, name")
             .eq("company_id", profile.company_id)
-            .ilike("phone", `%${phoneSuffix}%`)
-            .limit(1);
+            .ilike("phone", `%${phoneSuffix}%`);
 
           if (contacts && contacts.length > 0) {
-            const contact = contacts[0];
+            const contactIds = contacts.map((c: any) => c.id);
+            const activeContactName = contacts[0].name; // Usa o nome do primeiro
             
-            // Busca TODAS as conversas ativas/em espera para esse contato NA MESMA INSTÂNCIA que está recebendo a ligação
+            console.log(`[Wavoip] Encontrados ${contactIds.length} contatos para o telefone. IDs:`, contactIds);
+
+            // Busca TODAS as conversas ativas/em espera para esses contatos
             const { data: activeConvs, error } = await supabase
               .from("conversations")
-              .select("assigned_agent_id, conversation_sessions!inner(whatsapp_instance_id)")
-              .eq("contact_id", contact.id)
-              .eq("conversation_sessions.whatsapp_instance_id", instance.id)
+              .select(`
+                id,
+                assigned_agent_id,
+                conversation_sessions (id, whatsapp_instance_id)
+              `)
+              .in("contact_id", contactIds)
               .in("status", ["waiting", "active"]);
 
             if (error) {
               console.error("[Wavoip] Erro ao buscar conversas do contato na instância:", error);
             }
 
-            if (activeConvs && activeConvs.length > 0) {
+            console.log(`[Wavoip] Conversas ativas no banco para o contato:`, activeConvs);
+
+            // Filtra no JS para ser à prova de falhas de sintaxe e relacionamentos nulos
+            const convsInThisInstance = (activeConvs || []).filter((c: any) => {
+              if (!c.conversation_sessions) return false;
+              // Verifica se a conversa possui ALGUMA sessão ligada à instância que está tocando
+              // Lida tanto com array quanto com objeto, por garantia
+              if (Array.isArray(c.conversation_sessions)) {
+                 return c.conversation_sessions.some((s: any) => s.whatsapp_instance_id === instance.id);
+              } else {
+                 return c.conversation_sessions.whatsapp_instance_id === instance.id;
+              }
+            });
+
+            console.log(`[Wavoip] Conversas filtradas para a instância atual (${instance.name}):`, convsInThisInstance);
+
+            if (convsInThisInstance.length > 0) {
               // Verifica se o usuário atual é o dono de alguma das conversas nesta instância
-              const myConv = activeConvs.find((c: any) => c.assigned_agent_id === profile.id);
+              const myConv = convsInThisInstance.find((c: any) => c.assigned_agent_id === profile.id);
               
               if (!myConv) {
                 // Se o usuário atual não é o dono, verifica se existe OUTRO dono
-                const otherConv = activeConvs.find((c: any) => c.assigned_agent_id !== null);
+                const otherConv = convsInThisInstance.find((c: any) => c.assigned_agent_id !== null);
                 if (otherConv) {
                   console.log(`[Wavoip] Chamada ignorada. O contato já está sendo atendido por ${otherConv.assigned_agent_id} na instância ${instance.name}.`);
                   return; // Silencia para este usuário
@@ -154,7 +175,7 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
             }
             
             // Define o nome do contato que ligou
-            setActiveContactName(contact.name);
+            setActiveContactName(activeContactName);
           }
         }
       } catch (err) {
