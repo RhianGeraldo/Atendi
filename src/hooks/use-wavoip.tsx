@@ -121,16 +121,38 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
           if (contacts && contacts.length > 0) {
             const contact = contacts[0];
             
-            // Busca conversa ativa garantindo que ELA PERTENCE à exata instância que está tocando
-            const { data: conv } = await supabase
+            // Busca conversa ativa tentando primeiro a instância exata (para multi-instâncias na mesma unidade)
+            let { data: conv } = await supabase
               .from("conversations")
               .select("assigned_agent_id, conversation_sessions!inner(whatsapp_instance_id)")
               .eq("contact_id", contact.id)
-              .eq("unit_id", instance.unit_id as string)
               .eq("conversation_sessions.whatsapp_instance_id", instance.id)
               .in("status", ["waiting", "active"])
               .order("started_at", { ascending: false })
               .limit(1);
+
+            // Fallback: se não achar pela instância (ex: ticket criado manualmente sem ID da instância salvo),
+            // busca pela unidade da instância. Trata corretamente unit_id nulo (Sede/Matriz).
+            if (!conv || conv.length === 0) {
+              let fallbackQuery = supabase
+                .from("conversations")
+                .select("assigned_agent_id")
+                .eq("contact_id", contact.id)
+                .in("status", ["waiting", "active"])
+                .order("started_at", { ascending: false })
+                .limit(1);
+              
+              if (instance.unit_id) {
+                fallbackQuery = fallbackQuery.eq("unit_id", instance.unit_id);
+              } else {
+                fallbackQuery = fallbackQuery.is("unit_id", null);
+              }
+              
+              const { data: fallbackConv, error } = await fallbackQuery;
+              if (!error && fallbackConv) {
+                conv = fallbackConv as any;
+              }
+            }
 
             if (conv && conv.length > 0) {
               const assignedAgent = conv[0].assigned_agent_id;
@@ -194,8 +216,19 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
 
   const rejectCall = useCallback(async () => {
     if (!incomingOffer) return;
-    await incomingOffer.reject();
-    setIncomingOffer(null);
+    try {
+      console.log("Rejeitando chamada API Wavoip...", incomingOffer.id);
+      if (typeof incomingOffer.reject === "function") {
+        await incomingOffer.reject();
+        console.log("Chamada rejeitada na API Wavoip.");
+      }
+    } catch (e) {
+      console.error("Erro ao recusar chamada:", e);
+    } finally {
+      setIncomingOffer(null);
+      setActiveContactName(null);
+      setCallStatus(null);
+    }
   }, [incomingOffer]);
 
   const startCall = useCallback(async (phone: string, contactName?: string, fromToken?: string) => {
