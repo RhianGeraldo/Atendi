@@ -8,6 +8,7 @@ type ServerEntry = {
 };
 
 import { handleEvogoWebhook } from "./lib/server/evogo-webhook";
+import { handleWavoipWebhook } from "./lib/server/wavoip-webhook";
 import { handleCronFollowUps } from "./lib/server/cron";
 
 // Auto-trigger cron jobs every 1 minute while server is running
@@ -59,6 +60,9 @@ export default {
       const url = new URL(request.url);
       if (url.pathname === '/api/evogo/webhook' && request.method === 'POST') {
         return await handleEvogoWebhook(request);
+      }
+      if (url.pathname === '/api/wavoip/webhook' && request.method === 'POST') {
+        return await handleWavoipWebhook(request);
       }
       if (url.pathname === '/api/cron/follow-ups') {
         return await handleCronFollowUps(request);

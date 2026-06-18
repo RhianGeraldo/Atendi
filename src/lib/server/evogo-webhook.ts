@@ -1175,7 +1175,7 @@ async function handleReaction(targetRemoteId: string, emoji: string): Promise<vo
   return;
 }
 
-async function triggerAudioTranscription(messageId: string, base64Audio: string, companyId: string) {
+export async function triggerAudioTranscription(messageId: string, base64Audio: string, companyId: string) {
   try {
     const { data: company } = await supabaseAdmin
       .from('companies')
