@@ -1099,7 +1099,7 @@ function ChatPanel({
 }) {
   const { profile } = useAuth();
   const qc = useQueryClient();
-  const { startCall } = useWavoip();
+  const { startCall, instances } = useWavoip();
   const { selectedUnitId } = useUnit();
   const [text, setText] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
@@ -1743,7 +1743,8 @@ function ChatPanel({
                   onClick={() => {
                     if (conv.contact?.phone) {
                       const name = conv.contact.name !== "Desconhecido" ? conv.contact.name : undefined;
-                      startCall(conv.contact.phone, name);
+                      const currentInstance = instances?.find((i: any) => i.id === conv.whatsapp_instance_id);
+                      startCall(conv.contact.phone, name, currentInstance?.wavoip_token);
                     }
                   }}
                   title="Ligar para contato"
