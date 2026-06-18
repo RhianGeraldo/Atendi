@@ -261,31 +261,65 @@ async function processWavoipRecording(body: any) {
     return;
   }
 
-  // 6. Inserir a mensagem de áudio na conversa como mensagem interna
-  const { data: newMsg, error: msgErr } = await supabaseAdmin
+  // 6. Tentar encontrar a mensagem do tipo 'call' correspondente à ligação
+  const { data: existingCallMsg } = await supabaseAdmin
     .from('messages')
-    .insert({
-      conversation_id: conversationId,
-      sender_type: 'agent',
-      is_internal: true, // Visível apenas no CRM!
-      media_type: 'audio',
-      media_url: record_url,
-      content: '📞 Gravação da Ligação'
-    })
-    .select('id')
-    .single();
+    .select('id, metadata')
+    .eq('conversation_id', conversationId)
+    .filter('metadata->>wavoip_call_id', 'eq', whatsapp_call_id)
+    .limit(1)
+    .maybeSingle();
 
-  if (msgErr || !newMsg) {
-    console.error('[wavoip-webhook] Erro ao injetar mensagem de gravação no chat:', msgErr);
-    return;
+  let targetMessageId: string;
+
+  if (existingCallMsg) {
+    targetMessageId = existingCallMsg.id;
+    // Atualiza a mensagem existente adicionando o áudio
+    const updatedMetadata = {
+      ...(existingCallMsg.metadata as any || {}),
+      recording_url: record_url
+    };
+
+    const { error: updateMsgErr } = await supabaseAdmin
+      .from('messages')
+      .update({
+        media_url: record_url,
+        metadata: updatedMetadata
+      })
+      .eq('id', targetMessageId);
+
+    if (updateMsgErr) {
+      console.error('[wavoip-webhook] Erro ao atualizar mensagem da chamada com gravação:', updateMsgErr);
+    } else {
+      console.log(`[wavoip-webhook] Mensagem da chamada ${targetMessageId} atualizada com gravação.`);
+    }
+  } else {
+    // Fallback: se não achar a mensagem da chamada, insere a mensagem de áudio na conversa como mensagem interna
+    const { data: newMsg, error: msgErr } = await supabaseAdmin
+      .from('messages')
+      .insert({
+        conversation_id: conversationId,
+        sender_type: 'agent',
+        is_internal: true, // Visível apenas no CRM!
+        media_type: 'audio',
+        media_url: record_url,
+        content: '📞 Gravação da Ligação'
+      })
+      .select('id')
+      .single();
+
+    if (msgErr || !newMsg) {
+      console.error('[wavoip-webhook] Erro ao injetar mensagem de gravação no chat:', msgErr);
+      return;
+    }
+    targetMessageId = newMsg.id;
+    console.log(`[wavoip-webhook] Gravação de fallback injetada no chat. Msg ID: ${targetMessageId}`);
   }
-
-  console.log(`[wavoip-webhook] Gravação injetada no chat com sucesso! Msg ID: ${newMsg.id}`);
 
   // 7. Transcrever o áudio com o formato correto (MP3 do Wavoip, não OGG do WhatsApp)
   if (base64Audio && company_id) {
     console.log(`[wavoip-webhook] Iniciando transcrição de áudio via Whisper (formato: ${audioFormat})...`);
-    await triggerAudioTranscription(newMsg.id, base64Audio, company_id, audioFormat, callLog.id);
+    await triggerAudioTranscription(targetMessageId, base64Audio, company_id, audioFormat, callLog.id);
   }
 }
 

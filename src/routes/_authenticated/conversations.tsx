@@ -2598,10 +2598,10 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
             </Dialog>
           </div>
         ) : m.metadata?.type === "call" ? (
-          <div className="mb-1">
+          <div className="mb-1 flex flex-col gap-1 w-full max-w-[280px]">
             <div
               className={cn(
-                "flex items-center gap-3 p-3 rounded-xl border max-w-[280px]",
+                "flex items-center gap-3 p-3 rounded-xl border w-full",
                 mine ? "border-transparent bg-black/10 dark:bg-white/10 text-white" : "border-border bg-card text-foreground"
               )}
             >
@@ -2639,6 +2639,44 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
                 </p>
               </div>
             </div>
+
+            {/* Se houver gravação da ligação (media_url ou metadata.recording_url) */}
+            {(m.media_url || m.metadata.recording_url) && (
+              <div className={cn(
+                "p-2.5 rounded-lg border mt-1 flex flex-col gap-1.5 w-full",
+                mine ? "border-transparent bg-black/10 dark:bg-white/10" : "border-border bg-muted/30"
+              )}>
+                <audio 
+                  controls 
+                  src={m.media_url || m.metadata.recording_url} 
+                  className="h-9 w-full max-w-[260px] scale-95 origin-left" 
+                />
+                
+                {m.transcription ? (
+                  <div className="mt-1.5 pt-1.5 border-t border-border/50 text-xs italic flex flex-col gap-1 opacity-95 text-left w-full">
+                    <span className="flex items-center gap-1 font-semibold text-[10px] text-primary">
+                      <Sparkles className="h-3 w-3" /> Transcrição Automática
+                    </span>
+                    <span className="whitespace-pre-wrap leading-tight text-[11px] font-medium">{m.transcription}</span>
+                  </div>
+                ) : (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-7 text-[10px] w-full border border-border/40 bg-background/40 hover:bg-background/80 text-muted-foreground hover:text-primary mt-1"
+                    onClick={() => onTranscribe?.(m.id)}
+                    disabled={isTranscribingId === m.id}
+                  >
+                    {isTranscribingId === m.id ? (
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="mr-1 h-3 w-3" />
+                    )}
+                    Transcrever Gravação
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         ) : m.metadata?.location ? (
           <div className="mb-1">
