@@ -117,7 +117,7 @@ function CallsPage() {
                         <div className="flex items-center gap-2">
                           {call.direction === "INCOMING" ? (
                             call.status === "NOT_ANSWERED" || call.status === "REJECTED" ? (
-                              <PhoneMissed, RefreshCw className="h-4 w-4 text-red-500" />
+                              <PhoneMissed className="h-4 w-4 text-red-500" />
                             ) : (
                               <PhoneIncoming className="h-4 w-4 text-blue-500" />
                             )
