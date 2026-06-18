@@ -180,40 +180,21 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
             
             console.log(`[Wavoip] Encontrados ${contactIds.length} contatos para o telefone. IDs:`, contactIds);
 
-            // Busca TODAS as conversas ativas/em espera para esses contatos
+            // Busca TODAS as conversas ativas/em espera para esses contatos NA MESMA INSTÂNCIA
             const { data: activeConvs, error: convError } = await supabase
               .from("conversations")
               .select("id, assigned_agent_id")
               .in("contact_id", contactIds)
-              .in("status", ["waiting", "active"]);
+              .in("status", ["waiting", "active"])
+              .eq("whatsapp_instance_id", instance.id);
 
             if (convError) {
               console.error("[Wavoip] Erro ao buscar conversas do contato:", convError);
             }
 
-            console.log(`[Wavoip] Conversas ativas no banco para o contato:`, activeConvs);
+            console.log(`[Wavoip] Conversas ativas no banco para o contato na instância ${instance.name}:`, activeConvs);
 
-            let convsInThisInstance: any[] = [];
-
-            if (activeConvs && activeConvs.length > 0) {
-              const convIds = activeConvs.map((c: any) => c.id);
-              
-              // Agora busca apenas as sessões dessas conversas que pertencem a esta instância
-              const { data: sessions, error: sessError } = await supabase
-                .from("conversation_sessions")
-                .select("conversation_id")
-                .in("conversation_id", convIds)
-                .eq("whatsapp_instance_id", instance.id);
-
-              if (sessError) {
-                 console.error("[Wavoip] Erro ao buscar sessões:", sessError);
-              }
-
-              // Filtra as conversas para manter apenas as que têm sessão nesta instância
-              convsInThisInstance = activeConvs.filter((c: any) => 
-                 sessions?.some((s: any) => s.conversation_id === c.id)
-              );
-            }
+            let convsInThisInstance: any[] = activeConvs || [];
 
             console.log(`[Wavoip] Conversas filtradas para a instância atual (${instance.name}):`, convsInThisInstance);
 
