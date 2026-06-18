@@ -19,7 +19,7 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
       const { data: cleanedCalls, error: cleanupErr } = await supabaseAdmin
         .from('call_logs')
         .update({ 
-          status: 'ENDED',
+          status: 'FAILED',
           ended_at: new Date().toISOString()
         })
         .in('status', ['ACTIVE', 'RINGING'])
