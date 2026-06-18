@@ -11,7 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PhoneIncoming, PhoneOutgoing, Download, Clock, PhoneMissed } from "lucide-react";
+import { PhoneIncoming, PhoneOutgoing, Download, Clock, PhoneMissed, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -73,6 +73,9 @@ function CallsPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Histórico de Chamadas</h1>
+        <Button variant="outline" onClick={() => window.location.reload()}>
+          <RefreshCw className="mr-2 h-4 w-4" /> Atualizar
+        </Button>
       </div>
 
       <Card>
@@ -85,8 +88,8 @@ function CallsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Direção</TableHead>
-                  <TableHead>Instância (De)</TableHead>
-                  <TableHead>Contato (Para)</TableHead>
+                  <TableHead>Instância</TableHead>
+                  <TableHead>Contato</TableHead>
                   <TableHead>Atendente</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Gravação</TableHead>
@@ -114,7 +117,7 @@ function CallsPage() {
                         <div className="flex items-center gap-2">
                           {call.direction === "INCOMING" ? (
                             call.status === "NOT_ANSWERED" || call.status === "REJECTED" ? (
-                              <PhoneMissed className="h-4 w-4 text-red-500" />
+                              <PhoneMissed, RefreshCw className="h-4 w-4 text-red-500" />
                             ) : (
                               <PhoneIncoming className="h-4 w-4 text-blue-500" />
                             )
@@ -144,15 +147,11 @@ function CallsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {call.status === "ENDED" || call.recording_url ? (
-                          <Button variant="ghost" size="sm" asChild>
-                            <a href={call.recording_url || `https://storage.wavoip.com/${call.wavoip_call_id}`} target="_blank" rel="noreferrer">
-                              <Download className="h-4 w-4" />
-                            </a>
-                          </Button>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">-</span>
-                        )}
+                        <Button variant="ghost" size="sm" asChild>
+                          <a href={call.recording_url || `https://storage.wavoip.com/${call.wavoip_call_id}`} target="_blank" rel="noreferrer">
+                            <Download className="h-4 w-4" />
+                          </a>
+                        </Button>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
