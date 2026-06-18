@@ -1,5 +1,4 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
-import { triggerAudioTranscription } from './evogo-webhook';
 
 export async function handleWavoipWebhook(request: Request): Promise<Response> {
   try {
@@ -136,6 +135,37 @@ async function processWavoipRecording(body: any) {
   // 7. Transcrever o áudio com o formato correto (MP3 do Wavoip, não OGG do WhatsApp)
   if (base64Audio && company_id) {
     console.log(`[wavoip-webhook] Iniciando transcrição de áudio via Whisper (formato: ${audioFormat})...`);
-    await triggerAudioTranscription(newMsg.id, base64Audio, company_id, audioFormat);
+    await triggerAudioTranscription(newMsg.id, base64Audio, company_id, audioFormat, callLog.id);
   }
 }
+
+/**
+ * Salva a transcrição no call_logs após persisti-la na messages.
+ * Wrapper que adiciona o parâmetro callLogId ao triggerAudioTranscription original.
+ */
+async function triggerAudioTranscription(
+  messageId: string,
+  base64Audio: string,
+  companyId: string,
+  audioFormat: string,
+  callLogId: string
+) {
+  const { triggerAudioTranscription: baseTranscribe } = await import('./evogo-webhook');
+  await baseTranscribe(messageId, base64Audio, companyId, audioFormat);
+
+  // Após a transcrição ser salva na mensagem, copiar para o call_log também
+  const { data: updatedMsg } = await supabaseAdmin
+    .from('messages')
+    .select('transcription')
+    .eq('id', messageId)
+    .single();
+
+  if (updatedMsg?.transcription) {
+    await supabaseAdmin
+      .from('call_logs')
+      .update({ transcription: updatedMsg.transcription })
+      .eq('id', callLogId);
+    console.log(`[wavoip-webhook] Transcrição salva no call_log ${callLogId}`);
+  }
+}
+

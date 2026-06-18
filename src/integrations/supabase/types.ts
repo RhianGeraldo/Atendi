@@ -29,6 +29,7 @@ export type Database = {
           duration_seconds: number | null
           recording_url: string | null
           peer_number: string | null
+          transcription: string | null
         }
         Insert: {
           id?: string
@@ -44,6 +45,7 @@ export type Database = {
           duration_seconds?: number | null
           recording_url?: string | null
           peer_number?: string | null
+          transcription?: string | null
         }
         Update: {
           id?: string
@@ -59,6 +61,7 @@ export type Database = {
           duration_seconds?: number | null
           recording_url?: string | null
           peer_number?: string | null
+          transcription?: string | null
         }
         Relationships: [
           {

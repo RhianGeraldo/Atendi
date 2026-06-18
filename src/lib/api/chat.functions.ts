@@ -1390,3 +1390,112 @@ export const fixMessageTextAction = createServerFn({ method: "POST" })
 
     return { text: correctedText.trim() };
   });
+
+export const transcribeCallAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    callId: z.string().uuid(),
+  }))
+  .handler(async ({ data }) => {
+    // 1. Buscar o call_log com a recording_url e company_id
+    const { data: callLog } = await supabaseAdmin
+      .from('call_logs')
+      .select('id, recording_url, company_id')
+      .eq('id', data.callId)
+      .single();
+
+    if (!callLog?.recording_url) {
+      throw new Error("Gravação não disponível para esta chamada.");
+    }
+
+    // 2. Buscar configurações de IA da empresa
+    const { data: company } = await supabaseAdmin
+      .from('companies')
+      .select('ai_settings')
+      .eq('id', callLog.company_id)
+      .single();
+
+    if (!company?.ai_settings?.engines?.transcription || company.ai_settings.engines.transcription === 'none') {
+      throw new Error("Transcrição de IA não está habilitada. Configure nas Configurações > IA.");
+    }
+
+    const provider = company.ai_settings.engines.transcription;
+    const apiKey = company.ai_settings.keys?.[provider as keyof typeof company.ai_settings.keys];
+
+    if (!apiKey) {
+      throw new Error(`Nenhuma chave de API configurada para o provedor: ${provider}`);
+    }
+
+    // 3. Detectar formato e fazer download
+    const urlPath = new URL(callLog.recording_url).pathname.toLowerCase();
+    const audioFormat = urlPath.endsWith('.mp3') ? 'mp3'
+      : urlPath.endsWith('.wav') ? 'wav'
+      : urlPath.endsWith('.m4a') ? 'm4a'
+      : 'mp3';
+
+    const audioRes = await fetch(callLog.recording_url);
+    if (!audioRes.ok) throw new Error(`Falha ao baixar gravação: ${audioRes.status}`);
+    const arrayBuffer = await audioRes.arrayBuffer();
+    const base64Audio = Buffer.from(arrayBuffer).toString('base64');
+
+    const mimeType = audioFormat === 'mp3' ? 'audio/mpeg'
+      : audioFormat === 'wav' ? 'audio/wav'
+      : audioFormat === 'm4a' ? 'audio/mp4'
+      : 'audio/ogg';
+    const fileName = `audio.${audioFormat}`;
+
+    // 4. Enviar para o Whisper
+    let response;
+    if (provider === 'openrouter') {
+      response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'openai/whisper-1',
+          input_audio: { data: base64Audio, format: audioFormat }
+        })
+      });
+    } else {
+      const buffer = Buffer.from(base64Audio, 'base64');
+      const blob = new Blob([buffer], { type: mimeType });
+      const formData = new FormData();
+      formData.append('file', blob, fileName);
+
+      let baseUrl = '';
+      if (provider === 'groq') {
+        baseUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
+        formData.append('model', 'whisper-large-v3-turbo');
+      } else {
+        baseUrl = 'https://api.openai.com/v1/audio/transcriptions';
+        formData.append('model', 'whisper-1');
+      }
+      formData.append('language', 'pt');
+      formData.append('response_format', 'json');
+
+      response = await fetch(baseUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        body: formData as any
+      });
+    }
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('[transcribeCallAction] API Error:', response.status, err);
+      throw new Error(`Falha na API de transcrição: ${response.status}`);
+    }
+
+    const apiData = await response.json();
+    if (!apiData.text) throw new Error("API retornou resposta sem texto.");
+
+    // 5. Salvar no call_log
+    await supabaseAdmin
+      .from('call_logs')
+      .update({ transcription: apiData.text })
+      .eq('id', data.callId);
+
+    return { success: true, text: apiData.text };
+  });
