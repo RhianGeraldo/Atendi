@@ -2631,8 +2631,13 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
                   }
                 </p>
                 <p className={cn("mt-1 text-[11px] opacity-75 font-normal leading-none text-left")}>
-                  {m.metadata.status === "completed" && m.metadata.duration ? (
-                    `Duração: ${Math.floor(m.metadata.duration / 60)}m ${m.metadata.duration % 60}s`
+                  {m.metadata.status === "completed" && m.metadata.duration !== undefined && m.metadata.duration !== null ? (
+                    `Duração: ${(() => {
+                      const secs = Number(m.metadata.duration);
+                      const min = Math.floor(secs / 60);
+                      const sec = secs % 60;
+                      return `${min.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
+                    })()}`
                   ) : (
                     "Retorne as ligações no seu celular"
                   )}
