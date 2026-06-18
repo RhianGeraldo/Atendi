@@ -42,6 +42,21 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectingPhone, setConnectingPhone] = useState<string | null>(null);
 
+
+  const updateCallLog = async (data: any) => {
+    try {
+      const payload: any = {};
+      if (data.status !== undefined) payload.status = data.status;
+      if (data.ended_at !== undefined) payload.ended_at = data.ended_at;
+      if (data.recording_url !== undefined) payload.recording_url = data.recording_url;
+
+      const { error } = await supabase.from('call_logs').update(payload).eq('wavoip_call_id', data.wavoip_call_id);
+      if (error) console.error("[Wavoip] Erro ao atualizar log:", error);
+    } catch (e) {
+      console.error("[Wavoip] Exceção update log:", e);
+    }
+  };
+
   const upsertCallLog = async (data: any) => {
     if (!profile?.company_id) return;
     try {
@@ -257,14 +272,22 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         setIncomingOffer(null);
         setActiveCall(call);
         setCallStatus(call.status);
-        call.on("status", setCallStatus);
-        call.on("ended", () => {
-             upsertCallLog({
-               wavoip_call_id: call.id,
-               status: 'ENDED',
-               ended_at: new Date().toISOString(),
-               recording_url: `https://storage.wavoip.com/${call.id}`
-             });
+        
+        call.on("status", (status) => {
+          setCallStatus(status);
+          if (status === 'ENDED' || status === 'REJECTED' || status === 'FAILED' || status === 'DISCONNECTED') {
+            updateCallLog({
+              wavoip_call_id: call.id,
+              status,
+              ended_at: new Date().toISOString(),
+              recording_url: `https://storage.wavoip.com/${call.id}`
+            });
+            setTimeout(closeCallWithDelay, 1000);
+          } else {
+            updateCallLog({ wavoip_call_id: call.id, status });
+          }
+        });
+        
              closeCallWithDelay();
           });
           const instance = instances.find((i: any) => i.wavoip_token === call.device_token);
@@ -348,7 +371,21 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
       if (call) {
         setActiveCall(call);
         setCallStatus(call.status);
-        call.on("status", setCallStatus);
+        
+        call.on("status", (status) => {
+          setCallStatus(status);
+          if (status === 'ENDED' || status === 'REJECTED' || status === 'FAILED' || status === 'DISCONNECTED') {
+            updateCallLog({
+              wavoip_call_id: call.id,
+              status,
+              ended_at: new Date().toISOString(),
+              recording_url: `https://storage.wavoip.com/${call.id}`
+            });
+            setTimeout(closeCallWithDelay, 1000);
+          } else {
+            updateCallLog({ wavoip_call_id: call.id, status });
+          }
+        });
         const instance = instances.find((i: any) => i.wavoip_token === call.device_token);
         upsertCallLog({
           wavoip_call_id: call.id,
@@ -362,17 +399,25 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         call.on("peerAccept", (active) => {
            setActiveCall(active);
            setCallStatus(active.status);
-           active.on("status", setCallStatus);
-           active.on("ended", () => {
-               upsertCallLog({
+           
+           active.on("status", (status) => {
+             setCallStatus(status);
+             if (status === 'ENDED' || status === 'REJECTED' || status === 'FAILED' || status === 'DISCONNECTED') {
+               updateCallLog({
                  wavoip_call_id: active.id,
-                 status: 'ENDED',
+                 status,
                  ended_at: new Date().toISOString(),
                  recording_url: `https://storage.wavoip.com/${active.id}`
                });
+               setTimeout(closeCallWithDelay, 1000);
+             } else {
+               updateCallLog({ wavoip_call_id: active.id, status });
+             }
+           });
+           
                closeCallWithDelay();
              });
-             upsertCallLog({
+             updateCallLog({
                wavoip_call_id: active.id,
                status: 'ACTIVE'
              });
