@@ -288,8 +288,6 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
           }
         });
         
-             closeCallWithDelay();
-          });
           const instance = instances.find((i: any) => i.wavoip_token === call.device_token);
           upsertCallLog({
             wavoip_call_id: call.id,
@@ -415,8 +413,6 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
              }
            });
            
-               closeCallWithDelay();
-             });
              updateCallLog({
                wavoip_call_id: active.id,
                status: 'ACTIVE'
