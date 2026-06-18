@@ -117,6 +117,8 @@ async function processWavoipCallEvent(body: any) {
 
   if (status === 'CALLING' || status === 'RINGING') {
     callLogPayload.started_at = new Date().toISOString();
+  } else if (dbStatus === 'ACTIVE') {
+    callLogPayload.started_at = new Date().toISOString();
   } else if (dbStatus === 'ENDED' || dbStatus === 'NOT_ANSWERED' || dbStatus === 'REJECTED' || dbStatus === 'FAILED' || dbStatus === 'DISCONNECTED') {
     callLogPayload.ended_at = new Date().toISOString();
     if (duration) {
@@ -133,6 +135,7 @@ async function processWavoipCallEvent(body: any) {
 
   if (existingCall) {
     const updatePayload: any = { status: dbStatus };
+    if (callLogPayload.started_at) updatePayload.started_at = callLogPayload.started_at;
     if (callLogPayload.ended_at) updatePayload.ended_at = callLogPayload.ended_at;
     if (callLogPayload.duration_seconds) updatePayload.duration_seconds = callLogPayload.duration_seconds;
     

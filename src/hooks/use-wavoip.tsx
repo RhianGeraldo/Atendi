@@ -47,6 +47,7 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
     try {
       const payload: any = {};
       if (data.status !== undefined) payload.status = data.status;
+      if (data.started_at !== undefined) payload.started_at = data.started_at;
       if (data.ended_at !== undefined) payload.ended_at = data.ended_at;
       if (data.recording_url !== undefined) payload.recording_url = data.recording_url;
 
@@ -444,10 +445,11 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
              }
            });
            
-             updateCallLog({
-               wavoip_call_id: active.id,
-               status: 'ACTIVE'
-             });
+           updateCallLog({
+             wavoip_call_id: active.id,
+             status: 'ACTIVE',
+             started_at: new Date().toISOString()
+           });
         });
         call.on("peerReject", closeCallWithDelay);
         call.on("unanswered", closeCallWithDelay);
