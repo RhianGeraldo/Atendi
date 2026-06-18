@@ -1,4 +1,4 @@
--- Criar função para sincronizar call_logs com mensagens no chat com auto-resolução de contatos e instâncias
+-- Criar função para sincronizar call_logs com mensagens no chat com auto-resolução de contatos e instâncias e casting de enums
 CREATE OR REPLACE FUNCTION public.handle_call_log_message_sync()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -140,7 +140,7 @@ BEGIN
         END IF;
     END IF;
 
-    -- Insere a mensagem
+    -- Insere a mensagem com cast explícito para os Enums message_sender e media_type
     INSERT INTO public.messages (
         conversation_id,
         sender_type,
@@ -151,9 +151,9 @@ BEGIN
         created_at
     ) VALUES (
         v_conversation_id,
-        v_sender_type,
+        v_sender_type::public.message_sender,
         FALSE,
-        'text',
+        'text'::public.media_type,
         v_content,
         v_metadata,
         COALESCE(NEW.ended_at, NEW.started_at, now())
