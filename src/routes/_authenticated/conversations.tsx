@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useInfiniteQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -2596,6 +2596,49 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
                 </DialogContent>
               )}
             </Dialog>
+          </div>
+        ) : m.metadata?.type === "call" ? (
+          <div className="mb-1">
+            <div
+              className={cn(
+                "flex items-center gap-3 p-3 rounded-xl border max-w-[280px]",
+                mine ? "border-transparent bg-black/10 dark:bg-white/10 text-white" : "border-border bg-card text-foreground"
+              )}
+            >
+              <div 
+                className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full shadow-sm",
+                  m.metadata.status === "missed" && m.metadata.direction === "incoming" 
+                    ? "bg-red-500/10 text-red-500" 
+                    : mine ? "bg-white/20 text-white" : "bg-primary/10 text-primary"
+                )}
+              >
+                {m.metadata.direction === "incoming" ? (
+                  m.metadata.status === "missed" ? (
+                    <PhoneMissed className="h-5 w-5" />
+                  ) : (
+                    <PhoneIncoming className="h-5 w-5" />
+                  )
+                ) : (
+                  <PhoneOutgoing className="h-5 w-5" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold leading-tight text-left">
+                  {m.metadata.direction === "incoming" 
+                    ? (m.metadata.status === "missed" ? "Ligação de voz perdida" : "Ligação de voz")
+                    : (m.metadata.status === "missed" ? "Ligação de voz não atendida" : "Ligação de voz")
+                  }
+                </p>
+                <p className={cn("mt-1 text-[11px] opacity-75 font-normal leading-none text-left")}>
+                  {m.metadata.status === "completed" && m.metadata.duration ? (
+                    `Duração: ${Math.floor(m.metadata.duration / 60)}m ${m.metadata.duration % 60}s`
+                  ) : (
+                    "Retorne as ligações no seu celular"
+                  )}
+                </p>
+              </div>
+            </div>
           </div>
         ) : m.metadata?.location ? (
           <div className="mb-1">

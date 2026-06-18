@@ -13,6 +13,28 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
   }
 
   try {
+    // Auto-expire calls stuck in ACTIVE or RINGING for more than 5 minutes
+    try {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data: cleanedCalls, error: cleanupErr } = await supabaseAdmin
+        .from('call_logs')
+        .update({ 
+          status: 'ENDED',
+          ended_at: new Date().toISOString()
+        })
+        .in('status', ['ACTIVE', 'RINGING'])
+        .lt('started_at', fiveMinutesAgo)
+        .select('id');
+      
+      if (cleanupErr) {
+        console.error('[cron] Error cleaning up stuck calls:', cleanupErr);
+      } else if (cleanedCalls && cleanedCalls.length > 0) {
+        console.log(`[cron] Cleaned up ${cleanedCalls.length} stuck call logs.`);
+      }
+    } catch (cleanupEx) {
+      console.error('[cron] Exception during stuck calls cleanup:', cleanupEx);
+    }
+
     console.log('[cron] Starting follow-up scan...');
     
     // Find active conversations that are handled by AI

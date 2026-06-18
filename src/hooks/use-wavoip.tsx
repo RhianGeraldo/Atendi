@@ -91,6 +91,11 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
   };
 
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const activeCallRef = useRef<any>(null);
+
+  useEffect(() => {
+    activeCallRef.current = activeCall;
+  }, [activeCall]);
 
   const closeCallWithDelay = useCallback(() => {
     setCallStatus("ENDED" as any);
@@ -243,8 +248,34 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
       
       offer.on("status", setCallStatus);
       offer.on("acceptedElsewhere", () => setIncomingOffer(null));
-      offer.on("unanswered", () => setIncomingOffer(null));
-      offer.on("ended", () => setIncomingOffer(null));
+      offer.on("unanswered", () => {
+        const instance = instances.find((i: any) => i.wavoip_token === offer.device_token);
+        upsertCallLog({
+          wavoip_call_id: offer.id,
+          whatsapp_instance_id: instance?.id,
+          assigned_agent_id: profile?.id,
+          direction: 'INCOMING',
+          status: 'NOT_ANSWERED',
+          peer_number: offer.peer.phone,
+          ended_at: new Date().toISOString(),
+        });
+        setIncomingOffer(null);
+      });
+      offer.on("ended", () => {
+        if (!activeCallRef.current) {
+          const instance = instances.find((i: any) => i.wavoip_token === offer.device_token);
+          upsertCallLog({
+            wavoip_call_id: offer.id,
+            whatsapp_instance_id: instance?.id,
+            assigned_agent_id: profile?.id,
+            direction: 'INCOMING',
+            status: 'NOT_ANSWERED',
+            peer_number: offer.peer.phone,
+            ended_at: new Date().toISOString(),
+          });
+        }
+        setIncomingOffer(null);
+      });
     });
 
     Promise.all(wavoipInstance.wakeUpDevices()).then((results) => {
