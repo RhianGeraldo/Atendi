@@ -50,7 +50,14 @@ async function processWavoipRecording(body: any) {
     return;
   }
 
-  // 3. Fazer o download do arquivo de áudio para converter para Base64 (necessário para transcrição)
+  // 3. Detectar o formato de áudio da URL (Wavoip envia MP3/WAV, não OGG como o WhatsApp)
+  const urlPath = new URL(record_url).pathname.toLowerCase();
+  const audioFormat = urlPath.endsWith('.mp3') ? 'mp3'
+    : urlPath.endsWith('.wav') ? 'wav'
+    : urlPath.endsWith('.m4a') ? 'm4a'
+    : 'mp3'; // fallback: Wavoip costuma usar mp3
+
+  // 4. Fazer o download do arquivo de áudio para converter para Base64 (necessário para transcrição)
   let base64Audio = null;
   try {
     const audioRes = await fetch(record_url);
@@ -58,13 +65,13 @@ async function processWavoipRecording(body: any) {
     
     const arrayBuffer = await audioRes.arrayBuffer();
     base64Audio = Buffer.from(arrayBuffer).toString('base64');
-    console.log(`[wavoip-webhook] Download da gravação concluído (${base64Audio.length} chars de base64)`);
+    console.log(`[wavoip-webhook] Download da gravação concluído (${base64Audio.length} chars de base64, formato: ${audioFormat})`);
   } catch (e) {
     console.error(`[wavoip-webhook] Erro ao baixar arquivo de áudio de ${record_url}:`, e);
     // Mesmo se falhar o download, vamos tentar registrar no chat
   }
 
-  // 4. Encontrar a conversa ativa ou aguardando
+  // 5. Encontrar a conversa ativa ou aguardando
   let conversationId;
   const { data: activeConvs } = await supabaseAdmin
     .from('conversations')
@@ -76,8 +83,6 @@ async function processWavoipRecording(body: any) {
 
   if (activeConvs && activeConvs.length > 0) {
     conversationId = activeConvs[0].id;
-    // Se estivesse resolvido, reabre para mostrar o áudio?
-    // Melhor manter o status como está e apenas injetar
     await supabaseAdmin.from('conversations')
       .update({ last_message_at: new Date().toISOString() })
       .eq('id', conversationId);
@@ -104,12 +109,15 @@ async function processWavoipRecording(body: any) {
     return;
   }
 
-  // 5. Inserir a mensagem de áudio na conversa como mensagem interna
+  // 6. Inserir a mensagem de áudio na conversa como mensagem interna
+  // IMPORTANTE: sender_type deve ser 'agent' (não 'system') para o player de áudio
+  // aparecer no chat com o botão de transcrição. is_internal: true garante que
+  // a mensagem não aparece para o contato e é marcada como "Nota Interna".
   const { data: newMsg, error: msgErr } = await supabaseAdmin
     .from('messages')
     .insert({
       conversation_id: conversationId,
-      sender_type: 'system',
+      sender_type: 'agent',
       is_internal: true, // Visível apenas no CRM!
       media_type: 'audio',
       media_url: record_url,
@@ -125,9 +133,9 @@ async function processWavoipRecording(body: any) {
 
   console.log(`[wavoip-webhook] Gravação injetada no chat com sucesso! Msg ID: ${newMsg.id}`);
 
-  // 6. Transcrever o áudio
+  // 7. Transcrever o áudio com o formato correto (MP3 do Wavoip, não OGG do WhatsApp)
   if (base64Audio && company_id) {
-    console.log(`[wavoip-webhook] Iniciando transcrição de áudio via Whisper...`);
-    await triggerAudioTranscription(newMsg.id, base64Audio, company_id);
+    console.log(`[wavoip-webhook] Iniciando transcrição de áudio via Whisper (formato: ${audioFormat})...`);
+    await triggerAudioTranscription(newMsg.id, base64Audio, company_id, audioFormat);
   }
 }

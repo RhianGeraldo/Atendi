@@ -1175,7 +1175,7 @@ async function handleReaction(targetRemoteId: string, emoji: string): Promise<vo
   return;
 }
 
-export async function triggerAudioTranscription(messageId: string, base64Audio: string, companyId: string) {
+export async function triggerAudioTranscription(messageId: string, base64Audio: string, companyId: string, audioFormat: string = 'ogg') {
   try {
     const { data: company } = await supabaseAdmin
       .from('companies')
@@ -1195,10 +1195,16 @@ export async function triggerAudioTranscription(messageId: string, base64Audio: 
       return;
     }
 
+    const mimeType = audioFormat === 'mp3' ? 'audio/mpeg'
+      : audioFormat === 'wav' ? 'audio/wav'
+      : audioFormat === 'm4a' ? 'audio/mp4'
+      : 'audio/ogg';
+    const fileName = `audio.${audioFormat}`;
+
     let response;
 
     if (provider === 'openrouter') {
-      console.log(`[transcribeAudio] Sending to OpenRouter for message ${messageId}...`);
+      console.log(`[transcribeAudio] Sending to OpenRouter for message ${messageId} (format: ${audioFormat})...`);
       response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
         method: 'POST',
         headers: {
@@ -1209,15 +1215,15 @@ export async function triggerAudioTranscription(messageId: string, base64Audio: 
           model: 'openai/whisper-1',
           input_audio: {
             data: base64Audio,
-            format: 'ogg'
+            format: audioFormat
           }
         })
       });
     } else {
       const buffer = Buffer.from(base64Audio, 'base64');
-      const blob = new Blob([buffer], { type: 'audio/ogg' });
+      const blob = new Blob([buffer], { type: mimeType });
       const formData = new FormData();
-      formData.append('file', blob, 'audio.ogg');
+      formData.append('file', blob, fileName);
       
       let baseUrl = '';
       if (provider === 'groq') {
@@ -1231,7 +1237,7 @@ export async function triggerAudioTranscription(messageId: string, base64Audio: 
       formData.append('language', 'pt');
       formData.append('response_format', 'json');
 
-      console.log(`[transcribeAudio] Sending to ${provider} for message ${messageId}...`);
+      console.log(`[transcribeAudio] Sending to ${provider} for message ${messageId} (format: ${audioFormat})...`);
       response = await fetch(baseUrl, {
         method: 'POST',
         headers: {

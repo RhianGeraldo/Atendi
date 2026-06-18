@@ -1187,10 +1187,35 @@ export const transcribeAudioAction = createServerFn({ method: "POST" })
       throw new Error(`Nenhuma chave de API configurada para o provedor: ${provider}`);
     }
 
-    const base64Audio = msg.media_url.split(',')[1];
-    if (!base64Audio) {
-       throw new Error("Áudio não possui formato base64 válido.");
+    // Detectar se é URL HTTP (gravação Wavoip) ou base64 inline (áudio WhatsApp)
+    let base64Audio: string;
+    let audioFormat = 'ogg'; // padrão para WhatsApp
+
+    if (msg.media_url.startsWith('http://') || msg.media_url.startsWith('https://')) {
+      // URL HTTP direta — precisa fazer download (gravações Wavoip)
+      const urlPath = new URL(msg.media_url).pathname.toLowerCase();
+      audioFormat = urlPath.endsWith('.mp3') ? 'mp3'
+        : urlPath.endsWith('.wav') ? 'wav'
+        : urlPath.endsWith('.m4a') ? 'm4a'
+        : 'mp3'; // fallback para Wavoip
+
+      const audioRes = await fetch(msg.media_url);
+      if (!audioRes.ok) throw new Error(`Falha ao baixar áudio: ${audioRes.status}`);
+      const arrayBuffer = await audioRes.arrayBuffer();
+      base64Audio = Buffer.from(arrayBuffer).toString('base64');
+    } else {
+      // Base64 inline — áudio do WhatsApp (data:audio/ogg;base64,...)
+      const extracted = msg.media_url.split(',')[1];
+      if (!extracted) throw new Error("Áudio não possui formato base64 válido.");
+      base64Audio = extracted;
+      audioFormat = 'ogg';
     }
+
+    const mimeType = audioFormat === 'mp3' ? 'audio/mpeg'
+      : audioFormat === 'wav' ? 'audio/wav'
+      : audioFormat === 'm4a' ? 'audio/mp4'
+      : 'audio/ogg';
+    const fileName = `audio.${audioFormat}`;
 
     let response;
 
@@ -1205,15 +1230,15 @@ export const transcribeAudioAction = createServerFn({ method: "POST" })
           model: 'openai/whisper-1',
           input_audio: {
             data: base64Audio,
-            format: 'ogg'
+            format: audioFormat
           }
         })
       });
     } else {
       const buffer = Buffer.from(base64Audio, 'base64');
-      const blob = new Blob([buffer], { type: 'audio/ogg' });
+      const blob = new Blob([buffer], { type: mimeType });
       const formData = new FormData();
-      formData.append('file', blob, 'audio.ogg');
+      formData.append('file', blob, fileName);
       
       let baseUrl = '';
       if (provider === 'groq') {
