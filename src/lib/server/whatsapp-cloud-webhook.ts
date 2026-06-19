@@ -367,6 +367,7 @@ async function processIncomingMessage(params: any) {
     await supabaseAdmin
       .from('conversations')
       .update({
+        whatsapp_instance_id: instanceId,
         last_message_at: new Date(timestamp).toISOString(),
         last_message_content: textContent?.substring(0, 50)
       })

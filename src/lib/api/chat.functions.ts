@@ -120,6 +120,36 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     } : undefined;
 
     if (!data.isInternal) {
+      if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
+        try {
+          if (data.mediaBase64.startsWith('data:')) {
+            const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+            if (match) {
+              const mimeType = match[1];
+              const base64Data = match[2];
+              const buffer = Buffer.from(base64Data, 'base64');
+              const ext = mimeType.split('/')[1] || 'bin';
+              const fileName = `${targetConversationId}/${Date.now()}.${ext}`;
+              
+              const { data: uploadData, error: uploadError } = await supabaseAdmin
+                .storage
+                .from('media')
+                .upload(fileName, buffer, {
+                  contentType: mimeType,
+                  upsert: false
+                });
+                
+              if (!uploadError && uploadData) {
+                const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
+                mediaUrlToSend = publicUrlData.publicUrl;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse or upload base64 to Supabase', e);
+        }
+      }
+
       if (provider === 'oficial') {
         const { sendCloudApiMessage } = await import('../server/whatsapp-cloud-api');
         try {
@@ -138,33 +168,6 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         }
       } else {
         if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
-          try {
-            if (data.mediaBase64.startsWith('data:')) {
-              const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-              if (match) {
-                const mimeType = match[1];
-                const base64Data = match[2];
-                const buffer = Buffer.from(base64Data, 'base64');
-                const ext = mimeType.split('/')[1] || 'bin';
-                const fileName = `${targetConversationId}/${Date.now()}.${ext}`;
-                
-                const { data: uploadData, error: uploadError } = await supabaseAdmin
-                  .storage
-                  .from('media')
-                  .upload(fileName, buffer, {
-                    contentType: mimeType,
-                    upsert: false
-                  });
-                  
-                if (!uploadError && uploadData) {
-                  const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
-                  mediaUrlToSend = publicUrlData.publicUrl;
-                }
-              }
-            }
-          } catch (e) {
-            console.error('Failed to parse or upload base64 to Supabase', e);
-          }
 
           evogoResponse = await sendEvogoMedia({
             host,
