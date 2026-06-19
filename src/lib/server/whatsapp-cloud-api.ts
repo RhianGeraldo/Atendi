@@ -37,7 +37,7 @@ export async function sendCloudApiMessage(
     to: formattedPhone
   };
 
-  if (quotedMessageId) {
+  if (quotedMessageId && quotedMessageId.startsWith('wamid.') && type !== 'template') {
     payload.context = {
       message_id: quotedMessageId
     };
