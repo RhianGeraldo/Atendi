@@ -408,14 +408,16 @@ async function processIncomingMessage(params: any) {
 
   // 4. Resolver quoted message se existir context.id
   let quotedMessageId = null;
+  let quotedContent = null;
   if (messageContext && messageContext.id) {
     const { data: quotedMsg } = await supabaseAdmin
       .from('messages')
-      .select('id')
+      .select('id, content, media_type')
       .eq('remote_msg_id', messageContext.id)
       .maybeSingle();
     if (quotedMsg) {
       quotedMessageId = quotedMsg.id;
+      quotedContent = quotedMsg.content || `[${quotedMsg.media_type}]`;
     }
   }
 
@@ -452,6 +454,7 @@ async function processIncomingMessage(params: any) {
       media_url: mediaUrl,
       remote_msg_id: messageId,
       quoted_message_id: quotedMessageId,
+      quoted_content: quotedContent,
       metadata: Object.keys(metadata).length > 0 ? metadata : null,
       created_at: new Date(timestamp).toISOString()
     })
