@@ -146,26 +146,24 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               mediaType = 'text';
             } else if (messageType === 'image') {
               mediaType = 'image';
-              textContent = message.image?.caption || '🖼️ Imagem';
+              textContent = message.image?.caption || '';
               metaMediaId = message.image?.id;
             } else if (messageType === 'audio') {
               mediaType = 'audio';
-              const isVoice = message.audio?.voice === true;
-              textContent = isVoice ? '🎤 Mensagem de Voz' : '🎵 Arquivo de Áudio';
+              textContent = '';
               metaMediaId = message.audio?.id;
               audioData = message.audio;
             } else if (messageType === 'video') {
               mediaType = 'video';
-              textContent = '📹 Vídeo';
+              textContent = message.video?.caption || '';
               metaMediaId = message.video?.id;
             } else if (messageType === 'document') {
               mediaType = 'document';
-              textContent = message.document?.filename || '📄 Documento';
+              textContent = message.document?.caption || message.document?.filename || '';
               metaMediaId = message.document?.id;
             } else if (messageType === 'sticker') {
               mediaType = 'image';
-              const isAnimated = message.sticker?.animated === true;
-              textContent = isAnimated ? '🧩 Figurinha Animada' : '🧩 Figurinha';
+              textContent = '';
               metaMediaId = message.sticker?.id;
               stickerData = message.sticker;
             } else if (messageType === 'system') {
