@@ -24,7 +24,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const [webhookUrl, setWebhookUrl] = useState("");
   const [wavoipToken, setWavoipToken] = useState("");
   const [oficialPhoneId, setOficialPhoneId] = useState("");
-  const [oficialAccountId, setOficialAccountId] = useState("");
   const [oficialAccessToken, setOficialAccessToken] = useState("");
   const [advSettings, setAdvSettings] = useState({
     rejectCall: false,
@@ -47,7 +46,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     setWebhookUrl(defaultWebhook);
     setWavoipToken(instance.wavoip_token || "");
     setOficialPhoneId(instance.oficial_phone_number_id || "");
-    setOficialAccountId(instance.oficial_account_id || "");
     setOficialAccessToken(instance.oficial_access_token || "");
     
     // Fetch advanced settings from EvoGo
@@ -96,7 +94,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           .update({ 
              webhook_url: webhookUrl, 
              oficial_phone_number_id: oficialPhoneId,
-             oficial_account_id: oficialAccountId,
              oficial_access_token: oficialAccessToken,
           })
           .eq("id", instance.id);
@@ -176,14 +173,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                     placeholder="Ex: 106540352242922" 
                     value={oficialPhoneId}
                     onChange={(e) => setOficialPhoneId(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1 mt-2">
-                  <label className="text-xs text-muted-foreground">WABA ID (WhatsApp Business Account ID)</label>
-                  <Input 
-                    placeholder="Ex: 102290129340398" 
-                    value={oficialAccountId}
-                    onChange={(e) => setOficialAccountId(e.target.value)}
                   />
                 </div>
                 <div className="space-y-1 mt-2">
