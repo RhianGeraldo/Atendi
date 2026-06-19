@@ -23,6 +23,9 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   
   const [webhookUrl, setWebhookUrl] = useState("");
   const [wavoipToken, setWavoipToken] = useState("");
+  const [oficialPhoneId, setOficialPhoneId] = useState("");
+  const [oficialAccountId, setOficialAccountId] = useState("");
+  const [oficialAccessToken, setOficialAccessToken] = useState("");
   const [advSettings, setAdvSettings] = useState({
     rejectCall: false,
     readMessages: false,
@@ -32,8 +35,9 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   useEffect(() => {
     if (!open || !instance || !company?.evogo_host) return;
 
+    const isOficial = instance.provider === 'oficial';
     let defaultWebhook = instance.webhook_url;
-    const currentDomainWebhook = `${window.location.origin}/api/webhooks/evogo`;
+    const currentDomainWebhook = `${window.location.origin}/api/webhooks/${isOficial ? 'whatsapp-cloud' : 'evogo'}`;
     
     // Se estiver vazio, for do supabase antigo, ou for de um domínio antigo diferente do atual, atualiza pra origem atual
     if (!defaultWebhook || defaultWebhook.includes('supabase.co') || !defaultWebhook.startsWith(window.location.origin)) {
@@ -42,9 +46,16 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
 
     setWebhookUrl(defaultWebhook);
     setWavoipToken(instance.wavoip_token || "");
+    setOficialPhoneId(instance.oficial_phone_number_id || "");
+    setOficialAccountId(instance.oficial_account_id || "");
+    setOficialAccessToken(instance.oficial_access_token || "");
     
     // Fetch advanced settings from EvoGo
     const fetchSettings = async () => {
+      if (isOficial) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
         if (!instance.evogo_instance_id) {
@@ -74,20 +85,33 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const handleSave = async () => {
     if (!company?.evogo_host || !instance) return;
     
+    const isOficial = instance.provider === 'oficial';
     setSaving(true);
     const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
 
     try {
-      // 1. Save Webhook and Wavoip Token
-      await client.connectInstance(webhookUrl, instance.evogo_api_key);
-      await supabase
-        .from("whatsapp_instances")
-        .update({ webhook_url: webhookUrl, wavoip_token: wavoipToken || null })
-        .eq("id", instance.id);
+      if (isOficial) {
+        await supabase
+          .from("whatsapp_instances")
+          .update({ 
+             webhook_url: webhookUrl, 
+             oficial_phone_number_id: oficialPhoneId,
+             oficial_account_id: oficialAccountId,
+             oficial_access_token: oficialAccessToken,
+          })
+          .eq("id", instance.id);
+      } else {
+        // 1. Save Webhook and Wavoip Token
+        await client.connectInstance(webhookUrl, instance.evogo_api_key);
+        await supabase
+          .from("whatsapp_instances")
+          .update({ webhook_url: webhookUrl, wavoip_token: wavoipToken || null })
+          .eq("id", instance.id);
 
-      // 2. Save Advanced Settings
-      if (instance.evogo_instance_id) {
-        await client.updateAdvancedSettings(instance.evogo_instance_id, advSettings, instance.evogo_api_key);
+        // 2. Save Advanced Settings
+        if (instance.evogo_instance_id) {
+          await client.updateAdvancedSettings(instance.evogo_instance_id, advSettings, instance.evogo_api_key);
+        }
       }
 
       toast.success("Configurações salvas com sucesso!");
@@ -143,42 +167,73 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
               </div>
             </div>
 
-            <div className="space-y-4">
-              <h4 className="text-sm font-medium border-b pb-1">Opções Avançadas</h4>
-              
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <label className="text-sm font-medium">Rejeitar Ligações</label>
-                  <p className="text-xs text-muted-foreground">Recusa chamadas de voz e vídeo automaticamente.</p>
+            {instance.provider === 'oficial' ? (
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium border-b pb-1">Credenciais Meta / Cloud API</h4>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Phone Number ID</label>
+                  <Input 
+                    placeholder="Ex: 106540352242922" 
+                    value={oficialPhoneId}
+                    onChange={(e) => setOficialPhoneId(e.target.value)}
+                  />
                 </div>
-                <Switch 
-                  checked={advSettings.rejectCall}
-                  onCheckedChange={(c) => setAdvSettings(s => ({ ...s, rejectCall: c }))}
-                />
+                <div className="space-y-1 mt-2">
+                  <label className="text-xs text-muted-foreground">WABA ID (WhatsApp Business Account ID)</label>
+                  <Input 
+                    placeholder="Ex: 102290129340398" 
+                    value={oficialAccountId}
+                    onChange={(e) => setOficialAccountId(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1 mt-2">
+                  <label className="text-xs text-muted-foreground">Access Token (Permanente)</label>
+                  <Input 
+                    placeholder="EAA..." 
+                    type="password"
+                    value={oficialAccessToken}
+                    onChange={(e) => setOficialAccessToken(e.target.value)}
+                  />
+                </div>
               </div>
+            ) : (
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium border-b pb-1">Opções Avançadas</h4>
+                
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <label className="text-sm font-medium">Rejeitar Ligações</label>
+                    <p className="text-xs text-muted-foreground">Recusa chamadas de voz e vídeo automaticamente.</p>
+                  </div>
+                  <Switch 
+                    checked={advSettings.rejectCall}
+                    onCheckedChange={(c) => setAdvSettings(s => ({ ...s, rejectCall: c }))}
+                  />
+                </div>
 
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <label className="text-sm font-medium">Marcar como Lido</label>
-                  <p className="text-xs text-muted-foreground">Marca mensagens como lidas ao receber.</p>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <label className="text-sm font-medium">Marcar como Lido</label>
+                    <p className="text-xs text-muted-foreground">Marca mensagens como lidas ao receber.</p>
+                  </div>
+                  <Switch 
+                    checked={advSettings.readMessages}
+                    onCheckedChange={(c) => setAdvSettings(s => ({ ...s, readMessages: c }))}
+                  />
                 </div>
-                <Switch 
-                  checked={advSettings.readMessages}
-                  onCheckedChange={(c) => setAdvSettings(s => ({ ...s, readMessages: c }))}
-                />
-              </div>
 
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <label className="text-sm font-medium">Always Online</label>
-                  <p className="text-xs text-muted-foreground">Força o status "Online" no WhatsApp.</p>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <label className="text-sm font-medium">Always Online</label>
+                    <p className="text-xs text-muted-foreground">Força o status "Online" no WhatsApp.</p>
+                  </div>
+                  <Switch 
+                    checked={advSettings.alwaysOnline}
+                    onCheckedChange={(c) => setAdvSettings(s => ({ ...s, alwaysOnline: c }))}
+                  />
                 </div>
-                <Switch 
-                  checked={advSettings.alwaysOnline}
-                  onCheckedChange={(c) => setAdvSettings(s => ({ ...s, alwaysOnline: c }))}
-                />
               </div>
-            </div>
+            )}
 
             <Button 
               className="w-full mt-4" 
