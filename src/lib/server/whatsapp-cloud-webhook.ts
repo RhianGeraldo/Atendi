@@ -143,7 +143,7 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
                 textContent = message.interactive?.list_reply?.title || '';
               }
               interactiveData = message.interactive;
-              mediaType = 'interactive_response';
+              mediaType = 'text';
             } else if (messageType === 'image') {
               mediaType = 'image';
               textContent = message.image?.caption || '🖼️ Imagem';
@@ -163,13 +163,13 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               textContent = message.document?.filename || '📄 Documento';
               metaMediaId = message.document?.id;
             } else if (messageType === 'sticker') {
-              mediaType = 'sticker';
+              mediaType = 'image';
               const isAnimated = message.sticker?.animated === true;
               textContent = isAnimated ? '🧩 Figurinha Animada' : '🧩 Figurinha';
               metaMediaId = message.sticker?.id;
               stickerData = message.sticker;
             } else if (messageType === 'system') {
-              mediaType = 'system';
+              mediaType = 'text';
               textContent = message.system?.body || '⚠️ Mensagem de Sistema';
               systemData = message.system;
             } else {
