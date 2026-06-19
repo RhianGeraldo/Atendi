@@ -72,7 +72,7 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
         // Buscar instância no banco usando o phone_number_id
         const { data: instance } = await supabaseAdmin
           .from('whatsapp_instances')
-          .select('id, company_id, name, oficial_access_token')
+          .select('id, company_id, unit_id, name, oficial_access_token')
           .eq('oficial_phone_number_id', phoneNumberId)
           .limit(1)
           .maybeSingle();
@@ -187,6 +187,7 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
             // Lógica de Contato e Conversa 
             await processIncomingMessage({
               companyId: instance.company_id,
+              unitId: instance.unit_id,
               instanceId: instance.id,
               contactPhone,
               contactName,
@@ -292,7 +293,7 @@ async function handleMessageStatus(statusPayload: any, instanceId: string) {
 }
 
 async function processIncomingMessage(params: any) {
-  const { companyId, instanceId, contactPhone, contactName, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe, messageContext, messageReferral, interactiveData, audioData, stickerData, systemData } = params;
+  const { companyId, unitId, instanceId, contactPhone, contactName, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe, messageContext, messageReferral, interactiveData, audioData, stickerData, systemData } = params;
 
   // 1. Encontrar ou criar o contato
   const phoneWithoutPlus = contactPhone.replace('+', '');
@@ -379,7 +380,7 @@ async function processIncomingMessage(params: any) {
       .insert({
         contact_id: contact.id,
         whatsapp_instance_id: instanceId,
-        unit_id: contact.unit_id,
+        unit_id: unitId,
         status: 'waiting',
         started_at: new Date(timestamp).toISOString(),
         last_message_at: new Date(timestamp).toISOString(),
