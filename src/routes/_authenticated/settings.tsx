@@ -1052,7 +1052,9 @@ function InstanceRow({ instance, company, onConnect, onSettings }: { instance: a
         </div>
       </div>
       <div className="flex gap-2">
-        {instance.status === 'connected' ? (
+        {instance.provider === 'oficial' ? (
+          <Badge variant="outline" className="h-9 px-3 border-emerald-200 text-emerald-700 bg-emerald-50">API Oficial Ativa</Badge>
+        ) : instance.status === 'connected' ? (
           <Button variant="outline" size="sm" onClick={() => setConfirmDialog({ open: true, type: 'disconnect' })} className="text-destructive hover:bg-destructive/10">
             Desconectar
           </Button>

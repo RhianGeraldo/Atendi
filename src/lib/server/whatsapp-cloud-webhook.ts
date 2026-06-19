@@ -263,7 +263,7 @@ async function processIncomingMessage(params: any) {
   
   let { data: contact } = await supabaseAdmin
     .from('contacts')
-    .select('id, assigned_agent_id, status, unit_id')
+    .select('id, assigned_agent_id, unit_id')
     .eq('company_id', companyId)
     .eq('phone', phoneWithoutPlus)
     .limit(1)
@@ -276,10 +276,9 @@ async function processIncomingMessage(params: any) {
         company_id: companyId,
         name: contactName,
         phone: phoneWithoutPlus,
-        whatsapp_lid: phoneWithoutPlus,
-        status: 'new'
+        whatsapp_lid: phoneWithoutPlus
       })
-      .select('id, assigned_agent_id, status, unit_id')
+      .select('id, assigned_agent_id, unit_id')
       .single();
 
     if (contactError) {
