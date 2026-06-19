@@ -266,7 +266,7 @@ async function processIncomingMessage(params: any) {
   
   let { data: contact } = await supabaseAdmin
     .from('contacts')
-    .select('id, assigned_agent_id, unit_id')
+    .select('id, unit_id')
     .eq('company_id', companyId)
     .eq('phone', phoneWithoutPlus)
     .limit(1)
@@ -281,7 +281,7 @@ async function processIncomingMessage(params: any) {
         phone: phoneWithoutPlus,
         whatsapp_lid: phoneWithoutPlus
       })
-      .select('id, assigned_agent_id, unit_id')
+      .select('id, unit_id')
       .single();
 
     if (contactError) {
@@ -294,7 +294,7 @@ async function processIncomingMessage(params: any) {
   // 2. Encontrar conversa ativa
   let { data: activeConv } = await supabaseAdmin
     .from('conversations')
-    .select('id, status')
+    .select('id, status, assigned_agent_id')
     .eq('contact_id', contact.id)
     .in('status', ['waiting', 'active'])
     .order('started_at', { ascending: false })
@@ -368,7 +368,7 @@ async function processIncomingMessage(params: any) {
   }
 
   // Se o contato já for atendido por IA, enfileirar (Se for waiting, a cron/AI processa)
-  if (activeConv?.status === 'waiting' || !contact.assigned_agent_id) {
+  if (activeConv?.status === 'waiting' || !activeConv?.assigned_agent_id) {
     await enqueueAiMessage(msgData.id, companyId, conversationId);
   }
 }
