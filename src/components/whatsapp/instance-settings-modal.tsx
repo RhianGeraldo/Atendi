@@ -148,6 +148,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
 
   const isOficial = instance?.provider === 'oficial';
   const isInstagram = instance?.provider === 'instagram';
+  const isMessenger = instance?.provider === 'messenger';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -158,7 +159,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
             Configurações da Instância
           </DialogTitle>
           <DialogDescription>
-            {instance?.name} {!(isOficial || isInstagram) && <span className="font-mono text-xs">({instance?.instance_name})</span>}
+            {instance?.name} {!(isOficial || isInstagram || isMessenger) && <span className="font-mono text-xs">({instance?.instance_name})</span>}
           </DialogDescription>
         </DialogHeader>
 
@@ -186,6 +187,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                     advSettings={advSettings} setAdvSettings={setAdvSettings}
                     isOficial={isOficial}
                     isInstagram={isInstagram}
+                    isMessenger={isMessenger}
                   />
                   <Button 
                     className="w-full mt-4" 
@@ -212,6 +214,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                   advSettings={advSettings} setAdvSettings={setAdvSettings}
                   isOficial={isOficial}
                   isInstagram={isInstagram}
+                  isMessenger={isMessenger}
                 />
                 <Button 
                   className="w-full mt-4" 
@@ -238,9 +241,9 @@ function SettingsFormContent({
   oficialWabaId, setOficialWabaId, 
   oficialAccessToken, setOficialAccessToken, 
   advSettings, setAdvSettings, 
-  isOficial, isInstagram
+  isOficial, isInstagram, isMessenger
 }: any) {
-  const isCloudAPI = isOficial || isInstagram;
+  const isCloudAPI = isOficial || isInstagram || isMessenger;
   
   return (
     <>
@@ -292,25 +295,32 @@ function SettingsFormContent({
         <div className="space-y-4 mt-4">
           <h4 className="text-sm font-medium border-b pb-1">Credenciais Meta / Cloud API</h4>
           <div className="space-y-1">
+            {isMessenger && (
+              <p className="text-xs text-muted-foreground mt-1 mb-2 bg-blue-500/10 p-2 rounded border border-blue-500/20">
+                Para o Messenger, use o <strong>Page Access Token</strong> gerado na aba "Messenger" do seu App. E coloque o <strong>ID da Página</strong> no campo abaixo.
+              </p>
+            )}
             <label className="text-xs text-muted-foreground">
-              {isInstagram ? 'Instagram Account ID' : 'Phone Number ID'}
+              {isInstagram ? 'Instagram Account ID' : isMessenger ? 'Facebook Page ID' : 'Phone Number ID'}
             </label>
             <Input 
-              placeholder={isInstagram ? "Ex: 178414000000000" : "Ex: 106540352242922"} 
+              placeholder={isInstagram ? "Ex: 178414000000000" : isMessenger ? "Ex: 102938475619283" : "Ex: 106540352242922"} 
               value={oficialPhoneId}
               onChange={(e) => setOficialPhoneId(e.target.value)}
             />
           </div>
-          <div className="space-y-1 mt-2">
-            <label className="text-xs text-muted-foreground">
-              {isInstagram ? 'Facebook Page ID' : 'WABA ID (WhatsApp Business Account)'}
-            </label>
-            <Input 
-              placeholder={isInstagram ? "Ex: 102938475619283" : "Ex: 119358594050135"} 
-              value={oficialWabaId}
-              onChange={(e) => setOficialWabaId(e.target.value)}
-            />
-          </div>
+          {!isMessenger && (
+            <div className="space-y-1 mt-2">
+              <label className="text-xs text-muted-foreground">
+                {isInstagram ? 'Facebook Page ID' : 'WABA ID (WhatsApp Business Account)'}
+              </label>
+              <Input 
+                placeholder={isInstagram ? "Ex: 102938475619283" : "Ex: 119358594050135"} 
+                value={oficialWabaId}
+                onChange={(e) => setOficialWabaId(e.target.value)}
+              />
+            </div>
+          )}
           <div className="space-y-1 mt-2">
             <label className="text-xs text-muted-foreground">Access Token (Permanente)</label>
             <Input 

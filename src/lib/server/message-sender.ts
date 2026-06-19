@@ -215,6 +215,88 @@ export async function sendPlatformMessage({
 
     remoteMsgId = result.message_id || null;
     participantJid = instance.oficial_phone_number_id;
+
+  } else if (provider === 'messenger') {
+    const { data: instance } = await supabaseAdmin
+      .from("whatsapp_instances")
+      .select("oficial_phone_number_id, oficial_access_token")
+      .eq("id", conv.whatsapp_instance_id)
+      .single();
+
+    if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
+      throw new Error("Facebook Page ID or Token missing");
+    }
+
+    const psid = conv.contacts?.whatsapp_lid || phone;
+
+    const payload: any = {
+      recipient: { id: psid },
+      message: {}
+    };
+
+    if (mediaBase64 && mediaType !== 'text') {
+       // Upload to Supabase to get a public URL for Meta
+        try {
+          if (mediaBase64.startsWith('data:')) {
+            const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+            if (match) {
+              const mimeType = match[1];
+              const base64Data = match[2];
+              const buffer = Buffer.from(base64Data, 'base64');
+              const ext = mimeType.split('/')[1] || 'bin';
+              const fileName = `fb_${conversationId}/${Date.now()}.${ext}`;
+              
+              const { data: uploadData, error: uploadError } = await supabaseAdmin
+                .storage
+                .from('media')
+                .upload(fileName, buffer, { contentType: mimeType, upsert: false });
+                
+              if (!uploadError && uploadData) {
+                const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
+                mediaUrlToSend = publicUrlData.publicUrl;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse or upload base64 to Supabase', e);
+        }
+
+        if (mediaUrlToSend) {
+          let fbMediaType = 'image';
+          if (mediaType === 'video') fbMediaType = 'video';
+          else if (mediaType === 'audio') fbMediaType = 'audio';
+          else if (mediaType === 'document') fbMediaType = 'file';
+
+          payload.message = {
+            attachment: {
+              type: fbMediaType,
+              payload: {
+                url: mediaUrlToSend,
+                is_reusable: false
+              }
+            }
+          };
+        } else {
+          payload.message = { text: text || '' };
+        }
+    } else {
+      payload.message = { text: text || '' };
+    }
+
+    const response = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      console.error("[sendPlatformMessage] Messenger sending error:", result);
+      throw new Error(`Graph API Error: ${result.error?.message || 'Unknown error'}`);
+    }
+
+    remoteMsgId = result.message_id || null;
+    participantJid = instance.oficial_phone_number_id;
   }
 
   // Save to DB

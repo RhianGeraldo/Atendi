@@ -265,7 +265,7 @@ function SettingsPage() {
       if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token)) {
         throw new Error("Configure Host e Token primeiro para usar a EvoGo.");
       }
-      if ((provider === 'oficial' || provider === 'instagram') && (!numberId || !accessToken || !verifyToken)) {
+      if ((provider === 'oficial' || provider === 'instagram' || provider === 'messenger') && (!numberId || !accessToken || !verifyToken)) {
         throw new Error("Preencha todos os campos da credencial (ID, Token e Verify Token).");
       }
       
@@ -292,6 +292,8 @@ function SettingsPage() {
         defaultWebhookUrl = `${window.location.origin}/api/webhooks/whatsapp-cloud`;
       } else if (provider === 'instagram') {
         defaultWebhookUrl = `${window.location.origin}/api/webhooks/instagram`;
+      } else if (provider === 'messenger') {
+        defaultWebhookUrl = `${window.location.origin}/api/webhooks/messenger`;
       }
 
       // Salvar no banco
@@ -957,16 +959,17 @@ function SettingsPage() {
                   <SelectItem value="evogo">EvoGo API (WhatsApp)</SelectItem>
                   <SelectItem value="oficial">API Oficial (WhatsApp Cloud API)</SelectItem>
                   <SelectItem value="instagram">Instagram</SelectItem>
+                  <SelectItem value="messenger">Messenger (Meta)</SelectItem>
                   <SelectItem value="stevo" disabled>Stevo (Em Breve)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {(instanceProvider === 'oficial' || instanceProvider === 'instagram') && (
+            {(instanceProvider === 'oficial' || instanceProvider === 'instagram' || instanceProvider === 'messenger') && (
               <>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">
-                    {instanceProvider === 'instagram' ? 'Instagram Account ID' : 'Phone Number ID'}
+                    {instanceProvider === 'instagram' ? 'Instagram Account ID' : instanceProvider === 'messenger' ? 'Facebook Page ID' : 'Phone Number ID'}
                   </label>
                   <Input 
                     placeholder="1234567890" 
@@ -993,7 +996,7 @@ function SettingsPage() {
                   />
                   <p className="text-xs text-muted-foreground">
                     Crie uma chave e use-a para configurar o webhook na Meta: 
-                    <code>{window.location.origin}/api/webhooks/{instanceProvider === 'instagram' ? 'instagram' : 'whatsapp-cloud'}</code>
+                    <code>{window.location.origin}/api/webhooks/{instanceProvider === 'instagram' ? 'instagram' : instanceProvider === 'messenger' ? 'messenger' : 'whatsapp-cloud'}</code>
                   </p>
                 </div>
               </>

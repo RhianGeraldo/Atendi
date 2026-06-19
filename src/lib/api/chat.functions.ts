@@ -219,6 +219,60 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
         evogoResponse = { id: result.message_id, isInstagram: true, participant: instance.oficial_phone_number_id };
 
+      } else if (provider === 'messenger') {
+        const { data: instance } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("oficial_phone_number_id, oficial_access_token") // oficial_phone_number_id guarda o Page ID para Messenger
+          .eq("id", conv.whatsapp_instance_id)
+          .single();
+
+        if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
+          throw new Error("Facebook Page ID ou Token faltando");
+        }
+
+        const payload: any = {
+          recipient: { id: phone }, // phone was filled with psid
+          message: {}
+        };
+
+        if (finalMessageId) {
+          payload.reply_to = { mid: finalMessageId };
+        }
+
+        if (data.mediaBase64 && data.mediaType !== 'text' && mediaUrlToSend) {
+          let fbMediaType = 'image';
+          if (data.mediaType === 'video') fbMediaType = 'video';
+          else if (data.mediaType === 'audio') fbMediaType = 'audio';
+          else if (data.mediaType === 'document') fbMediaType = 'file';
+
+          payload.message = {
+            attachment: {
+              type: fbMediaType,
+              payload: {
+                url: mediaUrlToSend,
+                is_reusable: false
+              }
+            }
+          };
+        } else {
+          payload.message = { text: textToSend || '' };
+        }
+
+        // Messenger utiliza o /me/messages usando o Page Access Token
+        const fbRes = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const result = await fbRes.json();
+        if (!fbRes.ok) {
+          console.error("[chat.functions] Messenger sending error:", result);
+          throw new Error(`Messenger Error: ${result.error?.message || 'Unknown error'}`);
+        }
+
+        evogoResponse = { id: result.message_id, isMessenger: true, participant: instance.oficial_phone_number_id };
+
       } else {
         if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
 
