@@ -201,7 +201,7 @@ export async function sendPlatformMessage({
       payload.message = { text: text || '' };
     }
 
-    const response = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`, {
+    const response = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
