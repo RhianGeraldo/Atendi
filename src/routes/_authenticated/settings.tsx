@@ -265,8 +265,8 @@ function SettingsPage() {
       if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token)) {
         throw new Error("Configure Host e Token primeiro para usar a EvoGo.");
       }
-      if (provider === 'oficial' && (!numberId || !accessToken || !verifyToken)) {
-        throw new Error("Preencha todos os campos da API Oficial.");
+      if ((provider === 'oficial' || provider === 'instagram') && (!numberId || !accessToken || !verifyToken)) {
+        throw new Error("Preencha todos os campos da credencial (ID, Token e Verify Token).");
       }
       
       // Gera o slug técnico
@@ -287,6 +287,13 @@ function SettingsPage() {
 
       const technicalName = `${slugify(company.name)}${unitSlugPart}-${slugify(name)}`;
 
+      let defaultWebhookUrl = null;
+      if (provider === 'oficial') {
+        defaultWebhookUrl = `${window.location.origin}/api/webhooks/whatsapp-cloud`;
+      } else if (provider === 'instagram') {
+        defaultWebhookUrl = `${window.location.origin}/api/webhooks/instagram`;
+      }
+
       // Salvar no banco
       const { data, error } = await supabase.from("whatsapp_instances").insert({
         company_id: profile.company_id,
@@ -296,7 +303,8 @@ function SettingsPage() {
         provider,
         oficial_phone_number_id: numberId,
         oficial_access_token: accessToken,
-        oficial_verify_token: verifyToken
+        oficial_verify_token: verifyToken,
+        webhook_url: defaultWebhookUrl
       }).select().single();
       
       if (error) throw error;

@@ -85,14 +85,16 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   }, [open, instance, company]);
 
   const handleSave = async () => {
-    if (!company?.evogo_host || !instance) return;
+    if (!instance) return;
     
     const isOficial = instance.provider === 'oficial';
+    const isInstagram = instance.provider === 'instagram';
+    const isCloudAPI = isOficial || isInstagram;
+
     setSaving(true);
-    const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
 
     try {
-      if (isOficial) {
+      if (isCloudAPI) {
         await supabase
           .from("whatsapp_instances")
           .update({ 
@@ -103,6 +105,11 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           })
           .eq("id", instance.id);
       } else {
+        if (!company?.evogo_host) {
+          throw new Error("Host da EvoGo não configurado na empresa.");
+        }
+        const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
+
         // 1. Save Webhook and Wavoip Token
         await client.connectInstance(webhookUrl, instance.evogo_api_key);
         await supabase
