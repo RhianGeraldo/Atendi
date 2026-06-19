@@ -215,7 +215,7 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
 async function downloadCloudMedia(mediaId: string, accessToken: string, companyId: string): Promise<string | null> {
   try {
     // 1. Get media URL
-    const res = await fetch(`https://graph.facebook.com/v22.0/${mediaId}`, {
+    const res = await fetch(`https://graph.facebook.com/v25.0/${mediaId}`, {
       headers: { 'Authorization': `Bearer ${accessToken}` }
     });
     const data = await res.json();
