@@ -9,6 +9,20 @@ import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fe
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile } from '@ffmpeg/util';
+
+let ffmpegInstance: FFmpeg | null = null;
+const getFFmpeg = async () => {
+  if (ffmpegInstance) return ffmpegInstance;
+  const ffmpeg = new FFmpeg();
+  await ffmpeg.load({
+    coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js',
+    wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm'
+  });
+  ffmpegInstance = ffmpeg;
+  return ffmpeg;
+};
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -1392,17 +1406,33 @@ function ChatPanel({
         }
       };
 
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg' });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64data = reader.result as string;
-          send.mutate({ content: "", isInternal: isInternalNote, mediaType: "audio", mediaBase64: base64data });
-        };
-        reader.readAsDataURL(audioBlob);
-        
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop());
+      mediaRecorder.onstop = async () => {
+        setIsRecording(false);
+        const toastId = toast.loading("Processando áudio...");
+        try {
+          const webmBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          
+          const ffmpeg = await getFFmpeg();
+          await ffmpeg.writeFile('input.webm', await fetchFile(webmBlob));
+          await ffmpeg.exec(['-i', 'input.webm', '-c:a', 'libopus', 'output.ogg']);
+          const data = await ffmpeg.readFile('output.ogg');
+          
+          const oggBlob = new Blob([data], { type: 'audio/ogg' });
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            send.mutate({ content: "", isInternal: isInternalNote, mediaType: "audio", mediaBase64: base64data });
+            toast.dismiss(toastId);
+          };
+          reader.readAsDataURL(oggBlob);
+        } catch (error) {
+          console.error("Erro na conversão de áudio:", error);
+          toast.dismiss(toastId);
+          toast.error("Erro ao processar áudio", { description: String(error) });
+        } finally {
+          // Stop all tracks
+          stream.getTracks().forEach(track => track.stop());
+        }
       };
 
       mediaRecorder.start();
