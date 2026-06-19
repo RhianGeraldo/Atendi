@@ -251,7 +251,7 @@ async function handleMessageStatus(statusPayload: any, instanceId: string) {
   const { error } = await supabaseAdmin
     .from('messages')
     .update(updateData)
-    .eq('remote_message_id', wamid);
+    .eq('remote_msg_id', wamid);
 
   if (error) {
     console.error(`[Whatsapp Cloud] Falha ao atualizar status da msg ${wamid}:`, error);
@@ -342,7 +342,7 @@ async function processIncomingMessage(params: any) {
   const { data: existingMsg } = await supabaseAdmin
     .from('messages')
     .select('id')
-    .eq('remote_message_id', messageId)
+    .eq('remote_msg_id', messageId)
     .maybeSingle();
 
   if (existingMsg) return; // Mensagem duplicada ignorada
@@ -356,7 +356,7 @@ async function processIncomingMessage(params: any) {
       content: textContent || '',
       media_type: mediaType,
       media_url: mediaUrl, // Vamos precisar converter isso de ID pra URL real dps
-      remote_message_id: messageId,
+      remote_msg_id: messageId,
       created_at: new Date(timestamp).toISOString()
     })
     .select('id')
