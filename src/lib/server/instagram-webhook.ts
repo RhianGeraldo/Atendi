@@ -32,45 +32,66 @@ export async function handleInstagramWebhook(request: Request): Promise<Response
 }
 
 async function processInstagramWebhookBody(body: any): Promise<void> {
-  if (body.object === 'instagram') {
+  if (body.object === 'instagram' || body.object === 'page') {
     if (body.entry && body.entry.length > 0) {
       for (const entry of body.entry) {
-        const instagramAccountId = entry.id; // O ID da conta do Instagram (página)
+        const accountId = entry.id; // Pode ser IG Account ID ou Facebook Page ID
 
-        // Buscar a instância correspondente
+        // Buscar a instância correspondente (checando tanto o ID do Instagram quanto o da Página)
         const { data: instance } = await supabaseAdmin
           .from('whatsapp_instances')
-          .select('id, company_id, unit_id, provider')
+          .select('id, company_id, unit_id, provider, oficial_phone_number_id, oficial_waba_id')
           .eq('provider', 'instagram')
-          .eq('oficial_phone_number_id', instagramAccountId)
+          .or(`oficial_phone_number_id.eq.${accountId},oficial_waba_id.eq.${accountId}`)
           .limit(1)
           .maybeSingle();
 
         if (!instance) {
-          console.log(`[Instagram Webhook] Instância não encontrada para a conta IG: ${instagramAccountId}`);
+          console.log(`[Instagram Webhook] Instância não encontrada para a conta: ${accountId}`);
           continue;
         }
 
+        const instagramAccountId = instance.oficial_phone_number_id;
+
         for (const webhookEvent of entry.messaging || []) {
-          const senderIgsid = webhookEvent.sender.id;
-          const recipientIgsid = webhookEvent.recipient.id;
+          const senderId = webhookEvent.sender?.id;
+          const recipientId = webhookEvent.recipient?.id;
           const timestamp = webhookEvent.timestamp;
 
-          // Se for is_echo, a mensagem foi enviada pelo dono da página (from me)
-          const isFromMe = webhookEvent.message?.is_echo || senderIgsid === instagramAccountId;
-          const contactIgsid = isFromMe ? recipientIgsid : senderIgsid;
+          if (!senderId || !recipientId) continue;
+
+          // Se for is_echo ou o remetente for a própria conta IG ou Página, foi enviado por nós
+          const isFromMe = webhookEvent.message?.is_echo || senderId === instagramAccountId || senderId === accountId;
+          const contactIgsid = isFromMe ? recipientId : senderId;
 
           if (webhookEvent.message) {
             const messageId = webhookEvent.message.mid;
-            const textContent = webhookEvent.message.text || '';
+            let textContent = webhookEvent.message.text || '';
             let mediaType = 'text';
             let mediaUrl = null;
 
             if (webhookEvent.message.attachments && webhookEvent.message.attachments.length > 0) {
               const attachment = webhookEvent.message.attachments[0];
-              mediaType = attachment.type; // 'image', 'video', 'audio', 'file'
+              const attType = attachment.type;
               mediaUrl = attachment.payload?.url;
-              if (attachment.payload?.sticker_id) mediaType = 'image';
+
+              if (['image', 'sticker'].includes(attType)) {
+                mediaType = 'image';
+              } else if (['video', 'reel', 'ig_reel'].includes(attType)) {
+                mediaType = 'video';
+              } else if (attType === 'audio') {
+                mediaType = 'audio';
+              } else if (attType === 'file') {
+                mediaType = 'document';
+              } else if (['post', 'ig_post', 'fallback'].includes(attType)) {
+                mediaType = 'text';
+                const attTitle = attachment.payload?.title || '';
+                const attUrl = attachment.payload?.url || '';
+                textContent = `${textContent}\n${attTitle} ${attUrl}`.trim();
+              } else {
+                mediaType = 'text';
+                textContent = `${textContent}\n[Anexo ${attType}]`.trim();
+              }
             }
 
             if (!textContent && mediaType === 'text') continue;
