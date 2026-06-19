@@ -10,7 +10,8 @@ export async function sendCloudApiMessage(
   toPhone: string, 
   content: string, 
   type: string = 'text', 
-  mediaUrl?: string | null
+  mediaUrl?: string | null,
+  quotedMessageId?: string | null
 ) {
   // Buscar configuração da instância
   const { data: instance } = await supabaseAdmin
@@ -33,6 +34,12 @@ export async function sendCloudApiMessage(
     recipient_type: 'individual',
     to: toPhone.replace(/\D/g, '')
   };
+
+  if (quotedMessageId) {
+    payload.context = {
+      message_id: quotedMessageId
+    };
+  }
 
   if (type === 'text') {
     payload.type = 'text';

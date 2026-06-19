@@ -39,12 +39,12 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     }
 
     // 2. Get evogo configuration for the conversation's instance
-    let host, token, instanceName;
+    let host, token, instanceName, provider;
 
     if (conv.whatsapp_instance_id) {
       const { data: instance } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .select("instance_name, evogo_api_key, provider, companies(evogo_host)")
         .eq("id", conv.whatsapp_instance_id)
         .single();
 
@@ -52,6 +52,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         host = instance.companies?.evogo_host;
         token = instance.evogo_api_key;
         instanceName = instance.instance_name;
+        provider = instance.provider || 'evogo';
       }
     }
 
@@ -61,7 +62,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       if (unitData) {
         const { data: companyInstance } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("instance_name, evogo_api_key, companies(evogo_host)")
+          .select("instance_name, evogo_api_key, provider, companies(evogo_host)")
           .eq("company_id", unitData.company_id)
           .limit(1)
           .maybeSingle();
@@ -69,11 +70,12 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           host = companyInstance.companies?.evogo_host;
           token = companyInstance.evogo_api_key;
           instanceName = companyInstance.instance_name;
+          provider = companyInstance.provider || 'evogo';
         }
       }
     }
 
-    if (!data.isInternal && (!host || !token || !instanceName)) {
+    if (!data.isInternal && provider !== 'oficial' && (!host || !token || !instanceName)) {
       throw new Error("EvoGo is not configured for this conversation.");
     }
 
@@ -118,63 +120,81 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     } : undefined;
 
     if (!data.isInternal) {
-      if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
+      if (provider === 'oficial') {
+        const { sendCloudApiMessage } = await import('./whatsapp-cloud-api');
         try {
-          if (data.mediaBase64.startsWith('data:')) {
-            const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-            if (match) {
-              const mimeType = match[1];
-              const base64Data = match[2];
-              const buffer = Buffer.from(base64Data, 'base64');
-              const ext = mimeType.split('/')[1] || 'bin';
-              const fileName = `${targetConversationId}/${Date.now()}.${ext}`;
-              
-              const { data: uploadData, error: uploadError } = await supabaseAdmin
-                .storage
-                .from('media')
-                .upload(fileName, buffer, {
-                  contentType: mimeType,
-                  upsert: false
-                });
+          const msgId = await sendCloudApiMessage(
+            conv.whatsapp_instance_id!,
+            phone,
+            textToSend || '',
+            data.mediaType,
+            mediaUrlToSend,
+            finalMessageId
+          );
+          evogoResponse = { id: msgId };
+        } catch (cloudErr) {
+          console.error('[chat.functions] sendCloudApiMessage failed:', cloudErr);
+          throw new Error("Falha ao enviar mensagem pela API Oficial.");
+        }
+      } else {
+        if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
+          try {
+            if (data.mediaBase64.startsWith('data:')) {
+              const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+              if (match) {
+                const mimeType = match[1];
+                const base64Data = match[2];
+                const buffer = Buffer.from(base64Data, 'base64');
+                const ext = mimeType.split('/')[1] || 'bin';
+                const fileName = `${targetConversationId}/${Date.now()}.${ext}`;
                 
-              if (!uploadError && uploadData) {
-                const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
-                mediaUrlToSend = publicUrlData.publicUrl;
+                const { data: uploadData, error: uploadError } = await supabaseAdmin
+                  .storage
+                  .from('media')
+                  .upload(fileName, buffer, {
+                    contentType: mimeType,
+                    upsert: false
+                  });
+                  
+                if (!uploadError && uploadData) {
+                  const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
+                  mediaUrlToSend = publicUrlData.publicUrl;
+                }
               }
             }
+          } catch (e) {
+            console.error('Failed to parse or upload base64 to Supabase', e);
           }
-        } catch (e) {
-          console.error('Failed to parse or upload base64 to Supabase', e);
-        }
 
-        evogoResponse = await sendEvogoMedia({
-          host,
-          token,
-          instanceName,
-          number: phone,
-          base64: mediaUrlToSend!,
-          mediatype: data.mediaType as any,
-          caption: textToSend,
-          quoted,
-        });
-      } else if (textToSend.match(/https?:\/\//)) {
-        evogoResponse = await sendEvogoLink({
-          host,
-          token,
-          instanceName,
-          number: phone,
-          text: textToSend,
-          quoted,
-        });
-      } else {
-        evogoResponse = await sendEvogoText({
-          host,
-          token,
-          instanceName,
-          number: phone,
-          text: textToSend,
-          quoted,
-        });
+          evogoResponse = await sendEvogoMedia({
+            host,
+            token,
+            instanceName,
+            number: phone,
+            base64: mediaUrlToSend!,
+            mediatype: data.mediaType as any,
+            caption: textToSend,
+            quoted,
+          });
+        } else if (textToSend.match(/https?:\/\//)) {
+          evogoResponse = await sendEvogoLink({
+            host,
+            token,
+            instanceName,
+            number: phone,
+            text: textToSend,
+            quoted,
+          });
+        } else {
+          evogoResponse = await sendEvogoText({
+            host,
+            token,
+            instanceName,
+            number: phone,
+            text: textToSend,
+            quoted,
+          });
+        }
       }
     }
 

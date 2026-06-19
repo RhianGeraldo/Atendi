@@ -62,7 +62,8 @@ export async function sendPlatformMessage({
         phone,
         text || '',
         mediaType,
-        mediaUrlToSend
+        mediaUrlToSend,
+        finalMessageId
       );
       remoteMsgId = msgId;
       participantJid = null;
