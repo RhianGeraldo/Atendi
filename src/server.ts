@@ -58,9 +58,28 @@ export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       const url = new URL(request.url);
+      
+      // Webhooks padronizados
+      if (url.pathname === '/api/webhooks/evogo' && request.method === 'POST') {
+        return await handleEvogoWebhook(request);
+      }
+      
+      // Retrocompatibilidade para quem já configurou o webhook na Evogo
       if (url.pathname === '/api/evogo/webhook' && request.method === 'POST') {
         return await handleEvogoWebhook(request);
       }
+
+      if (url.pathname === '/api/webhooks/whatsapp-cloud' && (request.method === 'POST' || request.method === 'GET')) {
+        const { handleWhatsappCloudWebhook } = await import('./lib/server/whatsapp-cloud-webhook');
+        return await handleWhatsappCloudWebhook(request);
+      }
+
+      if (url.pathname === '/api/webhooks/stevochat' && request.method === 'POST') {
+        // Reservado para futura integração
+        return new Response(JSON.stringify({ success: true, message: "Stevo webhook not implemented yet" }), { status: 200 });
+      }
+
+      // Outros webhooks
       if (url.pathname === '/api/wavoip/webhook' && request.method === 'POST') {
         return await handleWavoipWebhook(request);
       }

@@ -1553,6 +1553,10 @@ export type Database = {
           unit_id: string | null
           wavoip_token: string | null
           webhook_url: string | null
+          provider: string
+          oficial_phone_number_id: string | null
+          oficial_access_token: string | null
+          oficial_verify_token: string | null
         }
         Insert: {
           company_id: string
@@ -1567,6 +1571,10 @@ export type Database = {
           unit_id?: string | null
           wavoip_token?: string | null
           webhook_url?: string | null
+          provider?: string
+          oficial_phone_number_id?: string | null
+          oficial_access_token?: string | null
+          oficial_verify_token?: string | null
         }
         Update: {
           company_id?: string
@@ -1581,6 +1589,10 @@ export type Database = {
           unit_id?: string | null
           wavoip_token?: string | null
           webhook_url?: string | null
+          provider?: string
+          oficial_phone_number_id?: string | null
+          oficial_access_token?: string | null
+          oficial_verify_token?: string | null
         }
         Relationships: [
           {

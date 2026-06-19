@@ -53,6 +53,10 @@ function SettingsPage() {
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
   const [instanceName, setInstanceName] = useState("");
+  const [instanceProvider, setInstanceProvider] = useState("evogo");
+  const [oficialNumberId, setOficialNumberId] = useState("");
+  const [oficialToken, setOficialToken] = useState("");
+  const [oficialVerifyToken, setOficialVerifyToken] = useState("");
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [useSignature, setUseSignature] = useState(profile?.use_signature ?? true);
@@ -254,13 +258,17 @@ function SettingsPage() {
   });
 
   const createInstance = useMutation({
-    mutationFn: async (name: string) => {
+    mutationFn: async (payload: { name: string, provider: string, numberId?: string, accessToken?: string, verifyToken?: string }) => {
+      const { name, provider, numberId, accessToken, verifyToken } = payload;
       if (!profile?.company_id) throw new Error("Sem empresa");
-      if (!company?.evogo_host || !company?.evogo_global_token) {
-        throw new Error("Configure Host e Token primeiro.");
+      if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token)) {
+        throw new Error("Configure Host e Token primeiro para usar a EvoGo.");
+      }
+      if (provider === 'oficial' && (!numberId || !accessToken || !verifyToken)) {
+        throw new Error("Preencha todos os campos da API Oficial.");
       }
       
-      // Gera o slug técnico com remoção de acentos real e sem espaços
+      // Gera o slug técnico
       const slugify = (s: string) => s
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
@@ -284,19 +292,23 @@ function SettingsPage() {
         unit_id: selectedUnitId || null,
         name,
         instance_name: technicalName,
+        provider,
+        oficial_phone_number_id: numberId,
+        oficial_access_token: accessToken,
+        oficial_verify_token: verifyToken
       }).select().single();
       
       if (error) throw error;
 
-      // Chama a EvoGo real
-      const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
-      try {
-        const evoRes: any = await client.createInstance(technicalName, data.evogo_api_key);
-        const evogoId = evoRes?.data?.id || evoRes?.id;
+      if (provider === 'evogo') {
+        // Chama a EvoGo real
+        const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
+        try {
+          const evoRes: any = await client.createInstance(technicalName, data.evogo_api_key);
+          const evogoId = evoRes?.data?.id || evoRes?.id;
 
-        if (evogoId) {
-          // Salva no banco local com base no domínio que o usuário está acessando
-          const webhookUrl = `${window.location.origin}/api/evogo/webhook`;
+          if (evogoId) {
+            const webhookUrl = `${window.location.origin}/api/webhooks/evogo`;
           
           await supabase.from("whatsapp_instances").update({
             evogo_instance_id: evogoId,
@@ -321,8 +333,12 @@ function SettingsPage() {
       return data;
     },
     onSuccess: () => {
-      toast.success("Instância global criada!");
+      toast.success("Instância criada com sucesso!");
       setInstanceName("");
+      setInstanceProvider("evogo");
+      setOficialNumberId("");
+      setOficialToken("");
+      setOficialVerifyToken("");
       setCreateModalOpen(false);
       qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
     },
@@ -910,27 +926,74 @@ function SettingsPage() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Nome da Conexão</label>
+              <label className="text-sm font-medium">Nome de Exibição</label>
               <Input 
                 placeholder="Ex: Suporte Central" 
                 value={instanceName}
                 onChange={(e) => setInstanceName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && instanceName && company?.evogo_host && !createInstance.isPending) {
-                    createInstance.mutate(instanceName);
-                  }
-                }}
                 autoFocus
               />
             </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Provedor</label>
+              <Select value={instanceProvider} onValueChange={setInstanceProvider}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o provedor" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="evogo">EvoGo API (Padrão)</SelectItem>
+                  <SelectItem value="oficial">API Oficial (Meta Cloud API)</SelectItem>
+                  <SelectItem value="stevo" disabled>Stevo (Em Breve)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {instanceProvider === 'oficial' && (
+              <>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Phone Number ID</label>
+                  <Input 
+                    placeholder="1234567890" 
+                    value={oficialNumberId}
+                    onChange={(e) => setOficialNumberId(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">O ID do seu número gerado no painel da Meta.</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Access Token Permanente</label>
+                  <Input 
+                    type="password"
+                    placeholder="EAAS..." 
+                    value={oficialToken}
+                    onChange={(e) => setOficialToken(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Verify Token (Sua Escolha)</label>
+                  <Input 
+                    placeholder="Crie uma senha (ex: atendi2026)" 
+                    value={oficialVerifyToken}
+                    onChange={(e) => setOficialVerifyToken(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Crie uma chave e use-a para configurar o webhook na Meta: <code>{window.location.origin}/api/webhooks/whatsapp-cloud</code></p>
+                </div>
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateModalOpen(false)}>
               Cancelar
             </Button>
             <Button 
-              onClick={() => createInstance.mutate(instanceName)}
-              disabled={!instanceName || createInstance.isPending || !company?.evogo_host}
+              onClick={() => createInstance.mutate({
+                name: instanceName,
+                provider: instanceProvider,
+                numberId: oficialNumberId,
+                accessToken: oficialToken,
+                verifyToken: oficialVerifyToken
+              })}
+              disabled={!instanceName || createInstance.isPending || (instanceProvider === 'evogo' && !company?.evogo_host)}
             >
               {createInstance.isPending ? "Criando..." : "Criar Instância"}
             </Button>

@@ -36,12 +36,12 @@ export async function sendPlatformMessage({
   let mediaUrlToSend = mediaBase64;
 
   if (conv.channel === 'whatsapp') {
-    let host, token, instanceName;
+    let provider = 'evogo';
 
     if (conv.whatsapp_instance_id) {
       const { data: instance } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .select("instance_name, evogo_api_key, provider, oficial_phone_number_id, oficial_access_token, companies(evogo_host)")
         .eq("id", conv.whatsapp_instance_id)
         .single();
 
@@ -49,47 +49,62 @@ export async function sendPlatformMessage({
         host = instance.companies?.evogo_host;
         token = instance.evogo_api_key;
         instanceName = instance.instance_name;
+        provider = instance.provider || 'evogo';
       }
-    }
-
-    if (!host || !token || !instanceName || !phone) {
-      throw new Error("EvoGo is not configured or missing phone number for WhatsApp channel.");
     }
 
     let evogoResponse;
 
-    if (mediaBase64 && mediaType !== 'text') {
-      // Upload to Supabase if it's base64
-      try {
-        if (mediaBase64.startsWith('data:')) {
-          const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-          if (match) {
-            const mimeType = match[1];
-            const base64Data = match[2];
-            const buffer = Buffer.from(base64Data, 'base64');
-            const ext = mimeType.split('/')[1] || 'bin';
-            const fileName = `${conversationId}/${Date.now()}.${ext}`;
-            
-            const { data: uploadData, error: uploadError } = await supabaseAdmin
-              .storage
-              .from('media')
-              .upload(fileName, buffer, { contentType: mimeType, upsert: false });
-              
-            if (!uploadError && uploadData) {
-              const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
-              mediaUrlToSend = publicUrlData.publicUrl;
-            }
-          }
-        }
-      } catch (e) {
-        console.error('Failed to parse or upload base64 to Supabase', e);
+    if (provider === 'oficial') {
+      const { sendCloudApiMessage } = await import('./whatsapp-cloud-api');
+      const msgId = await sendCloudApiMessage(
+        conv.whatsapp_instance_id!,
+        phone,
+        text || '',
+        mediaType,
+        mediaUrlToSend
+      );
+      remoteMsgId = msgId;
+      participantJid = null;
+    } else {
+      // Logic for Evogo
+      if (!host || !token || !instanceName || !phone) {
+        throw new Error("EvoGo is not configured or missing phone number for WhatsApp channel.");
       }
 
-      evogoResponse = await sendEvogoMedia({
-        host, token, instanceName, number: phone,
-        base64: mediaUrlToSend!, mediatype: mediaType as any, caption: text,
-      });
-    } else {
+      if (mediaBase64 && mediaType !== 'text') {
+        // Upload to Supabase se for base64 e não tiver link de storage (Evogo não gosta de mt URL, mas a logica tava com base64 e storage misto)
+        // A lógica de upload fica idêntica para o evogo e ja tava aqui, ela sobe pro supabase e pega publicUrl
+        try {
+          if (mediaBase64.startsWith('data:')) {
+            const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+            if (match) {
+              const mimeType = match[1];
+              const base64Data = match[2];
+              const buffer = Buffer.from(base64Data, 'base64');
+              const ext = mimeType.split('/')[1] || 'bin';
+              const fileName = `${conversationId}/${Date.now()}.${ext}`;
+              
+              const { data: uploadData, error: uploadError } = await supabaseAdmin
+                .storage
+                .from('media')
+                .upload(fileName, buffer, { contentType: mimeType, upsert: false });
+                
+              if (!uploadError && uploadData) {
+                const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
+                mediaUrlToSend = publicUrlData.publicUrl;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse or upload base64 to Supabase', e);
+        }
+
+        evogoResponse = await sendEvogoMedia({
+          host, token, instanceName, number: phone,
+          base64: mediaUrlToSend!, mediatype: mediaType as any, caption: text,
+        });
+      } else {
       const messageText = text || '';
       // Regex to detect if there's any URL in the text, avoiding trailing punctuation or markdown chars like *, ), ], }
       const hasUrl = /(https?:\/\/[^\s*()\[\]{}]+)/g.test(messageText);
@@ -112,8 +127,10 @@ export async function sendPlatformMessage({
       }
     }
 
-    remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
-    participantJid = evogoResponse?.data?.Info?.Sender || null;
+      }
+      remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
+      participantJid = evogoResponse?.data?.Info?.Sender || null;
+    }
     
   } else if (conv.channel === 'instagram') {
     // Implement Instagram sending logic here in the future
