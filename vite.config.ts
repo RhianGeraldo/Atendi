@@ -16,6 +16,9 @@ export default defineConfig({
     server: {
       allowedHosts: true,
     },
+    optimizeDeps: {
+      exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util']
+    }
   },
   nitro: {
     preset: 'vercel',
