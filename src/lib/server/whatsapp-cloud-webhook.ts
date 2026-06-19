@@ -89,6 +89,19 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
           }
         }
 
+        // Processar Erros de Sistema/Conta
+        if (value.errors && value.errors.length > 0) {
+          for (const errorObj of value.errors) {
+            console.error(`[Whatsapp Cloud] Erro recebido da Meta para a instância ${instance.name} (${phoneNumberId}):`, {
+              code: errorObj.code,
+              title: errorObj.title,
+              message: errorObj.message,
+              details: errorObj.error_data?.details
+            });
+            // Dependendo do código do erro (ex: banimento), você poderia atualizar o status da instância aqui.
+          }
+        }
+
         // Processar Novas Mensagens
         if (value.messages && value.messages.length > 0) {
           for (const message of value.messages) {
@@ -112,6 +125,10 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
             let mediaType = 'text';
             let mediaUrl = null;
             let metaMediaId = null;
+            let interactiveData = null;
+            let audioData = null;
+            let stickerData = null;
+            let systemData = null;
 
             if (messageType === 'text') {
               textContent = message.text?.body || '';
@@ -125,6 +142,7 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               } else if (intType === 'list_reply') {
                 textContent = message.interactive?.list_reply?.title || '';
               }
+              interactiveData = message.interactive;
               mediaType = 'interactive_response';
             } else if (messageType === 'image') {
               mediaType = 'image';
@@ -132,8 +150,10 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               metaMediaId = message.image?.id;
             } else if (messageType === 'audio') {
               mediaType = 'audio';
-              textContent = '🎵 Áudio';
+              const isVoice = message.audio?.voice === true;
+              textContent = isVoice ? '🎤 Mensagem de Voz' : '🎵 Arquivo de Áudio';
               metaMediaId = message.audio?.id;
+              audioData = message.audio;
             } else if (messageType === 'video') {
               mediaType = 'video';
               textContent = '📹 Vídeo';
@@ -144,8 +164,14 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               metaMediaId = message.document?.id;
             } else if (messageType === 'sticker') {
               mediaType = 'sticker';
-              textContent = '🧩 Figurinhas (Sticker)';
+              const isAnimated = message.sticker?.animated === true;
+              textContent = isAnimated ? '🧩 Figurinha Animada' : '🧩 Figurinha';
               metaMediaId = message.sticker?.id;
+              stickerData = message.sticker;
+            } else if (messageType === 'system') {
+              mediaType = 'system';
+              textContent = message.system?.body || '⚠️ Mensagem de Sistema';
+              systemData = message.system;
             } else {
               textContent = `[Mensagem não suportada: ${messageType}]`;
             }
@@ -157,6 +183,9 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               mediaUrl = await downloadCloudMedia(metaMediaId, instance.oficial_access_token, instance.company_id);
             }
             
+            const messageContext = message.context;
+            const messageReferral = message.referral;
+
             // Lógica de Contato e Conversa 
             await processIncomingMessage({
               companyId: instance.company_id,
@@ -168,7 +197,13 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               mediaType,
               mediaUrl,
               timestamp,
-              isFromMe
+              isFromMe,
+              messageContext,
+              messageReferral,
+              interactiveData,
+              audioData,
+              stickerData,
+              systemData
             });
           }
         }
@@ -259,7 +294,7 @@ async function handleMessageStatus(statusPayload: any, instanceId: string) {
 }
 
 async function processIncomingMessage(params: any) {
-  const { companyId, instanceId, contactPhone, contactName, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe } = params;
+  const { companyId, instanceId, contactPhone, contactName, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe, messageContext, messageReferral, interactiveData, audioData, stickerData, systemData } = params;
 
   // 1. Encontrar ou criar o contato
   const phoneWithoutPlus = contactPhone.replace('+', '');
@@ -273,13 +308,23 @@ async function processIncomingMessage(params: any) {
     .maybeSingle();
 
   if (!contact) {
+    let source = null;
+    let sourceDetails = null;
+
+    if (messageReferral && messageReferral.source_url) {
+      source = messageReferral.source_url.includes('ig.me') || messageReferral.source_url.includes('instagram') ? 'Instagram Ads' : 'Facebook Ads';
+      sourceDetails = messageReferral.headline || messageReferral.body || messageReferral.source_id;
+    }
+
     const { data: newContact, error: contactError } = await supabaseAdmin
       .from('contacts')
       .insert({
         company_id: companyId,
         name: contactName,
         phone: phoneWithoutPlus,
-        whatsapp_lid: phoneWithoutPlus
+        whatsapp_lid: phoneWithoutPlus,
+        source: source,
+        source_details: sourceDetails
       })
       .select('id, unit_id')
       .single();
@@ -289,6 +334,21 @@ async function processIncomingMessage(params: any) {
       return;
     }
     contact = newContact;
+  }
+
+  // 1.5 Processar Mudança de Número de Telefone
+  if (systemData && systemData.type === 'user_changed_number' && systemData.wa_id) {
+    const newPhone = systemData.wa_id.replace('+', '');
+    const { error: updateError } = await supabaseAdmin
+      .from('contacts')
+      .update({ phone: newPhone, whatsapp_lid: newPhone })
+      .eq('id', contact.id);
+      
+    if (updateError) {
+      console.error(`[Whatsapp Cloud] Falha ao atualizar o número de telefone de ${contactPhone} para ${newPhone}:`, updateError);
+    } else {
+      console.log(`[Whatsapp Cloud] Número do contato ${contact.id} atualizado de ${contactPhone} para ${newPhone}.`);
+    }
   }
 
   // 2. Encontrar conversa ativa
@@ -347,7 +407,42 @@ async function processIncomingMessage(params: any) {
 
   if (existingMsg) return; // Mensagem duplicada ignorada
 
-  // 4. Inserir mensagem
+  // 4. Resolver quoted message se existir context.id
+  let quotedMessageId = null;
+  if (messageContext && messageContext.id) {
+    const { data: quotedMsg } = await supabaseAdmin
+      .from('messages')
+      .select('id')
+      .eq('remote_msg_id', messageContext.id)
+      .maybeSingle();
+    if (quotedMsg) {
+      quotedMessageId = quotedMsg.id;
+    }
+  }
+
+  // 5. Preparar Metadata
+  let metadata: any = {};
+  if (messageContext && messageContext.referred_product) {
+    metadata.referred_product = messageContext.referred_product;
+  }
+  if (messageContext && (messageContext.forwarded || messageContext.frequently_forwarded)) {
+    metadata.is_forwarded = true;
+    metadata.frequently_forwarded = messageContext.frequently_forwarded || false;
+  }
+  if (messageReferral) {
+    metadata.referral = messageReferral;
+  }
+  if (interactiveData) {
+    metadata.interactive_response = interactiveData;
+  }
+  if (audioData && audioData.voice === true) {
+    metadata.is_voice_note = true;
+  }
+  if (stickerData && stickerData.animated === true) {
+    metadata.is_animated = true;
+  }
+
+  // 6. Inserir mensagem
   const { data: msgData, error: msgError } = await supabaseAdmin
     .from('messages')
     .insert({
@@ -355,8 +450,10 @@ async function processIncomingMessage(params: any) {
       sender_type: 'contact',
       content: textContent || '',
       media_type: mediaType,
-      media_url: mediaUrl, // Vamos precisar converter isso de ID pra URL real dps
+      media_url: mediaUrl,
       remote_msg_id: messageId,
+      quoted_message_id: quotedMessageId,
+      metadata: Object.keys(metadata).length > 0 ? metadata : null,
       created_at: new Date(timestamp).toISOString()
     })
     .select('id')
