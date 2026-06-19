@@ -243,10 +243,10 @@ async function downloadCloudMedia(mediaId: string, accessToken: string, companyI
 
     const filename = `${companyId}/${mediaId}_${Date.now()}.${ext}`;
 
-    // 3. Upload to Supabase Storage (bucket 'chat_media')
+    // 3. Upload to Supabase Storage (bucket 'media')
     const { data: uploadData, error: uploadErr } = await supabaseAdmin
       .storage
-      .from('chat_media')
+      .from('media')
       .upload(filename, buffer, {
         contentType: mimeType,
         upsert: true
@@ -260,7 +260,7 @@ async function downloadCloudMedia(mediaId: string, accessToken: string, companyI
     // 4. Retornar URL pública
     const { data: publicUrlData } = supabaseAdmin
       .storage
-      .from('chat_media')
+      .from('media')
       .getPublicUrl(filename);
 
     return publicUrlData.publicUrl;
