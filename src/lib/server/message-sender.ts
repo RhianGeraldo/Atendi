@@ -136,12 +136,12 @@ export async function sendPlatformMessage({
     
     const { data: instance } = await supabaseAdmin
       .from("whatsapp_instances")
-      .select("oficial_phone_number_id, oficial_waba_id, oficial_access_token")
+      .select("oficial_phone_number_id, oficial_access_token")
       .eq("id", conv.whatsapp_instance_id)
       .single();
 
-    if (!instance || !instance.oficial_phone_number_id || !instance.oficial_waba_id || !instance.oficial_access_token) {
-      throw new Error("Instagram Account ID, Page ID ou Token missing");
+    if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
+      throw new Error("Instagram Account ID or Token missing");
     }
 
     const igsid = conv.contacts?.whatsapp_lid || phone;
