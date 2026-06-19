@@ -126,11 +126,9 @@ export async function sendPlatformMessage({
         });
       }
     }
-
-      }
-      remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
-      participantJid = evogoResponse?.data?.Info?.Sender || null;
-    }
+    remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
+    participantJid = evogoResponse?.data?.Info?.Sender || null;
+  }
     
   } else if (conv.channel === 'instagram') {
     // Implement Instagram sending logic here in the future

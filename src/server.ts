@@ -74,6 +74,21 @@ export default {
         return await handleWhatsappCloudWebhook(request);
       }
 
+      if (url.pathname === '/api/webhooks/facebook' && (request.method === 'POST' || request.method === 'GET')) {
+        const { handleFacebookWebhook } = await import('./lib/server/facebook-webhook');
+        return await handleFacebookWebhook(request);
+      }
+
+      if (url.pathname === '/api/webhooks/instagram' && (request.method === 'POST' || request.method === 'GET')) {
+        const { handleInstagramWebhook } = await import('./lib/server/instagram-webhook');
+        return await handleInstagramWebhook(request);
+      }
+
+      if (url.pathname === '/api/webhooks/messenger' && (request.method === 'POST' || request.method === 'GET')) {
+        const { handleMessengerWebhook } = await import('./lib/server/messenger-webhook');
+        return await handleMessengerWebhook(request);
+      }
+
       if (url.pathname === '/api/webhooks/stevochat' && request.method === 'POST') {
         // Reservado para futura integração
         return new Response(JSON.stringify({ success: true, message: "Stevo webhook not implemented yet" }), { status: 200 });
