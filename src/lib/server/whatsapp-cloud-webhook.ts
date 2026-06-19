@@ -369,7 +369,7 @@ async function processIncomingMessage(params: any) {
       .from('conversations')
       .update({
         last_message_at: new Date(timestamp).toISOString(),
-        last_message_content: textContent?.substring(0, 50)
+        last_message_preview: textContent?.substring(0, 50)
       })
       .eq('id', conversationId);
   } else {
@@ -377,14 +377,13 @@ async function processIncomingMessage(params: any) {
     const { data: newConv, error: convError } = await supabaseAdmin
       .from('conversations')
       .insert({
-        company_id: companyId,
         contact_id: contact.id,
         whatsapp_instance_id: instanceId,
         unit_id: contact.unit_id,
         status: 'waiting',
         started_at: new Date(timestamp).toISOString(),
         last_message_at: new Date(timestamp).toISOString(),
-        last_message_content: textContent?.substring(0, 50),
+        last_message_preview: textContent?.substring(0, 50),
         channel: 'whatsapp'
       })
       .select('id')
