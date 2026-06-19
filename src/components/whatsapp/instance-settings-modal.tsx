@@ -33,7 +33,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     if (!open || !instance || !company?.evogo_host) return;
 
     let defaultWebhook = instance.webhook_url;
-    const currentDomainWebhook = `${window.location.origin}/api/evogo/webhook`;
+    const currentDomainWebhook = `${window.location.origin}/api/webhooks/evogo`;
     
     // Se estiver vazio, for do supabase antigo, ou for de um domínio antigo diferente do atual, atualiza pra origem atual
     if (!defaultWebhook || defaultWebhook.includes('supabase.co') || !defaultWebhook.startsWith(window.location.origin)) {

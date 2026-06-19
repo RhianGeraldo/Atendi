@@ -239,15 +239,18 @@ async function handleMessageStatus(statusPayload: any, instanceId: string) {
   const wamid = statusPayload.id;
   const statusString = statusPayload.status; // 'sent', 'delivered', 'read', 'failed'
   
-  // Mapeamento simples
-  let newStatus = 'sent';
-  if (statusString === 'delivered') newStatus = 'delivered';
-  if (statusString === 'read') newStatus = 'read';
-  if (statusString === 'failed') newStatus = 'error';
+  // Atualizamos o metadata ou read_at dependendo do status. A tabela messages não possui coluna 'status'.
+  const updateData: any = {};
+  if (statusString === 'read') {
+    updateData.read_at = new Date().toISOString();
+  }
+  
+  // Opcional: salvar o status exato no metadata
+  // updateData.metadata = { delivery_status: newStatus };
 
   const { error } = await supabaseAdmin
     .from('messages')
-    .update({ status: newStatus })
+    .update(updateData)
     .eq('remote_message_id', wamid);
 
   if (error) {
@@ -354,7 +357,6 @@ async function processIncomingMessage(params: any) {
       media_type: mediaType,
       media_url: mediaUrl, // Vamos precisar converter isso de ID pra URL real dps
       remote_message_id: messageId,
-      status: 'received',
       created_at: new Date(timestamp).toISOString()
     })
     .select('id')
