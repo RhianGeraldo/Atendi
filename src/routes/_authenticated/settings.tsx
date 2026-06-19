@@ -329,6 +329,7 @@ function SettingsPage() {
       } catch (e) {
         console.error("Falha ao criar/configurar na EvoGo, mas salvo no DB", e);
       }
+      }
 
       return data;
     },
