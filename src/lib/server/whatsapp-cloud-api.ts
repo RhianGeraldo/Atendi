@@ -96,3 +96,64 @@ export async function sendCloudApiMessage(
   // A API da Meta retorna messages[0].id (WAMID)
   return responseData.messages?.[0]?.id || null;
 }
+
+export async function syncCloudTemplates(instanceId: string) {
+  const { data: instance, error } = await supabaseAdmin
+    .from('whatsapp_instances')
+    .select('company_id, oficial_waba_id, oficial_access_token')
+    .eq('id', instanceId)
+    .single();
+
+  if (error || !instance) {
+    throw new Error('Instância não encontrada.');
+  }
+
+  if (!instance.oficial_waba_id || !instance.oficial_access_token) {
+    throw new Error('WABA ID ou Access Token ausentes na configuração da instância.');
+  }
+
+  // Busca templates na API da Meta
+  const response = await fetch(`https://graph.facebook.com/v25.0/${instance.oficial_waba_id}/message_templates?limit=100`, {
+    headers: {
+      'Authorization': `Bearer ${instance.oficial_access_token}`
+    }
+  });
+
+  const responseData = await response.json();
+
+  if (!response.ok) {
+    throw new Error(responseData.error?.message || 'Falha ao buscar templates.');
+  }
+
+  const templates = responseData.data;
+  
+  if (!templates || templates.length === 0) {
+    return { success: true, count: 0 };
+  }
+
+  // Prepara payload para upsert
+  const upsertData = templates.map((t: any) => ({
+    company_id: instance.company_id,
+    whatsapp_instance_id: instanceId,
+    name: t.name,
+    language: t.language,
+    status: t.status, // APPROVED, PENDING, REJECTED
+    quality_score: t.quality_score?.score || 'UNKNOWN',
+    category: t.category,
+    components: t.components || []
+  }));
+
+  // No Supabase, upsert com base no whatsapp_instance_id, name e language
+  const { error: upsertError } = await supabaseAdmin
+    .from('whatsapp_templates')
+    .upsert(upsertData, {
+      onConflict: 'whatsapp_instance_id, name, language'
+    });
+
+  if (upsertError) {
+    console.error('[WhatsApp Cloud API] Erro ao salvar templates:', upsertError);
+    throw new Error('Erro interno ao salvar templates.');
+  }
+
+  return { success: true, count: templates.length };
+}

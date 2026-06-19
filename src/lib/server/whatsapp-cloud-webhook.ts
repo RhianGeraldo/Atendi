@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
 import { enqueueAiMessage } from './ai-queue';
+import { syncCloudTemplates } from './whatsapp-cloud-api';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function handleWhatsappCloudWebhook(request: Request): Promise<Response> {
@@ -64,6 +65,47 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
         const value = change.value;
         if (!value) continue;
 
+        // Processar Webhooks de Templates (Eventos a nível de WABA, não possuem metadata.phone_number_id)
+        if (
+          change.field === 'message_template_components_update' ||
+          change.field === 'message_template_status_update' ||
+          change.field === 'message_template_quality_update' ||
+          change.field === 'template_category_update'
+        ) {
+          await handleTemplateWebhook(entry.id);
+          continue;
+        }
+
+        // Processar Webhooks de Alertas da Conta (WABA-level)
+        if (change.field === 'account_alerts') {
+          await handleAccountAlertWebhook(entry.id, value);
+          continue;
+        }
+
+        // Processar Webhooks de Revisão da Conta (WABA-level)
+        if (change.field === 'account_review_update') {
+          await handleAccountReviewWebhook(entry.id, value);
+          continue;
+        }
+
+        // Processar Webhooks de Atualizações Gerais da Conta (WABA-level)
+        if (change.field === 'account_update') {
+          await handleAccountUpdateWebhook(entry.id, value);
+          continue;
+        }
+
+        // Processar Webhooks de Nome de Telefone (WABA-level mas atrelado a um numero)
+        if (change.field === 'phone_number_name_update') {
+          await handlePhoneNumberNameWebhook(entry.id, value);
+          continue;
+        }
+
+        // Processar Webhooks de Qualidade/Limites do Telefone (WABA-level)
+        if (change.field === 'phone_number_quality_update') {
+          await handlePhoneNumberQualityWebhook(entry.id, value);
+          continue;
+        }
+
         const metadata = value.metadata;
         if (!metadata || !metadata.phone_number_id) continue;
 
@@ -79,6 +121,18 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
 
         if (!instance) {
           console.log(`[Whatsapp Cloud] Recebido webhook para phoneNumberId ${phoneNumberId}, mas nenhuma instância foi encontrada.`);
+          continue;
+        }
+
+        // Processar Webhooks de Sincronização de Contatos do App SMB
+        if (change.field === 'smb_app_state_sync') {
+          await handleStateSyncWebhook(instance.company_id, instance.unit_id, value);
+          continue;
+        }
+
+        // Processar Webhooks de Preferências do Usuário (Opt-in / Opt-out de Marketing)
+        if (change.field === 'user_preferences') {
+          await handleUserPreferencesWebhook(instance.company_id, value);
           continue;
         }
 
@@ -476,5 +530,207 @@ async function processIncomingMessage(params: any) {
   // Se o contato já for atendido por IA, enfileirar (Se for waiting, a cron/AI processa)
   if (activeConv?.status === 'waiting' || !activeConv?.assigned_agent_id) {
     await enqueueAiMessage(msgData.id, companyId, conversationId);
+  }
+}
+
+async function handleTemplateWebhook(wabaId: string): Promise<void> {
+  // Encontra pelo menos UMA instância que use esse WABA ID
+  const { data: instance } = await supabaseAdmin
+    .from('whatsapp_instances')
+    .select('id')
+    .eq('oficial_waba_id', wabaId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!instance) {
+    console.log(`[Whatsapp Cloud Webhook] Evento de template recebido para WABA ${wabaId}, mas não temos essa WABA configurada em nenhuma instância.`);
+    return;
+  }
+
+  try {
+    console.log(`[Whatsapp Cloud Webhook] Template atualizado para WABA ${wabaId}. Sincronizando via instância ${instance.id}...`);
+    await syncCloudTemplates(instance.id);
+    console.log(`[Whatsapp Cloud Webhook] Sincronização automática de templates concluída com sucesso.`);
+  } catch (e: any) {
+    console.error(`[Whatsapp Cloud Webhook] Erro ao auto-sincronizar templates para WABA ${wabaId}:`, e.message);
+  }
+}
+
+async function handleAccountAlertWebhook(wabaId: string, value: any): Promise<void> {
+  if (!value || !value.alert_info) return;
+
+  const alertInfo = value.alert_info;
+  console.log(`[Whatsapp Cloud Webhook] Alerta de Conta recebido para WABA ${wabaId}:`, alertInfo.alert_type);
+
+  // Atualiza TODAS as instâncias que pertencem a esse WABA com o último alerta
+  const { error } = await supabaseAdmin
+    .from('whatsapp_instances')
+    .update({ 
+      last_account_alert: {
+        entity_type: value.entity_type,
+        entity_id: value.entity_id,
+        severity: alertInfo.alert_severity,
+        status: alertInfo.alert_status,
+        type: alertInfo.alert_type,
+        description: alertInfo.alert_description,
+        received_at: new Date().toISOString()
+      } 
+    })
+    .eq('oficial_waba_id', wabaId);
+
+  if (error) {
+    console.error(`[Whatsapp Cloud Webhook] Erro ao salvar account_alert para WABA ${wabaId}:`, error.message);
+  }
+}
+
+async function handleAccountReviewWebhook(wabaId: string, value: any): Promise<void> {
+  if (!value || !value.decision) return;
+
+  console.log(`[Whatsapp Cloud Webhook] Status de Revisão da Conta para WABA ${wabaId}:`, value.decision);
+
+  const { error } = await supabaseAdmin
+    .from('whatsapp_instances')
+    .update({ 
+      waba_review_status: value.decision
+    })
+    .eq('oficial_waba_id', wabaId);
+
+  if (error) {
+    console.error(`[Whatsapp Cloud Webhook] Erro ao salvar waba_review_status para WABA ${wabaId}:`, error.message);
+  }
+}
+
+async function handleAccountUpdateWebhook(wabaId: string, value: any): Promise<void> {
+  if (!value || !value.event) return;
+
+  console.log(`[Whatsapp Cloud Webhook] Atualização de Conta recebida para WABA ${wabaId}:`, value.event);
+
+  // Salva a atualização completa no JSONB
+  const { error } = await supabaseAdmin
+    .from('whatsapp_instances')
+    .update({ 
+      last_account_update: {
+        event: value.event,
+        details: value,
+        received_at: new Date().toISOString()
+      }
+    })
+    .eq('oficial_waba_id', wabaId);
+
+  if (error) {
+    console.error(`[Whatsapp Cloud Webhook] Erro ao salvar account_update para WABA ${wabaId}:`, error.message);
+  }
+}
+
+async function handlePhoneNumberNameWebhook(wabaId: string, value: any): Promise<void> {
+  if (!value || !value.display_phone_number) return;
+
+  console.log(`[Whatsapp Cloud Webhook] Status do Nome para o telefone ${value.display_phone_number}:`, value.decision);
+
+  // No banco podemos não ter o número exatamente como "+55 11...", então fazemos um like ou removemos os sinais.
+  // Para ser seguro, atualizamos a instância do WABA que possuir a string do telefone nela.
+  // Como o supabase não tem REPLACE nativo fácil no eq(), vamos usar ilike
+  const cleanPhone = value.display_phone_number.replace(/\D/g, '');
+
+  const { error } = await supabaseAdmin
+    .from('whatsapp_instances')
+    .update({ 
+      phone_name_status: value.decision,
+      phone_name_rejection_reason: value.rejection_reason || null
+    })
+    .eq('oficial_waba_id', wabaId)
+    .ilike('phone', `%${cleanPhone}%`);
+
+  if (error) {
+    console.error(`[Whatsapp Cloud Webhook] Erro ao salvar phone_name_status para telefone ${cleanPhone}:`, error.message);
+  }
+}
+
+async function handlePhoneNumberQualityWebhook(wabaId: string, value: any): Promise<void> {
+  if (!value || !value.display_phone_number) return;
+
+  const limit = value.max_daily_conversations_per_business || value.current_limit;
+  console.log(`[Whatsapp Cloud Webhook] Novo limite de mensagens para o telefone ${value.display_phone_number}:`, limit);
+
+  const cleanPhone = value.display_phone_number.replace(/\D/g, '');
+
+  const { error } = await supabaseAdmin
+    .from('whatsapp_instances')
+    .update({ 
+      messaging_limit: limit
+    })
+    .eq('oficial_waba_id', wabaId)
+    .ilike('phone', `%${cleanPhone}%`);
+
+  if (error) {
+    console.error(`[Whatsapp Cloud Webhook] Erro ao salvar messaging_limit para telefone ${cleanPhone}:`, error.message);
+  }
+}
+
+async function handleStateSyncWebhook(companyId: string, unitId: string | null, value: any): Promise<void> {
+  if (!value || !value.state_sync || !Array.isArray(value.state_sync)) return;
+
+  for (const sync of value.state_sync) {
+    if (sync.type === 'contact' && sync.action === 'add') {
+      const contactData = sync.contact;
+      if (!contactData || !contactData.phone_number) continue;
+
+      const phone = contactData.phone_number;
+      const name = contactData.full_name || contactData.first_name || 'Contato SMB';
+
+      console.log(`[Whatsapp Cloud Webhook] Sincronizando contato SMB: ${phone} - ${name}`);
+
+      // Tenta achar contato existente
+      let { data: existingContact } = await supabaseAdmin
+        .from('contacts')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('phone', phone)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingContact) {
+        // Atualiza o nome se existir
+        await supabaseAdmin
+          .from('contacts')
+          .update({ name: name })
+          .eq('id', existingContact.id);
+      } else {
+        // Insere novo contato
+        await supabaseAdmin
+          .from('contacts')
+          .insert({
+            company_id: companyId,
+            unit_id: unitId,
+            name: name,
+            phone: phone,
+            source: 'SMB App Sync'
+          });
+      }
+    }
+  }
+}
+
+async function handleUserPreferencesWebhook(companyId: string, value: any): Promise<void> {
+  if (!value || !value.user_preferences || !Array.isArray(value.user_preferences)) return;
+
+  for (const pref of value.user_preferences) {
+    if (!pref.wa_id || !pref.value) continue;
+
+    const phone = pref.wa_id;
+    const isOptIn = pref.value === 'resume';
+
+    console.log(`[Whatsapp Cloud Webhook] Preferência de Marketing para ${phone}: ${pref.value}`);
+
+    // Atualiza o contato se ele existir
+    const { error } = await supabaseAdmin
+      .from('contacts')
+      .update({ marketing_opt_in: isOptIn })
+      .eq('company_id', companyId)
+      .eq('phone', phone);
+
+    if (error) {
+      console.error(`[Whatsapp Cloud Webhook] Erro ao atualizar opt-in para ${phone}:`, error.message);
+    }
   }
 }

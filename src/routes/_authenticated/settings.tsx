@@ -17,6 +17,7 @@ import { QrCodeModal } from "@/components/whatsapp/qr-code-modal";
 import { QuickMessagesTab } from "@/components/settings/quick-messages-tab";
 import { ResolutionReasonsTab } from "@/components/settings/resolution-reasons-tab";
 import { InstanceSettingsModal } from "@/components/whatsapp/instance-settings-modal";
+import { DepartmentCard } from "@/components/settings/department-card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -562,7 +563,7 @@ function SettingsPage() {
             <TabsList className="flex md:flex-col h-auto w-full md:w-56 bg-transparent gap-1 justify-start">
               <TabsTrigger value="whatsapp" className="w-full justify-start data-[state=active]:bg-muted">
                 <Smartphone className="mr-2 h-4 w-4" />
-                WhatsApp
+                Canais (WhatsApp / Insta)
               </TabsTrigger>
               <TabsTrigger value="quick-messages" className="w-full justify-start data-[state=active]:bg-muted">
                 <Zap className="mr-2 h-4 w-4" />
@@ -585,7 +586,7 @@ function SettingsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Smartphone className="h-5 w-5" />
-                Instâncias de WhatsApp
+                Instâncias e Canais
               </CardTitle>
               <CardDescription>
                 {selectedUnitId 
@@ -631,6 +632,8 @@ function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+
           </TabsContent>
 
           <TabsContent value="quick-messages" className="mt-0 border-none p-0">
@@ -920,7 +923,7 @@ function SettingsPage() {
       <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Nova Instância de WhatsApp</DialogTitle>
+            <DialogTitle>Novo Canal de Atendimento</DialogTitle>
             <DialogDescription>
               Digite um nome para a nova conexão que será criada na EvoGo.
             </DialogDescription>
@@ -943,23 +946,26 @@ function SettingsPage() {
                   <SelectValue placeholder="Selecione o provedor" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="evogo">EvoGo API (Padrão)</SelectItem>
-                  <SelectItem value="oficial">API Oficial (Meta Cloud API)</SelectItem>
+                  <SelectItem value="evogo">EvoGo API (WhatsApp)</SelectItem>
+                  <SelectItem value="oficial">API Oficial (WhatsApp Cloud API)</SelectItem>
+                  <SelectItem value="instagram">Instagram</SelectItem>
                   <SelectItem value="stevo" disabled>Stevo (Em Breve)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {instanceProvider === 'oficial' && (
+            {(instanceProvider === 'oficial' || instanceProvider === 'instagram') && (
               <>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Phone Number ID</label>
+                  <label className="text-sm font-medium">
+                    {instanceProvider === 'instagram' ? 'Instagram Account ID' : 'Phone Number ID'}
+                  </label>
                   <Input 
                     placeholder="1234567890" 
                     value={oficialNumberId}
                     onChange={(e) => setOficialNumberId(e.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">O ID do seu número gerado no painel da Meta.</p>
+                  <p className="text-xs text-muted-foreground">O ID gerado no painel de desenvolvedores da Meta.</p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Access Token Permanente</label>
@@ -977,7 +983,10 @@ function SettingsPage() {
                     value={oficialVerifyToken}
                     onChange={(e) => setOficialVerifyToken(e.target.value)}
                   />
-                  <p className="text-xs text-muted-foreground">Crie uma chave e use-a para configurar o webhook na Meta: <code>{window.location.origin}/api/webhooks/whatsapp-cloud</code></p>
+                  <p className="text-xs text-muted-foreground">
+                    Crie uma chave e use-a para configurar o webhook na Meta: 
+                    <code>{window.location.origin}/api/webhooks/{instanceProvider === 'instagram' ? 'instagram' : 'whatsapp-cloud'}</code>
+                  </p>
                 </div>
               </>
             )}
@@ -1054,6 +1063,11 @@ function InstanceRow({ instance, company, onConnect, onSettings }: { instance: a
       <div className="flex gap-2">
         {instance.provider === 'oficial' ? (
           <Badge variant="outline" className="h-9 px-3 border-emerald-200 text-emerald-700 bg-emerald-50">API Oficial Ativa</Badge>
+        ) : instance.provider === 'instagram' ? (
+          <Badge variant="outline" className="h-9 px-3 border-pink-200 text-pink-700 bg-pink-50 flex items-center gap-1">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+            Instagram
+          </Badge>
         ) : instance.status === 'connected' ? (
           <Button variant="outline" size="sm" onClick={() => setConfirmDialog({ open: true, type: 'disconnect' })} className="text-destructive hover:bg-destructive/10">
             Desconectar

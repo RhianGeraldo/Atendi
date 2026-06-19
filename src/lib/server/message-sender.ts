@@ -24,7 +24,7 @@ export async function sendPlatformMessage({
 }) {
   const { data: conv, error: convErr } = await supabaseAdmin
     .from("conversations")
-    .select("status, channel, whatsapp_instance_id, unit_id, contact_id, contacts(phone)")
+    .select("status, channel, whatsapp_instance_id, unit_id, contact_id, contacts(phone, whatsapp_lid)")
     .eq("id", conversationId)
     .single();
 
@@ -132,9 +132,89 @@ export async function sendPlatformMessage({
   }
     
   } else if (conv.channel === 'instagram') {
-    // Implement Instagram sending logic here in the future
-    console.log("[sendPlatformMessage] Instagram channel not implemented yet.");
-    throw new Error("Instagram channel not fully integrated yet.");
+    if (!conv.whatsapp_instance_id) throw new Error("Missing instance for Instagram");
+    
+    const { data: instance } = await supabaseAdmin
+      .from("whatsapp_instances")
+      .select("oficial_phone_number_id, oficial_access_token")
+      .eq("id", conv.whatsapp_instance_id)
+      .single();
+
+    if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
+      throw new Error("Instagram Account ID or Token missing");
+    }
+
+    const igsid = conv.contacts?.whatsapp_lid || phone;
+    if (!igsid) throw new Error("Missing Instagram Scoped ID (whatsapp_lid) for contact");
+
+    const payload: any = {
+      recipient: { id: igsid },
+      message: {}
+    };
+
+    if (mediaBase64 && mediaType !== 'text') {
+       // Upload to Supabase to get a public URL for Meta
+        try {
+          if (mediaBase64.startsWith('data:')) {
+            const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+            if (match) {
+              const mimeType = match[1];
+              const base64Data = match[2];
+              const buffer = Buffer.from(base64Data, 'base64');
+              const ext = mimeType.split('/')[1] || 'bin';
+              const fileName = `ig_${conversationId}/${Date.now()}.${ext}`;
+              
+              const { data: uploadData, error: uploadError } = await supabaseAdmin
+                .storage
+                .from('media')
+                .upload(fileName, buffer, { contentType: mimeType, upsert: false });
+                
+              if (!uploadError && uploadData) {
+                const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
+                mediaUrlToSend = publicUrlData.publicUrl;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse or upload base64 to Supabase', e);
+        }
+
+        if (mediaUrlToSend) {
+          let igMediaType = 'image';
+          if (mediaType === 'video') igMediaType = 'video';
+          else if (mediaType === 'audio') igMediaType = 'audio';
+          else if (mediaType === 'document') igMediaType = 'file';
+
+          payload.message = {
+            attachment: {
+              type: igMediaType,
+              payload: {
+                url: mediaUrlToSend,
+                is_reusable: false
+              }
+            }
+          };
+        } else {
+          payload.message = { text: text || '' };
+        }
+    } else {
+      payload.message = { text: text || '' };
+    }
+
+    const response = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      console.error("[sendPlatformMessage] Instagram sending error:", result);
+      throw new Error(`Graph API Error: ${result.error?.message || 'Unknown error'}`);
+    }
+
+    remoteMsgId = result.message_id || null;
+    participantJid = instance.oficial_phone_number_id;
   }
 
   // Save to DB
