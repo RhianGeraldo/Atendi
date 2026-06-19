@@ -121,7 +121,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
     if (!data.isInternal) {
       if (provider === 'oficial') {
-        const { sendCloudApiMessage } = await import('./whatsapp-cloud-api');
+        const { sendCloudApiMessage } = await import('../server/whatsapp-cloud-api');
         try {
           const msgId = await sendCloudApiMessage(
             conv.whatsapp_instance_id!,
