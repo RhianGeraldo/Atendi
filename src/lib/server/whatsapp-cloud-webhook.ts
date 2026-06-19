@@ -431,7 +431,14 @@ async function processIncomingMessage(params: any) {
     metadata.frequently_forwarded = messageContext.frequently_forwarded || false;
   }
   if (messageReferral) {
-    metadata.referral = messageReferral;
+    metadata.externalAdReply = {
+      title: messageReferral.headline,
+      body: messageReferral.body,
+      thumbnailURL: messageReferral.thumbnail_url || messageReferral.image_url,
+      sourceURL: messageReferral.source_url,
+      sourceApp: 'Meta',
+      raw_referral: messageReferral
+    };
   }
   if (interactiveData) {
     metadata.interactive_response = interactiveData;
