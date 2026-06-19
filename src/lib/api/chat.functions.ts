@@ -166,6 +166,59 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           console.error('[chat.functions] sendCloudApiMessage failed:', cloudErr);
           throw new Error(`Falha API Oficial: ${cloudErr.message || 'Erro desconhecido'}`);
         }
+      } else if (provider === 'instagram') {
+        const { data: instance } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("oficial_phone_number_id, oficial_access_token")
+          .eq("id", conv.whatsapp_instance_id)
+          .single();
+
+        if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
+          throw new Error("Instagram Account ID ou Token faltando");
+        }
+
+        const payload: any = {
+          recipient: { id: phone }, // phone was filled with igsid
+          message: {}
+        };
+
+        if (finalMessageId) {
+          payload.reply_to = { mid: finalMessageId };
+        }
+
+        if (data.mediaBase64 && data.mediaType !== 'text' && mediaUrlToSend) {
+          let igMediaType = 'image';
+          if (data.mediaType === 'video') igMediaType = 'video';
+          else if (data.mediaType === 'audio') igMediaType = 'audio';
+          else if (data.mediaType === 'document') igMediaType = 'file';
+
+          payload.message = {
+            attachment: {
+              type: igMediaType,
+              payload: {
+                url: mediaUrlToSend,
+                is_reusable: false
+              }
+            }
+          };
+        } else {
+          payload.message = { text: textToSend || '' };
+        }
+
+        const igRes = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const result = await igRes.json();
+        if (!igRes.ok) {
+          console.error("[chat.functions] Instagram sending error:", result);
+          throw new Error(`Instagram Error: ${result.error?.message || 'Unknown error'}`);
+        }
+
+        evogoResponse = { id: result.message_id, isInstagram: true, participant: instance.oficial_phone_number_id };
+
       } else {
         if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
 
@@ -219,6 +272,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     if (data.quotedInternalId) insertPayload.quoted_message_id = data.quotedInternalId;
     if (data.quotedContent) insertPayload.quoted_content = data.quotedContent;
     if (evogoResponse?.data?.Info?.Sender) insertPayload.participant_jid = evogoResponse.data.Info.Sender;
+    if (evogoResponse?.isInstagram && evogoResponse?.participant) insertPayload.participant_jid = evogoResponse.participant;
 
     const { data: msg, error: msgErr } = await supabase
       .from("messages")

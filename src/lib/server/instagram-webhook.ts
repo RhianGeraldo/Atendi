@@ -128,12 +128,35 @@ async function processIncomingMessage(params: any) {
     .maybeSingle();
 
   if (!contact) {
+    let profileName = `Instagram User (${contactIgsid})`;
+    let profilePic = null;
+
+    try {
+      const { data: instance } = await supabaseAdmin
+        .from('whatsapp_instances')
+        .select('oficial_access_token')
+        .eq('id', instanceId)
+        .single();
+
+      if (instance?.oficial_access_token) {
+        const profileRes = await fetch(`https://graph.facebook.com/v20.0/${contactIgsid}?fields=name,profile_pic&access_token=${instance.oficial_access_token}`);
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          if (profileData.name) profileName = profileData.name;
+          if (profileData.profile_pic) profilePic = profileData.profile_pic;
+        }
+      }
+    } catch (e) {
+      console.error('[Instagram Webhook] Erro ao buscar perfil:', e);
+    }
+
     const { data: newContact, error: contactError } = await supabaseAdmin
       .from('contacts')
       .insert({
         company_id: companyId,
         unit_id: unitId,
-        name: `Instagram User (${contactIgsid})`, // Poderíamos buscar o perfil da Graph API
+        name: profileName,
+        profile_picture_url: profilePic,
         phone: contactIgsid, // Necessário colocar algo no phone para evitar restrições
         whatsapp_lid: contactIgsid,
         source: 'Instagram'
