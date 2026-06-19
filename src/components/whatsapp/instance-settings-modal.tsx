@@ -35,14 +35,21 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   });
 
   useEffect(() => {
-    if (!open || !instance || !company?.evogo_host) return;
+    if (!open || !instance) return;
 
     const isOficial = instance.provider === 'oficial';
+    const isInstagram = instance.provider === 'instagram';
+    const isCloudAPI = isOficial || isInstagram;
+
+    let providerWebhookPath = 'evogo';
+    if (isOficial) providerWebhookPath = 'whatsapp-cloud';
+    else if (isInstagram) providerWebhookPath = 'instagram';
+
     let defaultWebhook = instance.webhook_url;
-    const currentDomainWebhook = `${window.location.origin}/api/webhooks/${isOficial ? 'whatsapp-cloud' : 'evogo'}`;
+    const currentDomainWebhook = `${window.location.origin}/api/webhooks/${providerWebhookPath}`;
     
-    // Se estiver vazio, for do supabase antigo, ou for de um domínio antigo diferente do atual, atualiza pra origem atual
-    if (!defaultWebhook || defaultWebhook.includes('supabase.co') || !defaultWebhook.startsWith(window.location.origin)) {
+    // Se estiver vazio, for do supabase antigo, for de um domínio antigo, ou for de outro provedor, corrige
+    if (!defaultWebhook || defaultWebhook.includes('supabase.co') || !defaultWebhook.startsWith(window.location.origin) || !defaultWebhook.includes(providerWebhookPath)) {
       defaultWebhook = currentDomainWebhook;
     }
 
@@ -54,10 +61,16 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     
     // Fetch advanced settings from EvoGo
     const fetchSettings = async () => {
-      if (isOficial) {
+      if (isCloudAPI) {
         setLoading(false);
         return;
       }
+      
+      if (!company?.evogo_host) {
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       try {
         if (!instance.evogo_instance_id) {
