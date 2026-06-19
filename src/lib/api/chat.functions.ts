@@ -162,9 +162,9 @@ export const sendMessageAction = createServerFn({ method: "POST" })
             finalMessageId
           );
           evogoResponse = { id: msgId };
-        } catch (cloudErr) {
+        } catch (cloudErr: any) {
           console.error('[chat.functions] sendCloudApiMessage failed:', cloudErr);
-          throw new Error("Falha ao enviar mensagem pela API Oficial.");
+          throw new Error(`Falha API Oficial: ${cloudErr.message || 'Erro desconhecido'}`);
         }
       } else {
         if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {

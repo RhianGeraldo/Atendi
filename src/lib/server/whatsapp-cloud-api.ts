@@ -29,10 +29,12 @@ export async function sendCloudApiMessage(
     accessToken: instance.oficial_access_token
   };
 
+  const formattedPhone = toPhone.replace(/\D/g, '');
+
   const payload: any = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to: toPhone.replace(/\D/g, '')
+    to: formattedPhone
   };
 
   if (quotedMessageId) {
@@ -75,7 +77,7 @@ export async function sendCloudApiMessage(
     throw new Error(`Tipo de mensagem não suportado pela Cloud API: ${type}`);
   }
 
-  const response = await fetch(`https://graph.facebook.com/v22.0/${config.phoneNumberId}/messages`, {
+  const response = await fetch(`https://graph.facebook.com/v25.0/${config.phoneNumberId}/messages`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${config.accessToken}`,
