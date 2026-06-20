@@ -178,7 +178,8 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         }
 
         const payload: any = {
-          recipient: { id: phone }, // phone was filled with igsid
+          recipient: { id: phone },
+          messaging_type: "RESPONSE",
           message: {}
         };
 
@@ -250,7 +251,8 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         }
 
         const payload: any = {
-          recipient: { id: phone }, // phone was filled with psid
+          recipient: { id: phone },
+          messaging_type: "RESPONSE",
           message: {}
         };
 
