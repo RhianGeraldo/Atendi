@@ -519,29 +519,47 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       // 2. Find or create Contact
       let contactId;
+      let activeConv = null;
+      
       const phoneVariants = getPhoneVariants(phoneNumber || '');
       const { data: existingContacts } = await supabaseAdmin
         .from('contacts')
-        .select('id, name, whatsapp_lid')
+        .select('id, name, whatsapp_lid, merged_into_id')
         .eq('company_id', company_id)
-        .or(`phone.in.(${phoneVariants.join(',')})${extractedLid ? `,whatsapp_lid.eq.${extractedLid}` : ''}`)
-        .limit(1);
+        .or(`phone.in.(${phoneVariants.join(',')})${extractedLid ? `,whatsapp_lid.eq.${extractedLid}` : ''}`);
 
       if (existingContacts && existingContacts.length > 0) {
-        contactId = existingContacts[0].id;
+        // Find if ANY of these contacts has an active conversation
+        const contactIds = existingContacts.map(c => c.merged_into_id || c.id);
+        const { data: convs } = await supabaseAdmin
+          .from('conversations')
+          .select('id, status, ai_active, ai_agent_id, contact_id')
+          .in('contact_id', contactIds)
+          .eq('whatsapp_instance_id', instance_id)
+          .in('status', ['waiting', 'active'])
+          .order('started_at', { ascending: false })
+          .limit(1);
+
+        let targetContact = existingContacts[0];
+        if (convs && convs.length > 0) {
+          activeConv = convs[0];
+          targetContact = existingContacts.find(c => (c.merged_into_id || c.id) === activeConv.contact_id) || existingContacts[0];
+        }
+
+        contactId = targetContact.id;
         
         const updates: any = {};
         
         // Update contact name
         if (remoteJid.includes('@g.us')) {
           // If it's a group and we got the actual name, update it if it differs
-          if (actualGroupName && existingContacts[0].name !== actualGroupName && existingContacts[0].name === 'Grupo do WhatsApp') {
+          if (actualGroupName && targetContact.name !== actualGroupName && targetContact.name === 'Grupo do WhatsApp') {
             updates.name = actualGroupName;
           }
         } else {
           // It's a direct contact
           if (!isFromMe && pushName && pushName !== 'Desconhecido') {
-            const currentName = existingContacts[0].name;
+            const currentName = targetContact.name;
             if (currentName === phoneNumber || currentName === 'Desconhecido') {
               updates.name = pushName;
             }
@@ -549,7 +567,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         }
 
         // Lock in the LID if we discovered it
-        if (extractedLid && existingContacts[0].whatsapp_lid !== extractedLid) {
+        if (extractedLid && targetContact.whatsapp_lid !== extractedLid) {
           updates.whatsapp_lid = extractedLid;
         }
 
@@ -558,6 +576,10 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             .from('contacts')
             .update(updates)
             .eq('id', contactId);
+        }
+
+        if (targetContact.merged_into_id) {
+          contactId = targetContact.merged_into_id;
         }
       } else {
         // Create new contact
@@ -587,15 +609,22 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
       // 3. Find latest conversation for this contact in THIS EXACT INSTANCE
       let conversationId;
-      let convQuery = supabaseAdmin
-        .from('conversations')
-        .select('id, status, ai_active, ai_agent_id')
-        .eq('contact_id', contactId)
-        .eq('whatsapp_instance_id', instance_id)
-        .order('started_at', { ascending: false })
-        .limit(1);
-        
-      const { data: latestConvs } = await convQuery;
+      let convsData = activeConv ? [activeConv] : null;
+
+      if (!activeConv) {
+        let convQuery = supabaseAdmin
+          .from('conversations')
+          .select('id, status, ai_active, ai_agent_id')
+          .eq('contact_id', contactId)
+          .eq('whatsapp_instance_id', instance_id)
+          .order('started_at', { ascending: false })
+          .limit(1);
+
+        const { data } = await convQuery;
+        convsData = data;
+      }
+
+      const latestConvs = convsData;
 
       console.log(`[evogo-webhook] Lookup conversation: instance_id=${instance_id}, contact_id=${contactId}, result=${JSON.stringify(latestConvs)}`);
 
@@ -655,7 +684,8 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         }
 
         
-        const updatePayload: any = { last_message_at: new Date().toISOString(), ai_followup_count: 0 };
+        
+        const updatePayload: any = { last_message_at: new Date().toISOString(), ai_followup_count: 0, remote_id: extractedLid || phoneNumber };
         
         // Se a conversa estava resolvida, reabre ela como 'waiting' (ou 'active' se a IA for atender)
         if (conv.status === 'resolved') {
@@ -756,6 +786,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             whatsapp_instance_id: instance_id,
             contact_id: contactId,
             channel: 'whatsapp',
+            remote_id: extractedLid || phoneNumber,
             status: isFromMe ? 'resolved' : (isActiveByDefault ? 'active' : 'waiting'),
             last_message_at: new Date().toISOString(),
             resolved_at: isFromMe ? new Date().toISOString() : null,

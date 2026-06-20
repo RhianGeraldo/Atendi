@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { History, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { ChannelIcon } from "@/components/common/channel-icon";
 import {
   Sheet,
   SheetContent,
@@ -28,6 +29,7 @@ import { TaskDialog } from "@/components/crm/task-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Link } from "@tanstack/react-router";
+import { MergeContactDialog } from "./merge-contact-dialog";
 
 interface ContactDetailsSheetProps {
   contactId: string | null;
@@ -747,6 +749,7 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
             )
           ),
           conversation:conversations!conversation_sessions_conversation_id_fkey (
+            channel,
             ai_active,
             ai_agent:ai_agents (
               name
@@ -888,9 +891,13 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
                     <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
                       <div className="min-w-[130px] flex-1">
                         <div className="flex flex-wrap items-center gap-2 mb-1">
-                          <div className="flex items-center justify-center w-6 h-6 rounded-full bg-muted text-muted-foreground shrink-0">
-                            <MessageCircle className="h-3 w-3" />
-                          </div>
+                          {session.conversation?.channel ? (
+                            <ChannelIcon channel={session.conversation.channel} className="h-6 w-6" />
+                          ) : (
+                            <div className="flex items-center justify-center w-6 h-6 rounded-full bg-muted text-muted-foreground shrink-0">
+                              <MessageCircle className="h-3 w-3" />
+                            </div>
+                          )}
                           <span className="text-xs font-mono text-muted-foreground uppercase truncate">#{session.id.substring(0, 8)}</span>
                           <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wider", session.resolved_at ? getStatusColor("resolved") : getStatusColor("active"))}>
                             {session.resolved_at ? "Resolvido" : "Em Andamento"}
@@ -1079,17 +1086,23 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
   );
 }
 
-export function ContactDetailsSheet({ contactId, open, onOpenChange }: ContactDetailsSheetProps) {
+export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenChange }: ContactDetailsSheetProps) {
   const { profile } = useAuth();
   const qc = useQueryClient();
   const isAdmin = profile?.role === 'admin_company';
+  
+  const [activeContactId, setActiveContactId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveContactId(initialContactId);
+  }, [initialContactId]);
 
   const deleteContact = useMutation({
     mutationFn: async () => {
       const { error } = await supabase
         .from("contacts")
         .delete()
-        .eq("id", contactId!);
+        .eq("id", activeContactId!);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -1102,18 +1115,25 @@ export function ContactDetailsSheet({ contactId, open, onOpenChange }: ContactDe
     }
   });
   const { data: contact, isLoading: isLoadingContact } = useQuery({
-    queryKey: ["contact-details", contactId],
-    enabled: !!contactId && open,
+    queryKey: ["contact-details", activeContactId],
+    enabled: !!activeContactId && open,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("contacts")
         .select("*, creator:profiles!contacts_created_by_fkey(name)")
-        .eq("id", contactId!)
+        .eq("id", activeContactId!)
         .single();
       if (error) throw error;
       return data;
     },
   });
+
+  // Automatically follow merged_into_id if we fetch a merged contact
+  useEffect(() => {
+    if (contact?.merged_into_id) {
+      setActiveContactId(contact.merged_into_id);
+    }
+  }, [contact?.merged_into_id]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -1129,9 +1149,17 @@ export function ContactDetailsSheet({ contactId, open, onOpenChange }: ContactDe
         ) : (
           <>
             <SheetHeader className="p-6 pb-4 border-b">
-              <div className="flex items-center justify-between">
-                <SheetTitle className="text-2xl">{contact.name}</SheetTitle>
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  {contact.profile_picture_url && (
+                    <div className="h-12 w-12 rounded-full overflow-hidden border">
+                      <img src={contact.profile_picture_url} alt={contact.name} className="h-full w-full object-cover" />
+                    </div>
+                  )}
+                  <SheetTitle className="text-2xl">{contact.name}</SheetTitle>
+                </div>
                 <div className="flex items-center gap-1">
+                  <MergeContactDialog sourceContact={contact} onSuccess={(targetId) => setActiveContactId(targetId)} />
                   <ContactEditDialog contact={contact} />
                   {isAdmin && (
                     <Dialog>
@@ -1168,6 +1196,12 @@ export function ContactDetailsSheet({ contactId, open, onOpenChange }: ContactDe
                   <div className="flex items-center gap-2">
                     <Phone className="h-4 w-4" />
                     <span>{contact.phone}</span>
+                  </div>
+                )}
+                {contact.instagram_username && (
+                  <div className="flex items-center gap-2">
+                    <User className="h-4 w-4 text-pink-500" />
+                    <span>@{contact.instagram_username}</span>
                   </div>
                 )}
                 <div className="flex items-center gap-2 text-xs">
@@ -1215,7 +1249,7 @@ export function ContactDetailsSheet({ contactId, open, onOpenChange }: ContactDe
               )}
             </SheetHeader>
 
-            <ContactDetailsTabs contactId={contactId!} />
+            <ContactDetailsTabs contactId={activeContactId!} />
           </>
         )}
       </SheetContent>
@@ -1227,18 +1261,26 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
   const qc = useQueryClient();
   const [name, setName] = useState(contact.name || "");
   const [email, setEmail] = useState(contact.email || "");
+  const [instagram, setInstagram] = useState(contact.instagram_username || "");
+  
+  const isPsid = contact.phone && contact.phone.length > 15;
+  const [phone, setPhone] = useState(isPsid ? "" : (contact.phone || ""));
 
   // Update states if contact changes
   useEffect(() => {
     setName(contact.name || "");
     setEmail(contact.email || "");
+    setInstagram(contact.instagram_username || "");
+    const newIsPsid = contact.phone && contact.phone.length > 15;
+    setPhone(newIsPsid ? "" : (contact.phone || ""));
   }, [contact]);
 
   const updateContact = useMutation({
     mutationFn: async () => {
+      const finalPhone = phone.trim() ? phone.trim() : (isPsid ? contact.phone : null);
       const { error } = await supabase
         .from("contacts")
-        .update({ name, email })
+        .update({ name, email, instagram_username: instagram, phone: finalPhone })
         .eq("id", contact.id);
       if (error) throw error;
     },
@@ -1277,12 +1319,25 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
           <Label htmlFor="phone">Telefone (WhatsApp)</Label>
           <Input 
             id="phone" 
-            value={contact.phone || ""} 
-            disabled 
-            className="bg-muted"
-            title="O número de telefone é o identificador único e não pode ser alterado."
+            value={phone} 
+            onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+            placeholder="5511999999999"
           />
-          <p className="text-[10px] text-muted-foreground">O número é usado para deduplicação automática.</p>
+          {isPsid ? (
+            <p className="text-[10px] text-muted-foreground">ID do Canal (Instagram/Messenger): {contact.phone}</p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground">O número é usado para deduplicação automática.</p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="instagram">Usuário do Instagram (@)</Label>
+          <Input 
+            id="instagram" 
+            value={instagram} 
+            onChange={(e) => setInstagram(e.target.value.replace('@', ''))} 
+            placeholder="usuario_do_instagram"
+          />
         </div>
 
         <div className="space-y-2">
@@ -1300,7 +1355,7 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
           <Button 
             type="submit" 
             className="w-full" 
-            disabled={updateContact.isPending || (name === contact.name && email === (contact.email || ""))}
+            disabled={updateContact.isPending || (name === contact.name && email === (contact.email || "") && instagram === (contact.instagram_username || "") && phone === (isPsid ? "" : (contact.phone || "")))}
           >
             {updateContact.isPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

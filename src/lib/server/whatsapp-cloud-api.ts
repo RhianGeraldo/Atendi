@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
+import { getPhoneVariants } from '@/lib/utils';
 
 interface CloudApiConfig {
   phoneNumberId: string;
@@ -30,6 +31,7 @@ export async function sendCloudApiMessage(
   };
 
   const formattedPhone = toPhone.replace(/\D/g, '');
+  const variants = getPhoneVariants(formattedPhone);
 
   const payload: any = {
     messaging_product: 'whatsapp',
@@ -77,24 +79,42 @@ export async function sendCloudApiMessage(
     throw new Error(`Tipo de mensagem não suportado pela Cloud API: ${type}`);
   }
 
-  const response = await fetch(`https://graph.facebook.com/v25.0/${config.phoneNumberId}/messages`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${config.accessToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
+  let lastError = null;
 
-  const responseData = await response.json();
+  for (const variant of variants) {
+    payload.to = variant;
+    const response = await fetch(`https://graph.facebook.com/v25.0/${config.phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
 
-  if (!response.ok) {
-    console.error('[WhatsApp Cloud API] Erro ao enviar mensagem:', responseData);
-    throw new Error(responseData.error?.message || 'Falha ao enviar mensagem');
+    const responseData = await response.json();
+
+    if (response.ok) {
+      // Sucesso com esta variante!
+      return responseData.messages?.[0]?.id || null;
+    } else {
+      // Se for erro de numero invalido (131026) ou não permitido (131030) na sandbox
+      const errCode = responseData.error?.code;
+      if (errCode === 131026 || errCode === 131030) {
+        lastError = responseData;
+        console.warn(`[WhatsApp Cloud API] Variante ${variant} falhou com código ${errCode}. Tentando próxima...`);
+        continue;
+      } else {
+        // Outro erro, não adianta tentar variante
+        console.error('[WhatsApp Cloud API] Erro ao enviar mensagem:', responseData);
+        throw new Error(responseData.error?.message || 'Falha ao enviar mensagem');
+      }
+    }
   }
 
-  // A API da Meta retorna messages[0].id (WAMID)
-  return responseData.messages?.[0]?.id || null;
+  // Se todas as variantes falharem
+  console.error('[WhatsApp Cloud API] Todas as variantes falharam. Último erro:', lastError);
+  throw new Error(`Falha API Oficial: (#${lastError?.error?.code || 'Desconhecido'}) ${lastError?.error?.message || 'Falha ao enviar mensagem para o número.'}`);
 }
 
 export async function syncCloudTemplates(instanceId: string) {

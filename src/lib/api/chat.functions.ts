@@ -23,7 +23,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     
     const { data: conv, error: convErr } = await supabase
       .from("conversations")
-      .select("status, whatsapp_instance_id, unit_id, contact_id, contacts(phone)")
+      .select("status, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid)")
       .eq("id", data.conversationId)
       .single();
 
@@ -33,9 +33,9 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
     const targetConversationId = data.conversationId;
 
-    const phone = conv.contacts?.phone;
+    const phone = conv.remote_id || conv.contacts?.whatsapp_lid || conv.contacts?.phone;
     if (!phone) {
-      throw new Error("Contact has no phone number.");
+      throw new Error("Contact has no remote_id or phone number.");
     }
 
     // 2. Get evogo configuration for the conversation's instance
@@ -205,7 +205,12 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           payload.message = { text: textToSend || '' };
         }
 
-        const igRes = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`, {
+        const isDirectToken = instance.oficial_access_token.startsWith('IGA');
+        const endpoint = isDirectToken 
+          ? `https://graph.instagram.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`
+          : `https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`;
+
+        const igRes = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -425,14 +430,14 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     const phoneVariants = getPhoneVariants(rawPhone);
     const { data: existingContact } = await supabaseAdmin
       .from('contacts')
-      .select('id')
+      .select('id, merged_into_id')
       .eq('company_id', data.companyId)
       .in('phone', phoneVariants)
       .limit(1)
       .maybeSingle();
 
     if (existingContact) {
-      contactId = existingContact.id;
+      contactId = existingContact.merged_into_id || existingContact.id;
     } else {
       const { data: newContact, error: contactErr } = await supabaseAdmin
         .from('contacts')

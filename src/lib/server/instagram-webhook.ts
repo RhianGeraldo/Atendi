@@ -121,7 +121,7 @@ async function processIncomingMessage(params: any) {
   // 1. Encontrar ou criar o contato usando o IGSID (Instagram Scoped ID) no campo whatsapp_lid
   let { data: contact } = await supabaseAdmin
     .from('contacts')
-    .select('id, name')
+    .select('id, name, merged_into_id')
     .eq('company_id', companyId)
     .eq('whatsapp_lid', contactIgsid)
     .limit(1)
@@ -130,6 +130,7 @@ async function processIncomingMessage(params: any) {
   if (!contact) {
     let profileName = `Instagram User (${contactIgsid})`;
     let profilePic = null;
+    let profileUsername = null;
 
     try {
       const { data: instance } = await supabaseAdmin
@@ -139,11 +140,22 @@ async function processIncomingMessage(params: any) {
         .single();
 
       if (instance?.oficial_access_token) {
-        const profileRes = await fetch(`https://graph.facebook.com/v20.0/${contactIgsid}?fields=name,profile_pic&access_token=${instance.oficial_access_token}`);
+        const isDirectToken = instance.oficial_access_token.startsWith('IGA');
+        const endpoint = isDirectToken
+          ? `https://graph.instagram.com/v20.0/${contactIgsid}?fields=name,username,profile_pic&access_token=${instance.oficial_access_token}`
+          : `https://graph.facebook.com/v20.0/${contactIgsid}?fields=name,profile_pic&access_token=${instance.oficial_access_token}`;
+
+        const profileRes = await fetch(endpoint);
         if (profileRes.ok) {
           const profileData = await profileRes.json();
-          if (profileData.name) profileName = profileData.name;
-          if (profileData.profile_pic) profilePic = profileData.profile_pic;
+          if (isDirectToken) {
+            if (profileData.name || profileData.username) profileName = profileData.name || profileData.username;
+            if (profileData.profile_pic) profilePic = profileData.profile_pic;
+            if (profileData.username) profileUsername = profileData.username;
+          } else {
+            if (profileData.name) profileName = profileData.name;
+            if (profileData.profile_pic) profilePic = profileData.profile_pic;
+          }
         }
       }
     } catch (e) {
@@ -157,6 +169,7 @@ async function processIncomingMessage(params: any) {
         unit_id: unitId,
         name: profileName,
         profile_picture_url: profilePic,
+        instagram_username: profileUsername,
         phone: contactIgsid, // Necessário colocar algo no phone para evitar restrições
         whatsapp_lid: contactIgsid,
         source: 'Instagram'
@@ -168,7 +181,50 @@ async function processIncomingMessage(params: any) {
       console.error('[Instagram Webhook] Erro ao criar contato:', contactError);
       return;
     }
-    contact = newContact;
+    contact = { ...newContact, name: profileName };
+  } else if (contact.name && contact.name.startsWith('Instagram User (')) {
+    // Tenta atualizar o nome genérico se ele mandar mensagem novamente
+    try {
+      const { data: instance } = await supabaseAdmin
+        .from('whatsapp_instances')
+        .select('oficial_access_token')
+        .eq('id', instanceId)
+        .single();
+
+      if (instance?.oficial_access_token) {
+        const isDirectToken = instance.oficial_access_token.startsWith('IGA');
+        const endpoint = isDirectToken
+          ? `https://graph.instagram.com/v20.0/${contactIgsid}?fields=name,username,profile_pic&access_token=${instance.oficial_access_token}`
+          : `https://graph.facebook.com/v20.0/${contactIgsid}?fields=name,profile_pic&access_token=${instance.oficial_access_token}`;
+
+        const profileRes = await fetch(endpoint);
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          let newName = contact.name;
+          let newPic = null;
+
+          if (isDirectToken) {
+            if (profileData.name || profileData.username) newName = profileData.name || profileData.username;
+            if (profileData.profile_pic) newPic = profileData.profile_pic;
+          } else {
+            if (profileData.name) newName = profileData.name;
+            if (profileData.profile_pic) newPic = profileData.profile_pic;
+          }
+
+          if (newName !== contact.name) {
+            await supabaseAdmin.from('contacts').update({ name: newName, profile_picture_url: newPic }).eq('id', contact.id);
+            contact.name = newName;
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[Instagram Webhook] Erro ao atualizar perfil genérico:', e);
+    }
+  }
+
+  // Se o contato estiver mesclado, usar o ID do contato pai
+  if (contact.merged_into_id) {
+    contact.id = contact.merged_into_id;
   }
 
   // 2. Encontrar conversa ativa na mesma instância
@@ -190,7 +246,8 @@ async function processIncomingMessage(params: any) {
       .from('conversations')
       .update({
         last_message_at: new Date(timestamp).toISOString(),
-        last_message_preview: textContent?.substring(0, 50)
+        last_message_preview: textContent?.substring(0, 50),
+        remote_id: contactIgsid
       })
       .eq('id', conversationId);
   } else {
@@ -199,6 +256,7 @@ async function processIncomingMessage(params: any) {
       .from('conversations')
       .insert({
         contact_id: contact.id,
+        remote_id: contactIgsid,
         whatsapp_instance_id: instanceId,
         unit_id: unitId,
         status: isFromMe ? 'resolved' : 'waiting',

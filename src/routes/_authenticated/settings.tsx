@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2 } from "lucide-react";
+import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,10 @@ function SettingsPage() {
   const [oficialNumberId, setOficialNumberId] = useState("");
   const [oficialToken, setOficialToken] = useState("");
   const [oficialVerifyToken, setOficialVerifyToken] = useState("");
+  const [metaAccounts, setMetaAccounts] = useState<any[]>([]);
+  const [isLoadingMeta, setIsLoadingMeta] = useState(false);
+  const [selectedMetaAccountId, setSelectedMetaAccountId] = useState("");
+  const [useManualToken, setUseManualToken] = useState(false);
   const [host, setHost] = useState("");
   const [token, setToken] = useState("");
   const [useSignature, setUseSignature] = useState(profile?.use_signature ?? true);
@@ -77,6 +81,7 @@ function SettingsPage() {
   const [companyDocument, setCompanyDocument] = useState("");
   const [companyAddress, setCompanyAddress] = useState("");
   const [companyBusinessHours, setCompanyBusinessHours] = useState("");
+  const [companyMetaToken, setCompanyMetaToken] = useState("");
   const [companyCustomVars, setCompanyCustomVars] = useState<{key: string, value: string}[]>([]);
   // QrCode Modal State
   const [selectedInstance, setSelectedInstance] = useState<any>(null);
@@ -84,19 +89,54 @@ function SettingsPage() {
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
 
+  useEffect(() => {
+    if (createModalOpen) {
+      setMetaAccounts([]);
+      setSelectedMetaAccountId("");
+      setUseManualToken(false);
+      setOficialNumberId("");
+      setOficialToken("");
+    }
+  }, [createModalOpen]);
+
+
   const { data: company, isLoading: isLoadingCompany } = useQuery({
     queryKey: ["company", profile?.company_id],
     enabled: !!profile?.company_id,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("id, name, evogo_host, evogo_global_token, ai_settings, document, address, business_hours, custom_variables")
+        .select("id, name, evogo_host, evogo_global_token, meta_system_user_token, ai_settings, document, address, business_hours, custom_variables")
         .eq("id", profile!.company_id!)
         .single();
       if (error) throw error;
       return data;
     },
   });
+
+  useEffect(() => {
+    if (createModalOpen && company?.meta_system_user_token && (instanceProvider === 'instagram' || instanceProvider === 'messenger')) {
+      const fetchAccounts = async () => {
+        setIsLoadingMeta(true);
+        try {
+          const res = await fetch(`https://graph.facebook.com/v20.0/me/accounts?fields=name,access_token,instagram_business_account{name,username,profile_picture_url}&access_token=${company.meta_system_user_token}`);
+          const json = await res.json();
+          if (json.error) throw new Error(json.error.message);
+          
+          let accounts = json.data || [];
+          if (instanceProvider === 'instagram') {
+            accounts = accounts.filter((a: any) => a.instagram_business_account);
+          }
+          setMetaAccounts(accounts);
+        } catch (e: any) {
+          toast.error("Erro ao buscar contas da Meta", { description: e.message });
+        } finally {
+          setIsLoadingMeta(false);
+        }
+      };
+      fetchAccounts();
+    }
+  }, [instanceProvider, createModalOpen, company?.meta_system_user_token]);
 
   const createCompany = useMutation({
     mutationFn: async (name: string) => {
@@ -125,6 +165,7 @@ function SettingsPage() {
       setCompanyDocument(company.document || "");
       setCompanyAddress(company.address || "");
       setCompanyBusinessHours(company.business_hours || "");
+      setCompanyMetaToken(company.meta_system_user_token || "");
       
       const vars = company.custom_variables as Record<string, string>;
       if (vars && typeof vars === 'object') {
@@ -206,6 +247,7 @@ function SettingsPage() {
           document: companyDocument,
           address: companyAddress,
           business_hours: companyBusinessHours,
+          meta_system_user_token: companyMetaToken,
           custom_variables: customVarsObj
         })
         .eq("id", profile.company_id);
@@ -265,8 +307,26 @@ function SettingsPage() {
       if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token)) {
         throw new Error("Configure Host e Token primeiro para usar a EvoGo.");
       }
-      if ((provider === 'oficial' || provider === 'instagram' || provider === 'messenger') && (!numberId || !accessToken || !verifyToken)) {
-        throw new Error("Preencha todos os campos da credencial (ID, Token e Verify Token).");
+
+      let finalNumberId = numberId;
+      let finalAccessToken = accessToken;
+      let finalWabaId = undefined;
+
+      if ((provider === 'instagram' || provider === 'messenger') && company?.meta_system_user_token && !useManualToken && selectedMetaAccountId) {
+        const account = metaAccounts.find(a => a.id === selectedMetaAccountId);
+        if (account) {
+          finalAccessToken = account.access_token;
+          if (provider === 'instagram') {
+            finalNumberId = account.instagram_business_account.id;
+            finalWabaId = account.id; // The Page ID is used as wabaId for instagram
+          } else {
+            finalNumberId = account.id; // Page ID
+          }
+        }
+      }
+
+      if ((provider === 'oficial' || provider === 'instagram' || provider === 'messenger') && (!finalNumberId || !finalAccessToken || !verifyToken)) {
+        throw new Error("Preencha todos os campos da credencial (ID, Token e Verify Token) ou selecione uma conta da Meta.");
       }
       
       // Gera o slug técnico
@@ -303,8 +363,9 @@ function SettingsPage() {
         name,
         instance_name: technicalName,
         provider,
-        oficial_phone_number_id: numberId,
-        oficial_access_token: accessToken,
+        oficial_phone_number_id: finalNumberId,
+        oficial_waba_id: finalWabaId || null,
+        oficial_access_token: finalAccessToken,
         oficial_verify_token: verifyToken,
         webhook_url: defaultWebhookUrl
       }).select().single();
@@ -451,6 +512,18 @@ function SettingsPage() {
                     value={companyBusinessHours}
                     onChange={(e) => setCompanyBusinessHours(e.target.value)}
                   />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium flex items-center gap-2">Token da Meta (System User)</label>
+                  <Input 
+                    type="password"
+                    placeholder="EAAW...ZDZD" 
+                    value={companyMetaToken}
+                    onChange={(e) => setCompanyMetaToken(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Usado para listar e conectar contas do Instagram e Páginas do Facebook automaticamente.
+                  </p>
                 </div>
 
                 <div className="pt-4 border-t">
@@ -967,26 +1040,79 @@ function SettingsPage() {
 
             {(instanceProvider === 'oficial' || instanceProvider === 'instagram' || instanceProvider === 'messenger') && (
               <>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    {instanceProvider === 'instagram' ? 'Instagram Account ID' : instanceProvider === 'messenger' ? 'Facebook Page ID' : 'Phone Number ID'}
-                  </label>
-                  <Input 
-                    placeholder="1234567890" 
-                    value={oficialNumberId}
-                    onChange={(e) => setOficialNumberId(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">O ID gerado no painel de desenvolvedores da Meta.</p>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Access Token Permanente</label>
-                  <Input 
-                    type="password"
-                    placeholder="EAAS..." 
-                    value={oficialToken}
-                    onChange={(e) => setOficialToken(e.target.value)}
-                  />
-                </div>
+                {(instanceProvider === 'instagram' || instanceProvider === 'messenger') && company?.meta_system_user_token && !useManualToken ? (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Selecione a Conta da Meta</label>
+                    {isLoadingMeta ? (
+                      <div className="text-sm text-muted-foreground flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Buscando contas...
+                      </div>
+                    ) : metaAccounts.length === 0 ? (
+                      <div className="text-sm text-destructive">
+                        Nenhuma conta encontrada. Verifique as permissões do Token do Sistema ou se a página está vinculada.
+                      </div>
+                    ) : (
+                      <Select value={selectedMetaAccountId} onValueChange={setSelectedMetaAccountId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a Página / Instagram" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {metaAccounts.map(acc => (
+                            <SelectItem key={acc.id} value={acc.id}>
+                              <div className="flex items-center gap-2">
+                                {instanceProvider === 'instagram' && acc.instagram_business_account?.profile_picture_url ? (
+                                  <img src={acc.instagram_business_account.profile_picture_url} className="w-5 h-5 rounded-full" />
+                                ) : (
+                                  <Globe className="w-4 h-4 text-muted-foreground" />
+                                )}
+                                <span>{instanceProvider === 'instagram' ? acc.instagram_business_account?.username || acc.name : acc.name}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <Button 
+                      variant="link" 
+                      className="px-0 text-xs text-muted-foreground h-auto"
+                      onClick={() => setUseManualToken(true)}
+                    >
+                      Não achou sua conta? Inserir Manualmente (Modo Direto)
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">
+                        {instanceProvider === 'instagram' ? 'Instagram Account ID' : instanceProvider === 'messenger' ? 'Facebook Page ID' : 'Phone Number ID'}
+                      </label>
+                      <Input 
+                        placeholder="1234567890" 
+                        value={oficialNumberId}
+                        onChange={(e) => setOficialNumberId(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">O ID gerado no painel de desenvolvedores da Meta.</p>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Access Token Permanente</label>
+                      <Input 
+                        type="password"
+                        placeholder="EAAS... ou IGA..." 
+                        value={oficialToken}
+                        onChange={(e) => setOficialToken(e.target.value)}
+                      />
+                    </div>
+                    {company?.meta_system_user_token && (
+                      <Button 
+                        variant="link" 
+                        className="px-0 text-xs text-muted-foreground h-auto mt-2"
+                        onClick={() => setUseManualToken(false)}
+                      >
+                        Voltar para a Busca Automática
+                      </Button>
+                    )}
+                  </>
+                )}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Verify Token (Sua Escolha)</label>
                   <Input 

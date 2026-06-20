@@ -387,6 +387,7 @@ export type Database = {
           evogo_host: string | null
           id: string
           logo_url: string | null
+          meta_system_user_token: string | null
           name: string
           slug: string
         }
@@ -401,6 +402,7 @@ export type Database = {
           evogo_host?: string | null
           id?: string
           logo_url?: string | null
+          meta_system_user_token?: string | null
           name: string
           slug: string
         }
@@ -415,6 +417,7 @@ export type Database = {
           evogo_host?: string | null
           id?: string
           logo_url?: string | null
+          meta_system_user_token?: string | null
           name?: string
           slug?: string
         }
@@ -658,6 +661,7 @@ export type Database = {
           id: string
           last_message_at: string
           last_message_preview: string | null
+          remote_id: string | null
           resolution_observation: string | null
           resolution_reason_id: string | null
           resolved_at: string | null

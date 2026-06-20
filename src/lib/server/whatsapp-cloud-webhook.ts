@@ -2,6 +2,7 @@ import { supabaseAdmin } from '@/integrations/supabase/client.server';
 import { enqueueAiMessage } from './ai-queue';
 import { syncCloudTemplates } from './whatsapp-cloud-api';
 import { v4 as uuidv4 } from 'uuid';
+import { getPhoneVariants } from '@/lib/utils';
 
 export async function handleWhatsappCloudWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -351,16 +352,43 @@ async function processIncomingMessage(params: any) {
 
   // 1. Encontrar ou criar o contato
   const phoneWithoutPlus = contactPhone.replace('+', '');
+  const phoneVariants = getPhoneVariants(phoneWithoutPlus);
   
-  let { data: contact } = await supabaseAdmin
+  const { data: contacts } = await supabaseAdmin
     .from('contacts')
-    .select('id, unit_id')
+    .select('id, unit_id, merged_into_id')
     .eq('company_id', companyId)
-    .eq('phone', phoneWithoutPlus)
-    .limit(1)
-    .maybeSingle();
+    .in('phone', phoneVariants);
 
-  if (!contact) {
+  let contact = null;
+  let activeConv = null;
+
+  if (contacts && contacts.length > 0) {
+    // Se encontrou contatos, tenta achar uma conversa ativa vinculada a QUALQUER um deles
+    const contactIds = contacts.map(c => c.merged_into_id || c.id);
+    
+    const { data: convs } = await supabaseAdmin
+      .from('conversations')
+      .select('id, status, assigned_agent_id, contact_id')
+      .in('contact_id', contactIds)
+      .eq('whatsapp_instance_id', instanceId)
+      .in('status', ['waiting', 'active'])
+      .order('started_at', { ascending: false })
+      .limit(1);
+
+    if (convs && convs.length > 0) {
+      activeConv = convs[0];
+      contact = contacts.find(c => (c.merged_into_id || c.id) === activeConv.contact_id) || contacts[0];
+    } else {
+      // Se não tem conversa ativa, pega o primeiro (preferencialmente o pai se mesclado)
+      contact = contacts[0];
+    }
+    
+    if (contact.merged_into_id) {
+      contact.id = contact.merged_into_id;
+    }
+  } else {
+    // Criar novo contato
     let source = null;
     let sourceDetails = null;
 
@@ -404,17 +432,6 @@ async function processIncomingMessage(params: any) {
     }
   }
 
-  // 2. Encontrar conversa ativa na mesma instância
-  let { data: activeConv } = await supabaseAdmin
-    .from('conversations')
-    .select('id, status, assigned_agent_id')
-    .eq('contact_id', contact.id)
-    .eq('whatsapp_instance_id', instanceId)
-    .in('status', ['waiting', 'active'])
-    .order('started_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
   let conversationId;
 
   if (activeConv) {
@@ -424,7 +441,8 @@ async function processIncomingMessage(params: any) {
       .from('conversations')
       .update({
         last_message_at: new Date(timestamp).toISOString(),
-        last_message_preview: textContent?.substring(0, 50)
+        last_message_preview: textContent?.substring(0, 50),
+        remote_id: phoneWithoutPlus
       })
       .eq('id', conversationId);
   } else {
@@ -433,6 +451,7 @@ async function processIncomingMessage(params: any) {
       .from('conversations')
       .insert({
         contact_id: contact.id,
+        remote_id: phoneWithoutPlus,
         whatsapp_instance_id: instanceId,
         unit_id: unitId,
         status: 'waiting',

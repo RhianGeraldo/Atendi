@@ -45,6 +45,7 @@ function ContactsPage() {
           )
         `)
         .eq("company_id", profile!.company_id!)
+        .is("merged_into_id", null)
         .order("created_at", { ascending: false });
 
       if (selectedUnitId) {
@@ -58,8 +59,8 @@ function ContactsPage() {
       const { data, error } = await query;
       if (error) throw error;
       
-      // Filter out groups (phone number > 15 characters)
-      return data.filter(c => !c.phone || c.phone.length <= 15).map(c => {
+      // Filter out groups (WhatsApp group IDs are usually 18 digits, Instagram PSIDs are ~16)
+      return data.filter(c => !c.phone || c.phone.length <= 17).map(c => {
         // Sort conversations to get the latest
         const sortedConvs = (c.conversations || []).sort((a: any, b: any) => 
           new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
@@ -96,6 +97,7 @@ function ContactsPage() {
           )
         `)
         .eq('company_id', profile!.company_id!)
+        .is("contact.merged_into_id", null)
         .order('created_at', { ascending: false });
 
       if (selectedUnitId) {
@@ -106,9 +108,9 @@ function ContactsPage() {
       if (error) throw error;
 
       let validAdLeads = data.filter((lead: any) => {
-        // Ensure we only process contacts, not groups (groups usually have > 15 chars)
+        // Ensure we only process contacts, not groups
         const phone = lead.contact?.phone;
-        if (phone && phone.length > 15) return false;
+        if (phone && phone.length > 17) return false;
 
         if (searchTerm) {
           const searchLower = searchTerm.toLowerCase();
@@ -211,10 +213,21 @@ function ContactsPage() {
                           </td>
                           <td className="p-4">
                             <div className="flex flex-col gap-1 text-muted-foreground">
-                              {contact.phone && (
+                              {contact.phone && contact.phone.length <= 15 && (
                                 <div className="flex items-center gap-1.5">
                                   <Phone className="h-3 w-3" />
                                   <span>{contact.phone}</span>
+                                </div>
+                              )}
+                              {contact.phone && contact.phone.length > 15 && !contact.instagram_username && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs" title="ID do Canal">ID: {contact.phone}</span>
+                                </div>
+                              )}
+                              {contact.instagram_username && (
+                                <div className="flex items-center gap-1.5">
+                                  <User className="h-3 w-3 text-pink-500" />
+                                  <span>@{contact.instagram_username}</span>
                                 </div>
                               )}
                               {contact.email && (
@@ -223,7 +236,7 @@ function ContactsPage() {
                                   <span className="truncate max-w-[150px]">{contact.email}</span>
                                 </div>
                               )}
-                              {!contact.phone && !contact.email && <span>-</span>}
+                              {!contact.phone && !contact.email && !contact.instagram_username && <span>-</span>}
                             </div>
                             {!selectedUnitId && contact.last_unit_name && (
                               <div className="flex items-center gap-1 mt-2 text-[10px] font-medium px-2 py-0.5 rounded bg-muted/60 text-muted-foreground w-fit">

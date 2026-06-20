@@ -24,13 +24,14 @@ export async function sendPlatformMessage({
 }) {
   const { data: conv, error: convErr } = await supabaseAdmin
     .from("conversations")
-    .select("status, channel, whatsapp_instance_id, unit_id, contact_id, contacts(phone, whatsapp_lid)")
+    .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid)")
     .eq("id", conversationId)
     .single();
 
   if (convErr || !conv) throw new Error("Conversation not found");
 
-  const phone = conv.contacts?.phone;
+  const phone = conv.remote_id || conv.contacts?.phone;
+  const whatsapp_lid = conv.remote_id || conv.contacts?.whatsapp_lid;
   let remoteMsgId = null;
   let participantJid = null;
   let mediaUrlToSend = mediaBase64;
@@ -144,7 +145,7 @@ export async function sendPlatformMessage({
       throw new Error("Instagram Account ID or Token missing");
     }
 
-    const igsid = conv.contacts?.whatsapp_lid || phone;
+    const igsid = whatsapp_lid;
     if (!igsid) throw new Error("Missing Instagram Scoped ID (whatsapp_lid) for contact");
 
     const payload: any = {
@@ -201,7 +202,12 @@ export async function sendPlatformMessage({
       payload.message = { text: text || '' };
     }
 
-    const response = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`, {
+    const isDirectToken = instance.oficial_access_token.startsWith('IGA');
+    const endpoint = isDirectToken 
+      ? `https://graph.instagram.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`
+      : `https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`;
+
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -227,7 +233,7 @@ export async function sendPlatformMessage({
       throw new Error("Facebook Page ID or Token missing");
     }
 
-    const psid = conv.contacts?.whatsapp_lid || phone;
+    const psid = whatsapp_lid;
 
     const payload: any = {
       recipient: { id: psid },

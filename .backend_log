@@ -1,0 +1,10 @@
+
+> dev
+> vite dev
+
+Port 8080 is in use, trying another one...
+
+  VITE v7.3.5  ready in 2623 ms
+
+  ➜  Local:   http://localhost:8081/
+  ➜  Network: http://192.168.15.20:8081/

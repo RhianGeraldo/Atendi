@@ -121,7 +121,7 @@ async function processIncomingMessage(params: any) {
   // 1. Encontrar ou criar o contato usando o IGSID (Messenger Scoped ID) no campo whatsapp_lid
   let { data: contact } = await supabaseAdmin
     .from('contacts')
-    .select('id, name')
+    .select('id, name, merged_into_id')
     .eq('company_id', companyId)
     .eq('whatsapp_lid', contactPsid)
     .limit(1)
@@ -171,6 +171,11 @@ async function processIncomingMessage(params: any) {
     contact = newContact;
   }
 
+  // Se o contato estiver mesclado, usar o ID do contato pai
+  if (contact.merged_into_id) {
+    contact.id = contact.merged_into_id;
+  }
+
   // 2. Encontrar conversa ativa na mesma instância
   let { data: activeConv } = await supabaseAdmin
     .from('conversations')
@@ -190,7 +195,8 @@ async function processIncomingMessage(params: any) {
       .from('conversations')
       .update({
         last_message_at: new Date(timestamp).toISOString(),
-        last_message_preview: textContent?.substring(0, 50)
+        last_message_preview: textContent?.substring(0, 50),
+        remote_id: contactPsid
       })
       .eq('id', conversationId);
   } else {
@@ -199,6 +205,7 @@ async function processIncomingMessage(params: any) {
       .from('conversations')
       .insert({
         contact_id: contact.id,
+        remote_id: contactPsid,
         whatsapp_instance_id: instanceId,
         unit_id: unitId,
         status: isFromMe ? 'resolved' : 'waiting',
