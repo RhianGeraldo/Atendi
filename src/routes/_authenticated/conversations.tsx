@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
+import { ProviderIcon } from "@/components/common/provider-icon";
 
 let ffmpegInstance: FFmpeg | null = null;
 const getFFmpeg = async () => {
@@ -122,7 +123,7 @@ function ConversationsPage() {
       if (!profile?.company_id) return [];
       const { data, error } = await supabase
         .from("whatsapp_instances")
-        .select("id, name, instance_name")
+        .select("id, name, instance_name, provider")
         .eq("company_id", profile.company_id);
       if (error) throw error;
       return data ?? [];
@@ -853,7 +854,7 @@ function NewConversationDialog({
       if (!profile?.company_id) return [];
       const { data, error } = await supabase
         .from("whatsapp_instances")
-        .select("id, name, instance_name")
+        .select("id, name, instance_name, provider")
         .eq("company_id", profile.company_id);
       if (error) throw error;
       return data ?? [];
@@ -916,7 +917,10 @@ function NewConversationDialog({
               <SelectContent>
                 {instances?.map((inst) => (
                   <SelectItem key={inst.instance_name} value={inst.instance_name}>
-                    {inst.name || inst.instance_name}
+                    <div className="flex items-center gap-2">
+                      <ProviderIcon provider={inst.provider} />
+                      <span>{inst.name || inst.instance_name}</span>
+                    </div>
                   </SelectItem>
                 ))}
                 {!instances?.length && (
