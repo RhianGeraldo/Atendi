@@ -111,7 +111,8 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
                 mediaType = 'image';
               } else if (attType === 'story_mention') {
                 mediaType = 'image';
-                textContent = "✨ Mencionou você em um story" + (textContent ? `\n\n${textContent}` : '');
+                const mentionText = isFromMe ? "✨ Você mencionou o contato em um story" : "✨ Mencionou você em um story";
+                textContent = mentionText + (textContent ? `\n\n${textContent}` : '');
               } else if (attType === 'ephemeral') {
                 mediaType = 'text';
                 textContent = "📷 Mídia temporária (visualização única)";

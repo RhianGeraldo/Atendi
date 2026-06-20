@@ -746,7 +746,7 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
     // 1. Get conversation and message
     const { data: conv } = await supabase
       .from("conversations")
-      .select("whatsapp_instance_id, unit_id, contact_id, contacts(phone)")
+      .select("whatsapp_instance_id, unit_id, contact_id, channel, contacts(phone, whatsapp_lid)")
       .eq("id", data.conversationId)
       .single();
 
@@ -761,54 +761,101 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
     if (!msg) throw new Error("Message not found");
     if (!msg.remote_msg_id) throw new Error("Cannot react to a message without a remote ID");
 
-    // 2. Get evogo configuration
-    let host, token, instanceName;
+    // 2. Obter instância
+    let provider = 'coex';
+    let host, token, instanceName, oficialToken, oficialPhoneId;
 
     if (conv.whatsapp_instance_id) {
       const { data: instance } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .select("provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)")
         .eq("id", conv.whatsapp_instance_id)
         .single();
 
       if (instance) {
+        provider = instance.provider || 'coex';
         host = instance.companies?.evogo_host;
         token = instance.evogo_api_key;
         instanceName = instance.instance_name;
+        oficialToken = instance.oficial_access_token;
+        oficialPhoneId = instance.oficial_phone_number_id;
       }
     }
 
-    if (!host && conv.unit_id) {
-      const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
-      if (unitData) {
-        const { data: companyInstance } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("instance_name, evogo_api_key, companies(evogo_host)")
-          .eq("company_id", unitData.company_id)
-          .limit(1)
-          .maybeSingle();
-        if (companyInstance) {
-          host = companyInstance.companies?.evogo_host;
-          token = companyInstance.evogo_api_key;
-          instanceName = companyInstance.instance_name;
-        }
-      }
-    }
-
-    if (!host || !token || !instanceName) throw new Error("EvoGo is not configured");
-
-    // 3. Send Reaction via EvoGo API
+    // 3. Enviar Reação conforme o provedor
     try {
-      await sendEvogoReaction({
-        host,
-        token,
-        number: conv.contacts.phone,
-        remoteMsgId: msg.remote_msg_id,
-        emoji: data.emoji,
-        fromMe: msg.sender_type === 'agent',
-      });
+      if (provider === 'instagram' || provider === 'messenger') {
+        if (!oficialToken || !oficialPhoneId) throw new Error("Missing Meta tokens");
+        const igsid = conv.contacts.whatsapp_lid;
+        if (!igsid) throw new Error("Missing recipient scoped ID");
+
+        const isDirectToken = oficialToken.startsWith('IGA');
+        const endpoint = (provider === 'instagram' && isDirectToken)
+          ? `https://graph.instagram.com/v20.0/${oficialPhoneId}/messages?access_token=${oficialToken}`
+          : `https://graph.facebook.com/v20.0/me/messages?access_token=${oficialToken}`;
+
+        const emojiMap: Record<string, string> = {
+          '❤️': 'love', '👍': 'like', '😢': 'sad', '😠': 'angry', '😡': 'angry',
+          '😮': 'wow', '😲': 'wow', '😂': 'laugh', '😆': 'laugh',
+          '👍🏻': 'like', '👍🏼': 'like', '👍🏽': 'like', '👍🏾': 'like', '👍🏿': 'like'
+        };
+
+        const payload: any = {
+          recipient: { id: igsid },
+          sender_action: "react",
+          payload: { message_id: msg.remote_msg_id }
+        };
+
+        if (data.emoji) {
+          payload.payload.reaction = emojiMap[data.emoji] || 'like';
+        }
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          console.error(`Meta API Reaction Error:`, await res.text());
+        }
+
+      } else if (provider === 'oficial') {
+        if (!oficialToken || !oficialPhoneId) throw new Error("Missing Meta tokens");
+        const endpoint = `https://graph.facebook.com/v20.0/${oficialPhoneId}/messages`;
+        const payload = {
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: conv.contacts.phone,
+          type: "reaction",
+          reaction: {
+            message_id: msg.remote_msg_id,
+            emoji: data.emoji || ""
+          }
+        };
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${oficialToken}` },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          console.error(`Cloud API Reaction Error:`, await res.text());
+        }
+
+      } else {
+        // Evogo / Coex
+        if (!host || !token || !instanceName) throw new Error("EvoGo is not configured");
+        await sendEvogoReaction({
+          host,
+          token,
+          number: conv.contacts.phone,
+          remoteMsgId: msg.remote_msg_id,
+          emoji: data.emoji,
+          fromMe: msg.sender_type === 'agent',
+        });
+      }
     } catch (err) {
-      console.warn("EvoGo Reaction failed, likely incorrect endpoint or unconfigured API. Still updating DB.", err);
+      console.warn("Reaction API failed, still updating DB.", err);
     }
 
     // 4. Update DB
