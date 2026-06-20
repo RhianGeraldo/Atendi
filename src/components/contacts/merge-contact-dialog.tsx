@@ -21,8 +21,6 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
 
   // Field selection state
   const [selectedName, setSelectedName] = useState<"source" | "target">("target");
-  const [selectedPhone, setSelectedPhone] = useState<"source" | "target">("target");
-  const [selectedInsta, setSelectedInsta] = useState<"source" | "target">("target");
 
   const { data: contacts, isLoading } = useQuery({
     queryKey: ["contacts-search", search, selectedUnit],
@@ -54,9 +52,9 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
       if (!selectedTarget) return;
 
       const finalName = selectedName === "source" ? sourceContact.name : selectedTarget.name;
-      const finalPhone = selectedPhone === "source" ? sourceContact.phone : selectedTarget.phone;
-      const finalLid = selectedPhone === "source" ? sourceContact.whatsapp_lid : selectedTarget.whatsapp_lid;
-      const finalInsta = selectedInsta === "source" ? sourceContact.instagram_username : selectedTarget.instagram_username;
+      const finalPhone = selectedTarget.phone || sourceContact.phone;
+      const finalLid = selectedTarget.whatsapp_lid; // Target keeps its lid, source keeps its own
+      const finalInsta = selectedTarget.instagram_username || sourceContact.instagram_username;
       
       // Try to keep the one that actually has a picture if the other doesn't
       const finalPic = selectedTarget.profile_picture_url || sourceContact.profile_picture_url;
@@ -90,8 +88,6 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
       setSearch("");
       setSelectedTarget(null);
       setSelectedName("target");
-      setSelectedPhone("target");
-      setSelectedInsta("target");
     }
   }, [open]);
 
@@ -197,47 +193,8 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
                   </Label>
                 </RadioGroup>
               </div>
-
-              {/* Field Selection: Phone */}
-              <div className="space-y-2 pt-2 border-t">
-                <Label className="text-xs font-semibold text-muted-foreground">Qual Telefone manter?</Label>
-                <RadioGroup value={selectedPhone} onValueChange={(v: any) => setSelectedPhone(v)} className="grid grid-cols-2 gap-2">
-                  <Label
-                    htmlFor="phone-target"
-                    className={cn("flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-3 hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary cursor-pointer", selectedPhone === "target" && "border-primary bg-primary/5")}
-                  >
-                    <RadioGroupItem value="target" id="phone-target" className="sr-only" />
-                    <span className="font-medium truncate w-full text-center">{selectedTarget.phone || '-'}</span>
-                  </Label>
-                  <Label
-                    htmlFor="phone-source"
-                    className={cn("flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-3 hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary cursor-pointer", selectedPhone === "source" && "border-primary bg-primary/5")}
-                  >
-                    <RadioGroupItem value="source" id="phone-source" className="sr-only" />
-                    <span className="font-medium truncate w-full text-center">{sourceContact.phone || '-'}</span>
-                  </Label>
-                </RadioGroup>
-              </div>
-
-              {/* Field Selection: Instagram */}
-              <div className="space-y-2 pt-2 border-t">
-                <Label className="text-xs font-semibold text-muted-foreground">Qual @Instagram manter?</Label>
-                <RadioGroup value={selectedInsta} onValueChange={(v: any) => setSelectedInsta(v)} className="grid grid-cols-2 gap-2">
-                  <Label
-                    htmlFor="insta-target"
-                    className={cn("flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-3 hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary cursor-pointer", selectedInsta === "target" && "border-primary bg-primary/5")}
-                  >
-                    <RadioGroupItem value="target" id="insta-target" className="sr-only" />
-                    <span className="font-medium truncate w-full text-center">{selectedTarget.instagram_username ? `@${selectedTarget.instagram_username}` : '-'}</span>
-                  </Label>
-                  <Label
-                    htmlFor="insta-source"
-                    className={cn("flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-3 hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary cursor-pointer", selectedInsta === "source" && "border-primary bg-primary/5")}
-                  >
-                    <RadioGroupItem value="source" id="insta-source" className="sr-only" />
-                    <span className="font-medium truncate w-full text-center">{sourceContact.instagram_username ? `@${sourceContact.instagram_username}` : '-'}</span>
-                  </Label>
-                </RadioGroup>
+              <div className="text-xs text-muted-foreground mt-4 px-2">
+                Os demais dados (Telefone, @Instagram, etc) serão combinados automaticamente para não perder nenhuma informação.
               </div>
             </div>
 
