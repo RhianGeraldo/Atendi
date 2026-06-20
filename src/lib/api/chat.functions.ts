@@ -182,10 +182,6 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           message: {}
         };
 
-        if (finalMessageId) {
-          payload.reply_to = { mid: finalMessageId };
-        }
-
         if (data.mediaBase64 && data.mediaType !== 'text' && mediaUrlToSend) {
           let igMediaType = 'image';
           if (data.mediaType === 'video') igMediaType = 'video';
@@ -203,6 +199,10 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           };
         } else {
           payload.message = { text: textToSend || '' };
+        }
+
+        if (finalMessageId) {
+          payload.message.reply_to = { mid: finalMessageId };
         }
 
         const isDirectToken = instance.oficial_access_token.startsWith('IGA');
@@ -240,10 +240,6 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           message: {}
         };
 
-        if (finalMessageId) {
-          payload.reply_to = { mid: finalMessageId };
-        }
-
         if (data.mediaBase64 && data.mediaType !== 'text' && mediaUrlToSend) {
           let fbMediaType = 'image';
           if (data.mediaType === 'video') fbMediaType = 'video';
@@ -261,6 +257,10 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           };
         } else {
           payload.message = { text: textToSend || '' };
+        }
+
+        if (finalMessageId) {
+          payload.message.reply_to = { mid: finalMessageId };
         }
 
         // Messenger utiliza o /me/messages usando o Page Access Token
