@@ -202,7 +202,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         }
 
         if (finalMessageId) {
-          payload.message.reply_to = { mid: finalMessageId };
+          payload.reply_to = { message_id: finalMessageId }; // Corrigido de message.reply_to e alterado para message_id conforme v20.0
         }
 
         const isDirectToken = instance.oficial_access_token.startsWith('IGA');
@@ -260,7 +260,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         }
 
         if (finalMessageId) {
-          payload.message.reply_to = { mid: finalMessageId };
+          payload.reply_to = { message_id: finalMessageId }; // Alterado para message_id
         }
 
         // Messenger utiliza o /me/messages usando o Page Access Token
