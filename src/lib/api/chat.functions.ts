@@ -33,10 +33,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
     const targetConversationId = data.conversationId;
 
-    const phone = conv.remote_id || conv.contacts?.whatsapp_lid || conv.contacts?.phone;
-    if (!phone) {
-      throw new Error("Contact has no remote_id or phone number.");
-    }
+    // O identificador final será resolvido após descobrir o provedor
 
     // 2. Get evogo configuration for the conversation's instance
     let host, token, instanceName, provider;
@@ -75,8 +72,20 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       }
     }
 
-    if (!data.isInternal && provider !== 'oficial' && (!host || !token || !instanceName)) {
+    if (!data.isInternal && provider !== 'oficial' && provider !== 'instagram' && provider !== 'messenger' && (!host || !token || !instanceName)) {
       throw new Error("EvoGo is not configured for this conversation.");
+    }
+
+    let phone = "";
+    if (provider === 'instagram' || provider === 'messenger') {
+      phone = conv.remote_id || conv.contacts?.whatsapp_lid || conv.contacts?.phone || "";
+    } else {
+      // Para WhatsApp (oficial e evogo), o identificador prioritário é o telefone real.
+      phone = conv.contacts?.phone || conv.remote_id || conv.contacts?.whatsapp_lid || "";
+    }
+
+    if (!phone) {
+      throw new Error("Contact has no remote_id or phone number.");
     }
 
     // 3. Get user profile for signature
@@ -98,6 +107,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     let finalMessageId = data.quotedMessageId;
     
     // Fallback: If UI forgot to send the remote_msg_id, but sent the internal ID, fetch it from the DB!
+    let quotedSenderType = "contact";
     if (data.quotedInternalId) {
       const { data: qMsg } = await supabaseAdmin
         .from('messages')
@@ -108,9 +118,13 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       if (!finalMessageId && qMsg?.remote_msg_id) {
         finalMessageId = qMsg.remote_msg_id;
       }
+      if (qMsg?.sender_type) {
+        quotedSenderType = qMsg.sender_type;
+      }
     }
 
-    if (!finalParticipant && conv.contacts?.phone && !conv.contacts.phone.includes('-')) {
+    // Injetar o JID do contato SOMENTE se a mensagem original foi enviada pelo contato
+    if (!finalParticipant && quotedSenderType === "contact" && conv.contacts?.phone && !conv.contacts.phone.includes('-')) {
       finalParticipant = `${conv.contacts.phone}@s.whatsapp.net`;
     }
 
@@ -837,7 +851,11 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
         };
 
         if (data.emoji) {
-          payload.payload.reaction = emojiMap[data.emoji] || 'like';
+          if (provider === 'messenger') {
+            payload.payload.reaction = emojiMap[data.emoji] || 'like';
+          } else {
+            payload.payload.reaction = data.emoji; // Instagram exige o caractere do emoji exato
+          }
         }
 
         const res = await fetch(endpoint, {
