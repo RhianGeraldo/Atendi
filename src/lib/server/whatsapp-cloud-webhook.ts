@@ -153,7 +153,19 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               message: errorObj.message,
               details: errorObj.error_data?.details
             });
-            // Dependendo do código do erro (ex: banimento), você poderia atualizar o status da instância aqui.
+            // Salvar no log da instância
+            await supabaseAdmin.from('whatsapp_instances')
+              .update({
+                last_account_alert: {
+                  code: errorObj.code,
+                  title: errorObj.title,
+                  message: errorObj.message,
+                  details: errorObj.error_data?.details,
+                  timestamp: new Date().toISOString()
+                },
+                last_account_update: new Date().toISOString()
+              })
+              .eq('id', instance.id);
           }
         }
 
@@ -174,6 +186,25 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               if (contactMatch && contactMatch.profile && contactMatch.profile.name) {
                 contactName = contactMatch.profile.name;
               }
+            }
+
+            // Tratamento especial para edição de mensagem
+            if (messageType === 'edit') {
+              const originalMsgId = message.edit?.original_message_id;
+              let newContent = '';
+              const editMsg = message.edit?.message;
+              if (editMsg) {
+                if (editMsg.type === 'text') newContent = editMsg.text?.body || '';
+                else if (editMsg.type === 'image') newContent = editMsg.image?.caption || '';
+                else if (editMsg.type === 'video') newContent = editMsg.video?.caption || '';
+                else if (editMsg.type === 'document') newContent = editMsg.document?.caption || editMsg.document?.filename || '';
+              }
+              
+              if (originalMsgId && newContent) {
+                if (!newContent.endsWith('(editado)')) newContent += ' (editado)';
+                await supabaseAdmin.from('messages').update({ content: newContent }).eq('remote_msg_id', originalMsgId);
+              }
+              continue; // Interrompe para não inserir como nova mensagem
             }
 
             let textContent = '';
@@ -225,6 +256,15 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               mediaType = 'text';
               textContent = message.system?.body || '⚠️ Mensagem de Sistema';
               systemData = message.system;
+            } else if (messageType === 'contacts') {
+              mediaType = 'text';
+              const contactsList = message.contacts || [];
+              const formattedContacts = contactsList.map((c: any) => {
+                const name = c.name?.formatted_name || c.name?.first_name || 'Contato';
+                const phones = (c.phones || []).map((p: any) => p.phone).join(', ');
+                return `👤 ${name}\n📞 ${phones}`;
+              });
+              textContent = `[Cartão de Contato]\n${formattedContacts.join('\n\n')}`;
             } else {
               textContent = `[Mensagem não suportada: ${messageType}]`;
             }
