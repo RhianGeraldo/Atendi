@@ -169,12 +169,12 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       } else if (provider === 'instagram') {
         const { data: instance } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("oficial_phone_number_id, oficial_waba_id, oficial_access_token")
+          .select("oficial_phone_number_id, oficial_access_token")
           .eq("id", conv.whatsapp_instance_id)
           .single();
 
-        if (!instance || !instance.oficial_phone_number_id || !instance.oficial_waba_id || !instance.oficial_access_token) {
-          throw new Error("Instagram Account ID, Page ID ou Token faltando");
+        if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
+          throw new Error("Instagram Account ID ou Token faltando");
         }
 
         const payload: any = {
@@ -205,7 +205,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           payload.message = { text: textToSend || '' };
         }
 
-        const igRes = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_waba_id}/messages?access_token=${instance.oficial_access_token}`, {
+        const igRes = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
