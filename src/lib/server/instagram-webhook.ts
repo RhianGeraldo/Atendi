@@ -64,19 +64,57 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
           const isFromMe = webhookEvent.message?.is_echo || senderId === instagramAccountId || senderId === accountId;
           const contactIgsid = isFromMe ? recipientId : senderId;
 
-          if (webhookEvent.message) {
-            const messageId = webhookEvent.message.mid;
-            let textContent = webhookEvent.message.text || '';
-            let mediaType = 'text';
-            let mediaUrl = null;
+          if (webhookEvent.reaction) {
+            await updateMessageReaction(webhookEvent.reaction.mid, webhookEvent.reaction.action, webhookEvent.reaction.emoji);
+            continue;
+          }
 
-            if (webhookEvent.message.attachments && webhookEvent.message.attachments.length > 0) {
+          if (webhookEvent.read) {
+            await updateMessageReadStatus(webhookEvent.read.mid, timestamp);
+            continue;
+          }
+
+          let messageId = null;
+          let textContent = '';
+          let mediaType = 'text';
+          let mediaUrl = null;
+          let isDeleted = false;
+          let quotedMessageId = null;
+
+          if (webhookEvent.postback) {
+            messageId = webhookEvent.postback.mid || `pb_${timestamp}`;
+            textContent = webhookEvent.postback.title || webhookEvent.postback.payload || 'Opção selecionada';
+          } else if (webhookEvent.referral) {
+            messageId = `ref_${timestamp}`;
+            textContent = `[Referência] ${webhookEvent.referral.source}: ${webhookEvent.referral.ref || webhookEvent.referral.ad_id}`;
+          } else if (webhookEvent.message) {
+            messageId = webhookEvent.message.mid;
+            textContent = webhookEvent.message.text || '';
+            isDeleted = webhookEvent.message.is_deleted || false;
+            
+            if (webhookEvent.message.reply_to) {
+              quotedMessageId = webhookEvent.message.reply_to.mid;
+            }
+
+            if (webhookEvent.message.is_unsupported) {
+              textContent = "⚠️ Mensagem não suportada pelo Instagram";
+              mediaType = 'text';
+            } else if (isDeleted) {
+              textContent = "🚫 Mensagem apagada";
+              mediaType = 'text';
+            } else if (webhookEvent.message.attachments && webhookEvent.message.attachments.length > 0) {
               const attachment = webhookEvent.message.attachments[0];
               const attType = attachment.type;
               mediaUrl = attachment.payload?.url;
 
               if (['image', 'sticker'].includes(attType)) {
                 mediaType = 'image';
+              } else if (attType === 'story_mention') {
+                mediaType = 'image';
+                textContent = "✨ Mencionou você em um story" + (textContent ? `\n\n${textContent}` : '');
+              } else if (attType === 'ephemeral') {
+                mediaType = 'text';
+                textContent = "📷 Mídia temporária (visualização única)";
               } else if (['video', 'reel', 'ig_reel'].includes(attType)) {
                 mediaType = 'video';
               } else if (attType === 'audio') {
@@ -93,22 +131,25 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
                 textContent = `${textContent}\n[Anexo ${attType}]`.trim();
               }
             }
-
-            if (!textContent && mediaType === 'text') continue;
-
-            await processIncomingMessage({
-              companyId: instance.company_id,
-              unitId: instance.unit_id,
-              instanceId: instance.id,
-              contactIgsid,
-              messageId,
-              textContent,
-              mediaType,
-              mediaUrl,
-              timestamp,
-              isFromMe
-            });
           }
+
+          if (!messageId) continue;
+          if (!textContent && mediaType === 'text') continue;
+
+          await processIncomingMessage({
+            companyId: instance.company_id,
+            unitId: instance.unit_id,
+            instanceId: instance.id,
+            contactIgsid,
+            messageId,
+            textContent,
+            mediaType,
+            mediaUrl,
+            timestamp,
+            isFromMe,
+            isDeleted,
+            quotedMessageId
+          });
         }
       }
     }
@@ -116,7 +157,7 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
 }
 
 async function processIncomingMessage(params: any) {
-  const { companyId, unitId, instanceId, contactIgsid, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe } = params;
+  const { companyId, unitId, instanceId, contactIgsid, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe, isDeleted, quotedMessageId } = params;
 
   // 1. Encontrar ou criar o contato usando o IGSID (Instagram Scoped ID) no campo whatsapp_lid
   let { data: contact } = await supabaseAdmin
@@ -294,6 +335,8 @@ async function processIncomingMessage(params: any) {
       media_type: mediaType,
       media_url: mediaUrl,
       remote_msg_id: messageId,
+      quoted_message_id: quotedMessageId,
+      is_deleted: isDeleted,
       created_at: new Date(timestamp).toISOString()
     })
     .select('id')
@@ -307,5 +350,34 @@ async function processIncomingMessage(params: any) {
   // Se não for do dono da página, enqueue para IA se necessário
   if (!isFromMe && (activeConv?.status === 'waiting' || !activeConv?.assigned_agent_id)) {
     await enqueueAiMessage(msgData.id, companyId, conversationId);
+  }
+}
+
+async function updateMessageReaction(messageId: string, action: string, emoji?: string) {
+  try {
+    const { data: msg } = await supabaseAdmin.from('messages').select('id, reactions').eq('remote_msg_id', messageId).maybeSingle();
+    if (!msg) return;
+    
+    let reactions: Record<string, number> = msg.reactions || {};
+    if (action === 'react' && emoji) {
+      reactions[emoji] = (reactions[emoji] || 0) + 1;
+    } else if (action === 'unreact' && emoji) {
+      if (reactions[emoji]) reactions[emoji] -= 1;
+      if (reactions[emoji] <= 0) delete reactions[emoji];
+    }
+    
+    await supabaseAdmin.from('messages').update({ reactions }).eq('id', msg.id);
+  } catch (e) {
+    console.error('[Instagram Webhook] Erro ao atualizar reação:', e);
+  }
+}
+
+async function updateMessageReadStatus(messageId: string, timestamp: number) {
+  try {
+    await supabaseAdmin.from('messages')
+      .update({ read_at: new Date(timestamp).toISOString() })
+      .eq('remote_msg_id', messageId);
+  } catch (e) {
+    console.error('[Instagram Webhook] Erro ao atualizar status de leitura:', e);
   }
 }
