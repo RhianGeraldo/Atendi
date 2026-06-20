@@ -176,16 +176,35 @@ async function processIncomingMessage(params: any) {
     contact.id = contact.merged_into_id;
   }
 
-  // 2. Encontrar conversa ativa na mesma instância
+  // 2. Encontrar conversa ativa na mesma instância (por contact_id ou remote_id)
   let { data: activeConv } = await supabaseAdmin
     .from('conversations')
-    .select('id, status, assigned_agent_id')
-    .eq('contact_id', contact.id)
+    .select('id, status, assigned_agent_id, contact_id')
     .eq('whatsapp_instance_id', instanceId)
+    .or(`contact_id.eq.${contact.id},remote_id.eq.${contactPsid}`)
     .in('status', ['waiting', 'active'])
     .order('started_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  if (!activeConv) {
+    // Se não tem conversa ativa, verifica se tem alguma resolvida com esse remote_id para herdar o contact_id correto (mesclado)
+    let { data: resolvedConv } = await supabaseAdmin
+      .from('conversations')
+      .select('contact_id')
+      .eq('whatsapp_instance_id', instanceId)
+      .eq('remote_id', contactPsid)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+      
+    if (resolvedConv && resolvedConv.contact_id !== contact.id) {
+      contact.id = resolvedConv.contact_id;
+    }
+  } else if (activeConv.contact_id !== contact.id) {
+    // Se encontrou conversa ativa pelo remote_id e o contact_id for diferente, usar o contact_id da conversa original!
+    contact.id = activeConv.contact_id;
+  }
 
   let conversationId;
 
