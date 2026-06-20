@@ -1419,7 +1419,7 @@ function ChatPanel({
           const ffmpeg = await getFFmpeg();
           await ffmpeg.writeFile('input.webm', await fetchFile(webmBlob));
           
-          const isInstagram = selected?.channel === 'instagram';
+          const isInstagram = conv.channel === 'instagram';
           const outputName = isInstagram ? 'output.mp4' : 'output.ogg';
           const mimeType = isInstagram ? 'audio/mp4' : 'audio/ogg';
 
