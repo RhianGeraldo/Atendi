@@ -215,6 +215,7 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
             let audioData = null;
             let stickerData = null;
             let systemData = null;
+            let contactsData = null;
 
             if (messageType === 'text') {
               textContent = message.text?.body || '';
@@ -258,13 +259,21 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               systemData = message.system;
             } else if (messageType === 'contacts') {
               mediaType = 'text';
+              textContent = '👤 Contato(s) recebido(s)';
               const contactsList = message.contacts || [];
-              const formattedContacts = contactsList.map((c: any) => {
-                const name = c.name?.formatted_name || c.name?.first_name || 'Contato';
-                const phones = (c.phones || []).map((p: any) => p.phone).join(', ');
-                return `👤 ${name}\n📞 ${phones}`;
-              });
-              textContent = `[Cartão de Contato]\n${formattedContacts.join('\n\n')}`;
+              const parsedContacts = [];
+              for (const c of contactsList) {
+                const name = c.name?.formatted_name || c.name?.first_name || null;
+                const phoneObj = c.phones && c.phones.length > 0 ? c.phones[0] : null;
+                const phone = phoneObj?.phone || null;
+                const waid = phoneObj?.wa_id || null;
+                if (name || phone || waid) {
+                  parsedContacts.push({ name, phone, waid });
+                }
+              }
+              if (parsedContacts.length > 0) {
+                contactsData = parsedContacts;
+              }
             } else {
               textContent = `[Mensagem não suportada: ${messageType}]`;
             }
@@ -297,7 +306,8 @@ async function processWhatsappCloudWebhookBody(body: any): Promise<void> {
               interactiveData,
               audioData,
               stickerData,
-              systemData
+              systemData,
+              contactsData
             });
           }
         }
@@ -388,7 +398,7 @@ async function handleMessageStatus(statusPayload: any, instanceId: string) {
 }
 
 async function processIncomingMessage(params: any) {
-  const { companyId, unitId, instanceId, contactPhone, contactName, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe, messageContext, messageReferral, interactiveData, audioData, stickerData, systemData } = params;
+  const { companyId, unitId, instanceId, contactPhone, contactName, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe, messageContext, messageReferral, interactiveData, audioData, stickerData, systemData, contactsData } = params;
 
   // 1. Encontrar ou criar o contato
   const phoneWithoutPlus = contactPhone.replace('+', '');
@@ -561,6 +571,12 @@ async function processIncomingMessage(params: any) {
   }
   if (stickerData && stickerData.animated === true) {
     metadata.is_animated = true;
+  }
+  if (systemData) {
+    metadata.system = systemData;
+  }
+  if (contactsData) {
+    metadata.contacts = contactsData;
   }
 
   // 6. Inserir mensagem
