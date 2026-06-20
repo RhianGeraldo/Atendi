@@ -2549,18 +2549,12 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
                   className="max-w-[200px] cursor-pointer rounded-lg hover:opacity-90 transition-opacity" 
                 />
               </DialogTrigger>
-              <DialogContent className="max-w-4xl p-0 bg-transparent border-none shadow-none flex justify-center items-center [&>button]:hidden">
-                <div className="relative inline-flex justify-center">
-                  <DialogClose className="absolute -top-12 right-0 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
-                    <X className="h-6 w-6" />
-                    <span className="sr-only">Close</span>
-                  </DialogClose>
-                  <img 
-                    src={m.media_url} 
-                    alt={displayContent || "Imagem recebida"} 
-                    className="max-h-[85vh] w-auto rounded-md object-contain" 
-                  />
-                </div>
+              <DialogContent className="max-w-3xl p-6 flex flex-col items-center justify-center">
+                <img 
+                  src={m.media_url} 
+                  alt={displayContent || "Imagem recebida"} 
+                  className="max-h-[75vh] w-auto rounded-md object-contain shadow-sm" 
+                />
               </DialogContent>
             </Dialog>
             {displayContent && displayContent !== "📷 Imagem" && displayContent !== "🖼️ Figurinha" && (
