@@ -285,7 +285,7 @@ function SettingsPage() {
         }
       }
 
-      const technicalName = `${slugify(company.name)}${unitSlugPart}-${slugify(name)}`;
+      const technicalName = `${slugify(company.name)}${unitSlugPart}-${slugify(name)}-${provider}`;
 
       let defaultWebhookUrl = null;
       if (provider === 'oficial') {
