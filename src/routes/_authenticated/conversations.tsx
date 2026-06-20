@@ -1418,17 +1418,27 @@ function ChatPanel({
           
           const ffmpeg = await getFFmpeg();
           await ffmpeg.writeFile('input.webm', await fetchFile(webmBlob));
-          await ffmpeg.exec(['-i', 'input.webm', '-c:a', 'libopus', 'output.ogg']);
-          const data = await ffmpeg.readFile('output.ogg');
           
-          const oggBlob = new Blob([data], { type: 'audio/ogg' });
+          const isInstagram = selected?.channel === 'instagram';
+          const outputName = isInstagram ? 'output.mp4' : 'output.ogg';
+          const mimeType = isInstagram ? 'audio/mp4' : 'audio/ogg';
+
+          if (isInstagram) {
+            await ffmpeg.exec(['-i', 'input.webm', '-c:a', 'aac', '-b:a', '128k', outputName]);
+          } else {
+            await ffmpeg.exec(['-i', 'input.webm', '-c:a', 'libopus', outputName]);
+          }
+          
+          const data = await ffmpeg.readFile(outputName);
+          
+          const audioBlob = new Blob([data], { type: mimeType });
           const reader = new FileReader();
           reader.onloadend = () => {
             const base64data = reader.result as string;
             send.mutate({ content: "", isInternal: isInternalNote, mediaType: "audio", mediaBase64: base64data });
             toast.dismiss(toastId);
           };
-          reader.readAsDataURL(oggBlob);
+          reader.readAsDataURL(audioBlob);
         } catch (error) {
           console.error("Erro na conversão de áudio:", error);
           toast.dismiss(toastId);
