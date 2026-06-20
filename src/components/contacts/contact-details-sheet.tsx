@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
-import { History, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map } from "lucide-react";
+import { History, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { ChannelIcon } from "@/components/common/channel-icon";
@@ -1202,6 +1202,18 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                   <div className="flex items-center gap-2">
                     <User className="h-4 w-4 text-pink-500" />
                     <span>@{contact.instagram_username}</span>
+                  </div>
+                )}
+                {contact.whatsapp_lid && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Smartphone className="h-3.5 w-3.5" />
+                    <span>ID/LID: {contact.whatsapp_lid}</span>
+                  </div>
+                )}
+                {contact.instagram_id && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Hash className="h-3.5 w-3.5 text-pink-400" />
+                    <span>Insta ID: {contact.instagram_id}</span>
                   </div>
                 )}
                 <div className="flex items-center gap-2 text-xs">

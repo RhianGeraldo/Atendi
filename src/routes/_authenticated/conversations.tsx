@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useInfiniteQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List, Hash, Smartphone } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -146,7 +146,7 @@ function ConversationsPage() {
       const from = pageParam as number;
       const to = from + PAGE_SIZE - 1;
 
-      let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+      let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,instagram_username,whatsapp_lid,instagram_id,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
       
       if (debouncedSearch) {
         selectString = selectString.replace("contact:contacts(", "contact:contacts!inner(");
@@ -702,6 +702,29 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
               {isGroup ? "Grupo" : (conv.contact?.phone ? formatPhone(conv.contact.phone) : "Sem número")}
             </Badge>
           </div>
+          
+          {conv.contact && !isGroup && (
+            <div className="flex flex-col items-center gap-1 mt-2 text-xs text-muted-foreground">
+              {conv.contact.instagram_username && (
+                <div className="flex items-center gap-1.5">
+                  <User className="h-3 w-3 text-pink-500" />
+                  <span>@{conv.contact.instagram_username}</span>
+                </div>
+              )}
+              {conv.contact.whatsapp_lid && (
+                <div className="flex items-center gap-1.5">
+                  <Smartphone className="h-3 w-3" />
+                  <span className="truncate max-w-[200px]">ID/LID: {conv.contact.whatsapp_lid}</span>
+                </div>
+              )}
+              {conv.contact.instagram_id && (
+                <div className="flex items-center gap-1.5">
+                  <Hash className="h-3 w-3 text-pink-400" />
+                  <span className="truncate max-w-[200px]">Insta ID: {conv.contact.instagram_id}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
