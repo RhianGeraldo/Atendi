@@ -326,6 +326,17 @@ async function processIncomingMessage(params: any) {
 
   if (existingMsg) return; // Duplicada
 
+  // 3.5 Resolver UUID da mensagem citada (pois o webhook manda o mid remoto)
+  let internalQuotedId = null;
+  if (quotedMessageId) {
+    const { data: qMsg } = await supabaseAdmin
+      .from('messages')
+      .select('id')
+      .eq('remote_msg_id', quotedMessageId)
+      .maybeSingle();
+    if (qMsg) internalQuotedId = qMsg.id;
+  }
+
   // 4. Inserir mensagem
   const { data: msgData, error: msgError } = await supabaseAdmin
     .from('messages')
@@ -336,7 +347,7 @@ async function processIncomingMessage(params: any) {
       media_type: mediaType,
       media_url: mediaUrl,
       remote_msg_id: messageId,
-      quoted_message_id: quotedMessageId,
+      quoted_message_id: internalQuotedId,
       is_deleted: isDeleted,
       created_at: new Date(timestamp).toISOString()
     })
