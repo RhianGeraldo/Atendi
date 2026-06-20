@@ -210,13 +210,27 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           ? `https://graph.instagram.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`
           : `https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`;
 
-        const igRes = await fetch(endpoint, {
+        let igRes = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
 
-        const result = await igRes.json();
+        let result = await igRes.json();
+        
+        // Se a API da Meta recusar o reply_to (ex: respondendo a menções de story, mensagens expiradas, etc), refaz sem o reply_to
+        if (!igRes.ok && result.error?.code === 100 && payload.reply_to) {
+          console.warn("[chat.functions] Instagram rejected reply_to (possibly story mention or unsupported). Retrying without reply_to...");
+          delete payload.reply_to;
+          
+          igRes = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          result = await igRes.json();
+        }
+
         if (!igRes.ok) {
           console.error("[chat.functions] Instagram sending error:", result);
           throw new Error(`Instagram Error: ${result.error?.message || 'Unknown error'}`);
@@ -264,13 +278,27 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         }
 
         // Messenger utiliza o /me/messages usando o Page Access Token
-        const fbRes = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`, {
+        let fbRes = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
 
-        const result = await fbRes.json();
+        let result = await fbRes.json();
+
+        // Se a API da Meta recusar o reply_to (ex: respondendo a mensagens expiradas), refaz sem o reply_to
+        if (!fbRes.ok && result.error?.code === 100 && payload.reply_to) {
+          console.warn("[chat.functions] Messenger rejected reply_to. Retrying without reply_to...");
+          delete payload.reply_to;
+          
+          fbRes = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          result = await fbRes.json();
+        }
+
         if (!fbRes.ok) {
           console.error("[chat.functions] Messenger sending error:", result);
           throw new Error(`Messenger Error: ${result.error?.message || 'Unknown error'}`);
