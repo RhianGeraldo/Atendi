@@ -1268,9 +1268,9 @@ function ConversationItem({
             </Badge>
           ))}
           {conv.unread_count && conv.unread_count > 0 ? (
-            <Badge className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-success px-1.5 py-0 text-[10px] font-bold hover:bg-success">
+            <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-success px-1.5 py-0 text-[10px] font-bold text-white shadow-sm">
               {conv.unread_count}
-            </Badge>
+            </span>
           ) : null}
         </div>
       </div>
