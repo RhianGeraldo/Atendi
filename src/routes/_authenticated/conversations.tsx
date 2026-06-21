@@ -338,6 +338,76 @@ function ConversationsPage() {
     }
   });
 
+  const updateConversationInCache = (convId: string, updates: Partial<ConvRow>, moveToTop = false) => {
+    qc.setQueriesData({ queryKey: ["conversations"] }, (oldData: any, query: any) => {
+      if (!oldData || !oldData.pages) return oldData;
+      
+      const queryTab = query.queryKey[1] as TabType;
+      let targetConv: ConvRow | null = null;
+      
+      // Find the conversation across all pages
+      const updatedPages = oldData.pages.map((page: any) => {
+        if (!page || !page.rows) return page;
+        const filteredRows = page.rows.filter((c: ConvRow) => {
+          if (c.id === convId) {
+            targetConv = { ...c, ...updates } as ConvRow;
+            // Remove from current position so we can move it if appropriate
+            return false;
+          }
+          return true;
+        });
+        return { ...page, rows: filteredRows };
+      });
+
+      // Determine if this conversation belongs to the current queryTab
+      if (targetConv) {
+        const isGroup = !!((targetConv as ConvRow).contact?.phone && ((targetConv as ConvRow).contact.phone!.startsWith('120363') || (targetConv as ConvRow).contact.phone!.includes('-')));
+        const matchesTab = isGroup ? (queryTab === "groups") : ((targetConv as ConvRow).status === queryTab);
+        
+        if (matchesTab) {
+          // Prepend to the first page
+          if (updatedPages.length > 0 && updatedPages[0].rows) {
+            updatedPages[0].rows = [targetConv, ...updatedPages[0].rows];
+          } else {
+            updatedPages[0] = { rows: [targetConv], rawCount: 1 };
+          }
+        }
+      } else if (moveToTop) {
+        // If not found in cache and moveToTop was requested, trigger a refetch
+        setTimeout(() => qc.invalidateQueries({ queryKey: ["conversations"] }), 0);
+      }
+      
+      return { ...oldData, pages: updatedPages };
+    });
+  };
+
+  const updateUnreadCountsInCache = (tabKey: "waiting" | "active" | "resolved" | "groups", totalDiff: number, unreadDiff: number) => {
+    qc.setQueriesData({ queryKey: ["unread-counts"] }, (oldData: any) => {
+      if (!oldData) return oldData;
+      const newData = { ...oldData };
+      if (newData[tabKey]) {
+        newData[tabKey] = {
+          total: Math.max(0, newData[tabKey].total + totalDiff),
+          unread: Math.max(0, newData[tabKey].unread + unreadDiff)
+        };
+      }
+      return newData;
+    });
+  };
+
+  const handleConversationStatusChangeInCache = (conv: ConvRow, oldStatus: "waiting" | "active" | "resolved", newStatus: "waiting" | "active" | "resolved") => {
+    const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-')));
+    if (isGroup) return; // groups tab doesn't split by status
+
+    updateUnreadCountsInCache(oldStatus, -1, -(conv.unread_count || 0));
+    updateUnreadCountsInCache(newStatus, 1, conv.unread_count || 0);
+  };
+
+  const selectedIdRef = useRef(selectedId);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
   // Realtime
   useEffect(() => {
     // Usando um ID aleatório para o canal para evitar problemas de desconexão silenciosa no Vite HMR
@@ -346,14 +416,129 @@ function ConversationsPage() {
       .channel(channelId)
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, (payload) => {
         console.log("Realtime: conversations updated", payload);
-        qc.refetchQueries({ queryKey: ["conversations"] });
-        qc.refetchQueries({ queryKey: ["unread-counts"] });
+        
+        if (payload.eventType === "UPDATE") {
+          const updatedConv = payload.new as ConvRow;
+          const convId = updatedConv.id;
+
+          let oldConv: ConvRow | null = null;
+          qc.getQueriesData({ queryKey: ["conversations"] }).forEach(([key, oldData]: any) => {
+            if (oldData?.pages) {
+              for (const page of oldData.pages) {
+                const found = page.rows?.find((c: any) => c.id === convId);
+                if (found) {
+                  oldConv = found;
+                  break;
+                }
+              }
+            }
+          });
+
+          if (oldConv) {
+            // Update conversation details in-cache
+            updateConversationInCache(convId, updatedConv);
+
+            // Handle status changes in-cache
+            if ((oldConv as ConvRow).status !== updatedConv.status) {
+              handleConversationStatusChangeInCache(oldConv as ConvRow, (oldConv as ConvRow).status, updatedConv.status);
+            }
+            
+            // Handle unread counts bubble changes in-cache
+            const unreadDiff = (updatedConv.unread_count || 0) - ((oldConv as ConvRow).unread_count || 0);
+            if (unreadDiff !== 0) {
+              const isGroup = !!((oldConv as ConvRow).contact?.phone && ((oldConv as ConvRow).contact.phone!.startsWith('120363') || (oldConv as ConvRow).contact.phone!.includes('-')));
+              const tabKey = isGroup ? "groups" : (updatedConv.status || "active");
+              updateUnreadCountsInCache(tabKey, 0, unreadDiff);
+            }
+          } else {
+            // Fallback: not in cache, refetch
+            qc.invalidateQueries({ queryKey: ["conversations"] });
+            qc.invalidateQueries({ queryKey: ["unread-counts"] });
+          }
+        } 
+        
+        else if (payload.eventType === "INSERT") {
+          // New conversation created, full refetch
+          qc.invalidateQueries({ queryKey: ["conversations"] });
+          qc.invalidateQueries({ queryKey: ["unread-counts"] });
+        }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, (payload) => {
         console.log("Realtime: messages updated", payload);
-        qc.refetchQueries({ queryKey: ["messages"] });
-        qc.refetchQueries({ queryKey: ["conversations"] });
-        qc.refetchQueries({ queryKey: ["unread-counts"] });
+        
+        if (payload.eventType === "INSERT") {
+          const newMsg = payload.new as any;
+          const convId = newMsg.conversation_id;
+
+          // 1. Append message to cache if loaded
+          qc.setQueryData(["messages", convId], (old: any) => {
+            if (!old) return old;
+            if (old.some((m: any) => m.id === newMsg.id)) return old;
+            return [...old, newMsg];
+          });
+
+          // 2. Update conversation preview and move it to top
+          let previewText = newMsg.content || "";
+          if (newMsg.media_type === "image") previewText = "📷 Foto";
+          else if (newMsg.media_type === "video") previewText = "🎥 Vídeo";
+          else if (newMsg.media_type === "audio") previewText = "🎵 Áudio";
+          else if (newMsg.media_type === "document") previewText = "📄 Documento";
+
+          const isFromContact = newMsg.sender_type === "contact";
+          const isNotOpened = selectedIdRef.current !== convId;
+          const unreadIncrement = (isFromContact && isNotOpened) ? 1 : 0;
+
+          let existingConv: ConvRow | null = null;
+          qc.getQueriesData({ queryKey: ["conversations"] }).forEach(([key, oldData]: any) => {
+            if (oldData?.pages) {
+              for (const page of oldData.pages) {
+                const found = page.rows?.find((c: any) => c.id === convId);
+                if (found) {
+                  existingConv = found;
+                  break;
+                }
+              }
+            }
+          });
+
+          if (existingConv) {
+            const nextUnread = ((existingConv as ConvRow).unread_count || 0) + unreadIncrement;
+            updateConversationInCache(convId, {
+              last_message_preview: previewText,
+              last_message_at: newMsg.created_at,
+              unread_count: nextUnread
+            }, true);
+
+            if (unreadIncrement > 0) {
+              const isGroup = !!((existingConv as ConvRow).contact?.phone && ((existingConv as ConvRow).contact.phone!.startsWith('120363') || (existingConv as ConvRow).contact.phone!.includes('-')));
+              const tabKey = isGroup ? "groups" : ((existingConv as ConvRow).status || "active");
+              updateUnreadCountsInCache(tabKey, 0, unreadIncrement);
+            }
+          } else {
+            qc.invalidateQueries({ queryKey: ["conversations"] });
+            qc.invalidateQueries({ queryKey: ["unread-counts"] });
+          }
+        } 
+        
+        else if (payload.eventType === "UPDATE") {
+          const updatedMsg = payload.new as any;
+          const convId = updatedMsg.conversation_id;
+
+          qc.setQueryData(["messages", convId], (old: any) => {
+            if (!old) return old;
+            return old.map((m: any) => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m);
+          });
+        } 
+        
+        else if (payload.eventType === "DELETE") {
+          const oldMsg = payload.old as any;
+          const convId = oldMsg.conversation_id;
+          
+          qc.setQueryData(["messages", convId], (old: any) => {
+            if (!old) return old;
+            return old.filter((m: any) => m.id !== oldMsg.id);
+          });
+        }
       })
       .subscribe((status) => {
         console.log("Realtime subscription status:", status);
@@ -1216,8 +1401,35 @@ function ChatPanel({
     // Reset unread count when chat is opened
     if (conv.id && conv.unread_count && conv.unread_count > 0) {
       supabase.rpc('reset_unread_count', { conv_id: conv.id }).then(() => {
-        qc.invalidateQueries({ queryKey: ["conversations"] });
-        qc.invalidateQueries({ queryKey: ["unread-counts"] });
+        // Update conversation in-cache
+        qc.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+          if (!oldData || !oldData.pages) return oldData;
+          return {
+            ...oldData,
+            pages: oldData.pages.map((page: any) => {
+              if (!page || !page.rows) return page;
+              return {
+                ...page,
+                rows: page.rows.map((c: ConvRow) => c.id === conv.id ? { ...c, unread_count: 0 } : c)
+              };
+            })
+          };
+        });
+
+        // Update unread counts in-cache
+        const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-')));
+        const tabKey = isGroup ? 'groups' : (conv.status || 'active');
+        qc.setQueriesData({ queryKey: ["unread-counts"] }, (oldData: any) => {
+          if (!oldData) return oldData;
+          const newData = { ...oldData };
+          if (newData[tabKey]) {
+            newData[tabKey] = {
+              total: newData[tabKey].total,
+              unread: Math.max(0, newData[tabKey].unread - conv.unread_count!)
+            };
+          }
+          return newData;
+        });
       });
     }
 

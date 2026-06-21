@@ -90,7 +90,7 @@ export async function sendPlatformMessage({
               const { data: uploadData, error: uploadError } = await supabaseAdmin
                 .storage
                 .from('media')
-                .upload(fileName, buffer, { contentType: mimeType, upsert: false });
+                .upload(fileName, buffer, { contentType: mimeType, upsert: false, cacheControl: '31536000, must-revalidate' });
                 
               if (!uploadError && uploadData) {
                 const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
@@ -168,7 +168,7 @@ export async function sendPlatformMessage({
               const { data: uploadData, error: uploadError } = await supabaseAdmin
                 .storage
                 .from('media')
-                .upload(fileName, buffer, { contentType: mimeType, upsert: false });
+                .upload(fileName, buffer, { contentType: mimeType, upsert: false, cacheControl: '31536000, must-revalidate' });
                 
               if (!uploadError && uploadData) {
                 const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
@@ -255,7 +255,7 @@ export async function sendPlatformMessage({
               const { data: uploadData, error: uploadError } = await supabaseAdmin
                 .storage
                 .from('media')
-                .upload(fileName, buffer, { contentType: mimeType, upsert: false });
+                .upload(fileName, buffer, { contentType: mimeType, upsert: false, cacheControl: '31536000, must-revalidate' });
                 
               if (!uploadError && uploadData) {
                 const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);

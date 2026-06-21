@@ -150,7 +150,8 @@ export const sendMessageAction = createServerFn({ method: "POST" })
                 .from('media')
                 .upload(fileName, buffer, {
                   contentType: mimeType,
-                  upsert: false
+                  upsert: false,
+                  cacheControl: '31536000, must-revalidate'
                 });
                 
               if (!uploadError && uploadData) {
