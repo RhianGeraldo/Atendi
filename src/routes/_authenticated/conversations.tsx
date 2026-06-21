@@ -346,10 +346,12 @@ function ConversationsPage() {
     const moveToTop = options?.moveToTop ?? false;
     const targetStatus = options?.status;
 
-    qc.setQueriesData({ queryKey: ["conversations"] }, (oldData: any, query: any) => {
-      if (!oldData || !oldData.pages) return oldData;
+    const queries = qc.getQueriesData({ queryKey: ["conversations"] });
+
+    queries.forEach(([queryKey, oldData]: any) => {
+      if (!oldData || !oldData.pages) return;
       
-      const queryTab = query.queryKey[1] as TabType;
+      const queryTab = queryKey[1] as TabType;
       let targetConv: ConvRow | null = null;
       
       // Find the conversation across all pages
@@ -366,6 +368,8 @@ function ConversationsPage() {
         return { ...page, rows: filteredRows };
       });
 
+      let nextData = oldData;
+
       // Determine if this conversation belongs to the current queryTab
       if (targetConv) {
         const isGroup = !!((targetConv as ConvRow).contact?.phone && ((targetConv as ConvRow).contact.phone!.startsWith('120363') || (targetConv as ConvRow).contact.phone!.includes('-')));
@@ -379,23 +383,26 @@ function ConversationsPage() {
               ...firstPage,
               rows: [targetConv, ...(firstPage.rows || [])]
             };
-            return {
+            nextData = {
               ...oldData,
               pages: [updatedFirstPage, ...updatedPages.slice(1)]
             };
           } else {
-            return {
+            nextData = {
               ...oldData,
               pages: [{ rows: [targetConv], rawCount: 1 }]
             };
           }
+        } else {
+          // If status/tab changed and it no longer belongs here, it is removed from this tab
+          nextData = { ...oldData, pages: updatedPages };
         }
       } else if (moveToTop && targetStatus === queryTab) {
         // If not found in cache and moveToTop was requested, and it belongs to this queryTab, trigger a refetch
-        setTimeout(() => qc.invalidateQueries({ queryKey: ["conversations", queryTab] }), 0);
+        setTimeout(() => qc.invalidateQueries({ queryKey: queryKey }), 0);
       }
       
-      return { ...oldData, pages: updatedPages };
+      qc.setQueryData(queryKey, nextData);
     });
   };
 
