@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Store, Smartphone, Settings, QrCode, Trash2, Users, MoreVertical, Edit2, ChevronRight, Layers, RefreshCw } from "lucide-react";
+import { Plus, Store, Smartphone, Settings, QrCode, Trash2, Users, MoreVertical, Edit2, ChevronRight, Layers, RefreshCw, Loader2, Globe } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const Route = createFileRoute("/_authenticated/units")({
   component: UnitsPage,
@@ -389,6 +390,50 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
   const [selectedInstance, setSelectedInstance] = useState<any>(null);
   const [refreshingInstance, setRefreshingInstance] = useState<string | null>(null);
 
+  const [instanceProvider, setInstanceProvider] = useState("evogo");
+  const [oficialNumberId, setOficialNumberId] = useState("");
+  const [oficialToken, setOficialToken] = useState("");
+  const [oficialVerifyToken, setOficialVerifyToken] = useState("");
+  const [metaAccounts, setMetaAccounts] = useState<any[]>([]);
+  const [isLoadingMeta, setIsLoadingMeta] = useState(false);
+  const [selectedMetaAccountId, setSelectedMetaAccountId] = useState("");
+  const [useManualToken, setUseManualToken] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (createModalOpen) {
+      setMetaAccounts([]);
+      setSelectedMetaAccountId("");
+      setUseManualToken(false);
+      setOficialNumberId("");
+      setOficialToken("");
+    }
+  }, [createModalOpen]);
+
+  useEffect(() => {
+    if (createModalOpen && company?.meta_system_user_token && (instanceProvider === 'instagram' || instanceProvider === 'messenger')) {
+      const fetchAccounts = async () => {
+        setIsLoadingMeta(true);
+        try {
+          const res = await fetch(`https://graph.facebook.com/v20.0/me/accounts?fields=name,access_token,instagram_business_account{name,username,profile_picture_url}&access_token=${company.meta_system_user_token}`);
+          const json = await res.json();
+          if (json.error) throw new Error(json.error.message);
+          
+          let accounts = json.data || [];
+          if (instanceProvider === 'instagram') {
+            accounts = accounts.filter((a: any) => a.instagram_business_account);
+          }
+          setMetaAccounts(accounts);
+        } catch (e: any) {
+          toast.error("Erro ao buscar contas da Meta", { description: e.message });
+        } finally {
+          setIsLoadingMeta(false);
+        }
+      };
+      fetchAccounts();
+    }
+  }, [instanceProvider, createModalOpen, company?.meta_system_user_token]);
+
   const { data: instances, isLoading: isLoadingInstances } = useQuery({
     queryKey: ["whatsapp-instances", unit.id],
     queryFn: async () => {
@@ -408,33 +453,95 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
   });
 
   const createInstance = useMutation({
-    mutationFn: async (name: string) => {
-      if (!company?.evogo_host || !company?.evogo_global_token) throw new Error("Configure Host e Token na Empresa Mãe primeiro.");
-      const technicalName = `${slugify(company.name)}-${slugify(unit.name)}-${slugify(name)}`;
-      const { data, error } = await supabase.from("whatsapp_instances").insert({ company_id: company.id, unit_id: unit.id, name, instance_name: technicalName }).select().single();
+    mutationFn: async (payload: { name: string, provider: string, numberId?: string, accessToken?: string, verifyToken?: string }) => {
+      const { name, provider, numberId, accessToken, verifyToken } = payload;
+      if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token)) {
+        throw new Error("Configure Host e Token na Empresa Mãe primeiro.");
+      }
+
+      let finalNumberId = numberId;
+      let finalAccessToken = accessToken;
+      let finalWabaId = undefined;
+
+      if ((provider === 'instagram' || provider === 'messenger') && company?.meta_system_user_token && !useManualToken && selectedMetaAccountId) {
+        const account = metaAccounts.find(a => a.id === selectedMetaAccountId);
+        if (account) {
+          finalAccessToken = account.access_token;
+          if (provider === 'instagram') {
+            finalNumberId = account.instagram_business_account.id;
+            finalWabaId = account.id; // The Page ID is used as wabaId for instagram
+          } else {
+            finalNumberId = account.id; // Page ID
+          }
+        }
+      }
+
+      if ((provider === 'oficial' || provider === 'instagram' || provider === 'messenger') && (!finalNumberId || !finalAccessToken || !verifyToken)) {
+        throw new Error("Preencha todos os campos da credencial (ID, Token e Verify Token) ou selecione uma conta da Meta.");
+      }
+
+      const localSlugify = (s: string) => s
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/\s+/g, '')
+        .replace(/[^\w-]/g, '');
+
+      const technicalName = `${localSlugify(company.name)}-${localSlugify(unit.name)}-${localSlugify(name)}-${provider}`;
+
+      let defaultWebhookUrl = null;
+      if (provider === 'oficial') {
+        defaultWebhookUrl = `${window.location.origin}/api/webhooks/whatsapp-cloud`;
+      } else if (provider === 'instagram') {
+        defaultWebhookUrl = `${window.location.origin}/api/webhooks/instagram`;
+      } else if (provider === 'messenger') {
+        defaultWebhookUrl = `${window.location.origin}/api/webhooks/messenger`;
+      }
+
+      const { data, error } = await supabase.from("whatsapp_instances").insert({
+        company_id: company.id,
+        unit_id: unit.id,
+        name,
+        instance_name: technicalName,
+        provider,
+        oficial_phone_number_id: finalNumberId,
+        oficial_waba_id: finalWabaId || null,
+        oficial_access_token: finalAccessToken,
+        oficial_verify_token: verifyToken,
+        webhook_url: defaultWebhookUrl
+      }).select().single();
+      
       if (error) throw error;
 
-      const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
-      try {
-        const evoRes: any = await client.createInstance(technicalName, data.evogo_api_key);
-        const evogoId = evoRes?.data?.id || evoRes?.id;
-        if (evogoId) {
-          const webhookUrl = `${window.location.origin}/api/evogo/webhook`;
-          await supabase.from("whatsapp_instances").update({ evogo_instance_id: evogoId, webhook_url: webhookUrl }).eq("id", data.id);
-          await client.connectInstance(webhookUrl, data.evogo_api_key).catch(console.error);
-          await client.updateAdvancedSettings(evogoId, { rejectCalls: false, readMessages: false, readStatus: false, alwaysOnline: false }, data.evogo_api_key).catch(console.error);
+      if (provider === 'evogo') {
+        const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
+        try {
+          const evoRes: any = await client.createInstance(technicalName, data.evogo_api_key);
+          const evogoId = evoRes?.data?.id || evoRes?.id;
+          if (evogoId) {
+            const webhookUrl = `${window.location.origin}/api/webhooks/evogo`;
+            await supabase.from("whatsapp_instances").update({ evogo_instance_id: evogoId, webhook_url: webhookUrl }).eq("id", data.id);
+            await client.connectInstance(webhookUrl, data.evogo_api_key).catch(console.error);
+            await client.updateAdvancedSettings(evogoId, { rejectCalls: false, readMessages: false, readStatus: false, alwaysOnline: false }, data.evogo_api_key).catch(console.error);
+          }
+        } catch (e) {
+          console.error("Falha ao criar/configurar na EvoGo, mas salvo no DB", e);
         }
-      } catch (e) {
-        console.error("Falha ao criar/configurar na EvoGo, mas salvo no DB", e);
       }
+
       return data;
     },
     onSuccess: () => {
-      toast.success("Instância criada!");
+      toast.success("Instância criada com sucesso!");
       setInstanceName("");
+      setInstanceProvider("evogo");
+      setOficialNumberId("");
+      setOficialToken("");
+      setOficialVerifyToken("");
+      setCreateModalOpen(false);
       qc.invalidateQueries({ queryKey: ["whatsapp-instances", unit.id] });
     },
-    onError: (e) => toast.error("Erro", { description: (e as Error).message })
+    onError: (e) => toast.error("Erro ao criar", { description: (e as Error).message })
   });
 
   const handleDisconnect = async (instance: any) => {
@@ -582,12 +689,15 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
             </TabsList>
 
             <TabsContent value="instances" className="space-y-6 animate-in fade-in-50 duration-300">
-              <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-                <h4 className="text-sm font-semibold mb-3">Conectar Novo Aparelho</h4>
-                <div className="flex gap-2">
-                  <Input placeholder="Nome (ex: Recepção)" value={instanceName} onChange={(e) => setInstanceName(e.target.value)} className="h-9" />
-                  <Button size="sm" className="h-9" onClick={() => createInstance.mutate(instanceName)} disabled={!instanceName || createInstance.isPending || !company?.evogo_host}>Criar</Button>
+              <div className="flex items-center justify-between bg-card border border-border rounded-lg p-4 shadow-sm">
+                <div className="space-y-0.5">
+                  <h4 className="text-sm font-semibold">Conectar Novo Aparelho</h4>
+                  <p className="text-xs text-muted-foreground font-normal">Adicione instâncias do WhatsApp (EvoGo ou Oficial), Instagram ou Facebook Messenger.</p>
                 </div>
+                <Button size="sm" className="h-9" onClick={() => setCreateModalOpen(true)}>
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Criar Instância
+                </Button>
               </div>
 
               <div className="space-y-3">
@@ -604,7 +714,16 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <span className="font-semibold text-sm">{inst.name}</span>
-                            <Badge variant={inst.status === 'connected' ? 'default' : 'secondary'} className={inst.status === 'connected' ? 'bg-success text-[10px] py-0 h-4' : 'text-[10px] py-0 h-4'}>
+                            {inst.provider && inst.provider !== 'whatsapp' && inst.provider !== 'evogo' && (
+                              <Badge variant="outline" className={`text-[9px] py-0 px-1.5 h-4 capitalize font-semibold ${
+                                inst.provider === 'instagram' ? 'border-pink-200 text-pink-700 bg-pink-50/50' : 
+                                inst.provider === 'messenger' ? 'border-blue-200 text-blue-700 bg-blue-50/50' : 
+                                inst.provider === 'oficial' ? 'border-emerald-200 text-emerald-700 bg-emerald-50/50' : ''
+                              }`}>
+                                {inst.provider === 'oficial' ? 'API Oficial' : inst.provider}
+                              </Badge>
+                            )}
+                            <Badge variant={inst.status === 'connected' ? 'default' : 'secondary'} className={inst.status === 'connected' ? 'bg-success text-[10px] py-0 h-4 font-semibold' : 'text-[10px] py-0 h-4 font-semibold'}>
                               {inst.status === 'connected' ? 'Online' : 'Aguardando'}
                             </Badge>
                           </div>
@@ -617,17 +736,33 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
                           )}
                         </div>
                         <div className="flex gap-1.5 opacity-100 sm:opacity-50 group-hover:opacity-100 transition-opacity">
-                          <Button variant="secondary" size="icon" className="h-8 w-8 bg-muted/50 hover:bg-muted" onClick={() => handleRefreshInstance(inst)} title="Verificar Status">
-                            <RefreshCw className={`h-4 w-4 text-primary ${refreshingInstance === inst.id ? 'animate-spin' : ''}`} />
-                          </Button>
-                          {inst.status === 'connected' ? (
-                            <Button variant="outline" size="sm" className="h-8 px-3 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/20" onClick={() => setConfirmDialog({ open: true, type: 'disconnect', instance: inst, dept: null })}>
-                              Desconectar
-                            </Button>
+                          {inst.provider === 'oficial' ? (
+                            <Badge variant="outline" className="h-8 px-2.5 border-emerald-200 text-emerald-700 bg-emerald-50 text-[11px] font-medium flex items-center">API Oficial Ativa</Badge>
+                          ) : inst.provider === 'instagram' ? (
+                            <Badge variant="outline" className="h-8 px-2.5 border-pink-200 text-pink-700 bg-pink-50 text-[11px] font-medium flex items-center gap-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+                              Instagram Ativo
+                            </Badge>
+                          ) : inst.provider === 'messenger' ? (
+                            <Badge variant="outline" className="h-8 px-2.5 border-blue-200 text-blue-700 bg-blue-50 text-[11px] font-medium flex items-center gap-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                              Messenger Ativo
+                            </Badge>
                           ) : (
-                            <Button variant="default" size="sm" className="h-8 px-3 text-xs bg-primary hover:bg-primary/90" onClick={() => { setSelectedInstance(inst); setQrModalOpen(true); }}>
-                              <QrCode className="mr-1.5 h-3.5 w-3.5" /> Ler QR
-                            </Button>
+                            <>
+                              <Button variant="secondary" size="icon" className="h-8 w-8 bg-muted/50 hover:bg-muted" onClick={() => handleRefreshInstance(inst)} title="Verificar Status">
+                                <RefreshCw className={`h-4 w-4 text-primary ${refreshingInstance === inst.id ? 'animate-spin' : ''}`} />
+                              </Button>
+                              {inst.status === 'connected' ? (
+                                <Button variant="outline" size="sm" className="h-8 px-3 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/20" onClick={() => setConfirmDialog({ open: true, type: 'disconnect', instance: inst, dept: null })}>
+                                  Desconectar
+                                </Button>
+                              ) : (
+                                <Button variant="default" size="sm" className="h-8 px-3 text-xs bg-primary hover:bg-primary/90" onClick={() => { setSelectedInstance(inst); setQrModalOpen(true); }}>
+                                  <QrCode className="mr-1.5 h-3.5 w-3.5" /> Ler QR
+                                </Button>
+                              )}
+                            </>
                           )}
                           <Button variant="secondary" size="icon" className="h-8 w-8 bg-muted/50 hover:bg-muted" onClick={() => { setSelectedInstance(inst); setSettingsModalOpen(true); }} title="Configurações">
                             <Settings className="h-4 w-4" />
@@ -720,6 +855,150 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
 
         <QrCodeModal open={qrModalOpen} onOpenChange={setQrModalOpen} instance={selectedInstance} company={company} />
         <InstanceSettingsModal open={settingsModalOpen} onOpenChange={setSettingsModalOpen} instance={selectedInstance} company={company} />
+
+        <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Novo Canal de Atendimento (Unidade)</DialogTitle>
+              <DialogDescription>
+                Selecione o provedor e preencha as credenciais do canal para esta unidade.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Nome de Exibição</label>
+                <Input 
+                  placeholder="Ex: Recepção Aracruz" 
+                  value={instanceName}
+                  onChange={(e) => setInstanceName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Provedor</label>
+                <Select value={instanceProvider} onValueChange={setInstanceProvider}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o provedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="evogo">EvoGo API (WhatsApp)</SelectItem>
+                    <SelectItem value="oficial">API Oficial (WhatsApp Cloud API)</SelectItem>
+                    <SelectItem value="instagram">Instagram</SelectItem>
+                    <SelectItem value="messenger">Messenger (Meta)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {(instanceProvider === 'oficial' || instanceProvider === 'instagram' || instanceProvider === 'messenger') && (
+                <>
+                  {(instanceProvider === 'instagram' || instanceProvider === 'messenger') && company?.meta_system_user_token && !useManualToken ? (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Selecione a Conta da Meta</label>
+                      {isLoadingMeta ? (
+                        <div className="text-sm text-muted-foreground flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" /> Buscando contas...
+                        </div>
+                      ) : metaAccounts.length === 0 ? (
+                        <div className="text-sm text-destructive">
+                          Nenhuma conta encontrada. Verifique as permissões do Token do Sistema ou se a página está vinculada.
+                        </div>
+                      ) : (
+                        <Select value={selectedMetaAccountId} onValueChange={setSelectedMetaAccountId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione a Página / Instagram" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {metaAccounts.map(acc => (
+                              <SelectItem key={acc.id} value={acc.id}>
+                                <div className="flex items-center gap-2">
+                                  {instanceProvider === 'instagram' && acc.instagram_business_account?.profile_picture_url ? (
+                                    <img src={acc.instagram_business_account.profile_picture_url} className="w-5 h-5 rounded-full" />
+                                  ) : (
+                                    <Globe className="w-4 h-4 text-muted-foreground" />
+                                  )}
+                                  <span>{instanceProvider === 'instagram' ? acc.instagram_business_account?.username || acc.name : acc.name}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      <Button 
+                        variant="link" 
+                        className="px-0 text-xs text-muted-foreground h-auto"
+                        onClick={() => setUseManualToken(true)}
+                      >
+                        Não achou sua conta? Inserir Manualmente (Modo Direto)
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">
+                          {instanceProvider === 'instagram' ? 'Instagram Account ID' : instanceProvider === 'messenger' ? 'Facebook Page ID' : 'Phone Number ID'}
+                        </label>
+                        <Input 
+                          placeholder="1234567890" 
+                          value={oficialNumberId}
+                          onChange={(e) => setOficialNumberId(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">O ID gerado no painel de desenvolvedores da Meta.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Access Token Permanente</label>
+                        <Input 
+                          type="password"
+                          placeholder="EAAS... ou IGA..." 
+                          value={oficialToken}
+                          onChange={(e) => setOficialToken(e.target.value)}
+                        />
+                      </div>
+                      {company?.meta_system_user_token && (
+                        <Button 
+                          variant="link" 
+                          className="px-0 text-xs text-muted-foreground h-auto mt-2"
+                          onClick={() => setUseManualToken(false)}
+                        >
+                          Voltar para a Busca Automática
+                        </Button>
+                      )}
+                    </>
+                  )}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Verify Token (Sua Escolha)</label>
+                    <Input 
+                      placeholder="Crie uma senha (ex: atendi2026)" 
+                      value={oficialVerifyToken}
+                      onChange={(e) => setOficialVerifyToken(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Crie uma chave e use-a para configurar o webhook na Meta: 
+                      <code>{window.location.origin}/api/webhooks/{instanceProvider === 'instagram' ? 'instagram' : instanceProvider === 'messenger' ? 'messenger' : 'whatsapp-cloud'}</code>
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreateModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button 
+                onClick={() => createInstance.mutate({
+                  name: instanceName,
+                  provider: instanceProvider,
+                  numberId: oficialNumberId,
+                  accessToken: oficialToken,
+                  verifyToken: oficialVerifyToken
+                })}
+                disabled={!instanceName || createInstance.isPending || (instanceProvider === 'evogo' && !company?.evogo_host)}
+              >
+                {createInstance.isPending ? "Criando..." : "Criar Instância"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </SheetContent>
     </Sheet>
   );
