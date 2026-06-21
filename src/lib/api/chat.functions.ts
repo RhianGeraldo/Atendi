@@ -23,7 +23,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     
     const { data: conv, error: convErr } = await supabase
       .from("conversations")
-      .select("status, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid)")
+      .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid)")
       .eq("id", data.conversationId)
       .single();
 
@@ -35,41 +35,148 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
     // O identificador final será resolvido após descobrir o provedor
 
-    // 2. Get evogo configuration for the conversation's instance
-    let host, token, instanceName, provider;
+    // 2. Get configuration for the conversation's instance based on channel
+    let host: string | null = null;
+    let token: string | null = null;
+    let instanceName: string | null = null;
+    let provider: string = 'evogo';
+    let resolvedInstanceId = conv.whatsapp_instance_id;
 
-    if (conv.whatsapp_instance_id) {
-      const { data: instance } = await supabaseAdmin
-        .from("whatsapp_instances")
-        .select("instance_name, evogo_api_key, provider, companies(evogo_host)")
-        .eq("id", conv.whatsapp_instance_id)
-        .single();
+    if ((conv.channel as string) === 'instagram') {
+      provider = 'instagram';
+      let instance = null;
+
+      if (resolvedInstanceId) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id")
+          .eq("id", resolvedInstanceId)
+          .eq("provider", "instagram")
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id")
+          .eq("unit_id", conv.unit_id)
+          .eq("provider", "instagram")
+          .limit(1)
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+        if (unitData) {
+          const { data } = await supabaseAdmin
+            .from("whatsapp_instances")
+            .select("id")
+            .eq("company_id", unitData.company_id)
+            .eq("provider", "instagram")
+            .limit(1)
+            .maybeSingle();
+          instance = data;
+        }
+      }
+
+      if (instance) {
+        resolvedInstanceId = instance.id;
+      }
+    } else if ((conv.channel as string) === 'messenger') {
+      provider = 'messenger';
+      let instance = null;
+
+      if (resolvedInstanceId) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id")
+          .eq("id", resolvedInstanceId)
+          .eq("provider", "messenger")
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id")
+          .eq("unit_id", conv.unit_id)
+          .eq("provider", "messenger")
+          .limit(1)
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+        if (unitData) {
+          const { data } = await supabaseAdmin
+            .from("whatsapp_instances")
+            .select("id")
+            .eq("company_id", unitData.company_id)
+            .eq("provider", "messenger")
+            .limit(1)
+            .maybeSingle();
+          instance = data;
+        }
+      }
+
+      if (instance) {
+        resolvedInstanceId = instance.id;
+      }
+    } else {
+      // WhatsApp channel
+      let instance = null;
+
+      if (resolvedInstanceId) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, instance_name, evogo_api_key, provider, companies(evogo_host)")
+          .eq("id", resolvedInstanceId)
+          .in("provider", ["evogo", "oficial", "stevo"])
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, instance_name, evogo_api_key, provider, companies(evogo_host)")
+          .eq("unit_id", conv.unit_id)
+          .in("provider", ["evogo", "oficial", "stevo"])
+          .limit(1)
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+        if (unitData) {
+          const { data } = await supabaseAdmin
+            .from("whatsapp_instances")
+            .select("id, instance_name, evogo_api_key, provider, companies(evogo_host)")
+            .eq("company_id", unitData.company_id)
+            .in("provider", ["evogo", "oficial", "stevo"])
+            .limit(1)
+            .maybeSingle();
+          instance = data;
+        }
+      }
 
       if (instance) {
         host = instance.companies?.evogo_host;
         token = instance.evogo_api_key;
         instanceName = instance.instance_name;
         provider = instance.provider || 'evogo';
+        resolvedInstanceId = instance.id;
       }
     }
 
-    if (!host && conv.unit_id) {
-      // Fallback for old conversations
-      const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
-      if (unitData) {
-        const { data: companyInstance } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("instance_name, evogo_api_key, provider, companies(evogo_host)")
-          .eq("company_id", unitData.company_id)
-          .limit(1)
-          .maybeSingle();
-        if (companyInstance) {
-          host = companyInstance.companies?.evogo_host;
-          token = companyInstance.evogo_api_key;
-          instanceName = companyInstance.instance_name;
-          provider = companyInstance.provider || 'evogo';
-        }
-      }
+    // Auto-repair conversation whatsapp_instance_id
+    if (resolvedInstanceId && conv.whatsapp_instance_id !== resolvedInstanceId) {
+      await supabaseAdmin.from("conversations").update({ whatsapp_instance_id: resolvedInstanceId }).eq("id", targetConversationId);
     }
 
     if (!data.isInternal && provider !== 'oficial' && provider !== 'instagram' && provider !== 'messenger' && (!host || !token || !instanceName)) {
@@ -169,7 +276,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         const { sendCloudApiMessage } = await import('../server/whatsapp-cloud-api');
         try {
           const msgId = await sendCloudApiMessage(
-            conv.whatsapp_instance_id!,
+            resolvedInstanceId!,
             phone,
             textToSend || '',
             data.mediaType,
@@ -185,7 +292,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         const { data: instance } = await supabaseAdmin
           .from("whatsapp_instances")
           .select("oficial_phone_number_id, oficial_access_token")
-          .eq("id", conv.whatsapp_instance_id)
+          .eq("id", resolvedInstanceId!)
           .single();
 
         if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
@@ -258,7 +365,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         const { data: instance } = await supabaseAdmin
           .from("whatsapp_instances")
           .select("oficial_phone_number_id, oficial_access_token") // oficial_phone_number_id guarda o Page ID para Messenger
-          .eq("id", conv.whatsapp_instance_id)
+          .eq("id", resolvedInstanceId!)
           .single();
 
         if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
@@ -327,9 +434,9 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
 
           evogoResponse = await sendEvogoMedia({
-            host,
-            token,
-            instanceName,
+            host: host!,
+            token: token!,
+            instanceName: instanceName!,
             number: phone,
             base64: mediaUrlToSend!,
             mediatype: data.mediaType as any,
@@ -338,18 +445,18 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           });
         } else if (textToSend.match(/https?:\/\//)) {
           evogoResponse = await sendEvogoLink({
-            host,
-            token,
-            instanceName,
+            host: host!,
+            token: token!,
+            instanceName: instanceName!,
             number: phone,
             text: textToSend,
             quoted,
           });
         } else {
           evogoResponse = await sendEvogoText({
-            host,
-            token,
-            instanceName,
+            host: host!,
+            token: token!,
+            instanceName: instanceName!,
             number: phone,
             text: textToSend,
             quoted,
@@ -807,17 +914,143 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
     if (!msg.remote_msg_id) throw new Error("Cannot react to a message without a remote ID");
 
     // 2. Obter instância
-    let provider = 'coex';
-    let host, token, instanceName, oficialToken, oficialPhoneId;
+    let provider: string = 'coex';
+    let host: string | null = null;
+    let token: string | null = null;
+    let instanceName: string | null = null;
+    let oficialToken: string | null = null;
+    let oficialPhoneId: string | null = null;
+    let resolvedInstanceId = conv.whatsapp_instance_id;
 
-    if (conv.whatsapp_instance_id) {
-      const { data: instance } = await supabaseAdmin
-        .from("whatsapp_instances")
-        .select("provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)")
-        .eq("id", conv.whatsapp_instance_id)
-        .single();
+    if ((conv.channel as string) === 'instagram') {
+      provider = 'instagram';
+      let instance = null;
+
+      if (resolvedInstanceId) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, oficial_access_token, oficial_phone_number_id")
+          .eq("id", resolvedInstanceId)
+          .eq("provider", "instagram")
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, oficial_access_token, oficial_phone_number_id")
+          .eq("unit_id", conv.unit_id)
+          .eq("provider", "instagram")
+          .limit(1)
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+        if (unitData) {
+          const { data } = await supabaseAdmin
+            .from("whatsapp_instances")
+            .select("id, oficial_access_token, oficial_phone_number_id")
+            .eq("company_id", unitData.company_id)
+            .eq("provider", "instagram")
+            .limit(1)
+            .maybeSingle();
+          instance = data;
+        }
+      }
 
       if (instance) {
+        resolvedInstanceId = instance.id;
+        oficialToken = instance.oficial_access_token;
+        oficialPhoneId = instance.oficial_phone_number_id;
+      }
+    } else if ((conv.channel as string) === 'messenger') {
+      provider = 'messenger';
+      let instance = null;
+
+      if (resolvedInstanceId) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, oficial_access_token, oficial_phone_number_id")
+          .eq("id", resolvedInstanceId)
+          .eq("provider", "messenger")
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, oficial_access_token, oficial_phone_number_id")
+          .eq("unit_id", conv.unit_id)
+          .eq("provider", "messenger")
+          .limit(1)
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+        if (unitData) {
+          const { data } = await supabaseAdmin
+            .from("whatsapp_instances")
+            .select("id, oficial_access_token, oficial_phone_number_id")
+            .eq("company_id", unitData.company_id)
+            .eq("provider", "messenger")
+            .limit(1)
+            .maybeSingle();
+          instance = data;
+        }
+      }
+
+      if (instance) {
+        resolvedInstanceId = instance.id;
+        oficialToken = instance.oficial_access_token;
+        oficialPhoneId = instance.oficial_phone_number_id;
+      }
+    } else {
+      // WhatsApp channel
+      let instance = null;
+
+      if (resolvedInstanceId) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)")
+          .eq("id", resolvedInstanceId)
+          .in("provider", ["evogo", "oficial", "stevo"])
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)")
+          .eq("unit_id", conv.unit_id)
+          .in("provider", ["evogo", "oficial", "stevo"])
+          .limit(1)
+          .maybeSingle();
+        instance = data;
+      }
+
+      if (!instance && conv.unit_id) {
+        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+        if (unitData) {
+          const { data } = await supabaseAdmin
+            .from("whatsapp_instances")
+            .select("id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)")
+            .eq("company_id", unitData.company_id)
+            .in("provider", ["evogo", "oficial", "stevo"])
+            .limit(1)
+            .maybeSingle();
+          instance = data;
+        }
+      }
+
+      if (instance) {
+        resolvedInstanceId = instance.id;
         provider = instance.provider || 'coex';
         host = instance.companies?.evogo_host;
         token = instance.evogo_api_key;
@@ -825,6 +1058,11 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
         oficialToken = instance.oficial_access_token;
         oficialPhoneId = instance.oficial_phone_number_id;
       }
+    }
+
+    // Auto-repair conversation whatsapp_instance_id
+    if (resolvedInstanceId && conv.whatsapp_instance_id !== resolvedInstanceId) {
+      await supabaseAdmin.from("conversations").update({ whatsapp_instance_id: resolvedInstanceId }).eq("id", data.conversationId);
     }
 
     // 3. Enviar Reação conforme o provedor

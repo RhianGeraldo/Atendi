@@ -31,40 +31,176 @@ export async function sendPlatformMessage({
   if (convErr || !conv) throw new Error("Conversation not found");
 
   const phone = conv.remote_id || conv.contacts?.phone;
+  if (!phone) throw new Error("Phone number is missing.");
   const whatsapp_lid = conv.remote_id || conv.contacts?.whatsapp_lid;
   let remoteMsgId = null;
   let participantJid = null;
   let mediaUrlToSend = mediaBase64;
 
-  if (conv.channel === 'whatsapp') {
-    let provider = 'evogo';
+  let host: string | null = null;
+  let token: string | null = null;
+  let instanceName: string | null = null;
+  let provider: string = 'evogo';
+  let resolvedInstanceId = conv.whatsapp_instance_id;
 
-    if (conv.whatsapp_instance_id) {
-      const { data: instance } = await supabaseAdmin
+  // Resolve instance details based on channel
+  if ((conv.channel as string) === 'instagram') {
+    provider = 'instagram';
+    let instance = null;
+
+    if (resolvedInstanceId) {
+      const { data } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("instance_name, evogo_api_key, provider, oficial_phone_number_id, oficial_access_token, companies(evogo_host)")
-        .eq("id", conv.whatsapp_instance_id)
-        .single();
+        .select("id, oficial_phone_number_id, oficial_access_token")
+        .eq("id", resolvedInstanceId)
+        .eq("provider", "instagram")
+        .maybeSingle();
+      instance = data;
+    }
 
-      if (instance) {
-        host = instance.companies?.evogo_host;
-        token = instance.evogo_api_key;
-        instanceName = instance.instance_name;
-        provider = instance.provider || 'evogo';
+    if (!instance && conv.unit_id) {
+      const { data } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("id, oficial_phone_number_id, oficial_access_token")
+        .eq("unit_id", conv.unit_id)
+        .eq("provider", "instagram")
+        .limit(1)
+        .maybeSingle();
+      instance = data;
+    }
+
+    if (!instance && conv.unit_id) {
+      const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+      if (unitData) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, oficial_phone_number_id, oficial_access_token")
+          .eq("company_id", unitData.company_id)
+          .eq("provider", "instagram")
+          .limit(1)
+          .maybeSingle();
+        instance = data;
       }
     }
 
+    if (!instance) {
+      throw new Error("Missing instance for Instagram");
+    }
+
+    if (resolvedInstanceId !== instance.id) {
+      resolvedInstanceId = instance.id;
+      await supabaseAdmin.from("conversations").update({ whatsapp_instance_id: instance.id }).eq("id", conversationId);
+    }
+  } else if ((conv.channel as string) === 'messenger') {
+    provider = 'messenger';
+    let instance = null;
+
+    if (resolvedInstanceId) {
+      const { data } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("id, oficial_phone_number_id, oficial_access_token")
+        .eq("id", resolvedInstanceId)
+        .eq("provider", "messenger")
+        .maybeSingle();
+      instance = data;
+    }
+
+    if (!instance && conv.unit_id) {
+      const { data } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("id, oficial_phone_number_id, oficial_access_token")
+        .eq("unit_id", conv.unit_id)
+        .eq("provider", "messenger")
+        .limit(1)
+        .maybeSingle();
+      instance = data;
+    }
+
+    if (!instance && conv.unit_id) {
+      const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+      if (unitData) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, oficial_phone_number_id, oficial_access_token")
+          .eq("company_id", unitData.company_id)
+          .eq("provider", "messenger")
+          .limit(1)
+          .maybeSingle();
+        instance = data;
+      }
+    }
+
+    if (!instance) {
+      throw new Error("Missing instance for Messenger");
+    }
+
+    if (resolvedInstanceId !== instance.id) {
+      resolvedInstanceId = instance.id;
+      await supabaseAdmin.from("conversations").update({ whatsapp_instance_id: instance.id }).eq("id", conversationId);
+    }
+  } else {
+    // WhatsApp channel
+    let instance = null;
+
+    if (resolvedInstanceId) {
+      const { data } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("id, instance_name, evogo_api_key, provider, oficial_phone_number_id, oficial_access_token, companies(evogo_host)")
+        .eq("id", resolvedInstanceId)
+        .in("provider", ["evogo", "oficial", "stevo"])
+        .maybeSingle();
+      instance = data;
+    }
+
+    if (!instance && conv.unit_id) {
+      const { data } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("id, instance_name, evogo_api_key, provider, oficial_phone_number_id, oficial_access_token, companies(evogo_host)")
+        .eq("unit_id", conv.unit_id)
+        .in("provider", ["evogo", "oficial", "stevo"])
+        .limit(1)
+        .maybeSingle();
+      instance = data;
+    }
+
+    if (!instance && conv.unit_id) {
+      const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+      if (unitData) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id, instance_name, evogo_api_key, provider, oficial_phone_number_id, oficial_access_token, companies(evogo_host)")
+          .eq("company_id", unitData.company_id)
+          .in("provider", ["evogo", "oficial", "stevo"])
+          .limit(1)
+          .maybeSingle();
+        instance = data;
+      }
+    }
+
+    if (instance) {
+      host = instance.companies?.evogo_host;
+      token = instance.evogo_api_key;
+      instanceName = instance.instance_name;
+      provider = instance.provider || 'evogo';
+
+      if (resolvedInstanceId !== instance.id) {
+        resolvedInstanceId = instance.id;
+        await supabaseAdmin.from("conversations").update({ whatsapp_instance_id: instance.id }).eq("id", conversationId);
+      }
+    }
+  }
+
+  if (conv.channel === 'whatsapp') {
     let evogoResponse;
 
     if (provider === 'oficial') {
       const { sendCloudApiMessage } = await import('./whatsapp-cloud-api');
       const msgId = await sendCloudApiMessage(
-        conv.whatsapp_instance_id!,
+        resolvedInstanceId!,
         phone,
         text || '',
         mediaType,
-        mediaUrlToSend,
-        finalMessageId
+        mediaUrlToSend
       );
       remoteMsgId = msgId;
       participantJid = null;
@@ -133,12 +269,10 @@ export async function sendPlatformMessage({
   }
     
   } else if (conv.channel === 'instagram') {
-    if (!conv.whatsapp_instance_id) throw new Error("Missing instance for Instagram");
-    
     const { data: instance } = await supabaseAdmin
       .from("whatsapp_instances")
       .select("oficial_phone_number_id, oficial_access_token")
-      .eq("id", conv.whatsapp_instance_id)
+      .eq("id", resolvedInstanceId!)
       .single();
 
     if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
@@ -222,11 +356,11 @@ export async function sendPlatformMessage({
     remoteMsgId = result.message_id || null;
     participantJid = instance.oficial_phone_number_id;
 
-  } else if (provider === 'messenger') {
+  } else if (conv.channel === 'messenger') {
     const { data: instance } = await supabaseAdmin
       .from("whatsapp_instances")
       .select("oficial_phone_number_id, oficial_access_token")
-      .eq("id", conv.whatsapp_instance_id)
+      .eq("id", resolvedInstanceId!)
       .single();
 
     if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
@@ -234,6 +368,7 @@ export async function sendPlatformMessage({
     }
 
     const psid = whatsapp_lid;
+    if (!psid) throw new Error("Missing Facebook Page Scoped ID (whatsapp_lid) for contact");
 
     const payload: any = {
       recipient: { id: psid },
@@ -313,7 +448,7 @@ export async function sendPlatformMessage({
       sender_type: senderType,
       sender_id: senderId,
       content: text || null,
-      media_type: mediaType,
+      media_type: mediaType as any,
       media_url: mediaUrlToSend || null,
       remote_msg_id: remoteMsgId,
       participant_jid: participantJid,
