@@ -148,7 +148,7 @@ function ConversationsPage() {
 
       let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,instagram_username,whatsapp_lid,instagram_id,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
       
-      if (debouncedSearch) {
+      if (debouncedSearch || tab === "groups") {
         selectString = selectString.replace("contact:contacts(", "contact:contacts!inner(");
       }
 
@@ -168,6 +168,10 @@ function ConversationsPage() {
 
       if (debouncedSearch) {
         query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`, { foreignTable: "contacts" });
+      }
+
+      if (tab === "groups") {
+        query = query.or('phone.like.120363%,phone.like.%-%', { foreignTable: "contacts" });
       }
 
       // Server-side status filter for non-group tabs
