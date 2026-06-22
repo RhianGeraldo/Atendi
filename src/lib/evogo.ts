@@ -7,6 +7,18 @@ type SendMessageParams = {
   delay?: number;
 };
 
+function parseEvogoError(status: number, statusText: string, errorText: string) {
+  let errorMessage = `Failed to send message via EvoGo: ${status} ${statusText}`;
+  try {
+    const json = JSON.parse(errorText);
+    if (json.error) errorMessage = json.error;
+    else if (json.message) errorMessage = json.message;
+  } catch (e) {
+    // keep default
+  }
+  return errorMessage;
+}
+
 export async function sendEvogoText({
   host,
   token,
@@ -39,7 +51,7 @@ export async function sendEvogoText({
   if (!response.ok) {
     const errorText = await response.text();
     console.error('EvoGo API Error:', errorText);
-    throw new Error(`Failed to send message via EvoGo: ${response.status} ${response.statusText}`);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
   return response.json();
@@ -75,7 +87,7 @@ export async function sendEvogoLink({
   if (!response.ok) {
     const errorText = await response.text();
     console.error('EvoGo API Error (link):', errorText);
-    throw new Error(`Failed to send link via EvoGo: ${response.status} ${response.statusText}`);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
   return response.json();
@@ -153,7 +165,7 @@ export async function sendEvogoMedia({
   if (!response.ok) {
     const errorText = await response.text();
     console.error('EvoGo Media API Error:', errorText);
-    throw new Error(`Failed to send media via EvoGo: ${response.status} ${response.statusText}`);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
   return response.json();
@@ -198,7 +210,7 @@ export async function sendEvogoReaction({
   if (!response.ok) {
     const errorText = await response.text();
     console.error('EvoGo Reaction API Error:', errorText);
-    throw new Error(`Failed to send reaction via EvoGo: ${response.status} ${response.statusText}`);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
   return response.json();
@@ -240,7 +252,7 @@ export async function editEvogoMessage({
   if (!response.ok) {
     const errorText = await response.text();
     console.error('EvoGo Edit API Error:', errorText);
-    throw new Error(`Failed to edit message via EvoGo: ${response.status} ${response.statusText}`);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
   return response.json();
@@ -279,7 +291,7 @@ export async function deleteEvogoMessage({
   if (!response.ok) {
     const errorText = await response.text();
     console.error('EvoGo Delete API Error:', errorText);
-    throw new Error(`Failed to delete message via EvoGo: ${response.status} ${response.statusText}`);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
   return response.json();

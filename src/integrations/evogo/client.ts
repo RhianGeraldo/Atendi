@@ -28,7 +28,15 @@ export class EvoGoClient {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`EvoGo API Error: ${response.status} - ${errorText}`);
+      let errorMessage = `EvoGo API Error: ${response.status} - ${errorText}`;
+      try {
+        const json = JSON.parse(errorText);
+        if (json.error) errorMessage = json.error;
+        else if (json.message) errorMessage = json.message;
+      } catch (e) {
+        // ignore
+      }
+      throw new Error(errorMessage);
     }
 
     return response.json();
