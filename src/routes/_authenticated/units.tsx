@@ -491,7 +491,7 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
 
       let defaultWebhookUrl = null;
       if (provider === 'oficial') {
-        defaultWebhookUrl = `${window.location.origin}/api/webhooks/whatsapp-cloud`;
+        defaultWebhookUrl = `${window.location.origin}/api/webhooks/whatsapp`;
       } else if (provider === 'instagram') {
         defaultWebhookUrl = `${window.location.origin}/api/webhooks/instagram`;
       } else if (provider === 'messenger') {

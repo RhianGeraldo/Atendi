@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Smartphone, Loader2, CheckCircle2, XCircle } from "lucide-react";
 
-export const Route = createFileRoute("/waba-signup")({
+export const Route = createFileRoute("/whatsapp-signup")({
   component: WabaSignupCallback,
 });
 

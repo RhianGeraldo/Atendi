@@ -9,7 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as WabaSignupRouteImport } from './routes/waba-signup'
+import { Route as WhatsappSignupRouteImport } from './routes/whatsapp-signup'
 import { Route as MessengerSignupRouteImport } from './routes/messenger-signup'
 import { Route as InstagramSignupRouteImport } from './routes/instagram-signup'
 import { Route as FacebookSignupRouteImport } from './routes/facebook-signup'
@@ -27,9 +27,9 @@ import { Route as AuthenticatedContactsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedCampaignsRouteImport } from './routes/_authenticated/campaigns'
 import { Route as AuthenticatedCallsRouteImport } from './routes/_authenticated/calls'
 
-const WabaSignupRoute = WabaSignupRouteImport.update({
-  id: '/waba-signup',
-  path: '/waba-signup',
+const WhatsappSignupRoute = WhatsappSignupRouteImport.update({
+  id: '/whatsapp-signup',
+  path: '/whatsapp-signup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MessengerSignupRoute = MessengerSignupRouteImport.update({
@@ -119,7 +119,7 @@ export interface FileRoutesByFullPath {
   '/facebook-signup': typeof FacebookSignupRoute
   '/instagram-signup': typeof InstagramSignupRoute
   '/messenger-signup': typeof MessengerSignupRoute
-  '/waba-signup': typeof WabaSignupRoute
+  '/whatsapp-signup': typeof WhatsappSignupRoute
   '/calls': typeof AuthenticatedCallsRoute
   '/campaigns': typeof AuthenticatedCampaignsRoute
   '/contacts': typeof AuthenticatedContactsRoute
@@ -137,7 +137,7 @@ export interface FileRoutesByTo {
   '/facebook-signup': typeof FacebookSignupRoute
   '/instagram-signup': typeof InstagramSignupRoute
   '/messenger-signup': typeof MessengerSignupRoute
-  '/waba-signup': typeof WabaSignupRoute
+  '/whatsapp-signup': typeof WhatsappSignupRoute
   '/calls': typeof AuthenticatedCallsRoute
   '/campaigns': typeof AuthenticatedCampaignsRoute
   '/contacts': typeof AuthenticatedContactsRoute
@@ -157,7 +157,7 @@ export interface FileRoutesById {
   '/facebook-signup': typeof FacebookSignupRoute
   '/instagram-signup': typeof InstagramSignupRoute
   '/messenger-signup': typeof MessengerSignupRoute
-  '/waba-signup': typeof WabaSignupRoute
+  '/whatsapp-signup': typeof WhatsappSignupRoute
   '/_authenticated/calls': typeof AuthenticatedCallsRoute
   '/_authenticated/campaigns': typeof AuthenticatedCampaignsRoute
   '/_authenticated/contacts': typeof AuthenticatedContactsRoute
@@ -177,7 +177,7 @@ export interface FileRouteTypes {
     | '/facebook-signup'
     | '/instagram-signup'
     | '/messenger-signup'
-    | '/waba-signup'
+    | '/whatsapp-signup'
     | '/calls'
     | '/campaigns'
     | '/contacts'
@@ -195,7 +195,7 @@ export interface FileRouteTypes {
     | '/facebook-signup'
     | '/instagram-signup'
     | '/messenger-signup'
-    | '/waba-signup'
+    | '/whatsapp-signup'
     | '/calls'
     | '/campaigns'
     | '/contacts'
@@ -214,7 +214,7 @@ export interface FileRouteTypes {
     | '/facebook-signup'
     | '/instagram-signup'
     | '/messenger-signup'
-    | '/waba-signup'
+    | '/whatsapp-signup'
     | '/_authenticated/calls'
     | '/_authenticated/campaigns'
     | '/_authenticated/contacts'
@@ -234,16 +234,16 @@ export interface RootRouteChildren {
   FacebookSignupRoute: typeof FacebookSignupRoute
   InstagramSignupRoute: typeof InstagramSignupRoute
   MessengerSignupRoute: typeof MessengerSignupRoute
-  WabaSignupRoute: typeof WabaSignupRoute
+  WhatsappSignupRoute: typeof WhatsappSignupRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/waba-signup': {
-      id: '/waba-signup'
-      path: '/waba-signup'
-      fullPath: '/waba-signup'
-      preLoaderRoute: typeof WabaSignupRouteImport
+    '/whatsapp-signup': {
+      id: '/whatsapp-signup'
+      path: '/whatsapp-signup'
+      fullPath: '/whatsapp-signup'
+      preLoaderRoute: typeof WhatsappSignupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/messenger-signup': {
@@ -397,7 +397,7 @@ const rootRouteChildren: RootRouteChildren = {
   FacebookSignupRoute: FacebookSignupRoute,
   InstagramSignupRoute: InstagramSignupRoute,
   MessengerSignupRoute: MessengerSignupRoute,
-  WabaSignupRoute: WabaSignupRoute,
+  WhatsappSignupRoute: WhatsappSignupRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

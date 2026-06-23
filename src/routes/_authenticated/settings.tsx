@@ -99,6 +99,25 @@ function SettingsPage() {
     }
   }, [createModalOpen]);
 
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") return;
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'WA_EMBEDDED_SIGNUP') {
+          console.log("Embedded Signup Data recebido:", data);
+          // O retorno geralmente inclui informações de sessão que podem ser usadas
+          // para concluir o cadastro do WhatsApp Business API.
+        }
+      } catch {
+        // Ignora erros de parse silenciosamente
+      }
+    };
+    
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
 
   const { data: company, isLoading: isLoadingCompany } = useQuery({
     queryKey: ["company", profile?.company_id],
@@ -349,7 +368,7 @@ function SettingsPage() {
 
       let defaultWebhookUrl = null;
       if (provider === 'oficial') {
-        defaultWebhookUrl = `${window.location.origin}/api/webhooks/whatsapp-cloud`;
+        defaultWebhookUrl = `${window.location.origin}/api/webhooks/whatsapp`;
       } else if (provider === 'instagram') {
         defaultWebhookUrl = `${window.location.origin}/api/webhooks/instagram`;
       } else if (provider === 'messenger') {

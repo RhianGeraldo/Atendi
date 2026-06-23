@@ -69,7 +69,7 @@ export default {
         return await handleEvogoWebhook(request);
       }
 
-      if (url.pathname === '/api/webhooks/whatsapp-cloud' && (request.method === 'POST' || request.method === 'GET')) {
+      if (url.pathname === '/api/webhooks/whatsapp' && (request.method === 'POST' || request.method === 'GET')) {
         const { handleWhatsappCloudWebhook } = await import('./lib/server/whatsapp-cloud-webhook');
         return await handleWhatsappCloudWebhook(request);
       }

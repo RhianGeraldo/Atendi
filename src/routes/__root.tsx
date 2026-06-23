@@ -98,6 +98,21 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="pt-BR">
       <head><HeadContent /></head>
       <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.fbAsyncInit = function() {
+                FB.init({
+                  appId            : '1035728705567552',
+                  autoLogAppEvents : true,
+                  xfbml            : true,
+                  version          : 'v25.0'
+                });
+              };
+            `,
+          }}
+        />
+        <script async defer crossOrigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js" />
         {children}
         <Scripts />
       </body>
