@@ -23,7 +23,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     
     const { data: conv, error: convErr } = await supabase
       .from("conversations")
-      .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid)")
+      .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid, company_id)")
       .eq("id", data.conversationId)
       .single();
 
@@ -81,6 +81,17 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         }
       }
 
+      if (!instance && conv.contacts?.company_id) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id")
+          .eq("company_id", conv.contacts.company_id)
+          .eq("provider", "instagram")
+          .limit(1)
+          .maybeSingle();
+        instance = data;
+      }
+
       if (instance) {
         resolvedInstanceId = instance.id;
       }
@@ -121,6 +132,17 @@ export const sendMessageAction = createServerFn({ method: "POST" })
             .maybeSingle();
           instance = data;
         }
+      }
+
+      if (!instance && conv.contacts?.company_id) {
+        const { data } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("id")
+          .eq("company_id", conv.contacts.company_id)
+          .eq("provider", "messenger")
+          .limit(1)
+          .maybeSingle();
+        instance = data;
       }
 
       if (instance) {
@@ -291,7 +313,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       } else if (provider === 'instagram') {
         const { data: instance } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("oficial_phone_number_id, oficial_access_token")
+          .select("oficial_phone_number_id, oficial_waba_id, oficial_access_token")
           .eq("id", resolvedInstanceId!)
           .single();
 
@@ -329,9 +351,10 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         }
 
         const isDirectToken = instance.oficial_access_token.startsWith('IGA');
+        const pageId = instance.oficial_waba_id || 'me';
         const endpoint = isDirectToken 
           ? `https://graph.instagram.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`
-          : `https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`;
+          : `https://graph.facebook.com/v20.0/${pageId}/messages?access_token=${instance.oficial_access_token}`;
 
         let igRes = await fetch(endpoint, {
           method: 'POST',
@@ -401,8 +424,8 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           payload.reply_to = { mid: finalMessageId };
         }
 
-        // Messenger utiliza o /me/messages usando o Page Access Token
-        let fbRes = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`, {
+        // Messenger utiliza o Page ID diretamente (oficial_phone_number_id armazena o Page ID)
+        let fbRes = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -415,7 +438,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           console.warn("[chat.functions] Messenger rejected reply_to. Retrying without reply_to...");
           delete payload.reply_to;
           
-          fbRes = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`, {
+          fbRes = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)

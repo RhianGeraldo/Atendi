@@ -56,6 +56,7 @@ function SettingsPage() {
   const [instanceName, setInstanceName] = useState("");
   const [instanceProvider, setInstanceProvider] = useState("evogo");
   const [oficialNumberId, setOficialNumberId] = useState("");
+  const [oficialWabaId, setOficialWabaId] = useState("");
   const [oficialToken, setOficialToken] = useState("");
   const [oficialVerifyToken, setOficialVerifyToken] = useState("");
   const [metaAccounts, setMetaAccounts] = useState<any[]>([]);
@@ -95,6 +96,7 @@ function SettingsPage() {
       setSelectedMetaAccountId("");
       setUseManualToken(false);
       setOficialNumberId("");
+      setOficialWabaId("");
       setOficialToken("");
     }
   }, [createModalOpen]);
@@ -138,7 +140,7 @@ function SettingsPage() {
       const fetchAccounts = async () => {
         setIsLoadingMeta(true);
         try {
-          const res = await fetch(`https://graph.facebook.com/v20.0/me/accounts?fields=name,access_token,instagram_business_account{name,username,profile_picture_url}&access_token=${company.meta_system_user_token}`);
+          const res = await fetch(`https://graph.facebook.com/v20.0/me/accounts?fields=name,access_token,instagram_business_account{id,name,username,profile_picture_url}&access_token=${company.meta_system_user_token}`);
           const json = await res.json();
           if (json.error) throw new Error(json.error.message);
           
@@ -320,8 +322,8 @@ function SettingsPage() {
   });
 
   const createInstance = useMutation({
-    mutationFn: async (payload: { name: string, provider: string, numberId?: string, accessToken?: string, verifyToken?: string }) => {
-      const { name, provider, numberId, accessToken, verifyToken } = payload;
+    mutationFn: async (payload: { name: string, provider: string, numberId?: string, wabaId?: string, accessToken?: string, verifyToken?: string }) => {
+      const { name, provider, numberId, wabaId, accessToken, verifyToken } = payload;
       if (!profile?.company_id) throw new Error("Sem empresa");
       if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token)) {
         throw new Error("Configure Host e Token primeiro para usar a EvoGo.");
@@ -329,7 +331,7 @@ function SettingsPage() {
 
       let finalNumberId = numberId;
       let finalAccessToken = accessToken;
-      let finalWabaId = undefined;
+      let finalWabaId = wabaId;
 
       if ((provider === 'instagram' || provider === 'messenger') && company?.meta_system_user_token && !useManualToken && selectedMetaAccountId) {
         const account = metaAccounts.find(a => a.id === selectedMetaAccountId);
@@ -1112,6 +1114,17 @@ function SettingsPage() {
                       />
                       <p className="text-xs text-muted-foreground">O ID gerado no painel de desenvolvedores da Meta.</p>
                     </div>
+                    {instanceProvider === 'instagram' && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Facebook Page ID (Opcional se usar token IGA)</label>
+                        <Input 
+                          placeholder="ID da página vinculada" 
+                          value={oficialWabaId}
+                          onChange={(e) => setOficialWabaId(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">Opcional para tokens diretos (IGA). Necessário se usar token da Meta (EAAS).</p>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Access Token Permanente</label>
                       <Input 
@@ -1141,7 +1154,7 @@ function SettingsPage() {
                   />
                   <p className="text-xs text-muted-foreground">
                     Crie uma chave e use-a para configurar o webhook na Meta: 
-                    <code>{window.location.origin}/api/webhooks/{instanceProvider === 'instagram' ? 'instagram' : instanceProvider === 'messenger' ? 'messenger' : 'whatsapp-cloud'}</code>
+                    <code>{window.location.origin}/api/webhooks/{instanceProvider === 'instagram' ? 'instagram' : instanceProvider === 'messenger' ? 'messenger' : 'whatsapp'}</code>
                   </p>
                 </div>
               </>
@@ -1209,20 +1222,34 @@ function InstanceRow({ instance, company, onConnect, onSettings }: { instance: a
       <div className="space-y-1">
         <p className="font-medium leading-none">{instance.name}</p>
         <p className="text-xs text-muted-foreground font-mono">{instance.instance_name}</p>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-          <span>Status:</span>
-          <Badge variant={instance.status === 'connected' ? 'default' : 'secondary'} className="text-[10px] py-0">
-            {instance.status}
-          </Badge>
-        </div>
+        {!['oficial', 'instagram', 'messenger', 'facebook'].includes(instance.provider) && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+            <span>Status:</span>
+            <Badge variant={instance.status === 'connected' ? 'default' : 'secondary'} className="text-[10px] py-0">
+              {instance.status}
+            </Badge>
+          </div>
+        )}
       </div>
       <div className="flex gap-2">
         {instance.provider === 'oficial' ? (
-          <Badge variant="outline" className="h-9 px-3 border-emerald-200 text-emerald-700 bg-emerald-50">API Oficial Ativa</Badge>
+          <Badge variant="outline" className="h-9 px-3 border-emerald-200 text-emerald-700 bg-emerald-50 flex items-center gap-1">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21"/><path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1"/></svg>
+            API Oficial Ativa
+          </Badge>
         ) : instance.provider === 'instagram' ? (
           <Badge variant="outline" className="h-9 px-3 border-pink-200 text-pink-700 bg-pink-50 flex items-center gap-1">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
             Instagram
+          </Badge>
+        ) : instance.provider === 'messenger' ? (
+          <Badge variant="outline" className="h-9 px-3 border-blue-200 text-blue-700 bg-blue-50 flex items-center gap-1">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.1 11.3c0-5-4.3-9-9.6-9s-9.6 4-9.6 9c0 2.8 1.4 5.3 3.6 7l-.3 2.7 2.6-1.4c1.1.3 2.3.5 3.6.5 5.3 0 9.6-4 9.6-9z" fill="none"/><path d="m11.5 13.9 1.7-2.7 4.1 2.7-4.5-4.8-1.7 2.7-4.1-2.7z"/></svg>
+            Messenger
+          </Badge>
+        ) : instance.provider === 'facebook' ? (
+          <Badge variant="outline" className="h-9 px-3 border-blue-200 text-blue-700 bg-blue-50 flex items-center gap-1">
+            Facebook
           </Badge>
         ) : instance.status === 'connected' ? (
           <Button variant="outline" size="sm" onClick={() => setConfirmDialog({ open: true, type: 'disconnect' })} className="text-destructive hover:bg-destructive/10">

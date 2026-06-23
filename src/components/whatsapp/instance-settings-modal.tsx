@@ -39,11 +39,14 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
 
     const isOficial = instance.provider === 'oficial';
     const isInstagram = instance.provider === 'instagram';
-    const isCloudAPI = isOficial || isInstagram;
+    const isMessenger = instance.provider === 'messenger';
+    const isCloudAPI = isOficial || isInstagram || isMessenger;
 
     let providerWebhookPath = 'evogo';
-    if (isOficial) providerWebhookPath = 'whatsapp-cloud';
+    if (instance.provider === 'stevo') providerWebhookPath = 'evogo';
+    else if (isOficial) providerWebhookPath = 'whatsapp';
     else if (isInstagram) providerWebhookPath = 'instagram';
+    else if (isMessenger) providerWebhookPath = 'messenger';
 
     let defaultWebhook = instance.webhook_url;
     const currentDomainWebhook = `${window.location.origin}/api/webhooks/${providerWebhookPath}`;
@@ -281,14 +284,16 @@ function SettingsFormContent({
             </p>
           )}
         </div>
-        <div className="space-y-1 mt-2">
-          <label className="text-xs text-muted-foreground">Wavoip Token (Chamadas)</label>
-          <Input 
-            placeholder="Seu token de dispositivo Wavoip" 
-            value={wavoipToken}
-            onChange={(e) => setWavoipToken(e.target.value)}
-          />
-        </div>
+        {!isCloudAPI && (
+          <div className="space-y-1 mt-2">
+            <label className="text-xs text-muted-foreground">Wavoip Token (Chamadas)</label>
+            <Input 
+              placeholder="Seu token de dispositivo Wavoip" 
+              value={wavoipToken}
+              onChange={(e) => setWavoipToken(e.target.value)}
+            />
+          </div>
+        )}
       </div>
 
       {isCloudAPI ? (

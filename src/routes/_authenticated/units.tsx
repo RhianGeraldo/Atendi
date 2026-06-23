@@ -392,6 +392,7 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
 
   const [instanceProvider, setInstanceProvider] = useState("evogo");
   const [oficialNumberId, setOficialNumberId] = useState("");
+  const [oficialWabaId, setOficialWabaId] = useState("");
   const [oficialToken, setOficialToken] = useState("");
   const [oficialVerifyToken, setOficialVerifyToken] = useState("");
   const [metaAccounts, setMetaAccounts] = useState<any[]>([]);
@@ -406,6 +407,7 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
       setSelectedMetaAccountId("");
       setUseManualToken(false);
       setOficialNumberId("");
+      setOficialWabaId("");
       setOficialToken("");
     }
   }, [createModalOpen]);
@@ -415,7 +417,7 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
       const fetchAccounts = async () => {
         setIsLoadingMeta(true);
         try {
-          const res = await fetch(`https://graph.facebook.com/v20.0/me/accounts?fields=name,access_token,instagram_business_account{name,username,profile_picture_url}&access_token=${company.meta_system_user_token}`);
+          const res = await fetch(`https://graph.facebook.com/v20.0/me/accounts?fields=name,access_token,instagram_business_account{id,name,username,profile_picture_url}&access_token=${company.meta_system_user_token}`);
           const json = await res.json();
           if (json.error) throw new Error(json.error.message);
           
@@ -453,15 +455,15 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
   });
 
   const createInstance = useMutation({
-    mutationFn: async (payload: { name: string, provider: string, numberId?: string, accessToken?: string, verifyToken?: string }) => {
-      const { name, provider, numberId, accessToken, verifyToken } = payload;
+    mutationFn: async (payload: { name: string, provider: string, numberId?: string, wabaId?: string, accessToken?: string, verifyToken?: string }) => {
+      const { name, provider, numberId, wabaId, accessToken, verifyToken } = payload;
       if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token)) {
         throw new Error("Configure Host e Token na Empresa Mãe primeiro.");
       }
 
       let finalNumberId = numberId;
       let finalAccessToken = accessToken;
-      let finalWabaId = undefined;
+      let finalWabaId = wabaId;
 
       if ((provider === 'instagram' || provider === 'messenger') && company?.meta_system_user_token && !useManualToken && selectedMetaAccountId) {
         const account = metaAccounts.find(a => a.id === selectedMetaAccountId);
@@ -723,9 +725,11 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
                                 {inst.provider === 'oficial' ? 'API Oficial' : inst.provider}
                               </Badge>
                             )}
-                            <Badge variant={inst.status === 'connected' ? 'default' : 'secondary'} className={inst.status === 'connected' ? 'bg-success text-[10px] py-0 h-4 font-semibold' : 'text-[10px] py-0 h-4 font-semibold'}>
-                              {inst.status === 'connected' ? 'Online' : 'Aguardando'}
-                            </Badge>
+                            {!['oficial', 'instagram', 'messenger', 'facebook'].includes(inst.provider) && (
+                              <Badge variant={inst.status === 'connected' ? 'default' : 'secondary'} className={inst.status === 'connected' ? 'bg-success text-[10px] py-0 h-4 font-semibold' : 'text-[10px] py-0 h-4 font-semibold'}>
+                                {inst.status === 'connected' ? 'Online' : 'Aguardando'}
+                              </Badge>
+                            )}
                           </div>
                           <p className="text-[10px] text-muted-foreground font-mono">{inst.instance_name}</p>
                           {inst.owner_jid && (
@@ -737,7 +741,10 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
                         </div>
                         <div className="flex gap-1.5 opacity-100 sm:opacity-50 group-hover:opacity-100 transition-opacity">
                           {inst.provider === 'oficial' ? (
-                            <Badge variant="outline" className="h-8 px-2.5 border-emerald-200 text-emerald-700 bg-emerald-50 text-[11px] font-medium flex items-center">API Oficial Ativa</Badge>
+                            <Badge variant="outline" className="h-8 px-2.5 border-emerald-200 text-emerald-700 bg-emerald-50 text-[11px] font-medium flex items-center gap-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21"/><path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1"/></svg>
+                              API Oficial Ativa
+                            </Badge>
                           ) : inst.provider === 'instagram' ? (
                             <Badge variant="outline" className="h-8 px-2.5 border-pink-200 text-pink-700 bg-pink-50 text-[11px] font-medium flex items-center gap-1">
                               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
@@ -747,6 +754,10 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
                             <Badge variant="outline" className="h-8 px-2.5 border-blue-200 text-blue-700 bg-blue-50 text-[11px] font-medium flex items-center gap-1">
                               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
                               Messenger Ativo
+                            </Badge>
+                          ) : inst.provider === 'facebook' ? (
+                            <Badge variant="outline" className="h-8 px-2.5 border-blue-200 text-blue-700 bg-blue-50 text-[11px] font-medium flex items-center gap-1">
+                              Facebook Ativo
                             </Badge>
                           ) : (
                             <>
@@ -945,6 +956,17 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
                         />
                         <p className="text-xs text-muted-foreground">O ID gerado no painel de desenvolvedores da Meta.</p>
                       </div>
+                      {instanceProvider === 'instagram' && (
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Facebook Page ID (Opcional se usar token IGA)</label>
+                          <Input 
+                            placeholder="ID da página vinculada" 
+                            value={oficialWabaId}
+                            onChange={(e) => setOficialWabaId(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">Opcional para tokens diretos (IGA). Necessário se usar token da Meta (EAAS).</p>
+                        </div>
+                      )}
                       <div className="space-y-2">
                         <label className="text-sm font-medium">Access Token Permanente</label>
                         <Input 
@@ -974,7 +996,7 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
                     />
                     <p className="text-xs text-muted-foreground">
                       Crie uma chave e use-a para configurar o webhook na Meta: 
-                      <code>{window.location.origin}/api/webhooks/{instanceProvider === 'instagram' ? 'instagram' : instanceProvider === 'messenger' ? 'messenger' : 'whatsapp-cloud'}</code>
+                      <code>{window.location.origin}/api/webhooks/{instanceProvider === 'instagram' ? 'instagram' : instanceProvider === 'messenger' ? 'messenger' : 'whatsapp'}</code>
                     </p>
                   </div>
                 </>
