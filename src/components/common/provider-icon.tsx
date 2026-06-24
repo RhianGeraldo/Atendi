@@ -11,6 +11,14 @@ export function ProviderIcon({ provider, className }: Props) {
   if (provider === "instagram") {
     return <ChannelIcon channel="instagram" className={className} />;
   }
+
+  if (provider === "messenger") {
+    return <ChannelIcon channel="messenger" className={className} />;
+  }
+
+  if (provider === "facebook") {
+    return <ChannelIcon channel="facebook" className={className} />;
+  }
   
   if (provider === "official") {
     return (
