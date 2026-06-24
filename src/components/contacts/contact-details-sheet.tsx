@@ -1216,6 +1216,12 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                     <span>Insta ID: {contact.instagram_id}</span>
                   </div>
                 )}
+                {contact.messenger_id && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Hash className="h-3.5 w-3.5 text-blue-500" />
+                    <span>Messenger ID: {contact.messenger_id}</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 text-xs">
                   <CalendarDays className="h-4 w-4" />
                   <span>Cadastrado em {format(new Date(contact.created_at), "dd/MM/yyyy", { locale: ptBR })}</span>

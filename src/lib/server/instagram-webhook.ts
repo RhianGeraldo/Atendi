@@ -212,8 +212,7 @@ async function processIncomingMessage(params: any) {
         name: profileName,
         profile_picture_url: profilePic,
         instagram_username: profileUsername,
-        phone: contactIgsid, // Necessário colocar algo no phone para evitar restrições
-        whatsapp_lid: contactIgsid,
+        instagram_id: contactIgsid,
         source: 'Instagram'
       })
       .select('id')
