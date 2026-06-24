@@ -419,7 +419,7 @@ async function processIncomingMessage(params: any) {
     
     const { data: convs } = await supabaseAdmin
       .from('conversations')
-      .select('id, status, assigned_agent_id, contact_id')
+      .select('id, status, assigned_agent_id, contact_id, ai_active')
       .in('contact_id', contactIds)
       .eq('whatsapp_instance_id', instanceId)
       .in('status', ['waiting', 'active'])
@@ -483,9 +483,11 @@ async function processIncomingMessage(params: any) {
   }
 
   let conversationId;
+  let aiActive = false;
 
   if (activeConv) {
     conversationId = activeConv.id;
+    aiActive = activeConv.ai_active ?? false;
     // Atualiza a conversa
     await supabaseAdmin
       .from('conversations')
@@ -496,6 +498,21 @@ async function processIncomingMessage(params: any) {
       })
       .eq('id', conversationId);
   } else {
+    // Check for default AI agent
+    const { data: defaultAgents } = await supabaseAdmin
+      .from('ai_agents')
+      .select('id, is_main_agent, active_by_default')
+      .eq('company_id', companyId)
+      .eq('is_active', true)
+      .or('is_main_agent.eq.true,active_by_default.eq.true')
+      .order('is_main_agent', { ascending: false })
+      .order('instance_id', { ascending: false })
+      .limit(1);
+    
+    const defaultAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
+    const isActiveByDefault = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
+    if (isActiveByDefault) aiActive = true;
+
     // Cria nova conversa
     const { data: newConv, error: convError } = await supabaseAdmin
       .from('conversations')
@@ -504,11 +521,13 @@ async function processIncomingMessage(params: any) {
         remote_id: phoneWithoutPlus,
         whatsapp_instance_id: instanceId,
         unit_id: unitId,
-        status: 'waiting',
+        status: isActiveByDefault ? 'active' : 'waiting',
         started_at: new Date(timestamp).toISOString(),
         last_message_at: new Date(timestamp).toISOString(),
         last_message_preview: textContent?.substring(0, 50),
-        channel: 'whatsapp'
+        channel: 'whatsapp',
+        ai_active: isActiveByDefault,
+        ai_agent_id: defaultAgentId
       })
       .select('id')
       .single();
@@ -603,7 +622,7 @@ async function processIncomingMessage(params: any) {
   }
 
   // Se o contato já for atendido por IA, enfileirar (Se for waiting, a cron/AI processa)
-  if (activeConv?.status === 'waiting' || !activeConv?.assigned_agent_id) {
+  if (aiActive) {
     await enqueueAiMessage(conversationId, msgData.id, companyId);
   }
 }
