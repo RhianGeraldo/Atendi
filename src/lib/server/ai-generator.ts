@@ -15,16 +15,39 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       return;
     }
 
-    if (!conv.ai_active || !conv.ai_agent_id || conv.status === "resolved") {
+    if (!conv.ai_active || conv.status === "resolved") {
       console.log(`[ai-generator] AI not active or conversation resolved. Aborting generation for ${conversationId}`);
       return;
+    }
+
+    let agentIdToUse = conv.ai_agent_id;
+
+    if (!agentIdToUse) {
+      console.log(`[ai-generator] No AI agent assigned to conversation ${conversationId}. Auto-assigning best available agent...`);
+      const { data: defaultAgents } = await supabaseAdmin
+        .from('ai_agents')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .order('is_main_agent', { ascending: false })
+        .order('active_by_default', { ascending: false })
+        .order('instance_id', { ascending: false })
+        .limit(1);
+
+      if (defaultAgents && defaultAgents.length > 0) {
+        agentIdToUse = defaultAgents[0].id;
+        await supabaseAdmin.from('conversations').update({ ai_agent_id: agentIdToUse }).eq('id', conversationId);
+      } else {
+        console.log(`[ai-generator] No active AI agents found in company ${companyId}. Aborting.`);
+        return;
+      }
     }
 
     // 2. Fetch AI Agent details
     const { data: agent, error: agentErr } = await supabaseAdmin
       .from("ai_agents")
       .select("*")
-      .eq("id", conv.ai_agent_id)
+      .eq("id", agentIdToUse)
       .single();
 
     if (agentErr || !agent || !agent.is_active) {

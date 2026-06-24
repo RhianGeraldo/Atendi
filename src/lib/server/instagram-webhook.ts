@@ -319,8 +319,8 @@ async function processIncomingMessage(params: any) {
       .select('id, is_main_agent, active_by_default')
       .eq('company_id', companyId)
       .eq('is_active', true)
-      .or('is_main_agent.eq.true,active_by_default.eq.true')
       .order('is_main_agent', { ascending: false })
+      .order('active_by_default', { ascending: false })
       .order('instance_id', { ascending: false })
       .limit(1);
     
