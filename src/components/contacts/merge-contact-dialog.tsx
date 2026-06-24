@@ -28,7 +28,7 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
     queryFn: async () => {
       let q = supabase
         .from("contacts")
-        .select("id, name, phone, whatsapp_lid, instagram_username, messenger_id, profile_picture_url")
+        .select("id, name, phone, whatsapp_lid, instagram_username, instagram_id, messenger_id, source, profile_picture_url")
         .neq("id", sourceContact.id)
         .is("merged_into_id", null)
         .limit(10);
@@ -155,6 +155,7 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
                           <p className="text-xs text-muted-foreground truncate">
                             {c.phone || c.whatsapp_lid || 'Sem número'}
                             {c.instagram_username && ` • @${c.instagram_username}`}
+                            {(!c.instagram_username && (c.source === 'Instagram' || c.instagram_id)) && ` • Instagram`}
                             {c.messenger_id && ` • Messenger`}
                           </p>
                         </div>
