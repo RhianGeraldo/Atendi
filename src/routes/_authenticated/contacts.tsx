@@ -290,7 +290,7 @@ function ContactsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {contacts.map((contact) => (
+                      {contacts.map((contact: any) => (
                         <tr 
                           key={contact.id} 
                           className="border-b last:border-0 hover:bg-muted/50 cursor-pointer"
