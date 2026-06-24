@@ -604,7 +604,7 @@ async function processIncomingMessage(params: any) {
 
   // Se o contato já for atendido por IA, enfileirar (Se for waiting, a cron/AI processa)
   if (activeConv?.status === 'waiting' || !activeConv?.assigned_agent_id) {
-    await enqueueAiMessage(msgData.id, companyId, conversationId);
+    await enqueueAiMessage(conversationId, msgData.id, companyId);
   }
 }
 
