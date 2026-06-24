@@ -14,7 +14,12 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContactDetailsSheet } from "@/components/contacts/contact-details-sheet";
 import { CreateContactDialog } from "@/components/contacts/create-contact-dialog";
-import { Link, ExternalLink, Image as ImageIcon } from "lucide-react";
+import { Link, ExternalLink, Image as ImageIcon, Calendar as CalendarIcon } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { Button } from "@/components/ui/button";
+import { DateRange } from "react-day-picker";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/contacts")({
   component: ContactsPage,
@@ -25,9 +30,10 @@ function ContactsPage() {
   const { selectedUnitId } = useUnit();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   const { data: contacts, isLoading } = useQuery({
-    queryKey: ["contacts", profile?.company_id, searchTerm, selectedUnitId],
+    queryKey: ["contacts", profile?.company_id, searchTerm, selectedUnitId, dateRange],
     enabled: !!profile?.company_id,
     queryFn: async () => {
       // Se não tem unidade selecionada (Empresa Mãe), pega todos os contatos.
@@ -56,6 +62,15 @@ function ContactsPage() {
         query = query.ilike("name", `%${searchTerm}%`);
       }
 
+      if (dateRange?.from) {
+        query = query.gte("created_at", dateRange.from.toISOString());
+      }
+      if (dateRange?.to) {
+        const toDate = new Date(dateRange.to);
+        toDate.setHours(23, 59, 59, 999);
+        query = query.lte("created_at", toDate.toISOString());
+      }
+
       const { data, error } = await query;
       if (error) throw error;
       
@@ -75,7 +90,7 @@ function ContactsPage() {
   });
 
   const { data: adLeads, isLoading: isLoadingAds } = useQuery({
-    queryKey: ["ad-leads", profile?.company_id, searchTerm, selectedUnitId],
+    queryKey: ["ad-leads", profile?.company_id, searchTerm, selectedUnitId, dateRange],
     enabled: !!profile?.company_id,
     queryFn: async () => {
       let query = supabase
@@ -102,6 +117,15 @@ function ContactsPage() {
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
+      }
+
+      if (dateRange?.from) {
+        query = query.gte("created_at", dateRange.from.toISOString());
+      }
+      if (dateRange?.to) {
+        const toDate = new Date(dateRange.to);
+        toDate.setHours(23, 59, 59, 999);
+        query = query.lte("created_at", toDate.toISOString());
       }
 
       const { data, error } = await query;
@@ -150,9 +174,78 @@ function ContactsPage() {
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-      <div className="flex items-center justify-between space-y-2">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between space-y-2 md:space-y-0">
         <h2 className="text-3xl font-bold tracking-tight">Gestão de Contatos</h2>
-        <CreateContactDialog />
+        <div className="flex items-center gap-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn(
+                  "w-[240px] justify-start text-left font-normal",
+                  !dateRange && "text-muted-foreground"
+                )}
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {dateRange?.from ? (
+                  dateRange.to ? (
+                    <>
+                      {format(dateRange.from, "dd/MM/yyyy")} -{" "}
+                      {format(dateRange.to, "dd/MM/yyyy")}
+                    </>
+                  ) : (
+                    format(dateRange.from, "dd/MM/yyyy")
+                  )
+                ) : (
+                  <span>Filtrar por data</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                initialFocus
+                mode="range"
+                defaultMonth={dateRange?.from}
+                selected={dateRange}
+                onSelect={setDateRange}
+                numberOfMonths={2}
+              />
+            </PopoverContent>
+          </Popover>
+          {dateRange && (
+            <Button variant="ghost" size="sm" onClick={() => setDateRange(undefined)}>
+              Limpar
+            </Button>
+          )}
+          <CreateContactDialog />
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total de Contatos</CardTitle>
+            <User className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{contacts?.length || 0}</div>
+            <p className="text-xs text-muted-foreground">
+              {dateRange ? "No período selecionado" : "Total histórico"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Leads de Anúncios</CardTitle>
+            <Link className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{adLeads?.length || 0}</div>
+            <p className="text-xs text-muted-foreground">
+              {dateRange ? "No período selecionado" : "Total histórico"}
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <Tabs defaultValue="all" className="space-y-4">
