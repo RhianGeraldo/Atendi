@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useInfiniteQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List, Hash, Smartphone } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List, Hash, Smartphone, LayoutTemplate } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -50,6 +50,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { WavoipCallOverlay } from "@/components/whatsapp/wavoip-call-overlay";
 import { WavoipDialer } from "@/components/whatsapp/wavoip-dialer";
 import { useWavoip } from "@/hooks/use-wavoip";
+import { WhatsappTemplateSender } from "@/components/whatsapp/whatsapp-template-sender";
 export const Route = createFileRoute("/_authenticated/conversations")({
   component: ConversationsPage,
   validateSearch: (search: Record<string, unknown>) => {
@@ -1375,6 +1376,7 @@ function ChatPanel({
   const [selectedReasonId, setSelectedReasonId] = useState<string>("");
   const [resolveObservation, setResolveObservation] = useState("");
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -1510,7 +1512,11 @@ function ChatPanel({
         qc.setQueryData(["messages", conv.id], context.previousMessages);
       }
       setText(context?.content || "");
-      toast.error("Erro ao enviar", { description: (e as Error).message });
+      if (e.message.includes('WINDOW_24H_EXPIRED')) {
+        setTemplateDialogOpen(true);
+      } else {
+        toast.error("Erro ao enviar", { description: (e as Error).message });
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["messages", conv.id] });
@@ -2273,13 +2279,13 @@ function ChatPanel({
             {!isRecording ? (
               <>
                 <input type="file" id="file-upload" hidden onChange={handleFileChange} />
-                <label htmlFor="file-upload" className="rounded p-2 text-muted-foreground hover:bg-accent cursor-pointer">
+                <label htmlFor="file-upload" className="rounded p-2 text-muted-foreground hover:bg-accent cursor-pointer" title="Anexar arquivo">
                   <Paperclip className="h-4 w-4" />
                 </label>
                 
                 <Popover>
                   <PopoverTrigger asChild>
-                    <button className="rounded p-2 text-muted-foreground hover:bg-accent">
+                    <button className="rounded p-2 text-muted-foreground hover:bg-accent" title="Emoji">
                       <Smile className="h-4 w-4" />
                     </button>
                   </PopoverTrigger>
@@ -2287,6 +2293,16 @@ function ChatPanel({
                     <EmojiPicker onEmojiClick={(e) => setText(prev => prev + e.emoji)} />
                   </PopoverContent>
                 </Popover>
+
+                {conv.channel === 'whatsapp' && (
+                  <button 
+                    onClick={() => setTemplateDialogOpen(true)}
+                    className="rounded p-2 text-muted-foreground hover:bg-accent" 
+                    title="Enviar Template (Bypass 24h)"
+                  >
+                    <LayoutTemplate className="h-4 w-4" />
+                  </button>
+                )}
 
                 <Popover open={quickMsgItems.items.length > 0} onOpenChange={() => {}}>
                   <PopoverTrigger asChild>
@@ -2477,6 +2493,21 @@ function ChatPanel({
         </div>
       </div>
 
+      {profile?.company_id && conv.whatsapp_instance_id && (
+        <WhatsappTemplateSender 
+          open={templateDialogOpen} 
+          onOpenChange={setTemplateDialogOpen} 
+          companyId={profile.company_id} 
+          instanceId={conv.whatsapp_instance_id} 
+          onSend={async (payload) => {
+            await send.mutateAsync({ 
+              content: JSON.stringify(payload), 
+              mediaType: "template" 
+            });
+          }}
+          isSending={send.isPending}
+        />
+      )}
     </div>
   );
 }

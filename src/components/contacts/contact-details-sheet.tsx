@@ -24,7 +24,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
-import { ChannelIcon } from "@/components/common/channel-icon";
 import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
 import { TaskDialog } from "@/components/crm/task-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";

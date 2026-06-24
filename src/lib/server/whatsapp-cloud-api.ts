@@ -107,6 +107,9 @@ export async function sendCloudApiMessage(
       } else {
         // Outro erro, não adianta tentar variante
         console.error('[WhatsApp Cloud API] Erro ao enviar mensagem:', responseData);
+        if (errCode === 131047) {
+          throw new Error('WINDOW_24H_EXPIRED');
+        }
         throw new Error(responseData.error?.message || 'Falha ao enviar mensagem');
       }
     }
