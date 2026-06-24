@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
+import { ChannelIcon } from "@/components/common/channel-icon";
 import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
 import { TaskDialog } from "@/components/crm/task-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -1191,38 +1192,50 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                   )}
                 </div>
               </div>
-              <SheetDescription className="flex flex-col gap-2 mt-2">
-                {contact.phone && (
-                  <div className="flex items-center gap-2">
-                    <Phone className="h-4 w-4" />
-                    <span>{contact.phone}</span>
+              <SheetDescription className="flex flex-col gap-3 mt-4">
+                {(contact.phone || contact.whatsapp_lid) && (
+                  <div className="flex flex-col gap-1">
+                    {contact.phone && (
+                      <div className="flex items-center gap-2">
+                        <ChannelIcon channel="whatsapp" className="h-4 w-4" />
+                        <span>{contact.phone}</span>
+                      </div>
+                    )}
+                    {contact.whatsapp_lid && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground pl-6">
+                        <span>ID/LID: {contact.whatsapp_lid}</span>
+                      </div>
+                    )}
                   </div>
                 )}
-                {contact.instagram_username && (
-                  <div className="flex items-center gap-2">
-                    <User className="h-4 w-4 text-pink-500" />
-                    <span>@{contact.instagram_username}</span>
+
+                {(contact.instagram_username || contact.instagram_id) && (
+                  <div className="flex flex-col gap-1">
+                    {contact.instagram_username && (
+                      <div className="flex items-center gap-2">
+                        <ChannelIcon channel="instagram" className="h-4 w-4" />
+                        <span>@{contact.instagram_username}</span>
+                      </div>
+                    )}
+                    {contact.instagram_id && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground pl-6">
+                        {!contact.instagram_username && <ChannelIcon channel="instagram" className="h-4 w-4 absolute -ml-6" />}
+                        <span>Insta ID: {contact.instagram_id}</span>
+                      </div>
+                    )}
                   </div>
                 )}
-                {contact.whatsapp_lid && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Smartphone className="h-3.5 w-3.5" />
-                    <span>ID/LID: {contact.whatsapp_lid}</span>
-                  </div>
-                )}
-                {contact.instagram_id && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Hash className="h-3.5 w-3.5 text-pink-400" />
-                    <span>Insta ID: {contact.instagram_id}</span>
-                  </div>
-                )}
+
                 {contact.messenger_id && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Hash className="h-3.5 w-3.5 text-blue-500" />
-                    <span>Messenger ID: {contact.messenger_id}</span>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <ChannelIcon channel="messenger" className="h-4 w-4" />
+                      <span>Messenger ID: {contact.messenger_id}</span>
+                    </div>
                   </div>
                 )}
-                <div className="flex items-center gap-2 text-xs">
+
+                <div className="flex items-center gap-2 text-xs mt-2 pt-2 border-t border-border/50">
                   <CalendarDays className="h-4 w-4" />
                   <span>Cadastrado em {format(new Date(contact.created_at), "dd/MM/yyyy", { locale: ptBR })}</span>
                 </div>
