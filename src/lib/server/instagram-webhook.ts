@@ -313,43 +313,113 @@ async function processIncomingMessage(params: any) {
       })
       .eq('id', conversationId);
   } else {
+    // Busca se existe uma conversa resolvida para reaproveitar (manter histórico da IA)
+    let { data: resolvedConv } = await supabaseAdmin
+      .from('conversations')
+      .select('id, contact_id, assigned_agent_id, ai_active')
+      .eq('contact_id', contact.id)
+      .eq('whatsapp_instance_id', instanceId)
+      .eq('status', 'resolved')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     // Check for default AI agent
     const { data: defaultAgents } = await supabaseAdmin
       .from('ai_agents')
-      .select('id, is_main_agent, active_by_default')
+      .select('id, is_main_agent, active_by_default, name')
       .eq('company_id', companyId)
       .eq('is_active', true)
       .eq('is_main_agent', true)
       .limit(1);
     
     const defaultAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
+    const defaultAgentName = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].name : 'IA';
     const isActiveByDefault = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
-    if (isActiveByDefault) aiActive = true;
-
-    // Cria nova conversa
-    const { data: newConv, error: convError } = await supabaseAdmin
-      .from('conversations')
-      .insert({
-        contact_id: contact.id,
-        remote_id: contactIgsid,
-        whatsapp_instance_id: instanceId,
-        unit_id: unitId,
+    
+    if (resolvedConv) {
+      conversationId = resolvedConv.id;
+      aiActive = isActiveByDefault || (resolvedConv.ai_active ?? false);
+      
+      const updatePayload: any = {
         status: isFromMe ? 'resolved' : (isActiveByDefault ? 'active' : 'waiting'),
-        started_at: new Date(timestamp).toISOString(),
         last_message_at: new Date(timestamp).toISOString(),
         last_message_preview: textContent?.substring(0, 50),
-        channel: 'instagram',
-        ai_active: isActiveByDefault,
-        ai_agent_id: defaultAgentId
-      })
-      .select('id')
-      .single();
+        remote_id: contactIgsid,
+        resolved_at: isFromMe ? new Date(timestamp).toISOString() : null,
+        ai_active: aiActive,
+        ai_followup_count: 0
+      };
+      if (aiActive && defaultAgentId) updatePayload.ai_agent_id = defaultAgentId;
 
-    if (convError) {
-      console.error('[Instagram Webhook] Erro ao criar conversa:', convError);
-      return;
+      await supabaseAdmin.from('conversations')
+        .update(updatePayload)
+        .eq('id', conversationId);
+    } else {
+      if (isActiveByDefault) aiActive = true;
+      // Cria nova conversa
+      const { data: newConv, error: convError } = await supabaseAdmin
+        .from('conversations')
+        .insert({
+          contact_id: contact.id,
+          remote_id: contactIgsid,
+          whatsapp_instance_id: instanceId,
+          unit_id: unitId,
+          status: isFromMe ? 'resolved' : (isActiveByDefault ? 'active' : 'waiting'),
+          started_at: new Date(timestamp).toISOString(),
+          last_message_at: new Date(timestamp).toISOString(),
+          last_message_preview: textContent?.substring(0, 50),
+          channel: 'instagram',
+          ai_active: isActiveByDefault,
+          ai_agent_id: defaultAgentId
+        })
+        .select('id')
+        .single();
+
+      if (convError) {
+        console.error('[Instagram Webhook] Erro ao criar conversa:', convError);
+        return;
+      }
+      conversationId = newConv.id;
     }
-    conversationId = newConv.id;
+  }
+
+  // Abre um novo ticket (sessão) se não for resolvido já na criação
+  if (!isFromMe) {
+    let sessionId = null;
+    let { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+    
+    if (existingSession) {
+      sessionId = existingSession.id;
+    } else {
+      const { data: newSession, error: sessionErr } = await supabaseAdmin.from('conversation_sessions').insert({
+        conversation_id: conversationId,
+        contact_id: contact.id,
+        whatsapp_instance_id: instanceId,
+        started_at: new Date(timestamp).toISOString()
+      }).select().single();
+      
+      if (sessionErr) {
+        if (sessionErr.code === '23505') {
+          const { data: concSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+          if (concSession) sessionId = concSession.id;
+          existingSession = concSession;
+        } else {
+          console.error('[Instagram Webhook] Erro ao criar sessão:', sessionErr);
+        }
+      } else if (newSession) {
+        sessionId = newSession.id;
+        await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', conversationId);
+      }
+    }
+
+    if (sessionId && !existingSession) {
+      const events: any[] = [{ session_id: sessionId, event_type: 'started' }];
+      if (aiActive) {
+        events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true, ai_agent_name: 'IA' } });
+      }
+      await supabaseAdmin.from('session_events').insert(events);
+    }
   }
 
   // 3. Verifica se a mensagem já existe
