@@ -343,17 +343,17 @@ function ContactsPage() {
                           </td>
                           <td className="p-4 hidden sm:table-cell">
                             {lead.adData.thumbnailURL || lead.adData.originalImageURL ? (
-                              <div className="h-12 w-12 rounded overflow-hidden bg-muted flex items-center justify-center border shrink-0">
+                              <div className="relative h-12 w-12 rounded overflow-hidden bg-muted flex items-center justify-center border shrink-0">
                                 <img 
                                   src={lead.adData.thumbnailURL || lead.adData.originalImageURL} 
                                   alt="Ad thumbnail" 
-                                  className="h-full w-full object-cover"
+                                  className="h-full w-full object-cover relative z-10"
                                   onError={(e) => {
                                     e.currentTarget.style.display = 'none';
                                     e.currentTarget.parentElement?.classList.add('p-2');
                                   }}
                                 />
-                                <ImageIcon className="h-4 w-4 text-muted-foreground absolute -z-10" />
+                                <ImageIcon className="h-4 w-4 text-muted-foreground absolute inset-0 m-auto z-0" />
                               </div>
                             ) : (
                               <div className="h-12 w-12 rounded bg-muted flex items-center justify-center border text-muted-foreground">
