@@ -119,13 +119,19 @@ function ConversationsPage() {
   const [dialerOpen, setDialerOpen] = useState(false);
   
   const { data: instances } = useQuery({
-    queryKey: ["whatsapp_instances_filter"],
+    queryKey: ["whatsapp_instances_filter", selectedUnitId],
     queryFn: async () => {
       if (!profile?.company_id) return [];
-      const { data, error } = await supabase
+      let query = supabase
         .from("whatsapp_instances")
         .select("id, name, instance_name, provider")
         .eq("company_id", profile.company_id);
+      
+      if (selectedUnitId && selectedUnitId !== "all") {
+        query = query.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data ?? [];
     },
@@ -1093,14 +1099,22 @@ function NewConversationDialog({
     if (open && initialPhone) setPhone(initialPhone);
   }, [open, initialPhone]);
 
+  const { selectedUnitId } = useUnit();
+
   const { data: instances } = useQuery({
-    queryKey: ["whatsapp_instances"],
+    queryKey: ["whatsapp_instances", selectedUnitId],
     queryFn: async () => {
       if (!profile?.company_id) return [];
-      const { data, error } = await supabase
+      let query = supabase
         .from("whatsapp_instances")
         .select("id, name, instance_name, provider")
         .eq("company_id", profile.company_id);
+      
+      if (selectedUnitId && selectedUnitId !== "all") {
+        query = query.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data ?? [];
     },
