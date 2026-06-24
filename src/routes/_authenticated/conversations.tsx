@@ -128,7 +128,7 @@ function ConversationsPage() {
         .eq("company_id", profile.company_id);
       
       if (selectedUnitId && selectedUnitId !== "all") {
-        query = query.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
+        query = query.eq("unit_id", selectedUnitId);
       }
 
       const { data, error } = await query;
@@ -1111,7 +1111,7 @@ function NewConversationDialog({
         .eq("company_id", profile.company_id);
       
       if (selectedUnitId && selectedUnitId !== "all") {
-        query = query.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
+        query = query.eq("unit_id", selectedUnitId);
       }
 
       const { data, error } = await query;
