@@ -226,9 +226,7 @@ async function processIncomingMessage(params: any) {
       .select('id, is_main_agent, active_by_default')
       .eq('company_id', companyId)
       .eq('is_active', true)
-      .order('is_main_agent', { ascending: false })
-      .order('active_by_default', { ascending: false })
-      .order('instance_id', { ascending: false })
+      .eq('is_main_agent', true)
       .limit(1);
     
     const defaultAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;

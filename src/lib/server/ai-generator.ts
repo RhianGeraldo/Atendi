@@ -29,9 +29,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         .select('id')
         .eq('company_id', companyId)
         .eq('is_active', true)
-        .order('is_main_agent', { ascending: false })
-        .order('active_by_default', { ascending: false })
-        .order('instance_id', { ascending: false })
+        .eq('is_main_agent', true)
         .limit(1);
 
       if (defaultAgents && defaultAgents.length > 0) {
