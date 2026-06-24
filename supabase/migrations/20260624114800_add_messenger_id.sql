@@ -20,10 +20,18 @@ BEGIN
   SET contact_id = target_id
   WHERE contact_id = source_id;
 
-  -- Move all messages from source to target
-  UPDATE public.messages
+  -- Move all conversation_sessions from source to target
+  UPDATE public.conversation_sessions
   SET contact_id = target_id
   WHERE contact_id = source_id;
+
+  -- Move all contact_notes from source to target
+  UPDATE public.contact_notes
+  SET contact_id = target_id
+  WHERE contact_id = source_id;
+
+  -- Ignore contact_labels to avoid primary key collisions, or delete old ones
+  -- Ignore ad_leads to avoid duplicates if any
 
   -- Update target with provided final fields or coalesce
   UPDATE public.contacts
