@@ -28,7 +28,7 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
     queryFn: async () => {
       let q = supabase
         .from("contacts")
-        .select("id, name, phone, whatsapp_lid, instagram_username, profile_picture_url")
+        .select("id, name, phone, whatsapp_lid, instagram_username, messenger_id, profile_picture_url")
         .neq("id", sourceContact.id)
         .is("merged_into_id", null)
         .limit(10);
@@ -38,7 +38,7 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
       }
       
       if (search) {
-        q = q.or(`name.ilike.%${search}%,phone.ilike.%${search}%,whatsapp_lid.ilike.%${search}%`);
+        q = q.or(`name.ilike.%${search}%,phone.ilike.%${search}%,whatsapp_lid.ilike.%${search}%,messenger_id.ilike.%${search}%`);
       }
       
       const { data, error } = await q;
@@ -53,8 +53,9 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
 
       const finalName = selectedName === "source" ? sourceContact.name : selectedTarget.name;
       const finalPhone = selectedTarget.phone || sourceContact.phone;
-      const finalLid = selectedTarget.whatsapp_lid; // Target keeps its lid, source keeps its own
+      const finalLid = selectedTarget.whatsapp_lid || sourceContact.whatsapp_lid; 
       const finalInsta = selectedTarget.instagram_username || sourceContact.instagram_username;
+      const finalMessenger = selectedTarget.messenger_id || sourceContact.messenger_id;
       
       // Try to keep the one that actually has a picture if the other doesn't
       const finalPic = selectedTarget.profile_picture_url || sourceContact.profile_picture_url;
@@ -66,7 +67,8 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
         final_phone: finalPhone,
         final_whatsapp_lid: finalLid,
         final_instagram_username: finalInsta,
-        final_profile_picture_url: finalPic
+        final_profile_picture_url: finalPic,
+        final_messenger_id: finalMessenger
       });
       if (error) throw error;
     },
@@ -153,6 +155,7 @@ export function MergeContactDialog({ sourceContact, onSuccess }: { sourceContact
                           <p className="text-xs text-muted-foreground truncate">
                             {c.phone || c.whatsapp_lid || 'Sem número'}
                             {c.instagram_username && ` • @${c.instagram_username}`}
+                            {c.messenger_id && ` • Messenger`}
                           </p>
                         </div>
                       </div>

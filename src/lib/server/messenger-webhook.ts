@@ -118,12 +118,12 @@ async function processMessengerWebhookBody(body: any): Promise<void> {
 async function processIncomingMessage(params: any) {
   const { companyId, unitId, instanceId, contactPsid, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe } = params;
 
-  // 1. Encontrar ou criar o contato usando o IGSID (Messenger Scoped ID) no campo whatsapp_lid
+  // 1. Encontrar ou criar o contato usando o IGSID (Messenger Scoped ID) no campo messenger_id
   let { data: contact } = await supabaseAdmin
     .from('contacts')
     .select('id, name, merged_into_id')
     .eq('company_id', companyId)
-    .eq('whatsapp_lid', contactPsid)
+    .eq('messenger_id', contactPsid)
     .limit(1)
     .maybeSingle();
 
@@ -157,8 +157,7 @@ async function processIncomingMessage(params: any) {
         unit_id: unitId,
         name: profileName,
         profile_picture_url: profilePic,
-        phone: contactPsid, // Necessário colocar algo no phone para evitar restrições
-        whatsapp_lid: contactPsid,
+        messenger_id: contactPsid,
         source: 'Messenger'
       })
       .select('id')
