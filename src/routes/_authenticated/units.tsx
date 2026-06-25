@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import { supabase } from "@/integrations/supabase/client";
 import { EvoGoClient } from "@/integrations/evogo/client";
 import { QrCodeModal } from "@/components/whatsapp/qr-code-modal";
@@ -44,6 +45,7 @@ function slugify(s: string) {
 
 function UnitsPage() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
   
   // Create state
@@ -66,20 +68,20 @@ function UnitsPage() {
   const [managingUnit, setManagingUnit] = useState<any>(null);
 
   const { data: company } = useQuery({
-    queryKey: ["company", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["company", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("companies").select("*").eq("id", profile!.company_id!).single();
+      const { data, error } = await supabase.from("companies").select("*").eq("id", activeCompanyId!).single();
       if (error) throw error;
       return data;
     },
   });
 
   const { data: units, isLoading: isLoadingUnits } = useQuery({
-    queryKey: ["units", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["units", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("units").select("*").eq("company_id", profile!.company_id!).order("created_at", { ascending: true });
+      const { data, error } = await supabase.from("units").select("*").eq("company_id", activeCompanyId!).order("created_at", { ascending: true });
       if (error) throw error;
       return data;
     },
@@ -87,9 +89,9 @@ function UnitsPage() {
 
   const createUnit = useMutation({
     mutationFn: async (name: string) => {
-      if (!profile?.company_id) throw new Error("Sem empresa");
+      if (!activeCompanyId) throw new Error("Sem empresa");
       const { error } = await supabase.from("units").insert({
-        company_id: profile.company_id,
+        company_id: activeCompanyId,
         name,
         slug: slugify(name),
         color: newUnitColor,

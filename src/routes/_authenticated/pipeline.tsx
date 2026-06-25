@@ -9,6 +9,7 @@ import { ptBR } from "date-fns/locale";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,19 +28,20 @@ export const Route = createFileRoute("/_authenticated/pipeline")({
 function PipelinePage() {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
 
   // Fetch Pipelines
   const { data: pipelines, isLoading: isLoadingPipelines } = useQuery({
-    queryKey: ["pipelines", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["pipelines", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("pipelines")
         .select("*")
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", activeCompanyId!)
         .order("created_at", { ascending: true });
       if (error) throw error;
       return data;

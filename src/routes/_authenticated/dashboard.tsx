@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { formatRelative, initials } from "@/lib/format";
 import { useUnit } from "@/lib/unit-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import { ChannelIcon } from "@/components/common/channel-icon";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
@@ -27,9 +28,10 @@ interface Metrics {
 
 function DashboardPage() {
   const { selectedUnitId } = useUnit();
+  const { activeCompanyId } = useActiveCompany();
 
   const { data: metrics } = useQuery<Metrics>({
-    queryKey: ["dashboard-metrics", selectedUnitId],
+    queryKey: ["dashboard-metrics", activeCompanyId, selectedUnitId],
     queryFn: async () => {
       let qWaiting = supabase.from("conversations").select("*", { count: "exact", head: true }).eq("status", "waiting");
       let qActive = supabase.from("conversations").select("*", { count: "exact", head: true }).eq("status", "active");
@@ -37,17 +39,26 @@ function DashboardPage() {
         .eq("status", "resolved")
         .gte("resolved_at", new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
       
+      if (activeCompanyId) {
+        qWaiting = qWaiting.eq("company_id", activeCompanyId);
+        qActive = qActive.eq("company_id", activeCompanyId);
+        qResolved = qResolved.eq("company_id", activeCompanyId);
+      }
+
       if (selectedUnitId) {
         qWaiting = qWaiting.eq("unit_id", selectedUnitId);
         qActive = qActive.eq("unit_id", selectedUnitId);
         qResolved = qResolved.eq("unit_id", selectedUnitId);
       }
 
+      let qAgents = supabase.from("profiles").select("*", { count: "exact", head: true }).eq("online", true);
+      if (activeCompanyId) qAgents = qAgents.eq("company_id", activeCompanyId);
+
       const [waiting, active, resolved, agents] = await Promise.all([
         qWaiting,
         qActive,
         qResolved,
-        supabase.from("profiles").select("*", { count: "exact", head: true }).eq("online", true),
+        qAgents,
       ]);
       
       return {
@@ -60,11 +71,12 @@ function DashboardPage() {
   });
 
   const { data: chartData } = useQuery({
-    queryKey: ["dashboard-chart", selectedUnitId],
+    queryKey: ["dashboard-chart", activeCompanyId, selectedUnitId],
     queryFn: async () => {
       const since = subDays(new Date(), 6);
       
       let qChart = supabase.from("conversations").select("started_at").gte("started_at", since.toISOString());
+      if (activeCompanyId) qChart = qChart.eq("company_id", activeCompanyId);
       if (selectedUnitId) qChart = qChart.eq("unit_id", selectedUnitId);
 
       const { data } = await qChart;
@@ -83,7 +95,7 @@ function DashboardPage() {
   });
 
   const { data: oldestWaiting } = useQuery({
-    queryKey: ["oldest-waiting", selectedUnitId],
+    queryKey: ["oldest-waiting", activeCompanyId, selectedUnitId],
     queryFn: async () => {
       let qOldest = supabase
         .from("conversations")
@@ -92,6 +104,7 @@ function DashboardPage() {
         .order("started_at", { ascending: true })
         .limit(5);
 
+      if (activeCompanyId) qOldest = qOldest.eq("company_id", activeCompanyId);
       if (selectedUnitId) qOldest = qOldest.eq("unit_id", selectedUnitId);
 
       const { data } = await qOldest;
@@ -100,7 +113,7 @@ function DashboardPage() {
   });
 
   const { data: myTasks } = useQuery({
-    queryKey: ["my-tasks-today", selectedUnitId],
+    queryKey: ["my-tasks-today", activeCompanyId, selectedUnitId],
     queryFn: async () => {
       const end = new Date(); end.setHours(23, 59, 59, 999);
       let qTasks = supabase
@@ -111,6 +124,7 @@ function DashboardPage() {
         .order("due_date", { ascending: true })
         .limit(6);
 
+      if (activeCompanyId) qTasks = qTasks.eq("company_id", activeCompanyId);
       if (selectedUnitId) qTasks = qTasks.eq("unit_id", selectedUnitId);
 
       const { data } = await qTasks;

@@ -24,6 +24,7 @@ import {
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,6 +53,7 @@ export const Route = createFileRoute("/_authenticated/tasks")({
 function TasksPage() {
   const qc = useQueryClient();
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const [tab, setTab] = useState<"pending" | "done">("pending");
   const [taskTypeFilter, setTaskTypeFilter] = useState<string>("all");
@@ -81,7 +83,7 @@ function TasksPage() {
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
-      } else if (profile?.company_id) {
+      } else if (activeCompanyId) {
         // Fallback: we should only fetch tasks for units the user has access to.
         // Actually, RLS handles unit access, but if we want to be explicit:
         // We just let RLS do its job for units.

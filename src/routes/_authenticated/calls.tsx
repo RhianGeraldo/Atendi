@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -85,13 +86,14 @@ function TranscriptionDialog({ call }: { call: CallLog }) {
 
 function CallsPage() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
   const [selectedCall, setSelectedCall] = useState<CallLog | null>(null);
 
   const { data: calls, isLoading } = useQuery({
-    queryKey: ["call_logs", profile?.company_id],
+    queryKey: ["call_logs", activeCompanyId],
     queryFn: async () => {
-      if (!profile?.company_id) return [];
+      if (!activeCompanyId) return [];
 
       const { data, error } = await supabase
         .from("call_logs")
@@ -101,14 +103,14 @@ function CallsPage() {
           contact:contacts!call_logs_contact_id_fkey(name, phone),
           whatsapp_instance:whatsapp_instances!call_logs_whatsapp_instance_id_fkey(name)
         `)
-        .eq("company_id", profile.company_id)
+        .eq("company_id", activeCompanyId)
         .order("started_at", { ascending: false })
         .limit(100);
 
       if (error) throw error;
       return data as CallLog[];
     },
-    enabled: !!profile?.company_id,
+    enabled: !!activeCompanyId,
   });
 
   const transcribeMutation = useMutation({
@@ -118,7 +120,7 @@ function CallsPage() {
     onSuccess: (data, callId) => {
       toast.success("Transcrição concluída!");
       qc.setQueryData(
-        ["call_logs", profile?.company_id],
+        ["call_logs", activeCompanyId],
         (old: CallLog[] | undefined) => {
           if (!old) return old;
           const updated = old.map((c) =>

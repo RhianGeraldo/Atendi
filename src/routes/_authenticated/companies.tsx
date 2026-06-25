@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -74,6 +75,7 @@ function slugify(s: string) {
 // ─── Page ────────────────────────────────────────────────────────────────────
 function CompaniesPage() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
 
   const [search, setSearch] = useState("");

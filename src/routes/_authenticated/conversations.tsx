@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChannelIcon } from "@/components/common/channel-icon";
 import { StatusBadge } from "@/components/common/status-badge";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import { cn } from "@/lib/utils";
 import { formatRelative, initials, formatPhone, formatMessageTime } from "@/lib/format";
 import { useUnit } from "@/lib/unit-context";
@@ -115,17 +116,18 @@ function ConversationsPage() {
   const [lastSelectedConv, setLastSelectedConv] = useState<ConvRow | null>(null);
 
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const { startCall } = useWavoip();
   const [dialerOpen, setDialerOpen] = useState(false);
   
   const { data: instances } = useQuery({
     queryKey: ["whatsapp_instances_filter", selectedUnitId],
     queryFn: async () => {
-      if (!profile?.company_id) return [];
+      if (!activeCompanyId) return [];
       let query = supabase
         .from("whatsapp_instances")
         .select("id, name, instance_name, provider")
-        .eq("company_id", profile.company_id);
+        .eq("company_id", activeCompanyId);
       
       if (selectedUnitId && selectedUnitId !== "all") {
         query = query.eq("unit_id", selectedUnitId);
@@ -135,7 +137,7 @@ function ConversationsPage() {
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!profile?.company_id,
+    enabled: !!activeCompanyId,
   });
   
   const PAGE_SIZE = 20;
@@ -796,13 +798,13 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
   const [searchLabel, setSearchLabel] = useState("");
 
   const { data: allLabels } = useQuery({
-    queryKey: ["labels", profile?.company_id],
+    queryKey: ["labels", activeCompanyId],
     queryFn: async () => {
-      if (!profile?.company_id) return [];
-      const { data } = await supabase.from('labels').select('*').eq('company_id', profile.company_id);
+      if (!activeCompanyId) return [];
+      const { data } = await supabase.from('labels').select('*').eq('company_id', activeCompanyId);
       return data || [];
     },
-    enabled: !!profile?.company_id
+    enabled: !!activeCompanyId
   });
 
   const toggleAi = useMutation({
@@ -837,7 +839,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
       return res.label;
     },
     onSuccess: async (label) => {
-      qc.invalidateQueries({ queryKey: ["labels", profile?.company_id] });
+      qc.invalidateQueries({ queryKey: ["labels", activeCompanyId] });
       // Auto assign the newly created label
       if (conv.contact?.id && selectedUnitId) {
         toggleLabel.mutate({ labelId: label.id, action: "add" });
@@ -1104,11 +1106,11 @@ function NewConversationDialog({
   const { data: instances } = useQuery({
     queryKey: ["whatsapp_instances", selectedUnitId],
     queryFn: async () => {
-      if (!profile?.company_id) return [];
+      if (!activeCompanyId) return [];
       let query = supabase
         .from("whatsapp_instances")
         .select("id, name, instance_name, provider")
-        .eq("company_id", profile.company_id);
+        .eq("company_id", activeCompanyId);
       
       if (selectedUnitId && selectedUnitId !== "all") {
         query = query.eq("unit_id", selectedUnitId);
@@ -1118,18 +1120,18 @@ function NewConversationDialog({
       if (error) throw error;
       return data ?? [];
     },
-    enabled: !!profile?.company_id,
+    enabled: !!activeCompanyId,
   });
 
   const send = useMutation({
     mutationFn: async () => {
-      if (!profile?.company_id) throw new Error("Usuário sem empresa");
+      if (!activeCompanyId) throw new Error("Usuário sem empresa");
       const res = await sendProactiveMessageAction({
         data: {
           phone,
           text,
           instanceName,
-          companyId: profile.company_id,
+          companyId: activeCompanyId,
         }
       });
       return res;
@@ -1413,13 +1415,13 @@ function ChatPanel({
   });
 
   const { data: quickMessageFolders } = useQuery({
-    queryKey: ["quick-message-folders", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["quick-message-folders", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("quick_message_folders")
         .select("*")
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", activeCompanyId!)
         .order("name", { ascending: true });
       if (error) throw error;
       return data;
@@ -1427,13 +1429,13 @@ function ChatPanel({
   });
 
   const { data: quickMessages } = useQuery({
-    queryKey: ["quick-messages", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["quick-messages", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("quick_messages")
         .select("*")
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", activeCompanyId!)
         .order("shortcut", { ascending: true });
       if (error) throw error;
       return data;
@@ -1856,13 +1858,13 @@ function ChatPanel({
   };
 
   const { data: resolutionReasons } = useQuery({
-    queryKey: ["resolution-reasons", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["resolution-reasons", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("resolution_reasons" as any)
         .select("id, label, order")
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", activeCompanyId!)
         .eq("active", true)
         .order("order", { ascending: true });
       if (error && error.code !== '42P01') throw error;
@@ -2507,11 +2509,11 @@ function ChatPanel({
         </div>
       </div>
 
-      {profile?.company_id && conv.whatsapp_instance_id && (
+      {activeCompanyId && conv.whatsapp_instance_id && (
         <WhatsappTemplateSender 
           open={templateDialogOpen} 
           onOpenChange={setTemplateDialogOpen} 
-          companyId={profile.company_id} 
+          companyId={activeCompanyId} 
           instanceId={conv.whatsapp_instance_id} 
           onSend={async (payload) => {
             await send.mutateAsync({ 

@@ -6,6 +6,7 @@ import { ptBR } from "date-fns/locale";
 import { Search, Phone, Mail, User, Loader2, Building } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,14 +28,15 @@ export const Route = createFileRoute("/_authenticated/contacts")({
 
 function ContactsPage() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   const { data: contacts, isLoading } = useQuery({
-    queryKey: ["contacts", profile?.company_id, searchTerm, selectedUnitId, dateRange],
-    enabled: !!profile?.company_id,
+    queryKey: ["contacts", activeCompanyId, searchTerm, selectedUnitId, dateRange],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       // Se não tem unidade selecionada (Empresa Mãe), pega todos os contatos.
       // Se tem unidade, pega apenas os contatos que têm conversas na unidade logada.
@@ -50,7 +52,7 @@ function ContactsPage() {
             started_at
           )
         `)
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", activeCompanyId!)
         .is("merged_into_id", null)
         .order("created_at", { ascending: false });
 
@@ -90,8 +92,8 @@ function ContactsPage() {
   });
 
   const { data: adLeads, isLoading: isLoadingAds } = useQuery({
-    queryKey: ["ad-leads", profile?.company_id, searchTerm, selectedUnitId, dateRange],
-    enabled: !!profile?.company_id,
+    queryKey: ["ad-leads", activeCompanyId, searchTerm, selectedUnitId, dateRange],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       let query = supabase
         .from("ad_leads")
@@ -111,7 +113,7 @@ function ContactsPage() {
             company_id
           )
         `)
-        .eq('company_id', profile!.company_id!)
+        .eq('company_id', activeCompanyId!)
         .is("contact.merged_into_id", null)
         .order('created_at', { ascending: false });
 
