@@ -56,12 +56,15 @@ interface Props {
 export function AppSidebar({ collapsed, onToggle }: Props) {
   const { profile, signOut } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isSuperAdmin = profile?.role === 'super_admin';
+  const { activeCompanyId: selectedCompanyId, setActiveCompanyId } = useActiveCompany();
+  const effectiveCompanyId = isSuperAdmin ? selectedCompanyId : profile?.company_id;
 
   const { data: companyName } = useQuery({
-    queryKey: ["company-name", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["company-name", effectiveCompanyId],
+    enabled: !!effectiveCompanyId,
     queryFn: async () => {
-      const { data } = await supabase.from("companies").select("name").eq("id", profile!.company_id!).single();
+      const { data } = await supabase.from("companies").select("name").eq("id", effectiveCompanyId!).single();
       return data?.name || "Minha Empresa";
     }
   });
@@ -78,8 +81,6 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
   const { selectedUnitId, setSelectedUnitId } = useUnit();
   
   // Super admin: seletor de empresa via contexto global
-  const isSuperAdmin = profile?.role === 'super_admin';
-  const { activeCompanyId: selectedCompanyId, setActiveCompanyId } = useActiveCompany();
 
   const handleSelectCompany = (id: string | null) => {
     setActiveCompanyId(id);
@@ -98,7 +99,6 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
   const selectedSuperCompany = allCompanies?.find(c => c.id === selectedCompanyId);
 
   // Para super_admin: unidades da empresa selecionada no sidebar
-  const effectiveCompanyId = isSuperAdmin ? selectedCompanyId : profile?.company_id;
 
   const { data: units } = useQuery({
     queryKey: ["sidebar-units", effectiveCompanyId, profile?.id, isSuperAdmin],
