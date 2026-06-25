@@ -1,9 +1,14 @@
+import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-dotenv.config();
-const supabase = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(process.env.VITE_SUPABASE_URL, process.env.VITE_SUPABASE_ANON_KEY);
+
 async function run() {
-  const { data, error } = await supabase.from('whatsapp_instances').select('id, instance_name, oficial_phone_number_id, oficial_waba_id').eq('provider', 'instagram');
-  console.log(data);
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('id, status, started_at, last_message_preview, unit_id, whatsapp_instance_id, contact:contacts!inner(name, company_id)')
+    .like('contact.name', '%Ana Clara%')
+    .order('started_at', { ascending: false })
+    .limit(5);
+  console.log(JSON.stringify(data, null, 2));
 }
 run();

@@ -372,7 +372,7 @@ function ConversationsPage() {
     queries.forEach(([queryKey, oldData]: any) => {
       if (!oldData || !oldData.pages) return;
       
-      const queryTab = queryKey[1] as TabType;
+      const queryTab = queryKey[2] as TabType;
       let targetConv: ConvRow | null = null;
       
       // Find the conversation across all pages
