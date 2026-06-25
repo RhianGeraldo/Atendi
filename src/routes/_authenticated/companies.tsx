@@ -458,46 +458,33 @@ function CompanyUnitsSheet({
   const [newUnitColor, setNewUnitColor] = useState("#6366f1");
   const [deletingUnit, setDeletingUnit] = useState<any>(null);
 
-  const { data: units, isLoading } = useQuery({
+  const { data: units, isLoading, error: unitsError } = useQuery({
     queryKey: ["company-units-admin", company.id],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_company_units", {
-        _company_id: company.id,
-      });
+      // Usa query direta — RLS já permite super_admin via policy atualizada
+      const { data, error } = await supabase
+        .from("units")
+        .select("id, company_id, name, slug, color, active, created_at")
+        .eq("company_id", company.id)
+        .order("created_at", { ascending: true });
       if (error) throw error;
-      return data as Array<{
-        id: string;
-        company_id: string;
-        name: string;
-        slug: string;
-        color: string | null;
-        active: boolean;
-        created_at: string;
-      }>;
+      return data ?? [];
     },
   });
 
   const createUnit = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.rpc("super_create_unit", {
-        p_company_id: company.id,
-        p_name: newUnitName,
+      const { error } = await supabase.from("units").insert({
+        company_id: company.id,
+        name: newUnitName,
+        slug: newUnitName
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, ""),
+        color: newUnitColor,
       });
       if (error) throw error;
-      // Also set color if supported
-      if (newUnitColor && newUnitColor !== "#6366f1") {
-        const { data: unitData } = await supabase
-          .from("units")
-          .select("id")
-          .eq("company_id", company.id)
-          .eq("name", newUnitName)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .single();
-        if (unitData?.id) {
-          await supabase.from("units").update({ color: newUnitColor }).eq("id", unitData.id);
-        }
-      }
     },
     onSuccess: () => {
       toast.success("Unidade criada!");
@@ -511,7 +498,7 @@ function CompanyUnitsSheet({
 
   const deleteUnit = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.rpc("super_delete_unit", { p_unit_id: id });
+      const { error } = await supabase.from("units").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -520,7 +507,7 @@ function CompanyUnitsSheet({
       qc.invalidateQueries({ queryKey: ["company-units-admin", company.id] });
       qc.invalidateQueries({ queryKey: ["all-companies"] });
     },
-    onError: (e) => toast.error("Não foi possível excluir", { description: "Esta unidade pode ter dados vinculados." }),
+    onError: (e) => toast.error("Não foi possível excluir", { description: (e as Error).message }),
   });
 
   return (
@@ -590,6 +577,11 @@ function CompanyUnitsSheet({
                   {[...Array(3)].map((_, i) => (
                     <div key={i} className="h-14 rounded-lg border bg-card/50 animate-pulse" />
                   ))}
+                </div>
+              ) : unitsError ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                  <p className="font-medium">Erro ao carregar unidades:</p>
+                  <p className="text-xs mt-1 opacity-80">{(unitsError as Error).message}</p>
                 </div>
               ) : units?.length ? (
                 <div className="space-y-2">

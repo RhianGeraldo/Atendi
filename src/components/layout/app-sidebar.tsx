@@ -75,28 +75,58 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
   });
 
   const { selectedUnitId, setSelectedUnitId } = useUnit();
+  
+  // Super admin: seletor de empresa ativo no sidebar
+  const isSuperAdmin = profile?.role === 'super_admin';
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(
+    () => typeof window !== 'undefined' ? localStorage.getItem('omni_selected_company_id') : null
+  );
+  const handleSelectCompany = (id: string | null) => {
+    setSelectedCompanyId(id);
+    setSelectedUnitId(null); // reset unit when company changes
+    if (typeof window !== 'undefined') {
+      if (id) localStorage.setItem('omni_selected_company_id', id);
+      else localStorage.removeItem('omni_selected_company_id');
+    }
+  };
+
+  // Todas as empresas (apenas super_admin)
+  const { data: allCompanies } = useQuery({
+    queryKey: ['all-companies-sidebar'],
+    enabled: isSuperAdmin,
+    queryFn: async () => {
+      const { data } = await supabase.from('companies').select('id, name').order('name');
+      return data ?? [];
+    },
+  });
+  const selectedSuperCompany = allCompanies?.find(c => c.id === selectedCompanyId);
+
+  // Para super_admin: unidades da empresa selecionada no sidebar
+  const effectiveCompanyId = isSuperAdmin ? selectedCompanyId : profile?.company_id;
 
   const { data: units } = useQuery({
-    queryKey: ["sidebar-units", profile?.company_id, profile?.id],
-    enabled: !!profile?.company_id && !!profile?.id,
+    queryKey: ["sidebar-units", effectiveCompanyId, profile?.id, isSuperAdmin],
+    enabled: !!effectiveCompanyId,
     queryFn: async () => {
-      const { data: allUnits } = await supabase.from("units").select("id, name").eq("company_id", profile!.company_id!).order("created_at", { ascending: true });
-      
-      if (profile!.role === 'admin_company') {
+      const { data: allUnits } = await supabase
+        .from("units")
+        .select("id, name")
+        .eq("company_id", effectiveCompanyId!)
+        .order("created_at", { ascending: true });
+
+      if (isSuperAdmin || profile!.role === 'admin_company') {
         return allUnits || [];
       }
 
-      // Busca as unidades vinculadas ao usuário
+      // Usuário comum: filtra pelas unidades vinculadas
       const { data: userUnits } = await supabase.from("user_units").select("unit_id").eq("user_id", profile!.id);
       const allowedIds = userUnits?.map(u => u.unit_id) || [];
-      
       return (allUnits || []).filter(u => allowedIds.includes(u.id));
     }
   });
 
   useEffect(() => {
-    if (!selectedUnitId && profile && profile.role !== 'admin_company' && units && units.length > 0) {
-      // Idealmente verificaria has_matriz_access, mas como está removido temporariamente, força a primeira unidade
+    if (!selectedUnitId && profile && profile.role !== 'admin_company' && profile.role !== 'super_admin' && units && units.length > 0) {
       setSelectedUnitId(units[0].id);
     }
   }, [selectedUnitId, profile, units, setSelectedUnitId]);
@@ -130,16 +160,51 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
         )}
       </div>
 
-      {/* Unit selector */}
-      {!collapsed && (
+      {/* Super Admin: Company selector */}
+      {!collapsed && isSuperAdmin && (
         <div className="px-3 pt-4">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40 mb-1.5 px-1">Empresa</p>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex w-full items-center justify-between gap-2 rounded-md border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-left text-sm transition-colors hover:bg-violet-500/20">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <Building className="h-4 w-4 shrink-0 text-violet-400" />
+                  <span className="font-medium truncate text-sidebar-foreground">
+                    {selectedSuperCompany?.name ?? 'Selecionar Empresa'}
+                  </span>
+                </div>
+                <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-[216px]" align="start" alignOffset={-12}>
+              <DropdownMenuLabel className="text-xs text-muted-foreground">Todas as Empresas</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {allCompanies?.map(company => (
+                <DropdownMenuItem
+                  key={company.id}
+                  onClick={() => handleSelectCompany(company.id)}
+                  className={cn('cursor-pointer', selectedCompanyId === company.id && 'bg-accent text-accent-foreground')}
+                >
+                  <Building2 className="mr-2 h-4 w-4" />
+                  <span className="truncate">{company.name}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+
+      {/* Unit selector — para todos os usuários */}
+      {!collapsed && effectiveCompanyId && (
+        <div className="px-3 pt-2">
+          {isSuperAdmin && <p className="text-[10px] font-semibold uppercase tracking-widest text-sidebar-foreground/40 mb-1.5 px-1">Unidade</p>}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex w-full items-center justify-between gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/40 px-3 py-2 text-left text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground">
                 <div className="flex items-center gap-2 overflow-hidden">
                   {selectedUnit ? <MapPin className="h-4 w-4 shrink-0" /> : <Building2 className="h-4 w-4 shrink-0" />}
                   <span className="font-medium truncate">
-                    {selectedUnit ? selectedUnit.name : (companyName || "Empresa Mãe")}
+                    {selectedUnit ? selectedUnit.name : (companyName || 'Empresa Mãe')}
                   </span>
                 </div>
                 <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
@@ -148,13 +213,15 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
             <DropdownMenuContent className="w-[216px]" align="start" alignOffset={-12}>
               <DropdownMenuLabel className="text-xs text-muted-foreground">Alternar Contexto</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {(profile?.role === 'admin_company' || profile?.has_matriz_access) && (
-                <DropdownMenuItem 
+              {(profile?.role === 'admin_company' || profile?.has_matriz_access || isSuperAdmin) && (
+                <DropdownMenuItem
                   onClick={() => setSelectedUnitId(null)}
-                  className={cn("cursor-pointer", !selectedUnitId && "bg-accent text-accent-foreground")}
+                  className={cn('cursor-pointer', !selectedUnitId && 'bg-accent text-accent-foreground')}
                 >
                   <Building2 className="mr-2 h-4 w-4" />
-                  <span className="truncate">{companyName || "Empresa Mãe"} (Sede)</span>
+                  <span className="truncate">
+                    {isSuperAdmin ? (selectedSuperCompany?.name ?? 'Empresa') : (companyName || 'Empresa Mãe')} (Sede)
+                  </span>
                 </DropdownMenuItem>
               )}
               {units && units.length > 0 && (
@@ -162,10 +229,10 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel className="text-xs text-muted-foreground">Unidades / Filiais</DropdownMenuLabel>
                   {units.map(unit => (
-                    <DropdownMenuItem 
+                    <DropdownMenuItem
                       key={unit.id}
                       onClick={() => setSelectedUnitId(unit.id)}
-                      className={cn("cursor-pointer", selectedUnitId === unit.id && "bg-accent text-accent-foreground")}
+                      className={cn('cursor-pointer', selectedUnitId === unit.id && 'bg-accent text-accent-foreground')}
                     >
                       <MapPin className="mr-2 h-4 w-4" />
                       <span className="truncate">{unit.name}</span>
@@ -173,6 +240,26 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
                   ))}
                 </>
               )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+
+      {/* Fallback: unit selector sem empresa selecionada (usuários normais sem company_id) */}
+      {!collapsed && !isSuperAdmin && !effectiveCompanyId && (
+        <div className="px-3 pt-4">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex w-full items-center justify-between gap-2 rounded-md border border-sidebar-border bg-sidebar-accent/40 px-3 py-2 text-left text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <Building2 className="h-4 w-4 shrink-0" />
+                  <span className="font-medium truncate">{companyName || 'Empresa Mãe'}</span>
+                </div>
+                <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-[216px]" align="start" alignOffset={-12}>
+              <DropdownMenuLabel className="text-xs text-muted-foreground">Sem unidades disponíveis</DropdownMenuLabel>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
