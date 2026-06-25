@@ -105,22 +105,33 @@ function SettingsPage() {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== "https://www.facebook.com" && event.origin !== "https://web.facebook.com") return;
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'WA_EMBEDDED_SIGNUP') {
-          console.log("Embedded Signup Data recebido:", data);
-          // O retorno geralmente inclui informações de sessão que podem ser usadas
-          // para concluir o cadastro do WhatsApp Business API.
+      // Se for a nossa própria janela de login (callback)
+      if (event.origin === window.location.origin) {
+        if (event.data?.type === 'META_AUTH_SUCCESS') {
+          toast.success("Conta do Facebook vinculada com sucesso!");
+          qc.invalidateQueries({ queryKey: ["company", activeCompanyId] });
+          return;
         }
-      } catch {
-        // Ignora erros de parse silenciosamente
+      }
+
+      // Se for o popup da Meta (para embedded signup)
+      if (event.origin === "https://www.facebook.com" || event.origin === "https://web.facebook.com") {
+        try {
+          const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+          if (data.type === 'WA_EMBEDDED_SIGNUP') {
+            console.log("Embedded Signup Data recebido:", data);
+            toast.success("Vínculo do WhatsApp Embedded concluído!");
+            qc.invalidateQueries({ queryKey: ["company", activeCompanyId] });
+          }
+        } catch {
+          // Ignora
+        }
       }
     };
     
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [activeCompanyId]);
 
 
   const { data: company, isLoading: isLoadingCompany } = useQuery({
