@@ -306,13 +306,13 @@ function SettingsPage() {
   });
 
   const { data: instances, isLoading: isLoadingInstances } = useQuery({
-    queryKey: ["whatsapp-instances", profile?.company_id, selectedUnitId],
-    enabled: !!profile?.company_id,
+    queryKey: ["whatsapp-instances", activeCompanyId, selectedUnitId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       let q = supabase
         .from("whatsapp_instances")
         .select("*")
-        .eq("company_id", profile!.company_id!);
+        .eq("company_id", activeCompanyId!);
       
       if (selectedUnitId) q = q.eq("unit_id", selectedUnitId);
       else q = q.is("unit_id", null);
@@ -326,7 +326,7 @@ function SettingsPage() {
   const createInstance = useMutation({
     mutationFn: async (payload: { name: string, provider: string, numberId?: string, wabaId?: string, accessToken?: string, verifyToken?: string }) => {
       const { name, provider, numberId, wabaId, accessToken, verifyToken } = payload;
-      if (!profile?.company_id) throw new Error("Sem empresa");
+      if (!activeCompanyId) throw new Error("Sem empresa");
       if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token)) {
         throw new Error("Configure Host e Token primeiro para usar a EvoGo.");
       }
@@ -441,7 +441,7 @@ function SettingsPage() {
     onError: (e) => toast.error("Erro ao criar", { description: (e as Error).message })
   });
 
-  if (!profile?.company_id) {
+  if (!activeCompanyId) {
     return (
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
         <div className="max-w-md mx-auto mt-20">
