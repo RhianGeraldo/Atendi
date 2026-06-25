@@ -191,7 +191,7 @@ function ConversationsPage() {
       if (tab === "waiting") {
         query = query.eq("status", "waiting");
         // Non-admin: only see conversations in their dept or assigned to them
-        if (profile?.role !== "admin_company" && profile?.role !== "manager") {
+        if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
           if (profile?.department_id) {
             query = query.or(`department_id.eq.${profile.department_id},assigned_agent_id.eq.${profile.id},department_id.is.null`);
           } else {
@@ -200,12 +200,12 @@ function ConversationsPage() {
         }
       } else if (tab === "active") {
         query = query.eq("status", "active");
-        if (profile?.role !== "admin_company" && profile?.role !== "manager") {
+        if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
           query = query.eq("assigned_agent_id", profile?.id ?? "");
         }
       } else if (tab === "resolved") {
         query = query.eq("status", "resolved");
-        if (profile?.role !== "admin_company" && profile?.role !== "manager") {
+        if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
           query = query.eq("assigned_agent_id", profile?.id ?? "");
         }
       }
@@ -284,7 +284,7 @@ function ConversationsPage() {
         .select(selectString);
 
       if (activeCompanyId) {
-        query = query.eq("unit.company_id", activeCompanyId);
+        query = query.eq("contact.company_id", activeCompanyId);
       }
 
       if (selectedUnitId) {
@@ -318,7 +318,7 @@ function ConversationsPage() {
           counts.groups.total++;
           counts.groups.unread += c.unread_count || 0;
         } else {
-          const isAdmin = profile?.role === "admin_company";
+          const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
           const isManager = profile?.role === "manager";
           const isMyDept = c.department_id === profile?.department_id;
           const isGeneral = !c.department_id;
@@ -2226,7 +2226,7 @@ function ChatPanel({
         <div className="border-t border-border bg-card p-3 flex flex-col gap-2 relative">
           {(conv.status === 'waiting' || (conv.status === 'active' && ((conv.assigned_agent_id && conv.assigned_agent_id !== profile?.id) || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card gap-2">
-              {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || profile?.role === 'admin_company' || profile?.role === 'manager') ? (
+              {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || profile?.role === 'admin_company' || profile?.role === 'super_admin' || profile?.role === 'manager') ? (
                 <>
                   <p className="text-sm font-medium text-muted-foreground text-center px-4">
                     {(!conv.assigned_agent_id && !conv.ai_active)
