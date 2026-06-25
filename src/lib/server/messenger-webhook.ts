@@ -144,6 +144,9 @@ async function processIncomingMessage(params: any) {
           const profileData = await profileRes.json();
           if (profileData.name) profileName = profileData.name;
           if (profileData.profile_pic) profilePic = profileData.profile_pic;
+        } else {
+          const errorText = await profileRes.text();
+          console.error('[Messenger Webhook] Erro na API do Graph ao buscar perfil:', errorText);
         }
       }
     } catch (e) {

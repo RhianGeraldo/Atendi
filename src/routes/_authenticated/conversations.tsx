@@ -158,7 +158,7 @@ function ConversationsPage() {
       let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,tags,instagram_username,whatsapp_lid,instagram_id,company_id,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
       
       if (debouncedSearch || tab === "groups") {
-        selectString = selectString.replace("contact:contacts!inner(", "contact:contacts!inner(");
+        selectString = selectString; // No replacement needed, inner join is already default
       }
 
       let query = supabase
@@ -601,6 +601,7 @@ function ConversationsPage() {
 
 
   const filtered = conversations.filter(c => !!c?.id);
+  console.log("DEBUG_FILTERED:", filtered);
 
   useEffect(() => {
     const current = filtered.find((c) => c.id === selectedId);
@@ -1301,14 +1302,14 @@ function ConversationItem({
               )}
             </div>
           ) : (
-            !showUnitInfo && conv.whatsapp_instance?.name && (
+            conv.whatsapp_instance?.name ? (
               <div 
                 className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded w-fit max-w-full truncate border border-border/50 bg-muted/50 text-muted-foreground"
               >
                 <Phone className="h-2 w-2 opacity-70" />
                 <span className="truncate">{conv.whatsapp_instance.name}</span>
               </div>
-            )
+            ) : null
           )}
           {conv.department?.name && (
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">

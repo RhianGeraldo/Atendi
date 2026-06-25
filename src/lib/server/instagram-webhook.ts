@@ -198,6 +198,9 @@ async function processIncomingMessage(params: any) {
             if (profileData.name) profileName = profileData.name;
             if (profileData.profile_pic) profilePic = profileData.profile_pic;
           }
+        } else {
+          const errorText = await profileRes.text();
+          console.error('[Instagram Webhook] Erro na API do Graph ao buscar perfil:', errorText);
         }
       }
     } catch (e) {
@@ -256,6 +259,9 @@ async function processIncomingMessage(params: any) {
             await supabaseAdmin.from('contacts').update({ name: newName, profile_picture_url: newPic }).eq('id', contact.id);
             contact.name = newName;
           }
+        } else {
+          const errorText = await profileRes.text();
+          console.error('[Instagram Webhook] Erro na API do Graph ao atualizar perfil genérico:', errorText);
         }
       }
     } catch (e) {
