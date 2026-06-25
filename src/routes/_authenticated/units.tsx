@@ -514,7 +514,12 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
         finalAccessToken = company.meta_system_user_token;
       }
 
-      if ((provider === 'oficial' || provider === 'instagram' || provider === 'messenger') && (!finalNumberId || !finalAccessToken || !verifyToken)) {
+      let finalVerifyToken = verifyToken;
+      if (!finalVerifyToken) {
+        finalVerifyToken = `atendi_${Math.random().toString(36).substring(2, 11)}`;
+      }
+
+      if ((provider === 'oficial' || provider === 'instagram' || provider === 'messenger') && (!finalNumberId || !finalAccessToken || !finalVerifyToken)) {
         throw new Error("Preencha todos os campos da credencial (ID, Token e Verify Token) ou selecione uma conta da Meta.");
       }
 
@@ -545,7 +550,7 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
         oficial_phone_number_id: finalNumberId,
         oficial_waba_id: finalWabaId || null,
         oficial_access_token: finalAccessToken,
-        oficial_verify_token: verifyToken,
+        oficial_verify_token: finalVerifyToken,
         webhook_url: defaultWebhookUrl
       }).select().single();
       
@@ -1049,15 +1054,21 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
                         />
                         <p className="text-xs text-muted-foreground">O ID gerado no painel de desenvolvedores da Meta.</p>
                       </div>
-                      {instanceProvider === 'instagram' && (
+                      {(instanceProvider === 'instagram' || instanceProvider === 'oficial') && (
                         <div className="space-y-2 text-left">
-                          <label className="text-sm font-medium">Facebook Page ID (Opcional se usar token IGA)</label>
+                          <label className="text-sm font-medium">
+                            {instanceProvider === 'oficial' ? 'WhatsApp Business Account ID (WABA ID)' : 'Facebook Page ID (Opcional se usar token IGA)'}
+                          </label>
                           <Input 
-                            placeholder="ID da página vinculada" 
+                            placeholder={instanceProvider === 'oficial' ? "Ex: 109876543210" : "ID da página vinculada"}
                             value={oficialWabaId}
                             onChange={(e) => setOficialWabaId(e.target.value)}
                           />
-                          <p className="text-xs text-muted-foreground">Opcional para tokens diretos (IGA). Necessário se usar token da Meta (EAAS).</p>
+                          <p className="text-xs text-muted-foreground">
+                            {instanceProvider === 'oficial' 
+                              ? "O ID da conta comercial do WhatsApp no painel da Meta." 
+                              : "Opcional para tokens diretos (IGA). Necessário se usar token da Meta (EAAS)."}
+                          </p>
                         </div>
                       )}
                       <div className="space-y-2 text-left">
@@ -1109,6 +1120,7 @@ function UnitManagementSheet({ open, onOpenChange, unit, company }: { open: bool
                   name: instanceName,
                   provider: instanceProvider,
                   numberId: oficialNumberId,
+                  wabaId: oficialWabaId,
                   accessToken: oficialToken,
                   verifyToken: oficialVerifyToken
                 })}
