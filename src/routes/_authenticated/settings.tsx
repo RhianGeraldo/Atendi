@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe } from "lucide-react";
+import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe, Facebook } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1051,87 +1051,143 @@ function SettingsPage() {
 
             {(instanceProvider === 'oficial' || instanceProvider === 'instagram' || instanceProvider === 'messenger') && (
               <>
-                {(instanceProvider === 'instagram' || instanceProvider === 'messenger') && company?.meta_system_user_token && !useManualToken ? (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Selecione a Conta da Meta</label>
-                    {isLoadingMeta ? (
-                      <div className="text-sm text-muted-foreground flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin" /> Buscando contas...
-                      </div>
-                    ) : metaAccounts.length === 0 ? (
-                      <div className="text-sm text-destructive">
-                        Nenhuma conta encontrada. Verifique as permissões do Token do Sistema ou se a página está vinculada.
-                      </div>
-                    ) : (
-                      <Select value={selectedMetaAccountId} onValueChange={setSelectedMetaAccountId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione a Página / Instagram" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {metaAccounts.map(acc => (
-                            <SelectItem key={acc.id} value={acc.id}>
-                              <div className="flex items-center gap-2">
-                                {instanceProvider === 'instagram' && acc.instagram_business_account?.profile_picture_url ? (
-                                  <img src={acc.instagram_business_account.profile_picture_url} className="w-5 h-5 rounded-full" />
-                                ) : (
-                                  <Globe className="w-4 h-4 text-muted-foreground" />
-                                )}
-                                <span>{instanceProvider === 'instagram' ? acc.instagram_business_account?.username || acc.name : acc.name}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
+                {!company?.meta_system_user_token ? (
+                  <div className="p-4 border border-dashed rounded-lg bg-slate-50 dark:bg-slate-900/50 flex flex-col items-center justify-center text-center space-y-3 my-2">
+                    <Facebook className="h-8 w-8 text-blue-600 animate-pulse" />
+                    <div>
+                      <h4 className="text-sm font-semibold">Conectar conta da Meta</h4>
+                      <p className="text-xs text-muted-foreground max-w-[280px] mx-auto mt-1">
+                        Vincule sua conta para listar suas páginas do Facebook e contas do Instagram automaticamente.
+                      </p>
+                    </div>
                     <Button 
-                      variant="link" 
-                      className="px-0 text-xs text-muted-foreground h-auto"
-                      onClick={() => setUseManualToken(true)}
+                      type="button"
+                      onClick={() => {
+                        const appId = import.meta.env.VITE_META_APP_ID || "1035728705567552";
+                        const redirectUri = encodeURIComponent(window.location.origin + "/facebook-signup");
+                        const oauthUrl = `https://www.facebook.com/v20.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&state=${activeCompanyId}&scope=pages_show_list,pages_messaging,instagram_basic,instagram_manage_messages,whatsapp_business_management,whatsapp_business_messaging`;
+                        
+                        const width = 600;
+                        const height = 650;
+                        const left = window.screenX + (window.innerWidth - width) / 2;
+                        const top = window.screenY + (window.innerHeight - height) / 2;
+                        window.open(oauthUrl, "facebook-oauth", `width=${width},height=${height},left=${left},top=${top}`);
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 flex items-center gap-2"
                     >
-                      Não achou sua conta? Inserir Manualmente (Modo Direto)
+                      <Facebook className="h-4 w-4 fill-current" />
+                      Conectar com Facebook
                     </Button>
                   </div>
                 ) : (
                   <>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">
-                        {instanceProvider === 'instagram' ? 'Instagram Account ID' : instanceProvider === 'messenger' ? 'Facebook Page ID' : 'Phone Number ID'}
-                      </label>
-                      <Input 
-                        placeholder="1234567890" 
-                        value={oficialNumberId}
-                        onChange={(e) => setOficialNumberId(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">O ID gerado no painel de desenvolvedores da Meta.</p>
-                    </div>
-                    {instanceProvider === 'instagram' && (
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Facebook Page ID (Opcional se usar token IGA)</label>
-                        <Input 
-                          placeholder="ID da página vinculada" 
-                          value={oficialWabaId}
-                          onChange={(e) => setOficialWabaId(e.target.value)}
-                        />
-                        <p className="text-xs text-muted-foreground">Opcional para tokens diretos (IGA). Necessário se usar token da Meta (EAAS).</p>
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Access Token Permanente</label>
-                      <Input 
-                        type="password"
-                        placeholder="EAAS... ou IGA..." 
-                        value={oficialToken}
-                        onChange={(e) => setOficialToken(e.target.value)}
-                      />
-                    </div>
-                    {company?.meta_system_user_token && (
-                      <Button 
-                        variant="link" 
-                        className="px-0 text-xs text-muted-foreground h-auto mt-2"
-                        onClick={() => setUseManualToken(false)}
+                    <div className="flex items-center justify-between p-2.5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/30 rounded-md mb-4">
+                      <span className="text-xs text-emerald-800 dark:text-emerald-400 flex items-center gap-1.5 font-medium">
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Integração Meta Ativa
+                      </span>
+                      <Button
+                        variant="link"
+                        className="text-xs text-destructive h-auto p-0 hover:no-underline"
+                        onClick={async () => {
+                          const { error } = await supabase
+                            .from("companies")
+                            .update({ meta_system_user_token: null })
+                            .eq("id", activeCompanyId!);
+                          if (error) {
+                            toast.error("Erro ao desconectar");
+                          } else {
+                            toast.success("Integração Meta desconectada!");
+                            qc.invalidateQueries({ queryKey: ["company", activeCompanyId] });
+                          }
+                        }}
                       >
-                        Voltar para a Busca Automática
+                        Desconectar
                       </Button>
+                    </div>
+
+                    {(instanceProvider === 'instagram' || instanceProvider === 'messenger') && !useManualToken ? (
+                      <div className="space-y-2 mb-4">
+                        <label className="text-sm font-medium">Selecione a Conta da Meta</label>
+                        {isLoadingMeta ? (
+                          <div className="text-sm text-muted-foreground flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" /> Buscando contas...
+                          </div>
+                        ) : metaAccounts.length === 0 ? (
+                          <div className="text-sm text-destructive">
+                            Nenhuma conta encontrada. Verifique as permissões do Token ou se a página está vinculada.
+                          </div>
+                        ) : (
+                          <Select value={selectedMetaAccountId} onValueChange={setSelectedMetaAccountId}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione a Página / Instagram" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {metaAccounts.map(acc => (
+                                <SelectItem key={acc.id} value={acc.id}>
+                                  <div className="flex items-center gap-2">
+                                    {instanceProvider === 'instagram' && acc.instagram_business_account?.profile_picture_url ? (
+                                      <img src={acc.instagram_business_account.profile_picture_url} className="w-5 h-5 rounded-full" />
+                                    ) : (
+                                      <Globe className="w-4 h-4 text-muted-foreground" />
+                                    )}
+                                    <span>{instanceProvider === 'instagram' ? acc.instagram_business_account?.username || acc.name : acc.name}</span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                        <Button 
+                          variant="link" 
+                          className="px-0 text-xs text-muted-foreground h-auto"
+                          onClick={() => setUseManualToken(true)}
+                        >
+                          Não achou sua conta? Inserir Manualmente (Modo Direto)
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">
+                            {instanceProvider === 'instagram' ? 'Instagram Account ID' : instanceProvider === 'messenger' ? 'Facebook Page ID' : 'Phone Number ID'}
+                          </label>
+                          <Input 
+                            placeholder="1234567890" 
+                            value={oficialNumberId}
+                            onChange={(e) => setOficialNumberId(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">O ID gerado no painel de desenvolvedores da Meta.</p>
+                        </div>
+                        {instanceProvider === 'instagram' && (
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Facebook Page ID (Opcional se usar token IGA)</label>
+                            <Input 
+                              placeholder="ID da página vinculada" 
+                              value={oficialWabaId}
+                              onChange={(e) => setOficialWabaId(e.target.value)}
+                            />
+                            <p className="text-xs text-muted-foreground">Opcional para tokens diretos (IGA). Necessário se usar token da Meta (EAAS).</p>
+                          </div>
+                        )}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Access Token Permanente</label>
+                          <Input 
+                            type="password"
+                            placeholder="EAAS... ou IGA..." 
+                            value={oficialToken}
+                            onChange={(e) => setOficialToken(e.target.value)}
+                          />
+                        </div>
+                        {company?.meta_system_user_token && (
+                          <Button 
+                            variant="link" 
+                            className="px-0 text-xs text-muted-foreground h-auto mt-2"
+                            onClick={() => setUseManualToken(false)}
+                          >
+                            Voltar para a Busca Automática
+                          </Button>
+                        )}
+                      </>
                     )}
                   </>
                 )}

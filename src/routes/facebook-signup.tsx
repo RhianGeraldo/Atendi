@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from "react";
 import { Facebook, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { exchangeMetaCodeAction } from "@/lib/api/whatsapp.functions";
 
 export const Route = createFileRoute("/facebook-signup")({
   component: FacebookSignupCallback,
@@ -8,25 +9,56 @@ export const Route = createFileRoute("/facebook-signup")({
 
 function FacebookSignupCallback() {
   const [status, setStatus] = useState<"processing" | "success" | "error">("processing");
-  const search = Route.useSearch() as { code?: string; error?: string; error_description?: string };
+  const [errorMessage, setErrorMessage] = useState("");
+  const search = Route.useSearch() as { code?: string; error?: string; error_description?: string; state?: string };
 
   useEffect(() => {
-    // Simulando ou processando a verificação de código
     if (search.error) {
       setStatus("error");
+      setErrorMessage(search.error_description || "Ocorreu um erro na autenticação com a Meta.");
       return;
     }
 
     if (search.code) {
-      // Futuro: enviar 'search.code' para o backend trocar por access_token
-      setTimeout(() => {
-        setStatus("success");
-        // window.close() ou window.location.href = '/settings'
-      }, 2000);
+      const performExchange = async () => {
+        try {
+          const companyId = search.state;
+          if (!companyId) {
+            throw new Error("ID da empresa (parâmetro state) não foi fornecido na URL de callback.");
+          }
+
+          const redirectUri = window.location.origin + window.location.pathname;
+          await exchangeMetaCodeAction({
+            data: {
+              code: search.code!,
+              companyId,
+              redirectUri
+            }
+          });
+
+          setStatus("success");
+          
+          if (window.opener) {
+            window.opener.postMessage({ type: 'META_AUTH_SUCCESS' }, window.location.origin);
+          }
+
+          setTimeout(() => {
+            window.close();
+          }, 2500);
+        } catch (e: any) {
+          console.error("Error exchanging Meta code:", e);
+          setStatus("error");
+          setErrorMessage(e.message || "Erro desconhecido ao processar o token da Meta.");
+        }
+      };
+
+      performExchange();
     } else {
       setStatus("error");
+      setErrorMessage("Nenhum código de autorização foi encontrado nos parâmetros da URL.");
     }
   }, [search]);
+
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
@@ -46,7 +78,7 @@ function FacebookSignupCallback() {
           <p className="text-slate-500">
             {status === "processing" && "Aguarde enquanto vinculamos a sua página. Não feche esta janela."}
             {status === "success" && "Sua conta do Facebook foi vinculada com sucesso. Você já pode fechar esta janela."}
-            {status === "error" && (search.error_description || "Não foi possível validar o código de acesso da Meta.")}
+            {status === "error" && (errorMessage || search.error_description || "Não foi possível validar o código de acesso da Meta.")}
           </p>
         </div>
 
