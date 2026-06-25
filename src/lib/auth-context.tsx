@@ -7,7 +7,7 @@ export interface Profile {
   name: string;
   email: string;
   avatar_url: string | null;
-  role: "admin_company" | "manager" | "agent";
+  role: "super_admin" | "admin_company" | "manager" | "agent";
   company_id: string | null;
   has_matriz_access: boolean;
   department_id: string | null;
