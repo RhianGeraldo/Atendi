@@ -149,7 +149,7 @@ function ConversationsPage() {
     isFetchingNextPage,
     isFetching: isConvFetching,
   } = useInfiniteQuery({
-    queryKey: ["conversations", tab, selectedUnitId, profile?.id, profile?.role, profile?.department_id, debouncedSearch, instanceFilter],
+    queryKey: ["conversations", activeCompanyId, tab, selectedUnitId, profile?.id, profile?.role, profile?.department_id, debouncedSearch, instanceFilter],
     initialPageParam: 0,
     queryFn: async ({ pageParam = 0 }) => {
       const from = pageParam as number;
@@ -166,6 +166,10 @@ function ConversationsPage() {
         .select(selectString)
         .order("last_message_at", { ascending: false })
         .range(from, to);
+
+      if (activeCompanyId) {
+        query = query.eq("company_id", activeCompanyId);
+      }
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
@@ -267,7 +271,7 @@ function ConversationsPage() {
   }, [searchConvId]);
 
   const { data: unreadCounts } = useQuery({
-    queryKey: ["unread-counts", selectedUnitId, profile?.id, profile?.department_id, instanceFilter, debouncedSearch],
+    queryKey: ["unread-counts", activeCompanyId, selectedUnitId, profile?.id, profile?.department_id, instanceFilter, debouncedSearch],
     queryFn: async () => {
       let selectString = "id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts(id, phone, name)";
 
@@ -278,6 +282,10 @@ function ConversationsPage() {
       let query = supabase
         .from("conversations")
         .select(selectString);
+
+      if (activeCompanyId) {
+        query = query.eq("company_id", activeCompanyId);
+      }
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);

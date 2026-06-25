@@ -61,8 +61,8 @@ function TasksPage() {
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
 
   const { data: tasks, isLoading } = useQuery({
-    queryKey: ["all-tasks", profile?.id, profile?.role, selectedUnitId, tab, taskTypeFilter],
-    enabled: !!profile?.id,
+    queryKey: ["all-tasks", activeCompanyId, profile?.id, profile?.role, selectedUnitId, tab, taskTypeFilter],
+    enabled: !!profile?.id && !!activeCompanyId,
     queryFn: async () => {
       let query = supabase
         .from("tasks")
@@ -79,6 +79,10 @@ function TasksPage() {
 
       if (taskTypeFilter !== "all") {
         query = query.eq("task_type", taskTypeFilter);
+      }
+      
+      if (activeCompanyId) {
+        query = query.eq("company_id", activeCompanyId);
       }
 
       if (selectedUnitId) {

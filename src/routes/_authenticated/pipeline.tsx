@@ -70,8 +70,8 @@ function PipelinePage() {
 
   // Fetch Opportunities for this pipeline
   const { data: opportunities, isLoading: isLoadingOpps } = useQuery({
-    queryKey: ["opportunities", selectedPipelineId, profile?.role, profile?.id, selectedUnitId],
-    enabled: !!selectedPipelineId && !!stages && stages.length > 0 && !!profile?.id,
+    queryKey: ["opportunities", activeCompanyId, selectedPipelineId, profile?.role, profile?.id, selectedUnitId],
+    enabled: !!selectedPipelineId && !!stages && stages.length > 0 && !!profile?.id && !!activeCompanyId,
     queryFn: async () => {
       const stageIds = stages!.map(s => s.id);
       let query = supabase
@@ -119,10 +119,10 @@ function PipelinePage() {
       if (error) throw error;
     },
     onMutate: async ({ oppId, newStageId }) => {
-      await qc.cancelQueries({ queryKey: ["opportunities", selectedPipelineId] });
-      const previous = qc.getQueryData(["opportunities", selectedPipelineId]);
+      await qc.cancelQueries({ queryKey: ["opportunities", activeCompanyId, selectedPipelineId] });
+      const previous = qc.getQueryData(["opportunities", activeCompanyId, selectedPipelineId]);
       
-      qc.setQueryData(["opportunities", selectedPipelineId], (old: any[] | undefined) => {
+      qc.setQueryData(["opportunities", activeCompanyId, selectedPipelineId], (old: any[] | undefined) => {
         if (!old) return old;
         return old.map(o => o.id === oppId ? { ...o, stage_id: newStageId } : o);
       });
@@ -131,11 +131,11 @@ function PipelinePage() {
     onError: (err, variables, context) => {
       toast.error("Erro ao mover card", { description: err.message });
       if (context?.previous) {
-        qc.setQueryData(["opportunities", selectedPipelineId], context.previous);
+        qc.setQueryData(["opportunities", activeCompanyId, selectedPipelineId], context.previous);
       }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ["opportunities", selectedPipelineId] });
+      qc.invalidateQueries({ queryKey: ["opportunities", activeCompanyId, selectedPipelineId] });
     }
   });
 
