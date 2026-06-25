@@ -795,6 +795,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
   const qc = useQueryClient();
   const { selectedUnitId } = useUnit();
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const [searchLabel, setSearchLabel] = useState("");
 
   const { data: allLabels } = useQuery({
@@ -1092,6 +1093,7 @@ function NewConversationDialog({
 }) {
   const qc = useQueryClient();
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const [open, setOpen] = useState(false);
   const [phone, setPhone] = useState(initialPhone || "");
   const [text, setText] = useState("");
@@ -1377,6 +1379,7 @@ function ChatPanel({
   onAssigned?: () => void;
 }) {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
   const { startCall, instances } = useWavoip();
   const { selectedUnitId } = useUnit();
