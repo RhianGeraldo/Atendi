@@ -13,6 +13,7 @@ import {
   ChevronRight,
   LogOut, Phone,
   Building2,
+  Building,
   ChevronsUpDown,
   MapPin,
 } from "lucide-react";
@@ -43,6 +44,7 @@ const items = [
   { to: "/reports", label: "Relatórios", icon: BarChart3 },
   { to: "/units", label: "Gestão de Unidades", icon: Building2, globalOnly: true },
   { to: "/settings", label: "Configurações", icon: Settings },
+  { to: "/companies", label: "Empresas", icon: Building, superAdminOnly: true },
 ];
 
 interface Props {
@@ -178,7 +180,11 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
 
       {/* Nav */}
       <nav className="mt-4 flex-1 space-y-0.5 px-2">
-        {items.filter(item => !item.globalOnly || !selectedUnitId).map((item) => {
+        {items.filter(item => {
+          if (item.superAdminOnly) return profile?.role === 'super_admin';
+          if (item.globalOnly) return !selectedUnitId;
+          return true;
+        }).map((item) => {
           const active = pathname.startsWith(item.to);
           const Icon = item.icon;
           return (
