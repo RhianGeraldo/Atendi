@@ -150,6 +150,18 @@ export function UsersTab() {
     onError: (e) => toast.error("Erro ao atualizar", { description: (e as Error).message })
   });
 
+  const removeUser = useMutation({
+    mutationFn: async (userId: string) => {
+      const { error } = await supabase.rpc("remove_user_from_company", { p_user_id: userId });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["users"] });
+      toast.success("Usuário removido da empresa.");
+    },
+    onError: (e) => toast.error("Erro ao remover usuário", { description: (e as Error).message })
+  });
+
   const updateUserDepartment = useMutation({
     mutationFn: async ({ userId, departmentId }: { userId: string, departmentId: string | null }) => {
       const { error } = await supabase.from("profiles").update({ department_id: departmentId }).eq("id", userId);
@@ -455,7 +467,17 @@ export function UsersTab() {
                                 <Building className="h-4 w-4 mr-2" />
                                 Acessos às Unidades
                               </Button>
-                              <Button variant="ghost" size="icon" disabled={isSelf} className="h-8 w-8 text-destructive hover:bg-destructive/10">
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                disabled={isSelf || removeUser.isPending} 
+                                className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                onClick={() => {
+                                  if (window.confirm(`Tem certeza que deseja remover ${u.name} da empresa?`)) {
+                                    removeUser.mutate(u.id);
+                                  }
+                                }}
+                              >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
