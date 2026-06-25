@@ -33,16 +33,16 @@ function DashboardPage() {
   const { data: metrics } = useQuery<Metrics>({
     queryKey: ["dashboard-metrics", activeCompanyId, selectedUnitId],
     queryFn: async () => {
-      let qWaiting = supabase.from("conversations").select("id, unit:units!inner(company_id)", { count: "exact", head: true }).eq("status", "waiting");
-      let qActive = supabase.from("conversations").select("id, unit:units!inner(company_id)", { count: "exact", head: true }).eq("status", "active");
-      let qResolved = supabase.from("conversations").select("id, unit:units!inner(company_id)", { count: "exact", head: true })
+      let qWaiting = supabase.from("conversations").select("id, contact:contacts!inner(company_id)", { count: "exact", head: true }).eq("status", "waiting");
+      let qActive = supabase.from("conversations").select("id, contact:contacts!inner(company_id)", { count: "exact", head: true }).eq("status", "active");
+      let qResolved = supabase.from("conversations").select("id, contact:contacts!inner(company_id)", { count: "exact", head: true })
         .eq("status", "resolved")
         .gte("resolved_at", new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
       
       if (activeCompanyId) {
-        qWaiting = qWaiting.eq("unit.company_id", activeCompanyId);
-        qActive = qActive.eq("unit.company_id", activeCompanyId);
-        qResolved = qResolved.eq("unit.company_id", activeCompanyId);
+        qWaiting = qWaiting.eq("contact.company_id", activeCompanyId);
+        qActive = qActive.eq("contact.company_id", activeCompanyId);
+        qResolved = qResolved.eq("contact.company_id", activeCompanyId);
       }
 
       if (selectedUnitId) {
@@ -75,8 +75,8 @@ function DashboardPage() {
     queryFn: async () => {
       const since = subDays(new Date(), 6);
       
-      let qChart = supabase.from("conversations").select("started_at, unit:units!inner(company_id)").gte("started_at", since.toISOString());
-      if (activeCompanyId) qChart = qChart.eq("unit.company_id", activeCompanyId);
+      let qChart = supabase.from("conversations").select("started_at, contact:contacts!inner(company_id)").gte("started_at", since.toISOString());
+      if (activeCompanyId) qChart = qChart.eq("contact.company_id", activeCompanyId);
       if (selectedUnitId) qChart = qChart.eq("unit_id", selectedUnitId);
 
       const { data } = await qChart;
@@ -99,12 +99,12 @@ function DashboardPage() {
     queryFn: async () => {
       let qOldest = supabase
         .from("conversations")
-        .select("id, started_at, channel, contact:contacts(name), unit:units!inner(company_id)")
+        .select("id, started_at, channel, contact:contacts!inner(name, company_id)")
         .eq("status", "waiting")
         .order("started_at", { ascending: true })
         .limit(5);
 
-      if (activeCompanyId) qOldest = qOldest.eq("unit.company_id", activeCompanyId);
+      if (activeCompanyId) qOldest = qOldest.eq("contact.company_id", activeCompanyId);
       if (selectedUnitId) qOldest = qOldest.eq("unit_id", selectedUnitId);
 
       const { data } = await qOldest;
