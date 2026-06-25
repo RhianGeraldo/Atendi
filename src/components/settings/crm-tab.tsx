@@ -8,9 +8,11 @@ import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 
 export function CrmTab() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
   
@@ -19,13 +21,13 @@ export function CrmTab() {
 
   // Fetch Pipelines
   const { data: pipelines, isLoading: isLoadingPipelines } = useQuery({
-    queryKey: ["pipelines", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["pipelines", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("pipelines")
         .select("*")
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", activeCompanyId!)
         .order("created_at", { ascending: true });
       if (error) throw error;
       return data;
@@ -34,10 +36,10 @@ export function CrmTab() {
 
   const createPipeline = useMutation({
     mutationFn: async (name: string) => {
-      if (!profile?.company_id) throw new Error("Empresa não encontrada");
+      if (!activeCompanyId) throw new Error("Empresa não encontrada");
       const { data, error } = await supabase
         .from("pipelines")
-        .insert({ name, company_id: profile.company_id })
+        .insert({ name, company_id: activeCompanyId })
         .select()
         .single();
       if (error) throw error;
@@ -142,10 +144,10 @@ function PipelineStagesManager({ pipeline }: { pipeline: any }) {
 
   // We need a fallback unit_id if selectedUnitId is null, because the original table requires it.
   const { data: fallbackUnit } = useQuery({
-    queryKey: ["first-unit", profile?.company_id],
-    enabled: !selectedUnitId && !!profile?.company_id,
+    queryKey: ["first-unit", activeCompanyId],
+    enabled: !selectedUnitId && !!activeCompanyId,
     queryFn: async () => {
-      const { data } = await supabase.from("units").select("id").eq("company_id", profile!.company_id!).limit(1).single();
+      const { data } = await supabase.from("units").select("id").eq("company_id", activeCompanyId!).limit(1).single();
       return data;
     }
   });

@@ -7,20 +7,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 
 export function DepartmentsTab() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
   
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
 
   const { data: departments, isLoading } = useQuery({
-    queryKey: ["departments", profile?.company_id, "sede"],
-    enabled: !!profile?.company_id,
+    queryKey: ["departments", activeCompanyId, "sede"],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       let q = supabase.from("departments").select("*")
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", activeCompanyId!)
         .is("unit_id", null);
       
       const { data, error } = await q.order("created_at", { ascending: true });
@@ -33,7 +35,7 @@ export function DepartmentsTab() {
     mutationFn: async () => {
       if (!name) throw new Error("Nome é obrigatório");
       const { error } = await supabase.from("departments").insert({
-        company_id: profile!.company_id!,
+        company_id: activeCompanyId!,
         unit_id: null,
         name,
         description,

@@ -15,9 +15,11 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 
 export function AiAgentsTab() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   
@@ -61,8 +63,8 @@ export function AiAgentsTab() {
 
   // Data Fetching
   const { data: agents, isLoading } = useQuery({
-    queryKey: ["ai_agents", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["ai_agents", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("ai_agents")
@@ -71,7 +73,7 @@ export function AiAgentsTab() {
           whatsapp_instances(name),
           departments!ai_agents_department_id_fkey(name)
         `)
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", activeCompanyId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
@@ -79,60 +81,60 @@ export function AiAgentsTab() {
   });
 
   const { data: instances } = useQuery({
-    queryKey: ["whatsapp_instances_list", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["whatsapp_instances_list", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("whatsapp_instances").select("id, name").eq("company_id", profile!.company_id!);
+      const { data, error } = await supabase.from("whatsapp_instances").select("id, name").eq("company_id", activeCompanyId!);
       if (error) throw error;
       return data;
     }
   });
 
   const { data: departments } = useQuery({
-    queryKey: ["departments_list", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["departments_list", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("departments").select("id, name").eq("company_id", profile!.company_id!);
+      const { data, error } = await supabase.from("departments").select("id, name").eq("company_id", activeCompanyId!);
       if (error) throw error;
       return data;
     }
   });
 
   const { data: units } = useQuery({
-    queryKey: ["units_list", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["units_list", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("units").select("id, name").eq("company_id", profile!.company_id!);
+      const { data, error } = await supabase.from("units").select("id, name").eq("company_id", activeCompanyId!);
       if (error) throw error;
       return data;
     }
   });
 
   const { data: pipelines } = useQuery({
-    queryKey: ["pipelines_list", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["pipelines_list", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("pipelines").select("id, name").eq("company_id", profile!.company_id!);
+      const { data, error } = await supabase.from("pipelines").select("id, name").eq("company_id", activeCompanyId!);
       if (error) throw error;
       return data;
     }
   });
 
   const { data: companySettings } = useQuery({
-    queryKey: ["company_ai_settings", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["company_ai_settings", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("companies").select("ai_settings").eq("id", profile!.company_id!).single();
+      const { data, error } = await supabase.from("companies").select("ai_settings").eq("id", activeCompanyId!).single();
       if (error) throw error;
       return data?.ai_settings || {};
     }
   });
 
   const { data: resolutionReasons } = useQuery({
-    queryKey: ["resolution_reasons", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["resolution_reasons", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data, error } = await supabase.from("resolution_reasons" as any).select("*").eq("company_id", profile!.company_id!).order("label");
+      const { data, error } = await supabase.from("resolution_reasons" as any).select("*").eq("company_id", activeCompanyId!).order("label");
       if (error) throw error;
       return data;
     }
@@ -219,7 +221,7 @@ export function AiAgentsTab() {
       if (!name || !aiType || !model) throw new Error("Nome, Tipo e Modelo são obrigatórios");
       
       const payload = {
-        company_id: profile!.company_id!,
+        company_id: activeCompanyId!,
         name,
         ai_type: aiType,
         description,

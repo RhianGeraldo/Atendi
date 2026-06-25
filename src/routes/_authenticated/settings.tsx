@@ -13,6 +13,7 @@ import { evogo, EvoGoClient } from "@/integrations/evogo/client";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import { QrCodeModal } from "@/components/whatsapp/qr-code-modal";
 import { QuickMessagesTab } from "@/components/settings/quick-messages-tab";
 import { ResolutionReasonsTab } from "@/components/settings/resolution-reasons-tab";
@@ -52,6 +53,7 @@ export const Route = createFileRoute("/_authenticated/settings")({
 function SettingsPage() {
   const { profile, user } = useAuth();
   const { selectedUnitId } = useUnit();
+  const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
   const [instanceName, setInstanceName] = useState("");
   const [instanceProvider, setInstanceProvider] = useState("evogo");
@@ -122,13 +124,13 @@ function SettingsPage() {
 
 
   const { data: company, isLoading: isLoadingCompany } = useQuery({
-    queryKey: ["company", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["company", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
         .select("id, name, evogo_host, evogo_global_token, meta_system_user_token, ai_settings, document, address, business_hours, custom_variables")
-        .eq("id", profile!.company_id!)
+        .eq("id", activeCompanyId!)
         .single();
       if (error) throw error;
       return data;

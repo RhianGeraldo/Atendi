@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 function MultiSelectUnits({ units, selected, onChange }: { units: any[], selected: string[], onChange: (selected: string[]) => void }) {
@@ -76,6 +77,7 @@ function MultiSelectUnits({ units, selected, onChange }: { units: any[], selecte
 
 export function UsersTab() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
   const [manageAccessUser, setManageAccessUser] = useState<any>(null);
@@ -92,41 +94,41 @@ export function UsersTab() {
 
   // Fetches ALL profiles of the company
   const { data: users, isLoading } = useQuery({
-    queryKey: ["users", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["users", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
         .select("id, name, email, role, department_id, has_matriz_access, departments!profiles_department_id_fkey(name), user_units(unit_id, role)")
-        .eq("company_id", profile!.company_id!);
+        .eq("company_id", activeCompanyId!);
       if (error) throw error;
       return data;
     }
   });
 
   const { data: units } = useQuery({
-    queryKey: ["units", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["units", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data } = await supabase.from("units").select("id, name").eq("company_id", profile!.company_id!);
+      const { data } = await supabase.from("units").select("id, name").eq("company_id", activeCompanyId!);
       return data ?? [];
     }
   });
 
   const { data: companyName } = useQuery({
-    queryKey: ["company-name", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["company-name", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data } = await supabase.from("companies").select("name").eq("id", profile!.company_id!).single();
+      const { data } = await supabase.from("companies").select("name").eq("id", activeCompanyId!).single();
       return data?.name;
     }
   });
 
   const { data: departments } = useQuery({
-    queryKey: ["departments", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["departments", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data } = await supabase.from("departments").select("id, name").eq("company_id", profile!.company_id!);
+      const { data } = await supabase.from("departments").select("id, name").eq("company_id", activeCompanyId!);
       return data ?? [];
     }
   });
@@ -203,14 +205,14 @@ export function UsersTab() {
   });
 
   const handleCopyLink = () => {
-    const link = `${window.location.origin}/auth?company=${profile?.company_id}`;
+    const link = `${window.location.origin}/auth?company=${activeCompanyId}`;
     navigator.clipboard.writeText(link);
     toast.success("Link copiado para a área de transferência!");
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.company_id) return;
+    if (!activeCompanyId) return;
     setIsCreating(true);
 
     try {
@@ -228,7 +230,7 @@ export function UsersTab() {
         options: {
           data: {
             name: newUserName,
-            company_id: profile.company_id,
+            company_id: activeCompanyId,
             department_id: newUserDepartment === "none" ? null : newUserDepartment,
           }
         }
@@ -244,7 +246,7 @@ export function UsersTab() {
         // Usa a RPC que tem permissão de SECURITY DEFINER para enxergar o usuário sem empresa e vinculá-lo
         const { error: linkError } = await supabase.rpc('link_user_to_company', {
           p_email: newUserEmail,
-          p_company_id: profile.company_id
+          p_company_id: activeCompanyId
         });
 
         if (linkError) {
@@ -293,7 +295,7 @@ export function UsersTab() {
               p_user_id: existingProfile.id,
               p_role: newUserRole,
               p_has_matriz_access: newUserUnits.includes("matriz"),
-              p_company_id: profile!.company_id
+              p_company_id: activeCompanyId!
             });
             if (pErr) throw pErr;
 
@@ -345,7 +347,7 @@ export function UsersTab() {
           <CardContent>
             <div className="flex items-center gap-3">
               <code className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-sm flex-1 truncate">
-                {window.location.origin}/auth?company={profile?.company_id}
+                {window.location.origin}/auth?company={activeCompanyId}
               </code>
               <Button variant="secondary" onClick={handleCopyLink}>
                 <Copy className="h-4 w-4 mr-2" />

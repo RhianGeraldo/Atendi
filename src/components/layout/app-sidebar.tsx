@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
+import { useActiveCompany } from "@/lib/active-company-context";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -76,18 +77,13 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
 
   const { selectedUnitId, setSelectedUnitId } = useUnit();
   
-  // Super admin: seletor de empresa ativo no sidebar
+  // Super admin: seletor de empresa via contexto global
   const isSuperAdmin = profile?.role === 'super_admin';
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(
-    () => typeof window !== 'undefined' ? localStorage.getItem('omni_selected_company_id') : null
-  );
+  const { activeCompanyId: selectedCompanyId, setActiveCompanyId } = useActiveCompany();
+
   const handleSelectCompany = (id: string | null) => {
-    setSelectedCompanyId(id);
+    setActiveCompanyId(id);
     setSelectedUnitId(null); // reset unit when company changes
-    if (typeof window !== 'undefined') {
-      if (id) localStorage.setItem('omni_selected_company_id', id);
-      else localStorage.removeItem('omni_selected_company_id');
-    }
   };
 
   // Todas as empresas (apenas super_admin)

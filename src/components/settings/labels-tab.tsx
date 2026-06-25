@@ -9,9 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 
 export function LabelsTab() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
   
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -21,13 +23,13 @@ export function LabelsTab() {
   const [color, setColor] = useState("#6b7280");
 
   const { data: labels, isLoading } = useQuery({
-    queryKey: ["labels", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["labels", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("labels")
         .select("*")
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", activeCompanyId!)
         .order("name");
       if (error) throw error;
       return data || [];
@@ -49,7 +51,7 @@ export function LabelsTab() {
 
   const saveLabel = useMutation({
     mutationFn: async () => {
-      if (!profile?.company_id) throw new Error("Sem empresa vinculada");
+      if (!activeCompanyId) throw new Error("Sem empresa vinculada");
       if (!name.trim()) throw new Error("O nome da etiqueta é obrigatório");
       
       if (editingLabel) {
@@ -64,14 +66,14 @@ export function LabelsTab() {
           .insert({ 
             name, 
             color, 
-            company_id: profile.company_id,
+            company_id: activeCompanyId,
             external_id: crypto.randomUUID()
           });
         if (error) throw error;
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["labels", profile?.company_id] });
+      qc.invalidateQueries({ queryKey: ["labels", activeCompanyId] });
       toast.success(editingLabel ? "Etiqueta atualizada!" : "Etiqueta criada!");
       setIsModalOpen(false);
     },
@@ -84,7 +86,7 @@ export function LabelsTab() {
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["labels", profile?.company_id] });
+      qc.invalidateQueries({ queryKey: ["labels", activeCompanyId] });
       qc.invalidateQueries({ queryKey: ["conversations"] }); // refresh UI sidebars
       toast.success("Etiqueta removida!");
     },

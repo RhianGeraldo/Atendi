@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Plus, Trash2, GripVertical, CheckCircle2, Loader2, Save } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,17 +33,18 @@ const DEFAULT_REASONS = [
 
 export function ResolutionReasonsTab() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
   const [newLabel, setNewLabel] = useState("");
 
   const { data: reasons, isLoading } = useQuery({
-    queryKey: ["resolution-reasons-settings", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["resolution-reasons-settings", activeCompanyId],
+    enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("resolution_reasons" as any)
         .select("id, company_id, label, order, active, created_at")
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", activeCompanyId!)
         .order("order", { ascending: true });
       if (error && error.code !== "42P01") throw error;
       return (data || []) as ResolutionReason[];
@@ -53,7 +55,7 @@ export function ResolutionReasonsTab() {
     mutationFn: async (label: string) => {
       const maxOrder = reasons?.length ? Math.max(...reasons.map((r) => r.order)) : -1;
       const { error } = await supabase.from("resolution_reasons" as any).insert({
-        company_id: profile!.company_id!,
+        company_id: activeCompanyId!,
         label: label.trim(),
         order: maxOrder + 1,
         active: true,
@@ -103,7 +105,7 @@ export function ResolutionReasonsTab() {
       const toInsert = DEFAULT_REASONS.filter(
         (label) => !existing.includes(label.toLowerCase())
       ).map((label, i) => ({
-        company_id: profile!.company_id!,
+        company_id: activeCompanyId!,
         label,
         order: (reasons?.length || 0) + i,
         active: true,
