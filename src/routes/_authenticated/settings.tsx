@@ -220,41 +220,41 @@ function SettingsPage() {
 
   const saveConfig = useMutation({
     mutationFn: async () => {
-      if (!profile?.company_id) throw new Error("Sem empresa vinculada");
+      if (!activeCompanyId) throw new Error("Sem empresa vinculada");
       const { error } = await supabase
         .from("companies")
         .update({ evogo_host: host, evogo_global_token: token })
-        .eq("id", profile.company_id);
+        .eq("id", activeCompanyId);
       if (error) throw error;
     },
     onSuccess: () => {
       toast.success("Configurações salvas!");
-      qc.invalidateQueries({ queryKey: ["company", profile?.company_id] });
+      qc.invalidateQueries({ queryKey: ["company", activeCompanyId] });
     },
     onError: (e) => toast.error("Erro ao salvar", { description: (e as Error).message })
   });
 
   const saveAiConfig = useMutation({
     mutationFn: async () => {
-      if (!profile?.company_id) throw new Error("Sem empresa vinculada");
+      if (!activeCompanyId) throw new Error("Sem empresa vinculada");
       const { error } = await supabase
         .from("companies")
         .update({ 
           ai_settings: aiSettings
         })
-        .eq("id", profile.company_id);
+        .eq("id", activeCompanyId);
       if (error) throw error;
     },
     onSuccess: () => {
       toast.success("Configurações de IA salvas!");
-      qc.invalidateQueries({ queryKey: ["company", profile?.company_id] });
+      qc.invalidateQueries({ queryKey: ["company", activeCompanyId] });
     },
     onError: (e) => toast.error("Erro ao salvar", { description: (e as Error).message })
   });
 
   const saveCompanyDetails = useMutation({
     mutationFn: async () => {
-      if (!profile?.company_id) throw new Error("Sem empresa vinculada");
+      if (!activeCompanyId) throw new Error("Sem empresa vinculada");
       
       const customVarsObj = companyCustomVars.reduce((acc, curr) => {
         if (curr.key.trim()) {
@@ -273,13 +273,13 @@ function SettingsPage() {
           meta_system_user_token: companyMetaToken,
           custom_variables: customVarsObj
         })
-        .eq("id", profile.company_id);
+        .eq("id", activeCompanyId);
       if (error) throw error;
     },
     onSuccess: () => {
       toast.success("Nome da empresa atualizado!");
-      qc.invalidateQueries({ queryKey: ["company", profile?.company_id] });
-      qc.invalidateQueries({ queryKey: ["company-name", profile?.company_id] }); // Update sidebar
+      qc.invalidateQueries({ queryKey: ["company", activeCompanyId] });
+      qc.invalidateQueries({ queryKey: ["company-name", activeCompanyId] }); // Update sidebar
     },
     onError: (e) => toast.error("Erro ao atualizar", { description: (e as Error).message })
   });
@@ -381,7 +381,7 @@ function SettingsPage() {
 
       // Salvar no banco
       const { data, error } = await supabase.from("whatsapp_instances").insert({
-        company_id: profile.company_id,
+        company_id: activeCompanyId,
         unit_id: selectedUnitId || null,
         name,
         instance_name: technicalName,
@@ -492,8 +492,7 @@ function SettingsPage() {
         
         <TabsContent value="general" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {/* Company Details */}
-          {!selectedUnitId && (
-            <Card className="col-span-full lg:col-span-1">
+          <Card className="col-span-full lg:col-span-1">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Building className="h-5 w-5" />
@@ -611,10 +610,8 @@ function SettingsPage() {
                 </Button>
               </CardContent>
             </Card>
-          )}
 
-          {/* EvoGo API Settings Card - Only visible in Global/Matriz Context */}
-          {!selectedUnitId && (
+          {/* EvoGo API Settings Card */}
           <Card className="col-span-full lg:col-span-1">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -661,7 +658,6 @@ function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
-        )}
         </TabsContent>
 
         <TabsContent value="channels" className="space-y-4">
@@ -830,10 +826,8 @@ function SettingsPage() {
 
       <div className="flex-1 w-full min-w-0">
         <TabsContent value="integrations" className="mt-0 border-none p-0 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {!selectedUnitId && (
-            <>
-              {/* Card de Chaves de API */}
-              <Card className="col-span-full lg:col-span-1">
+          {/* Card de Chaves de API */}
+          <Card className="col-span-full lg:col-span-1">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Key className="h-5 w-5" />
@@ -992,13 +986,7 @@ function SettingsPage() {
                   </div>
                 </CardContent>
               </Card>
-            </>
-          )}
-          {selectedUnitId && (
-            <div className="col-span-full rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-              A transcrição de áudio é configurada de forma global na Empresa Mãe.
-            </div>
-          )}
+
         </TabsContent>
 
         <TabsContent value="agents" className="mt-0 border-none p-0">
@@ -1170,6 +1158,7 @@ function SettingsPage() {
               onClick={() => createInstance.mutate({
                 name: instanceName,
                 provider: instanceProvider,
+                company_id: activeCompanyId,
                 numberId: oficialNumberId,
                 accessToken: oficialToken,
                 verifyToken: oficialVerifyToken
