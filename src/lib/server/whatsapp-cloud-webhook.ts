@@ -562,10 +562,32 @@ async function processIncomingMessage(params: any) {
         .single();
 
       if (convError) {
-        console.error('[Whatsapp Cloud] Erro ao criar conversa:', convError);
-        return;
+        if (convError.code === '23505') {
+          console.warn('[Whatsapp Cloud] Race condition detectada ao criar conversa. Buscando conversa existente.');
+          const { data: racedConv } = await supabaseAdmin
+            .from('conversations')
+            .select('id, ai_active, ai_agent_id')
+            .eq('contact_id', contact.id)
+            .eq('whatsapp_instance_id', instanceId)
+            .in('status', ['waiting', 'active'])
+            .order('started_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (racedConv) {
+            conversationId = racedConv.id;
+            aiActive = racedConv.ai_active ?? false;
+          } else {
+            console.error('[Whatsapp Cloud] Erro fatal de race condition: ', convError);
+            return;
+          }
+        } else {
+          console.error('[Whatsapp Cloud] Erro ao criar conversa:', convError);
+          return;
+        }
+      } else {
+        conversationId = newConv.id;
       }
-      conversationId = newConv.id;
     }
   }
 
