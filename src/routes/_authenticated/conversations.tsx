@@ -155,7 +155,7 @@ function ConversationsPage() {
       const from = pageParam as number;
       const to = from + PAGE_SIZE - 1;
 
-      let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,instagram_username,whatsapp_lid,instagram_id,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+      let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts(id,name,phone,email,tags,instagram_username,whatsapp_lid,instagram_id,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units!inner(name,color,custom_variables,company_id), whatsapp_instance:whatsapp_instances(name)";
       
       if (debouncedSearch || tab === "groups") {
         selectString = selectString.replace("contact:contacts(", "contact:contacts!inner(");
@@ -168,7 +168,7 @@ function ConversationsPage() {
         .range(from, to);
 
       if (activeCompanyId) {
-        query = query.eq("company_id", activeCompanyId);
+        query = query.eq("unit.company_id", activeCompanyId);
       }
 
       if (selectedUnitId) {
@@ -273,7 +273,7 @@ function ConversationsPage() {
   const { data: unreadCounts } = useQuery({
     queryKey: ["unread-counts", activeCompanyId, selectedUnitId, profile?.id, profile?.department_id, instanceFilter, debouncedSearch],
     queryFn: async () => {
-      let selectString = "id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts(id, phone, name)";
+      let selectString = "id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts(id, phone, name), unit:units!inner(company_id)";
 
       if (debouncedSearch) {
         selectString = selectString.replace("contact:contacts(", "contact:contacts!inner(");
@@ -284,7 +284,7 @@ function ConversationsPage() {
         .select(selectString);
 
       if (activeCompanyId) {
-        query = query.eq("company_id", activeCompanyId);
+        query = query.eq("unit.company_id", activeCompanyId);
       }
 
       if (selectedUnitId) {
