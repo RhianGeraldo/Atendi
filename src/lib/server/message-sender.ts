@@ -339,7 +339,7 @@ export async function sendPlatformMessage({
     const isDirectToken = instance.oficial_access_token.startsWith('IGA');
     const endpoint = isDirectToken 
       ? `https://graph.instagram.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`
-      : `https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`;
+      : `https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`;
 
     const response = await fetch(endpoint, {
       method: 'POST',
