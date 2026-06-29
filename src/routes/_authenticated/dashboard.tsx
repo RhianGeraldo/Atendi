@@ -133,7 +133,7 @@ function DashboardPage() {
   });
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-4 md:p-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Aguardando"
@@ -146,8 +146,8 @@ function DashboardPage() {
         <MetricCard label="Agentes online" value={metrics?.agentsOnline ?? 0} icon={Users} />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-3">
-        <Card className="xl:col-span-2 p-6">
+      <div className="grid gap-4 md:gap-6 xl:grid-cols-3">
+        <Card className="xl:col-span-2 p-4 md:p-6">
           <h2 className="mb-1 text-sm font-semibold">Volume de atendimentos</h2>
           <p className="mb-4 text-xs text-muted-foreground">Últimos 7 dias</p>
           <div className="h-64">
@@ -170,7 +170,7 @@ function DashboardPage() {
           </div>
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-4 md:p-6">
           <h2 className="mb-1 text-sm font-semibold">Tarefas de hoje</h2>
           <p className="mb-4 text-xs text-muted-foreground">{myTasks?.length ?? 0} pendentes</p>
           <div className="space-y-3">
@@ -193,7 +193,7 @@ function DashboardPage() {
         </Card>
       </div>
 
-      <Card className="p-6">
+      <Card className="p-4 md:p-6">
         <h2 className="mb-4 text-sm font-semibold">Aguardando há mais tempo</h2>
         <div className="space-y-2">
           {(oldestWaiting ?? []).map((c: any) => (
@@ -236,7 +236,7 @@ function MetricCard({
   alert?: boolean;
 }) {
   return (
-    <Card className="p-5">
+    <Card className="p-4 md:p-5">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {label}

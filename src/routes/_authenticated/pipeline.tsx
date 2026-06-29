@@ -186,8 +186,8 @@ function PipelinePage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-muted/20">
-      <header className="flex items-center justify-between border-b bg-card px-6 py-4 shrink-0">
-        <div className="flex items-center gap-4">
+      <header className="flex items-center justify-between border-b bg-card px-6 py-4 shrink-0 flex-wrap gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
           <h1 className="text-2xl font-bold tracking-tight">Kanban</h1>
           <Select value={selectedPipelineId || ""} onValueChange={setSelectedPipelineId}>
             <SelectTrigger className="w-[250px] h-9">

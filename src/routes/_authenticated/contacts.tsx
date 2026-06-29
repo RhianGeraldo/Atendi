@@ -281,8 +281,8 @@ function ContactsPage() {
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
               ) : contacts && contacts.length > 0 ? (
-                <div className="rounded-md border">
-                  <table className="w-full text-sm">
+                <div className="rounded-md border overflow-x-auto">
+                  <table className="w-full text-sm min-w-[600px]">
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="h-10 px-4 text-left font-medium">Nome</th>
@@ -397,8 +397,8 @@ function ContactsPage() {
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
               ) : adLeads && adLeads.length > 0 ? (
-                <div className="rounded-md border">
-                  <table className="w-full text-sm">
+                <div className="rounded-md border overflow-x-auto">
+                  <table className="w-full text-sm min-w-[800px]">
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="h-10 px-4 text-left font-medium">Lead</th>

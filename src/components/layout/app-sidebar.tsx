@@ -51,9 +51,11 @@ const items = [
 interface Props {
   collapsed: boolean;
   onToggle: () => void;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
-export function AppSidebar({ collapsed, onToggle }: Props) {
+export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Props) {
   const { profile, signOut } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isSuperAdmin = profile?.role === 'super_admin';
@@ -130,12 +132,20 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
   const selectedUnit = units?.find(u => u.id === selectedUnitId);
 
   return (
-    <aside
-      className={cn(
-        "flex flex-col bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-out",
-        collapsed ? "w-[64px]" : "w-[240px]",
+    <>
+      {mobileOpen && (
+        <div 
+          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm md:hidden"
+          onClick={onMobileClose}
+        />
       )}
-    >
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground transition-transform duration-300 ease-in-out md:relative md:translate-x-0",
+          collapsed ? "md:w-[64px]" : "md:w-[240px]",
+          mobileOpen ? "translate-x-0 w-[240px]" : "-translate-x-full w-[240px]",
+        )}
+      >
       {/* Brand */}
       <div
         className={cn(
@@ -274,6 +284,7 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
             <Link
               key={item.to}
               to={item.to}
+              onClick={() => onMobileClose && onMobileClose()}
               className={cn(
                 "group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                 active
@@ -349,6 +360,7 @@ export function AppSidebar({ collapsed, onToggle }: Props) {
           )}
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

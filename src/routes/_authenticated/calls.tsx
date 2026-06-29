@@ -187,8 +187,8 @@ function CallsPage() {
           <CardTitle>Últimas 100 Chamadas</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border">
-            <Table>
+          <div className="rounded-md border overflow-x-auto">
+            <Table className="min-w-[1000px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Direção</TableHead>

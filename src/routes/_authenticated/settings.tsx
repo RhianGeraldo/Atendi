@@ -502,7 +502,7 @@ function SettingsPage() {
       </div>
       
       <Tabs defaultValue="general" className="space-y-6">
-        <TabsList className="flex flex-wrap h-auto gap-1 justify-start">
+        <TabsList className="flex flex-wrap md:flex-nowrap h-auto gap-1 justify-start overflow-x-auto pb-1">
           <TabsTrigger value="general">Empresa & API</TabsTrigger>
           <TabsTrigger value="channels">Canais & Atendimento</TabsTrigger>
           <TabsTrigger value="ai">Inteligência Artificial</TabsTrigger>
@@ -682,7 +682,7 @@ function SettingsPage() {
 
         <TabsContent value="channels" className="space-y-4">
           <Tabs defaultValue="whatsapp" orientation="vertical" className="flex flex-col md:flex-row gap-6 w-full">
-            <TabsList className="flex md:flex-col h-auto w-full md:w-56 bg-transparent gap-1 justify-start">
+            <TabsList className="flex md:flex-col h-auto w-full md:w-56 bg-transparent gap-1 justify-start overflow-x-auto pb-1">
               <TabsTrigger value="whatsapp" className="w-full justify-start data-[state=active]:bg-muted">
                 <Smartphone className="mr-2 h-4 w-4" />
                 Canais (WhatsApp / Insta)
@@ -775,7 +775,7 @@ function SettingsPage() {
 
     <TabsContent value="team" className="space-y-4">
       <Tabs defaultValue="profile" orientation="vertical" className="flex flex-col md:flex-row gap-6 w-full">
-        <TabsList className="flex md:flex-col h-auto w-full md:w-56 bg-transparent gap-1 justify-start">
+        <TabsList className="flex md:flex-col h-auto w-full md:w-56 bg-transparent gap-1 justify-start overflow-x-auto pb-1">
           <TabsTrigger value="profile" className="w-full justify-start data-[state=active]:bg-muted">
             <User className="mr-2 h-4 w-4" />
             Minha Conta
