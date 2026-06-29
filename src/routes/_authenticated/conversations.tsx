@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useInfiniteQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List, Hash, Smartphone, LayoutTemplate } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List, Hash, Smartphone, LayoutTemplate, ChevronLeft } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -41,6 +41,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import EmojiPicker from "emoji-picker-react";
 import TextareaAutosize from "react-textarea-autosize";
 import { TransferDialog } from "@/components/chat/transfer-dialog";
@@ -620,7 +621,10 @@ function ConversationsPage() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* List */}
-      <aside className="flex w-[360px] shrink-0 flex-col border-r border-border bg-card">
+      <aside className={cn(
+        "flex w-full md:w-[360px] shrink-0 flex-col border-r border-border bg-card",
+        selectedId ? "hidden md:flex" : "flex"
+      )}>
         {/* Loading bar — shows on any active fetch (initial, realtime refresh, next page) */}
         <div className="relative h-0.5 w-full overflow-hidden bg-transparent">
           {isConvFetching && (
@@ -777,24 +781,39 @@ function ConversationsPage() {
       </aside>
 
       {/* Chat */}
-      <section className="flex min-w-0 flex-1 flex-col bg-background">
+      <section className={cn(
+        "flex min-w-0 flex-1 flex-col bg-background",
+        !selectedId ? "hidden md:flex" : "flex"
+      )}>
         {selected ? (
           <ChatPanel 
             conv={selected} 
             showSidebar={showSidebar}
             onToggleSidebar={() => setShowSidebar(!showSidebar)}
             onAssigned={() => setTab("active")}
+            onBack={() => setSelectedId(null)}
           />
         ) : (
           <EmptyChat />
         )}
       </section>
 
-      {/* Contact Info Sidebar */}
+      {/* Contact Info Sidebar - Desktop */}
       {selected && showSidebar && (
         <aside className="hidden w-[320px] shrink-0 flex-col border-l border-border bg-card lg:flex xl:w-[380px] 2xl:w-[420px] overflow-hidden">
           <ContactSidebar conv={selected} onClose={() => setShowSidebar(false)} />
         </aside>
+      )}
+
+      {/* Contact Info Sidebar - Mobile */}
+      {selected && (
+        <Sheet open={showSidebar} onOpenChange={setShowSidebar}>
+          <SheetContent className="w-full sm:w-[400px] p-0 flex flex-col lg:hidden">
+            <SheetTitle className="sr-only">Informações do Contato</SheetTitle>
+            <SheetDescription className="sr-only">Detalhes e histórico do contato selecionado</SheetDescription>
+            <ContactSidebar conv={selected} onClose={() => setShowSidebar(false)} />
+          </SheetContent>
+        </Sheet>
       )}
     </div>
   );
@@ -901,7 +920,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
     <div className="flex h-full flex-col bg-background/50">
       <div className="flex justify-between items-center p-3 pb-0">
         <h3 className="text-sm font-semibold ml-2 text-muted-foreground">Perfil</h3>
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground rounded-full hover:bg-muted" onClick={onClose}>
+        <Button variant="ghost" size="icon" className="hidden lg:flex h-8 w-8 text-muted-foreground rounded-full hover:bg-muted" onClick={onClose}>
           <X className="h-4 w-4" />
         </Button>
       </div>
@@ -1380,12 +1399,14 @@ function ChatPanel({
   conv,
   showSidebar,
   onToggleSidebar,
-  onAssigned
+  onAssigned,
+  onBack
 }: { 
   conv: ConvRow;
   showSidebar?: boolean;
   onToggleSidebar?: () => void;
   onAssigned?: () => void;
+  onBack?: () => void;
 }) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
@@ -2060,9 +2081,22 @@ function ChatPanel({
     <div className="flex h-full min-w-0">
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-border bg-card px-5 py-3 shadow-sm z-10">
-          <div className="flex items-center gap-3">
-            <div className="relative">
+        <header className="flex items-center justify-between border-b border-border bg-card px-3 md:px-5 py-3 shadow-sm z-10">
+          <div 
+            className="flex items-center gap-2 md:gap-3 cursor-pointer hover:bg-muted/50 rounded-md p-1 -ml-1 transition-colors"
+            onClick={onToggleSidebar}
+          >
+            {onBack && (
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="md:hidden h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
+                onClick={(e) => { e.stopPropagation(); onBack(); }}
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </Button>
+            )}
+            <div className="relative shrink-0">
               <Avatar className="h-10 w-10 ring-2 ring-primary/10 ring-offset-2">
                 <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
                   {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
@@ -2071,25 +2105,24 @@ function ChatPanel({
               <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-success" />
             </div>
             <div>
-              <div className="flex items-center gap-2 text-sm font-semibold">
+              <div className="flex items-center gap-1.5 text-[15px] font-semibold text-foreground">
                 {contactName}
-                <ChannelIcon channel={conv.channel} className="h-4 w-4" />
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                {conv.department?.name && <span className="font-medium text-foreground/70">{conv.department.name}</span>}
-                {conv.department?.name && <span>•</span>}
-                <StatusBadge status={conv.status} />
+              <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground mt-0.5">
+                <ChannelIcon channel={conv.channel} className="h-3.5 w-3.5" />
+                {conv.department?.name && <span>{conv.department.name}</span>}
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             {conv.status === "active" && !isGroup && (
               <>
                 <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="h-9 gap-2 border-green-200 text-green-600 hover:bg-green-50 hover:text-green-700 font-medium"
-                  onClick={() => {
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-10 w-10 text-muted-foreground hover:bg-muted/50 rounded-full"
+                  onClick={(e) => {
+                    e.stopPropagation();
                     if (conv.contact?.phone) {
                       const name = conv.contact.name !== "Desconhecido" ? conv.contact.name : undefined;
                       const currentInstance = instances?.find((i: any) => i.id === conv.whatsapp_instance_id);
@@ -2098,18 +2131,17 @@ function ChatPanel({
                   }}
                   title="Ligar para contato"
                 >
-                  <Phone className="h-4 w-4" />
-                  <span className="hidden sm:inline">Ligar</span>
+                  <Phone className="h-5 w-5" />
                 </Button>
                 <TransferDialog conv={conv} />
                 <Button
-                  variant="default"
-                  size="sm"
-                  className="hidden md:flex h-8"
-                  onClick={() => setResolveDialogOpen(true)}
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 text-muted-foreground hover:bg-muted/50 rounded-full"
+                  onClick={(e) => { e.stopPropagation(); setResolveDialogOpen(true); }}
+                  title="Encerrar Atendimento"
                 >
-                  <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
-                  Encerrar
+                  <CheckCircle2 className="h-5 w-5" />
                 </Button>
 
                 {/* Resolve Dialog */}
@@ -2306,197 +2338,219 @@ function ChatPanel({
           <div className="flex items-end gap-2">
             {!isRecording ? (
               <>
-                <input type="file" id="file-upload" hidden onChange={handleFileChange} />
-                <label htmlFor="file-upload" className="rounded p-2 text-muted-foreground hover:bg-accent cursor-pointer" title="Anexar arquivo">
-                  <Paperclip className="h-4 w-4" />
-                </label>
-                
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button className="rounded p-2 text-muted-foreground hover:bg-accent" title="Emoji">
-                      <Smile className="h-4 w-4" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent side="top" align="start" className="p-0 border-none w-auto shadow-xl">
-                    <EmojiPicker onEmojiClick={(e) => setText(prev => prev + e.emoji)} />
-                  </PopoverContent>
-                </Popover>
+                <div className={cn(
+                  "flex-1 flex items-end bg-muted/50 rounded-3xl border border-transparent shadow-sm px-1 py-1 focus-within:border-border transition-colors",
+                  isInternalNote && "bg-amber-100/50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50"
+                )}>
+                  
+                  {/* Left Side: Emoji */}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button className="rounded-full p-2.5 text-muted-foreground hover:text-foreground mb-0.5 shrink-0 transition-colors" title="Emoji">
+                        <Smile className="h-6 w-6" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent side="top" align="start" className="p-0 border-none w-auto shadow-xl" sideOffset={10}>
+                      <EmojiPicker onEmojiClick={(e) => setText(prev => prev + e.emoji)} />
+                    </PopoverContent>
+                  </Popover>
 
-                {conv.channel === 'whatsapp' && (
-                  <button 
-                    onClick={() => setTemplateDialogOpen(true)}
-                    className="rounded p-2 text-muted-foreground hover:bg-accent" 
-                    title="Enviar Template (Bypass 24h)"
-                  >
-                    <LayoutTemplate className="h-4 w-4" />
-                  </button>
-                )}
-
-                <Popover open={quickMsgItems.items.length > 0} onOpenChange={() => {}}>
-                  <PopoverTrigger asChild>
-                    <button 
-                      className="rounded p-2 text-muted-foreground hover:bg-accent"
-                      onClick={() => setText(prev => prev.startsWith('/') ? prev : '/' + prev)}
-                      title="Mensagens Rápidas"
-                    >
-                      <MessageSquarePlus className="h-4 w-4" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent 
-                    side="top" 
-                    align="start" 
-                    className="w-80 p-0 shadow-lg border-border"
-                    onOpenAutoFocus={(e) => e.preventDefault()}
-                    onCloseAutoFocus={(e) => {
-                      e.preventDefault();
-                      document.getElementById('chat-input')?.focus();
+                  {/* Text Input */}
+                  <TextareaAutosize
+                    id="chat-input"
+                    spellCheck={true}
+                    autoCorrect="on"
+                    value={text}
+                    onChange={(e) => {
+                      setText(e.target.value);
+                      setQuickMsgIndex(0);
                     }}
-                  >
-                    <div className="max-h-[300px] overflow-y-auto p-1 relative">
-                      {quickMsgItems.items.length === 0 && (
-                        <div className="py-6 text-center text-sm text-muted-foreground">Nenhum atalho encontrado.</div>
-                      )}
-                      {quickMsgItems.items.map((item) => {
-                        if (item.type === 'header') {
-                          return (
-                            <div 
-                              key={`header-${item.id}`}
-                              onClick={() => {
-                                if (item.folderId) {
-                                  setExpandedFolders(prev => {
-                                    const next = new Set(prev);
-                                    if (next.has(item.folderId)) next.delete(item.folderId);
-                                    else next.add(item.folderId);
-                                    return next;
-                                  });
-                                }
-                              }}
-                              className={cn(
-                                "px-2 py-1.5 mt-1 mb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 bg-muted/50 sticky top-0 backdrop-blur-md z-10 flex items-center justify-between rounded-sm",
-                                item.folderId ? "cursor-pointer hover:bg-muted/80 transition-colors" : ""
-                              )}
-                            >
-                              <div className="flex items-center gap-1.5">
-                                {item.folderId === null ? <MessageSquarePlus className="h-3 w-3" /> : (item.isExpanded ? <FolderOpen className="h-3 w-3" /> : <Folder className="h-3 w-3" />)}
-                                {item.name}
-                              </div>
-                            </div>
-                          );
+                    onKeyDown={(e) => {
+                      if (quickMsgItems.focusableCount > 0) {
+                        if (e.key === "ArrowDown") {
+                          e.preventDefault();
+                          setQuickMsgIndex(prev => Math.min(prev + 1, quickMsgItems.focusableCount - 1));
+                          return;
                         }
-
-                        const { qm, index } = item;
-                        return (
-                          <div
-                            key={qm.id}
-                            onClick={() => {
-                              insertQuickMessage(qm);
-                              setQuickMsgIndex(0);
-                            }}
-                            className={cn(
-                              "flex flex-col items-start gap-1 p-2 cursor-pointer rounded-sm mb-0.5", 
-                              index === quickMsgIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50 text-foreground"
-                            )}
-                          >
-                            <div className="flex items-center gap-2 w-full">
-                              <span className="font-semibold text-xs flex-1 truncate">{qm.name || "Mensagem sem nome"}</span>
-                              <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded shrink-0">{qm.shortcut}</span>
-                              {qm.media_url && (
-                                <span className="shrink-0 text-muted-foreground ml-1">
-                                  {qm.media_type === 'image' ? <ImageIcon className="h-3 w-3" /> :
-                                   qm.media_type === 'audio' ? <Headphones className="h-3 w-3" /> :
-                                   qm.media_type === 'video' ? <Video className="h-3 w-3" /> :
-                                   <Paperclip className="h-3 w-3" />}
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-xs text-muted-foreground line-clamp-1">{qm.content || "Contém apenas anexo"}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-                
-                <Button 
-                  variant={isInternalNote ? "default" : "ghost"} 
-                  size="icon" 
-                  className={cn("shrink-0 h-9 w-9 rounded-full", isInternalNote ? "bg-amber-400 text-amber-950 hover:bg-amber-500" : "text-muted-foreground")}
-                  title="Nota Interna"
-                  onClick={() => setIsInternalNote(!isInternalNote)}
-                >
-                  <FileText className="h-5 w-5" />
-                </Button>
-
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="shrink-0 h-9 w-9 rounded-full text-muted-foreground hover:text-amber-500"
-                  title="Corrigir com IA"
-                  onClick={() => fixTextMutation.mutate(text)}
-                  disabled={fixTextMutation.isPending || !text.trim()}
-                >
-                  {fixTextMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                </Button>
-
-                <TextareaAutosize
-                  id="chat-input"
-                  spellCheck={true}
-                  autoCorrect="on"
-                  value={text}
-                  onChange={(e) => {
-                    setText(e.target.value);
-                    setQuickMsgIndex(0); // reset index when typing
-                  }}
-                  onKeyDown={(e) => {
-                    if (quickMsgItems.focusableCount > 0) {
-                      if (e.key === "ArrowDown") {
-                        e.preventDefault();
-                        setQuickMsgIndex(prev => Math.min(prev + 1, quickMsgItems.focusableCount - 1));
-                        return;
-                      }
-                      if (e.key === "ArrowUp") {
-                        e.preventDefault();
-                        setQuickMsgIndex(prev => Math.max(prev - 1, 0));
-                        return;
+                        if (e.key === "ArrowUp") {
+                          e.preventDefault();
+                          setQuickMsgIndex(prev => Math.max(prev - 1, 0));
+                          return;
+                        }
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          const selectedItem = quickMsgItems.items.find(i => i.type === 'message' && i.index === quickMsgIndex);
+                          if (selectedItem) insertQuickMessage(selectedItem.qm);
+                          setQuickMsgIndex(0);
+                          return;
+                        }
                       }
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        const selectedItem = quickMsgItems.items.find(i => i.type === 'message' && i.index === quickMsgIndex);
-                        if (selectedItem) insertQuickMessage(selectedItem.qm);
-                        setQuickMsgIndex(0);
-                        return;
+                        handleSend();
                       }
-                    }
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  placeholder="Digite uma mensagem..."
-                  minRows={1}
-                  maxRows={6}
-                  className={cn(
-                    "flex w-full rounded-xl border-transparent bg-muted/50 px-4 py-3 pb-3 text-base shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 resize-none",
-                    isInternalNote && "bg-amber-100/50 dark:bg-amber-900/20 placeholder:text-amber-700/50 dark:placeholder:text-amber-400/50 border-amber-200 dark:border-amber-800/50"
-                  )}
-                />
+                    }}
+                    placeholder="Mensagem"
+                    minRows={1}
+                    maxRows={6}
+                    className={cn(
+                      "flex-1 w-full bg-transparent px-1 py-2.5 pb-2.5 text-[15px] placeholder:text-muted-foreground focus-visible:outline-none resize-none leading-relaxed",
+                      isInternalNote && "placeholder:text-amber-700/50 dark:placeholder:text-amber-400/50"
+                    )}
+                  />
+
+                  {/* Right Side: Attach Menu */}
+                  <input type="file" id="file-upload" hidden onChange={handleFileChange} />
+                  
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="rounded-full p-2.5 text-muted-foreground hover:text-foreground mb-0.5 shrink-0 transition-colors" title="Anexos e Ações">
+                        <Paperclip className="h-5 w-5 -rotate-45" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56" sideOffset={16}>
+                      <DropdownMenuItem asChild>
+                        <label htmlFor="file-upload" className="cursor-pointer flex items-center w-full">
+                          <ImageIcon className="mr-2 h-4 w-4 text-blue-500" />
+                          Galeria / Arquivo
+                        </label>
+                      </DropdownMenuItem>
+                      
+                      <DropdownMenuSeparator />
+
+                      <DropdownMenuItem onClick={() => setText(prev => prev.startsWith('/') ? prev : '/' + prev)}>
+                        <MessageSquarePlus className="mr-2 h-4 w-4 text-violet-500" />
+                        Mensagens Rápidas
+                      </DropdownMenuItem>
+                      
+                      {conv.channel === 'whatsapp' && (
+                        <DropdownMenuItem onClick={() => setTemplateDialogOpen(true)}>
+                          <LayoutTemplate className="mr-2 h-4 w-4 text-emerald-500" />
+                          Enviar Template
+                        </DropdownMenuItem>
+                      )}
+                      
+                      <DropdownMenuSeparator />
+                      
+                      <DropdownMenuItem onClick={() => setIsInternalNote(!isInternalNote)}>
+                        <FileText className={cn("mr-2 h-4 w-4", isInternalNote ? "text-amber-500" : "text-amber-500")} />
+                        {isInternalNote ? "Desativar Nota Interna" : "Nota Interna"}
+                      </DropdownMenuItem>
+                      
+                      <DropdownMenuItem 
+                        onClick={() => fixTextMutation.mutate(text)}
+                        disabled={!text.trim()}
+                      >
+                        <Sparkles className="mr-2 h-4 w-4 text-sky-500" />
+                        Corrigir texto com IA
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  {/* We can include quick messages popover invisibly or tied to the trigger above */}
+                  <Popover open={quickMsgItems.items.length > 0} onOpenChange={() => {}}>
+                    <PopoverTrigger className="sr-only" />
+                    <PopoverContent 
+                      side="top" 
+                      align="start" 
+                      className="w-80 p-0 shadow-lg border-border"
+                      onOpenAutoFocus={(e) => e.preventDefault()}
+                      onCloseAutoFocus={(e) => {
+                        e.preventDefault();
+                        document.getElementById('chat-input')?.focus();
+                      }}
+                    >
+                      <div className="max-h-[300px] overflow-y-auto p-1 relative">
+                        {quickMsgItems.items.length === 0 && (
+                          <div className="py-6 text-center text-sm text-muted-foreground">Nenhum atalho encontrado.</div>
+                        )}
+                        {quickMsgItems.items.map((item) => {
+                          if (item.type === 'header') {
+                            return (
+                              <div 
+                                key={`header-${item.id}`}
+                                onClick={() => {
+                                  if (item.folderId) {
+                                    setExpandedFolders(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(item.folderId)) next.delete(item.folderId);
+                                      else next.add(item.folderId);
+                                      return next;
+                                    });
+                                  }
+                                }}
+                                className={cn(
+                                  "px-2 py-1.5 mt-1 mb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 bg-muted/50 sticky top-0 backdrop-blur-md z-10 flex items-center justify-between rounded-sm",
+                                  item.folderId ? "cursor-pointer hover:bg-muted/80 transition-colors" : ""
+                                )}
+                              >
+                                <div className="flex items-center gap-1.5">
+                                  {item.folderId === null ? <MessageSquarePlus className="h-3 w-3" /> : (item.isExpanded ? <FolderOpen className="h-3 w-3" /> : <Folder className="h-3 w-3" />)}
+                                  {item.name}
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          const { qm, index } = item;
+                          return (
+                            <div
+                              key={qm.id}
+                              onClick={() => {
+                                insertQuickMessage(qm);
+                                setQuickMsgIndex(0);
+                              }}
+                              className={cn(
+                                "flex flex-col items-start gap-1 p-2 cursor-pointer rounded-sm mb-0.5", 
+                                index === quickMsgIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50 text-foreground"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 w-full">
+                                <span className="font-semibold text-xs flex-1 truncate">{qm.name || "Mensagem sem nome"}</span>
+                                <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded shrink-0">{qm.shortcut}</span>
+                                {qm.media_url && (
+                                  <span className="shrink-0 text-muted-foreground ml-1">
+                                    {qm.media_type === 'image' ? <ImageIcon className="h-3 w-3" /> :
+                                     qm.media_type === 'audio' ? <Headphones className="h-3 w-3" /> :
+                                     qm.media_type === 'video' ? <Video className="h-3 w-3" /> :
+                                     <Paperclip className="h-3 w-3" />}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-xs text-muted-foreground line-clamp-1">{qm.content || "Contém apenas anexo"}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+
+                </div>
+
+                {/* Outside Pill: Send / Mic */}
                 {(text.trim() || selectedFile) ? (
                   <Button
                     size="icon"
                     onClick={handleSend}
                     disabled={send.isPending}
-                    className={cn(isInternalNote && "bg-amber-500 hover:bg-amber-600 text-amber-950")}
+                    className={cn(
+                      "mb-0.5 rounded-full h-11 w-11 shrink-0 bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-all",
+                      isInternalNote && "bg-amber-500 hover:bg-amber-600 text-amber-950"
+                    )}
                   >
-                    <Send className="h-4 w-4" />
+                    <Send className="h-5 w-5 ml-1" />
                   </Button>
                 ) : (
                   <Button
                     size="icon"
                     variant="ghost"
-                    className={cn("text-muted-foreground hover:text-foreground", isInternalNote && "hover:bg-amber-200")}
+                    className={cn(
+                      "mb-0.5 rounded-full h-11 w-11 shrink-0 bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-all",
+                      isInternalNote && "bg-amber-500 hover:bg-amber-600 text-amber-950"
+                    )}
                     onClick={startRecording}
                   >
-                    <Mic className="h-4 w-4" />
+                    <Mic className="h-5 w-5" />
                   </Button>
                 )}
               </>

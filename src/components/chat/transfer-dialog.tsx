@@ -102,9 +102,8 @@ export function TransferDialog({ conv }: { conv: any }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" title="Transferir Atendimento">
-          <ArrowRightLeft className="h-4 w-4 mr-2" />
-          Transferir
+        <Button variant="ghost" size="icon" className="h-10 w-10 text-muted-foreground hover:bg-muted/50 rounded-full" title="Transferir Atendimento">
+          <ArrowRightLeft className="h-5 w-5" />
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
