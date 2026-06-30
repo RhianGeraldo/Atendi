@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { evogo, EvoGoClient } from "@/integrations/evogo/client";
 import { supabase } from "@/integrations/supabase/client";
@@ -76,7 +77,10 @@ function SettingsPage() {
       "meta-llama/llama-3-8b-instruct:free",
       "google/gemma-7b-it:free"
     ],
-    active_chatbot_model: ""
+    active_chatbot_model: "",
+    sales_coach_prompt: "",
+    sales_coach_model: "",
+    sales_coach_instances: [] as string[]
   });
   const [newModelInput, setNewModelInput] = useState("");
 
@@ -223,7 +227,10 @@ function SettingsPage() {
             "meta-llama/llama-3-8b-instruct:free",
             "google/gemma-7b-it:free"
           ],
-          active_chatbot_model: company.ai_settings.active_chatbot_model || ""
+          active_chatbot_model: company.ai_settings.active_chatbot_model || "",
+          sales_coach_prompt: company.ai_settings.sales_coach_prompt || "",
+          sales_coach_model: company.ai_settings.sales_coach_model || "",
+          sales_coach_instances: company.ai_settings.sales_coach_instances || []
         });
       }
     }
@@ -992,6 +999,75 @@ function SettingsPage() {
                         </div>
                       </div>
                     )}
+                  </div>
+
+                    {/* Configuração do Sales Coach */}
+                  <div className="space-y-3 p-4 border rounded-lg bg-muted/30 mt-4">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      <h4 className="font-semibold text-sm">Prompt do Sales Coach (Treinador de Vendas)</h4>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Define como o treinador de vendas deve se comportar ao analisar o contexto da conversa. (Ex: "Atue como um treinador e sugira como contornar a objeção acima de forma persuasiva.")
+                    </p>
+                    <Textarea 
+                      placeholder="Você é um treinador de vendas..."
+                      className="min-h-[100px] text-sm"
+                      value={aiSettings.sales_coach_prompt}
+                      onChange={(e) => setAiSettings({...aiSettings, sales_coach_prompt: e.target.value})}
+                    />
+
+                    <div className="mt-4 pt-4 border-t border-border/50">
+                      <label className="text-sm font-medium">Modelo da IA do Sales Coach</label>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        Selecione ou digite o modelo específico que o Sales Coach usará (ex: openai/gpt-4o-mini ou openai/gpt-oss-120b:free).
+                      </p>
+                      <div className="flex items-center gap-2 max-w-md">
+                        <Select 
+                          value={aiSettings.sales_coach_model} 
+                          onValueChange={(val) => setAiSettings({...aiSettings, sales_coach_model: val})}
+                        >
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Escolha ou deixe em branco para o padrão" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="openai/gpt-4o-mini">gpt-4o-mini (Padrão OpenAI)</SelectItem>
+                            <SelectItem value="openai/gpt-oss-120b:free">gpt-oss-120b:free (Padrão OpenRouter)</SelectItem>
+                            <SelectItem value="google/gemma-7b-it:free">gemma-7b-it:free</SelectItem>
+                            {aiSettings.chatbot_models.map((mod) => (
+                              !["openai/gpt-4o-mini", "openai/gpt-oss-120b:free", "google/gemma-7b-it:free"].includes(mod) && (
+                                <SelectItem key={mod} value={mod}>{mod}</SelectItem>
+                              )
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    
+                    <div className="mt-4 pt-4 border-t border-border/50">
+                      <label className="text-sm font-medium">Instâncias Ativas para o Sales Coach</label>
+                      <p className="text-xs text-muted-foreground mb-3">Selecione em quais canais/instâncias o botão do Sales Coach deve aparecer. Deixe vazio para ativar em todas.</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                        {instances?.map((inst: any) => {
+                          const isActive = aiSettings.sales_coach_instances.includes(inst.id);
+                          return (
+                            <div key={inst.id} className="flex items-center space-x-2 bg-background border p-2 rounded-md">
+                              <Switch 
+                                checked={isActive}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setAiSettings(prev => ({...prev, sales_coach_instances: [...prev.sales_coach_instances, inst.id]}));
+                                  } else {
+                                    setAiSettings(prev => ({...prev, sales_coach_instances: prev.sales_coach_instances.filter(id => id !== inst.id)}));
+                                  }
+                                }}
+                              />
+                              <span className="text-sm truncate font-medium">{inst.name}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="pt-2">
