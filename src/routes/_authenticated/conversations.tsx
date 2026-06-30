@@ -1437,9 +1437,16 @@ function ChatPanel({
     },
   });
 
-  const showCoach = (companySettings?.ai_settings as any)?.sales_coach_model && 
-    ((companySettings?.ai_settings as any)?.sales_coach_active_instances?.includes(conv.whatsapp_instance_id!) || 
-    !(companySettings?.ai_settings as any)?.sales_coach_active_instances?.length);
+  const aiSettings = companySettings?.ai_settings as any;
+  const hasAiConfigured = aiSettings && (
+    (aiSettings.engines?.chatbot && aiSettings.engines.chatbot !== 'none') ||
+    (aiSettings.engines?.text && aiSettings.engines.text !== 'none') ||
+    aiSettings.keys?.openai || aiSettings.keys?.openrouter || aiSettings.keys?.groq
+  );
+
+  const showCoach = hasAiConfigured && 
+    (aiSettings?.sales_coach_active_instances?.includes(conv.whatsapp_instance_id!) || 
+    !aiSettings?.sales_coach_active_instances?.length);
 
   useEffect(() => {
     const handleInsert = (e: any) => {
