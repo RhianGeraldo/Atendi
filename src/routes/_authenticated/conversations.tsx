@@ -5,9 +5,10 @@ import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Ph
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, toggleContactLabelAction, createLabelAction, assignConversationAction, transferConversationAction, updateContactFromWhatsappAction, editMessageAction, deleteMessageAction, transcribeAudioAction, fixMessageTextAction } from "@/lib/api/chat.functions";
+import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, toggleContactLabelAction, createLabelAction, assignConversationAction, transferConversationAction, updateContactFromWhatsappAction, editMessageAction, deleteMessageAction, transcribeAudioAction, fixMessageTextAction, salesCoachAction, salesCoachSuggestAction } from "@/lib/api/chat.functions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
@@ -99,6 +100,7 @@ interface ConvRow {
 function ConversationsPage() {
   const { c: searchConvId, tab: searchTab } = Route.useSearch();
   const qc = useQueryClient();
+  const isDesktop = useMediaQuery("(min-width: 768px)");
   const [tab, setTab] = useState<TabType>(searchTab || "waiting");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -800,15 +802,15 @@ function ConversationsPage() {
 
       {/* Contact Info Sidebar - Desktop */}
       {selected && showSidebar && (
-        <aside className="hidden w-[320px] shrink-0 flex-col border-l border-border bg-card lg:flex xl:w-[380px] 2xl:w-[420px] overflow-hidden">
+        <aside className="hidden w-[320px] shrink-0 flex-col border-l border-border bg-card md:flex xl:w-[380px] 2xl:w-[420px] overflow-hidden">
           <ContactSidebar conv={selected} onClose={() => setShowSidebar(false)} />
         </aside>
       )}
 
       {/* Contact Info Sidebar - Mobile */}
-      {selected && (
+      {selected && !isDesktop && (
         <Sheet open={showSidebar} onOpenChange={setShowSidebar}>
-          <SheetContent className="w-full sm:w-[400px] p-0 flex flex-col lg:hidden">
+          <SheetContent className="w-full sm:w-[400px] p-0 flex flex-col md:hidden">
             <SheetTitle className="sr-only">Informações do Contato</SheetTitle>
             <SheetDescription className="sr-only">Detalhes e histórico do contato selecionado</SheetDescription>
             <ContactSidebar conv={selected} onClose={() => setShowSidebar(false)} />
@@ -987,7 +989,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-y-auto min-w-0">
         <div className="px-4 pb-6 space-y-4">
           {/* AI Status Container */}
           {!isGroup && (
@@ -1101,11 +1103,11 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
           {/* Ficha Completa */}
           {conv.contact?.id && (
             <div className="bg-card border border-border/60 rounded-xl shadow-sm overflow-hidden">
-              <ContactDetailsTabs contactId={conv.contact?.id} />
+              <ContactDetailsTabs contactId={conv.contact?.id} conversationId={conv.id} />
             </div>
           )}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }
@@ -1417,7 +1419,40 @@ function ChatPanel({
   const [isInternalNote, setIsInternalNote] = useState(false);
   const [selectedFile, setSelectedFile] = useState<{ file: File; base64: string; type: string } | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
+  const [isCoaching, setIsCoaching] = useState(false);
   const [editingMessage, setEditingMessage] = useState<MessageRow | null>(null);
+  
+
+  const { data: companySettings } = useQuery({
+    queryKey: ["company-settings-chat", activeCompanyId],
+    enabled: !!activeCompanyId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("companies")
+        .select("ai_settings")
+        .eq("id", activeCompanyId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const showCoach = (companySettings?.ai_settings as any)?.sales_coach_model && 
+    ((companySettings?.ai_settings as any)?.sales_coach_active_instances?.includes(conv.whatsapp_instance_id!) || 
+    !(companySettings?.ai_settings as any)?.sales_coach_active_instances?.length);
+
+  useEffect(() => {
+    const handleInsert = (e: any) => {
+      if (e.detail) {
+        setText(prev => prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + e.detail);
+        setTimeout(() => {
+          document.getElementById("chat-input")?.focus();
+        }, 100);
+      }
+    };
+    window.addEventListener("insert-chat-text", handleInsert);
+    return () => window.removeEventListener("insert-chat-text", handleInsert);
+  }, []);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [quickMsgIndex, setQuickMsgIndex] = useState(0);
@@ -2081,7 +2116,7 @@ function ChatPanel({
     <div className="flex h-full min-w-0">
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-border bg-card px-3 md:px-5 py-3 shadow-sm z-10">
+        <header className="flex items-center justify-between border-b border-border bg-card px-3 md:px-5 py-3 shadow-sm z-10 min-w-0 w-full">
           <div 
             className="flex items-center gap-2 md:gap-3 cursor-pointer hover:bg-muted/50 rounded-md p-1 -ml-1 transition-colors"
             onClick={onToggleSidebar}
@@ -2354,6 +2389,40 @@ function ChatPanel({
                       <EmojiPicker onEmojiClick={(e) => setText(prev => prev + e.emoji)} />
                     </PopoverContent>
                   </Popover>
+
+                  {/* Left Side: Sales Coach */}
+                  {showCoach && (
+                    <button 
+                      className="rounded-full p-2.5 text-amber-500 hover:text-amber-600 mb-0.5 shrink-0 transition-colors bg-amber-500/10 hover:bg-amber-500/20" 
+                      title="Sales Coach (Analisar com IA)"
+                      disabled={isCoaching}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (isCoaching) return;
+                        setIsCoaching(true);
+                        try {
+                          toast.loading("Sales Coach analisando a conversa...", { id: "coach" });
+                          await salesCoachAction({ data: { conversationId: conv.id } });
+                          const res = await salesCoachSuggestAction({ data: { conversationId: conv.id } });
+                          if (res?.success && res.text) {
+                            await send.mutateAsync({ 
+                              content: `🤖 **Guia Tático do Coach**\n\n${res.text}`,
+                              isInternal: true
+                            });
+                            toast.success("Guia Tático adicionado às notas internas!", { id: "coach" });
+                          } else {
+                            toast.dismiss("coach");
+                          }
+                        } catch (err: any) {
+                          toast.error(err.message || "Falha ao gerar análise", { id: "coach" });
+                        } finally {
+                          setIsCoaching(false);
+                        }
+                      }}
+                    >
+                      {isCoaching ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bot className="h-5 w-5" />}
+                    </button>
+                  )}
 
                   {/* Text Input */}
                   <TextareaAutosize

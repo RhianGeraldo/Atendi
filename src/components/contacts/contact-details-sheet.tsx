@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
-import { History, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash } from "lucide-react";
+import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { ChannelIcon } from "@/components/common/channel-icon";
@@ -690,7 +690,18 @@ function ContactJourney({ contactId }: { contactId: string }) {
   );
 }
 
-export function ContactDetailsTabs({ contactId }: { contactId: string }) {
+export function ContactDetailsTabs({ contactId, conversationId }: { contactId: string; conversationId?: string }) {
+  const [activeTab, setActiveTab] = useState("jornada");
+
+  useEffect(() => {
+    const handleSwitch = (e: any) => {
+      if (e.detail) {
+        setActiveTab(e.detail);
+      }
+    };
+    window.addEventListener("open-contact-tab", handleSwitch);
+    return () => window.removeEventListener("open-contact-tab", handleSwitch);
+  }, []);
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
 
   const toggleSession = (id: string) => {
@@ -843,7 +854,7 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
   }
 
   return (
-    <Tabs defaultValue="jornada" className="flex-1 flex flex-col h-full min-h-0 w-full">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col h-full min-h-0 w-full">
       <div className="px-4 pt-4 border-b w-full">
         <TabsList className="grid w-full grid-cols-3 h-auto p-1 bg-muted/50 mb-3 gap-1">
           <TabsTrigger value="jornada" className="px-1 py-1.5 text-[10px] sm:text-[11px] font-bold truncate">Jornada</TabsTrigger>
@@ -855,7 +866,9 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
         </TabsList>
       </div>
 
-      <ScrollArea className="flex-1 p-4">
+      <div className="flex-1 p-4 overflow-y-auto overflow-x-hidden min-w-0">
+
+
 
         <TabsContent value="jornada" className="mt-0">
           <ContactJourney contactId={contactId} />
@@ -1081,7 +1094,7 @@ export function ContactDetailsTabs({ contactId }: { contactId: string }) {
         <TabsContent value="ads" className="mt-0">
           <ContactAdsHistory contactId={contactId} />
         </TabsContent>
-      </ScrollArea>
+      </div>
     </Tabs>
   );
 }

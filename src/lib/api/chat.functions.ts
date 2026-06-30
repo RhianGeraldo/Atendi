@@ -1992,3 +1992,269 @@ export const transcribeCallAction = createServerFn({ method: "POST" })
 
     return { success: true, text: apiData.text };
   });
+
+export const salesCoachAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    conversationId: z.string().uuid(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+
+    // 1. Obter a empresa da conversa
+    const { data: conv } = await supabaseAdmin
+      .from("conversations")
+      .select("contacts(company_id, name)")
+      .eq("id", data.conversationId)
+      .single();
+
+    const companyId = conv?.contacts?.company_id;
+    if (!companyId) throw new Error("ID da empresa não encontrado.");
+    const contactName = conv?.contacts?.name || "Cliente";
+
+    // 2. Obter configurações de IA
+    const { data: company } = await supabaseAdmin
+      .from('companies')
+      .select('ai_settings')
+      .eq('id', companyId)
+      .single();
+
+    const aiSettings = company?.ai_settings as any || {};
+    let provider = aiSettings.engines?.chatbot || aiSettings.engines?.text;
+
+    if (!provider || provider === 'none') {
+      if (aiSettings.keys?.openai) provider = 'openai';
+      else if (aiSettings.keys?.openrouter) provider = 'openrouter';
+      else if (aiSettings.keys?.groq) provider = 'groq';
+    }
+
+    if (!provider || provider === 'none') {
+      throw new Error("Geração de IA não está habilitada.");
+    }
+
+    const apiKey = aiSettings.keys?.[provider];
+
+    if (!apiKey) {
+      throw new Error(`Nenhuma chave de API configurada para o provedor: ${provider}`);
+    }
+
+    // 3. Obter últimas mensagens
+    const { data: messages } = await supabaseAdmin
+      .from('messages')
+      .select('content, sender_type, media_type')
+      .eq('conversation_id', data.conversationId)
+      .order('created_at', { ascending: false })
+      .limit(15);
+
+    if (!messages || messages.length === 0) {
+      throw new Error("Nenhuma mensagem para analisar.");
+    }
+
+    const formattedHistory = messages.reverse().map(m => {
+      const role = m.sender_type === 'contact' ? contactName : 'Vendedor';
+      const text = m.media_type === 'text' ? m.content : `[Mídia: ${m.media_type}]`;
+      return `${role}: ${text}`;
+    }).join('\n');
+
+    let systemPrompt = aiSettings.sales_coach_prompt || "Você é um treinador de vendas de elite.";
+    systemPrompt += `
+    
+Abaixo está o histórico recente da conversa. Analise o atendimento e gere uma tabela de análise estruturada em Markdown com exatamente as seguintes colunas: Item, Avaliação, e Trechos de Referência.
+Avalie rigorosamente: 1. Abertura, 2. Descoberta de necessidades, 3. Comunicação, 4. Técnicas de vendas, 5. Oportunidades perdidas, 6. Erros encontrados.
+Depois, adicione "7. Notas (0-10)" para: Empatia, Qualificação, Comunicação, Persuasão, Condução, e Nota Geral.
+Por fim, adicione "8. Sugestões de melhoria" em bullet points e "9. Resumo executivo".
+Responda APENAS com o texto da tabela em markdown e nada mais.`;
+
+    systemPrompt += `\n\nHistórico:\n\n${formattedHistory}`;
+
+    let suggestion = "";
+
+    try {
+      const customModel = aiSettings.sales_coach_model;
+      if (provider === 'openai') {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: customModel || 'gpt-4o-mini',
+            messages: [{ role: 'system', content: systemPrompt }]
+          })
+        });
+        if (!response.ok) throw new Error(`OpenAI Erro: ${response.status}`);
+        const json = await response.json();
+        suggestion = json.choices[0].message.content;
+      } else if (provider === 'groq') {
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: customModel || 'llama3-70b-8192',
+            messages: [{ role: 'system', content: systemPrompt }]
+          })
+        });
+        if (!response.ok) throw new Error(`Groq Erro: ${response.status}`);
+        const json = await response.json();
+        suggestion = json.choices[0].message.content;
+      } else if (provider === 'openrouter') {
+        const model = customModel || aiSettings.active_chatbot_model || 'openai/gpt-oss-120b:free';
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: 'system', content: systemPrompt }]
+          })
+        });
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`OpenRouter Erro: ${response.status} - ${errText}`);
+        }
+        const json = await response.json();
+        suggestion = json.choices[0].message.content;
+      }
+    } catch (e: any) {
+      console.error('[salesCoachAction] Error:', e);
+      throw new Error(`Falha ao gerar análise: ${e.message}`);
+    }
+
+    // 4. Salvar Análise no Banco
+    const { error: insertError } = await supabaseAdmin
+      .from('sales_coach_analyses')
+      .insert({
+        conversation_id: data.conversationId,
+        company_id: companyId,
+        analysis_markdown: suggestion,
+        created_by: userId
+      });
+      
+    if (insertError) {
+      console.error("Erro ao salvar análise:", insertError);
+    }
+
+    return { success: true, suggestion: suggestion.trim() };
+  });
+
+export const salesCoachSuggestAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    conversationId: z.string().uuid(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+
+    // 1. Obter a empresa e o último relatório
+    const { data: conv } = await supabaseAdmin
+      .from("conversations")
+      .select("contacts(company_id, name)")
+      .eq("id", data.conversationId)
+      .single();
+
+    const companyId = conv?.contacts?.company_id;
+    if (!companyId) throw new Error("ID da empresa não encontrado.");
+    const contactName = conv?.contacts?.name || "Cliente";
+
+    const { data: latestAnalysis } = await supabaseAdmin
+      .from('sales_coach_analyses')
+      .select('analysis_markdown')
+      .eq('conversation_id', data.conversationId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!latestAnalysis) {
+      throw new Error("Nenhuma análise encontrada. Gere a análise primeiro.");
+    }
+
+    // 2. Obter configurações de IA
+    const { data: company } = await supabaseAdmin
+      .from('companies')
+      .select('ai_settings')
+      .eq('id', companyId)
+      .single();
+
+    const aiSettings = company?.ai_settings as any || {};
+    let provider = aiSettings.engines?.chatbot || aiSettings.engines?.text;
+
+    if (!provider || provider === 'none') {
+      if (aiSettings.keys?.openai) provider = 'openai';
+      else if (aiSettings.keys?.openrouter) provider = 'openrouter';
+      else if (aiSettings.keys?.groq) provider = 'groq';
+    }
+
+    if (!provider || provider === 'none') {
+      throw new Error("Geração de IA não está habilitada.");
+    }
+
+    const apiKey = aiSettings.keys?.[provider];
+    if (!apiKey) throw new Error(`Nenhuma chave de API configurada para o provedor: ${provider}`);
+
+    // 3. Obter últimas mensagens
+    const { data: messages } = await supabaseAdmin
+      .from('messages')
+      .select('content, sender_type, media_type')
+      .eq('conversation_id', data.conversationId)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    const formattedHistory = (messages || []).reverse().map(m => {
+      const role = m.sender_type === 'contact' ? contactName : 'Vendedor';
+      const text = m.media_type === 'text' ? m.content : `[Mídia: ${m.media_type}]`;
+      return `${role}: ${text}`;
+    }).join('\n');
+
+    let systemPrompt = "Você é um treinador de vendas tático. Baseado na análise do atendimento e nas últimas mensagens abaixo, dê uma instrução RÁPIDA, TÁTICA e DIRETA para o vendedor sobre o que ele deve fazer agora.\n\nSua resposta deve obrigatoriamente seguir este formato em Markdown:\n**🎯 Objetivo:** [Qual o objetivo da próxima mensagem]\n**💡 Estratégia:** [Qual técnica de vendas usar]\n**💬 Sugestão de fala:** \"[Uma ou duas frases bem curtas e naturais para o vendedor enviar]\"\n\nNão escreva NADA fora desse formato.\n\n";
+    systemPrompt += `=== ANÁLISE ===\n${latestAnalysis.analysis_markdown}\n\n`;
+    systemPrompt += `=== ÚLTIMAS MENSAGENS ===\n${formattedHistory}`;
+
+    let suggestion = "";
+
+    try {
+      const customModel = aiSettings.sales_coach_model;
+      if (provider === 'openai') {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: customModel || 'gpt-4o-mini', messages: [{ role: 'system', content: systemPrompt }] })
+        });
+        if (!response.ok) throw new Error(`OpenAI Erro: ${response.status}`);
+        const json = await response.json();
+        suggestion = json.choices[0].message.content;
+      } else if (provider === 'groq') {
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: customModel || 'llama3-70b-8192', messages: [{ role: 'system', content: systemPrompt }] })
+        });
+        if (!response.ok) throw new Error(`Groq Erro: ${response.status}`);
+        const json = await response.json();
+        suggestion = json.choices[0].message.content;
+      } else if (provider === 'openrouter') {
+        const model = customModel || aiSettings.active_chatbot_model || 'openai/gpt-oss-120b:free';
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: model, messages: [{ role: 'system', content: systemPrompt }] })
+        });
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`OpenRouter Erro: ${response.status} - ${errText}`);
+        }
+        const json = await response.json();
+        suggestion = json.choices[0].message.content;
+      }
+    } catch (e: any) {
+      console.error('[salesCoachSuggestAction] Error:', e);
+      throw new Error(`Falha ao gerar sugestão: ${e.message}`);
+    }
+
+    return { success: true, text: suggestion.trim() };
+  });
