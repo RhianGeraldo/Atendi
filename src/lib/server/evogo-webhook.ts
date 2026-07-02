@@ -878,6 +878,58 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         }
       }
 
+      // 5.5 Check for externalAdReply and cache thumbnail
+      if (Object.keys(metadata).length > 0 && metadata.externalAdReply && !isFromMe) {
+        try {
+          const sourceId = metadata.externalAdReply.sourceID || metadata.externalAdReply.sourceURL;
+          const origThumb = metadata.externalAdReply.thumbnailURL || metadata.externalAdReply.originalImageURL;
+          
+          if (sourceId && origThumb && origThumb.startsWith('http') && !origThumb.includes('supabase.co')) {
+            // Check if we already have this ad cached
+            const { data: existingAd } = await supabaseAdmin
+              .from('ad_leads')
+              .select('thumbnail_url')
+              .eq('source_id', sourceId)
+              .not('thumbnail_url', 'is', null)
+              .limit(1)
+              .maybeSingle();
+
+            if (existingAd && existingAd.thumbnail_url && existingAd.thumbnail_url.includes('supabase.co')) {
+              // Reuse existing cached thumbnail
+              metadata.externalAdReply.thumbnailURL = existingAd.thumbnail_url;
+              console.log(`[evogo-webhook] Reusing cached ad thumbnail for sourceId: ${sourceId}`);
+            } else {
+              // Download and cache
+              console.log(`[evogo-webhook] Downloading ad thumbnail for sourceId: ${sourceId}`);
+              const response = await fetch(origThumb);
+              if (response.ok) {
+                const arrayBuffer = await response.arrayBuffer();
+                const ext = origThumb.includes('.png') ? 'png' : 'jpg';
+                const safeSourceId = sourceId.replace(/[^a-zA-Z0-9_-]/g, '_');
+                const fileName = `ads/${company_id}/${safeSourceId}.${ext}`;
+                
+                const { error: uploadErr } = await supabaseAdmin.storage
+                  .from('media')
+                  .upload(fileName, arrayBuffer, {
+                    contentType: response.headers.get('content-type') || `image/${ext}`,
+                    upsert: true
+                  });
+                  
+                if (!uploadErr) {
+                  const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(fileName);
+                  metadata.externalAdReply.thumbnailURL = publicUrlData.publicUrl;
+                  console.log(`[evogo-webhook] Successfully cached ad thumbnail to: ${publicUrlData.publicUrl}`);
+                } else {
+                  console.error('[evogo-webhook] Error uploading ad thumbnail:', uploadErr);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.error('[evogo-webhook] Error caching ad thumbnail:', e);
+        }
+      }
+
       // 6. Insert message
       let participantJid: string | null = null;
       if (isFromMe && body.data?.message?.key?.participant) {

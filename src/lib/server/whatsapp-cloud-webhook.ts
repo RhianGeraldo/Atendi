@@ -661,14 +661,92 @@ async function processIncomingMessage(params: any) {
     metadata.frequently_forwarded = messageContext.frequently_forwarded || false;
   }
   if (messageReferral) {
+    const sourceId = messageReferral.source_id || messageReferral.source_url;
+    let thumbUrl = messageReferral.thumbnail_url || messageReferral.image_url;
+
+    if (sourceId && thumbUrl && thumbUrl.startsWith('http') && !thumbUrl.includes('supabase.co')) {
+      try {
+        const { data: existingAd } = await supabaseAdmin
+          .from('ad_leads')
+          .select('thumbnail_url')
+          .eq('source_id', sourceId)
+          .not('thumbnail_url', 'is', null)
+          .limit(1)
+          .maybeSingle();
+
+        if (existingAd && existingAd.thumbnail_url && existingAd.thumbnail_url.includes('supabase.co')) {
+          thumbUrl = existingAd.thumbnail_url;
+          console.log(`[Whatsapp Cloud] Reusing cached ad thumbnail for sourceId: ${sourceId}`);
+        } else {
+          console.log(`[Whatsapp Cloud] Downloading ad thumbnail for sourceId: ${sourceId}`);
+          const response = await fetch(thumbUrl);
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            const ext = thumbUrl.includes('.png') ? 'png' : 'jpg';
+            const safeSourceId = sourceId.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const fileName = `ads/${companyId}/${safeSourceId}.${ext}`;
+            
+            const { error: uploadErr } = await supabaseAdmin.storage
+              .from('media')
+              .upload(fileName, arrayBuffer, {
+                contentType: response.headers.get('content-type') || `image/${ext}`,
+                upsert: true
+              });
+              
+            if (!uploadErr) {
+              const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(fileName);
+              thumbUrl = publicUrlData.publicUrl;
+              console.log(`[Whatsapp Cloud] Successfully cached ad thumbnail to: ${thumbUrl}`);
+            } else {
+              console.error('[Whatsapp Cloud] Error uploading ad thumbnail:', uploadErr);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[Whatsapp Cloud] Error caching ad thumbnail:', e);
+      }
+    }
+
     metadata.externalAdReply = {
       title: messageReferral.headline,
       body: messageReferral.body,
-      thumbnailURL: messageReferral.thumbnail_url || messageReferral.image_url,
+      thumbnailURL: thumbUrl,
       sourceURL: messageReferral.source_url,
+      sourceID: messageReferral.source_id,
       sourceApp: 'Meta',
       raw_referral: messageReferral
     };
+    
+    // Check for Ad Lead and save to ad_leads table (porting logic from evogo-webhook)
+    if (sourceId && !isFromMe) {
+      try {
+        const { data: existingAdLead } = await supabaseAdmin
+          .from('ad_leads')
+          .select('id')
+          .eq('contact_id', contact.id)
+          .eq('source_id', sourceId)
+          .maybeSingle();
+
+        if (!existingAdLead) {
+          await supabaseAdmin.from('ad_leads').insert({
+            company_id: companyId,
+            unit_id: unitId || null,
+            contact_id: contact.id,
+            ad_title: messageReferral.headline || null,
+            ad_body: messageReferral.body || null,
+            source_url: messageReferral.source_url || null,
+            thumbnail_url: thumbUrl || null,
+            source_id: sourceId,
+            ctwa_clid: messageReferral.ctwa_clid || null,
+            source_app: 'Meta',
+            media_type: messageReferral.media_type || null,
+          });
+          console.log(`[Whatsapp Cloud] Registered new ad lead for contact ${contact.id} and ad ${sourceId}`);
+        }
+      } catch (e) {
+        console.error('[Whatsapp Cloud] Failed to register ad lead:', e);
+      }
+    }
   }
   if (interactiveData) {
     metadata.interactive_response = interactiveData;
