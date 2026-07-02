@@ -60,6 +60,7 @@ function SettingsPage() {
   const [instanceName, setInstanceName] = useState("");
   const [customHost, setCustomHost] = useState("");
   const [customApiKey, setCustomApiKey] = useState("");
+  const [customInstanceId, setCustomInstanceId] = useState("");
   const [instanceProvider, setInstanceProvider] = useState("evogo");
   const [oficialNumberId, setOficialNumberId] = useState("");
   const [oficialWabaId, setOficialWabaId] = useState("");
@@ -349,8 +350,8 @@ function SettingsPage() {
   });
 
   const createInstance = useMutation({
-    mutationFn: async (payload: { name: string, provider: string, numberId?: string, wabaId?: string, accessToken?: string, verifyToken?: string, customHost?: string, customApiKey?: string }) => {
-      const { name, provider, numberId, wabaId, accessToken, verifyToken, customHost, customApiKey } = payload;
+    mutationFn: async (payload: { name: string, provider: string, numberId?: string, wabaId?: string, accessToken?: string, verifyToken?: string, customHost?: string, customApiKey?: string, customInstanceId?: string }) => {
+      const { name, provider, numberId, wabaId, accessToken, verifyToken, customHost, customApiKey, customInstanceId } = payload;
       if (!activeCompanyId) throw new Error("Sem empresa");
       if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token) && !customHost) {
         throw new Error('Configure Host Global ou preencha o Host customizado da instância.');
@@ -448,7 +449,7 @@ function SettingsPage() {
           
           if (customApiKey) {
             apiKeyToUse = customApiKey;
-            evogoId = "manual-" + technicalName;
+            evogoId = customInstanceId || "manual-" + technicalName;
           } else {
             const evoRes: any = await client.createInstance(technicalName, data.evogo_api_key);
             evogoId = evoRes?.data?.id || evoRes?.id;
@@ -479,7 +480,7 @@ function SettingsPage() {
           
           if (customApiKey) {
             apiKeyToUse = customApiKey;
-            stevoId = "manual-" + technicalName;
+            stevoId = customInstanceId || "manual-" + technicalName;
           } else {
             const stevoRes: any = await client.createInstance(technicalName, data.stevo_api_key);
             stevoId = stevoRes?.data?.id || stevoRes?.id;
@@ -515,6 +516,7 @@ function SettingsPage() {
       setOficialVerifyToken("");
       setCustomHost("");
       setCustomApiKey("");
+      setCustomInstanceId("");
       setCreateModalOpen(false);
       qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
     },
@@ -1266,6 +1268,15 @@ function SettingsPage() {
                   />
                   <p className="text-[11px] text-muted-foreground">Opcional no EvoGo. Obrigatório no Stevo se não for gerar via API.</p>
                 </div>
+                <div className="space-y-2 mt-4">
+                  <label className="text-sm font-medium">ID da Instância (Opcional)</label>
+                  <Input 
+                    placeholder="Ex: 786abac3-77f8-4bfd-9158-b1ce28d523ad" 
+                    value={customInstanceId}
+                    onChange={(e) => setCustomInstanceId(e.target.value)}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Preencha caso já tenha uma instância existente e queira usar o ID real dela para webhooks.</p>
+                </div>
                 <div className="space-y-2 mt-4 p-3 bg-slate-50 dark:bg-slate-900/50 border rounded-md">
                   <p className="text-xs font-medium mb-1">Configuração de Webhook (Aviso)</p>
                   <p className="text-[11px] text-muted-foreground">
@@ -1461,7 +1472,8 @@ function SettingsPage() {
                 accessToken: oficialToken,
                 verifyToken: oficialVerifyToken,
                 customHost,
-                customApiKey
+                customApiKey,
+                customInstanceId
               })}
               disabled={!instanceName || createInstance.isPending || (instanceProvider === 'evogo' && !company?.evogo_host && !customHost) || (instanceProvider === 'stevo' && !company?.stevo_host && !customHost)}
             >
