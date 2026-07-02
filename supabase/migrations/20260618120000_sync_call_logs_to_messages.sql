@@ -74,21 +74,31 @@ BEGIN
 
         -- Se não encontrar conversa, cria uma
         IF v_conversation_id IS NULL THEN
-            INSERT INTO public.conversations (
-                company_id,
-                whatsapp_instance_id,
-                contact_id,
-                channel,
-                status,
-                last_message_at
-            ) VALUES (
-                NEW.company_id,
-                NEW.whatsapp_instance_id,
-                NEW.contact_id,
-                'whatsapp',
-                'waiting',
-                now()
-            ) RETURNING id INTO v_conversation_id;
+            DECLARE
+                v_unit_id UUID;
+            BEGIN
+                SELECT unit_id INTO v_unit_id FROM public.contacts WHERE id = NEW.contact_id;
+                
+                IF v_unit_id IS NULL THEN
+                    SELECT id INTO v_unit_id FROM public.units WHERE company_id = NEW.company_id LIMIT 1;
+                END IF;
+
+                INSERT INTO public.conversations (
+                    unit_id,
+                    whatsapp_instance_id,
+                    contact_id,
+                    channel,
+                    status,
+                    last_message_at
+                ) VALUES (
+                    v_unit_id,
+                    NEW.whatsapp_instance_id,
+                    NEW.contact_id,
+                    'whatsapp',
+                    'waiting',
+                    now()
+                ) RETURNING id INTO v_conversation_id;
+            END;
         END IF;
     END IF;
 
