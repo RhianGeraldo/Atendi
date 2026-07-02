@@ -407,7 +407,8 @@ function SettingsPage() {
         }
       }
 
-      const technicalName = `${slugify(company.name)}${unitSlugPart}-${slugify(name)}-${provider}`;
+      const randomSuffix = Math.random().toString(36).substring(2, 6);
+      const technicalName = `${slugify(company.name)}${unitSlugPart}-${slugify(name)}-${provider}-${randomSuffix}`;
 
       let defaultWebhookUrl = null;
       if (provider === 'oficial') {
