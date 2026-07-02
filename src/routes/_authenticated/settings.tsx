@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { evogo, EvoGoClient } from "@/integrations/evogo/client";
+import { StevoClient } from "@/integrations/stevo/client";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
@@ -1228,6 +1229,23 @@ function SettingsPage() {
                 autoFocus
               />
             </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Provedor</label>
+              <Select value={instanceProvider} onValueChange={setInstanceProvider}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o provedor" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="evogo">EvoGo API (WhatsApp)</SelectItem>
+                  <SelectItem value="oficial">API Oficial (WhatsApp Cloud API)</SelectItem>
+                  <SelectItem value="instagram">Instagram</SelectItem>
+                  <SelectItem value="messenger">Messenger (Meta)</SelectItem>
+                  <SelectItem value="stevo">StevoChat</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             {(instanceProvider === 'evogo' || instanceProvider === 'stevo') && (
               <>
                 <div className="space-y-2 mt-4">
@@ -1259,22 +1277,6 @@ function SettingsPage() {
                 </div>
               </>
             )}
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Provedor</label>
-              <Select value={instanceProvider} onValueChange={setInstanceProvider}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione o provedor" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="evogo">EvoGo API (WhatsApp)</SelectItem>
-                  <SelectItem value="oficial">API Oficial (WhatsApp Cloud API)</SelectItem>
-                  <SelectItem value="instagram">Instagram</SelectItem>
-                  <SelectItem value="messenger">Messenger (Meta)</SelectItem>
-                  <SelectItem value="stevo">StevoChat</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
 
             {(instanceProvider === 'oficial' || instanceProvider === 'instagram' || instanceProvider === 'messenger') && (
               <>
