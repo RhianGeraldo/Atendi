@@ -41,19 +41,26 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
     // --- Handle PushName (CTWA LID Resolution) ---
     if (body.event === 'PushName') {
       const instanceName = body.instance || body.instanceName;
+      const instanceId = body.instanceId;
       const jid = body.data?.JID;
       const jidAlt = body.data?.JIDAlt;
       const newPushName = body.data?.NewPushName;
       
-      if (instanceName && jid && jidAlt && jid.includes('@lid') && jidAlt.includes('@s.whatsapp.net')) {
+      if ((instanceName || instanceId) && jid && jidAlt && jid.includes('@lid') && jidAlt.includes('@s.whatsapp.net')) {
         const lidNumber = jid.split('@')[0];
         const realNumber = jidAlt.split('@')[0];
         
-        const { data: instance } = await supabaseAdmin
+        const queryOr = instanceName ? `instance_name.eq.${instanceName}` : '';
+        const queryOrId = instanceId ? `stevo_instance_id.eq.${instanceId},evogo_instance_id.eq.${instanceId}` : '';
+        const finalOr = [queryOr, queryOrId].filter(Boolean).join(',');
+
+        const { data: instances } = await supabaseAdmin
           .from('whatsapp_instances')
           .select('company_id')
-          .eq('instance_name', instanceName)
-          .single();
+          .or(finalOr)
+          .limit(1);
+          
+        const instance = instances?.[0];
 
         if (instance) {
           const { data: contact } = await supabaseAdmin
@@ -484,7 +491,8 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         }
       }
 
-      if (!instanceName) {
+      const instanceId = body.instanceId;
+      if (!instanceName && !instanceId) {
         return;
       }
 
@@ -502,14 +510,20 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
       }
 
       // 1. Find the instance in the DB
-      const { data: instance, error: instanceErr } = await supabaseAdmin
+      const queryOr = instanceName ? `instance_name.eq.${instanceName}` : '';
+      const queryOrId = instanceId ? `stevo_instance_id.eq.${instanceId},evogo_instance_id.eq.${instanceId}` : '';
+      const finalOr = [queryOr, queryOrId].filter(Boolean).join(',');
+
+      const { data: instances, error: instanceErr } = await supabaseAdmin
         .from('whatsapp_instances')
         .select('id, unit_id, company_id')
-        .eq('instance_name', instanceName)
-        .single();
+        .or(finalOr)
+        .limit(1);
+
+      const instance = instances?.[0];
 
       if (instanceErr || !instance) {
-        console.error('Instance not found for webhook:', instanceName);
+        console.error('Instance not found for webhook:', instanceName || instanceId);
         return;
       }
 
