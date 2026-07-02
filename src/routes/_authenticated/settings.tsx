@@ -1511,18 +1511,29 @@ function InstanceRow({ instance, company, onConnect, onSettings }: { instance: a
 
   const handleDelete = async () => {
     try {
-      if (instance.provider === 'stevo' && instance.stevo_instance_id) {
-        const client = new StevoClient({ host: company.stevo_host, token: company.stevo_global_token });
-        await client.deleteInstance(instance.stevo_instance_id);
-      } else if (instance.provider === 'evogo' && instance.evogo_instance_id) {
-        const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
-        await client.deleteInstance(instance.evogo_instance_id);
+      let apiDeleted = true;
+      try {
+        if (instance.provider === 'stevo' && instance.stevo_instance_id && !instance.stevo_instance_id.startsWith('manual-')) {
+          const client = new StevoClient({ host: company.stevo_host, token: company.stevo_global_token });
+          if ((client as any).host) {
+            await client.deleteInstance(instance.stevo_instance_id);
+          }
+        } else if (instance.provider === 'evogo' && instance.evogo_instance_id && !instance.evogo_instance_id.startsWith('manual-')) {
+          const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
+          if ((client as any).host) {
+            await client.deleteInstance(instance.evogo_instance_id);
+          }
+        }
+      } catch (apiError) {
+        console.warn("Failed to delete instance from provider API:", apiError);
+        apiDeleted = false;
       }
+      
       await supabase.from("whatsapp_instances").delete().eq("id", instance.id);
-      toast.success("Instância deletada com sucesso.");
+      toast.success(apiDeleted ? "Instância deletada com sucesso." : "Removida localmente (Falha na API externa).");
       qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
     } catch (e: any) {
-      toast.error("Erro ao deletar", { description: e.message });
+      toast.error("Erro ao deletar do banco de dados", { description: e.message });
     } finally {
       setConfirmDialog({ open: false, type: null });
     }

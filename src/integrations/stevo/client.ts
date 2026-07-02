@@ -13,7 +13,10 @@ export class StevoClient {
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}, customApiKey?: string): Promise<T> {
-    const url = `${this.host}${endpoint}`;
+    if (!this.host) {
+      throw new Error("API Host não configurado.");
+    }
+    const url = `${this.host.replace(/\/$/, '')}${endpoint}`;
     
     const headers = {
       'Content-Type': 'application/json',
