@@ -137,6 +137,7 @@ export function CrmTab() {
 
 function PipelineStagesManager({ pipeline }: { pipeline: any }) {
   const qc = useQueryClient();
+  const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const { profile } = useAuth();
   const [newStageName, setNewStageName] = useState("");

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendEvogoText, sendEvogoMedia, sendEvogoLink } from "../evogo";
+import { sendStevoText, sendStevoMedia, sendStevoLink } from "../stevo";
 
 /**
  * Unified function to send messages across different channels (WhatsApp, Instagram, etc)
@@ -145,7 +146,7 @@ export async function sendPlatformMessage({
     if (resolvedInstanceId) {
       const { data } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("id, instance_name, evogo_api_key, provider, oficial_phone_number_id, oficial_access_token, companies(evogo_host)")
+        .select("id, instance_name, evogo_api_key, stevo_api_key, provider, custom_host, oficial_phone_number_id, oficial_access_token, companies(evogo_host, stevo_host)")
         .eq("id", resolvedInstanceId)
         .in("provider", ["evogo", "oficial", "stevo"])
         .maybeSingle();
@@ -155,7 +156,7 @@ export async function sendPlatformMessage({
     if (!instance && conv.unit_id) {
       const { data } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("id, instance_name, evogo_api_key, provider, oficial_phone_number_id, oficial_access_token, companies(evogo_host)")
+        .select("id, instance_name, evogo_api_key, stevo_api_key, provider, custom_host, oficial_phone_number_id, oficial_access_token, companies(evogo_host, stevo_host)")
         .eq("unit_id", conv.unit_id)
         .in("provider", ["evogo", "oficial", "stevo"])
         .limit(1)
@@ -168,7 +169,7 @@ export async function sendPlatformMessage({
       if (unitData) {
         const { data } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("id, instance_name, evogo_api_key, provider, oficial_phone_number_id, oficial_access_token, companies(evogo_host)")
+          .select("id, instance_name, evogo_api_key, stevo_api_key, provider, custom_host, oficial_phone_number_id, oficial_access_token, companies(evogo_host, stevo_host)")
           .eq("company_id", unitData.company_id)
           .in("provider", ["evogo", "oficial", "stevo"])
           .limit(1)
@@ -178,8 +179,8 @@ export async function sendPlatformMessage({
     }
 
     if (instance) {
-      host = instance.companies?.evogo_host;
-      token = instance.evogo_api_key;
+      host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
+      token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
       instanceName = instance.instance_name;
       provider = instance.provider || 'evogo';
 
@@ -238,10 +239,17 @@ export async function sendPlatformMessage({
           console.error('Failed to parse or upload base64 to Supabase', e);
         }
 
-        evogoResponse = await sendEvogoMedia({
-          host, token, instanceName, number: phone,
-          base64: mediaUrlToSend!, mediatype: mediaType as any, caption: text,
-        });
+        if (provider === 'stevo') {
+          evogoResponse = await sendStevoMedia({
+            host, token, instanceName, number: phone,
+            base64: mediaUrlToSend!, mediatype: mediaType as any, caption: text,
+          });
+        } else {
+          evogoResponse = await sendEvogoMedia({
+            host, token, instanceName, number: phone,
+            base64: mediaUrlToSend!, mediatype: mediaType as any, caption: text,
+          });
+        }
       } else {
       const messageText = text || '';
       // Regex to detect if there's any URL in the text, avoiding trailing punctuation or markdown chars like *, ), ], }
@@ -249,19 +257,37 @@ export async function sendPlatformMessage({
 
       if (hasUrl) {
         try {
-          evogoResponse = await sendEvogoLink({
+          if (provider === 'stevo') {
+            evogoResponse = await sendStevoLink({
+              host, token, instanceName, number: phone, text: messageText,
+            });
+          } else {
+            evogoResponse = await sendEvogoLink({
+              host, token, instanceName, number: phone, text: messageText,
+            });
+          }
+        } catch (linkErr) {
+          console.warn('[message-sender] sendLink failed (possibly invalid URL format), falling back to text:', linkErr);
+          if (provider === 'stevo') {
+            evogoResponse = await sendStevoText({
+              host, token, instanceName, number: phone, text: messageText,
+            });
+          } else {
+            evogoResponse = await sendEvogoText({
+              host, token, instanceName, number: phone, text: messageText,
+            });
+          }
+        }
+      } else {
+        if (provider === 'stevo') {
+          evogoResponse = await sendStevoText({
             host, token, instanceName, number: phone, text: messageText,
           });
-        } catch (linkErr) {
-          console.warn('[message-sender] sendEvogoLink failed (possibly invalid URL format), falling back to text:', linkErr);
+        } else {
           evogoResponse = await sendEvogoText({
             host, token, instanceName, number: phone, text: messageText,
           });
         }
-      } else {
-        evogoResponse = await sendEvogoText({
-          host, token, instanceName, number: phone, text: messageText,
-        });
       }
     }
     remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;

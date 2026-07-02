@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
-import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash } from "lucide-react";
+import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { ChannelIcon } from "@/components/common/channel-icon";
@@ -30,6 +30,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Link } from "@tanstack/react-router";
 import { MergeContactDialog } from "./merge-contact-dialog";
+import { ContactBlockDialog } from "./contact-block-dialog";
+import { blockContactAction, unblockContactAction } from "@/lib/api/chat.functions";
 
 interface ContactDetailsSheetProps {
   contactId: string | null;
@@ -1102,7 +1104,7 @@ export function ContactDetailsTabs({ contactId, conversationId }: { contactId: s
 export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenChange }: ContactDetailsSheetProps) {
   const { profile } = useAuth();
   const qc = useQueryClient();
-  const isAdmin = profile?.role === 'admin_company';
+  const isAdmin = profile?.role === 'admin_company' || profile?.role === 'super_admin' || profile?.role === 'manager';
   
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
 
@@ -1170,6 +1172,9 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                     </div>
                   )}
                   <SheetTitle className="text-2xl">{contact.name}</SheetTitle>
+                  {contact.is_blocked && (
+                    <Badge variant="destructive" className="ml-2 text-xs">Bloqueado</Badge>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   <MergeContactDialog sourceContact={contact} onSuccess={(targetId) => setActiveContactId(targetId)} />
@@ -1201,6 +1206,9 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                         </div>
                       </DialogContent>
                     </Dialog>
+                  )}
+                  {isAdmin && (
+                    <ContactBlockDialog contact={contact} />
                   )}
                 </div>
               </div>

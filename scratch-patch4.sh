@@ -1,0 +1,2 @@
+sed -i 's/<SalesCoachSheet/\/\/<SalesCoachSheet/' src/routes/_authenticated/conversations.tsx
+sed -i 's/onClick={() => setCoachSheetOpen(true)}/onClick={() => {\n                        if (!showSidebar \&\& onToggleSidebar) onToggleSidebar();\n                        setTimeout(() => window.dispatchEvent(new CustomEvent("open-contact-tab", { detail: "sales_coach" })), 100);\n                      }}/' src/routes/_authenticated/conversations.tsx

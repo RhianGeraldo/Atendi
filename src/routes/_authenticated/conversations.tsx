@@ -48,12 +48,15 @@ import TextareaAutosize from "react-textarea-autosize";
 import { TransferDialog } from "@/components/chat/transfer-dialog";
 import { LinkPreview } from "@/components/chat/link-preview";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
+import { ContactBlockDialog } from "@/components/contacts/contact-block-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { WavoipCallOverlay } from "@/components/whatsapp/wavoip-call-overlay";
 import { WavoipDialer } from "@/components/whatsapp/wavoip-dialer";
 import { useWavoip } from "@/hooks/use-wavoip";
 import { WhatsappTemplateSender } from "@/components/whatsapp/whatsapp-template-sender";
+import { resolveConversationAction } from "@/lib/api/chat.functions";
+
 export const Route = createFileRoute("/_authenticated/conversations")({
   component: ConversationsPage,
   validateSearch: (search: Record<string, unknown>) => {
@@ -158,7 +161,7 @@ function ConversationsPage() {
       const from = pageParam as number;
       const to = from + PAGE_SIZE - 1;
 
-      let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,tags,instagram_username,whatsapp_lid,instagram_id,company_id,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+      let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
       
       if (debouncedSearch || tab === "groups") {
         selectString = selectString; // No replacement needed, inner join is already default
@@ -173,6 +176,8 @@ function ConversationsPage() {
       if (activeCompanyId) {
         query = query.eq("contact.company_id", activeCompanyId);
       }
+      // Use neq instead of or so we don't overwrite the foreign table's or() filter later for search
+      query = query.not('contact.is_blocked', 'is', true);
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
@@ -183,11 +188,11 @@ function ConversationsPage() {
       }
 
       if (debouncedSearch) {
-        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`, { foreignTable: "contacts" });
+        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`, { foreignTable: "contact" });
       }
 
       if (tab === "groups") {
-        query = query.or('phone.like.120363%,phone.like.%-%', { foreignTable: "contacts" });
+        query = query.or('phone.like.120363%,phone.like.%-%', { foreignTable: "contact" });
       }
 
       // Server-side status filter for non-group tabs
@@ -276,7 +281,7 @@ function ConversationsPage() {
   const { data: unreadCounts } = useQuery({
     queryKey: ["unread-counts", activeCompanyId, selectedUnitId, profile?.id, profile?.department_id, instanceFilter, debouncedSearch],
     queryFn: async () => {
-      let selectString = "id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts!inner(id, phone, name, company_id), unit_id";
+      let selectString = "id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts!inner(id, phone, name, company_id, is_blocked), unit_id";
 
       if (debouncedSearch) {
         selectString = selectString.replace("contact:contacts(", "contact:contacts!inner(");
@@ -289,13 +294,15 @@ function ConversationsPage() {
       if (activeCompanyId) {
         query = query.eq("contact.company_id", activeCompanyId);
       }
+      // Use neq instead of or so we don't overwrite the foreign table's or() filter later for search
+      query = query.not('contact.is_blocked', 'is', true);
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
       }
 
       if (debouncedSearch) {
-        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`, { foreignTable: "contacts" });
+        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`, { foreignTable: "contact" });
       }
 
       const { data, error } = await query.order("last_message_at", { ascending: false });
@@ -956,6 +963,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
           <div className="flex items-center justify-center gap-1.5 max-w-[90%] mx-auto">
             <h3 className="font-bold text-xl truncate">{contactName || "Desconhecido"}</h3>
             <ContactEditDialog contact={conv.contact} />
+            {(profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager") && conv.contact && <ContactBlockDialog contact={conv.contact} />}
           </div>
           
           <div className="flex items-center justify-center">
@@ -1949,58 +1957,13 @@ function ChatPanel({
 
   const resolve = useMutation({
     mutationFn: async ({ reasonId, observation }: { reasonId: string; observation: string }) => {
-      const resolvedAt = new Date().toISOString();
-      
-      // 1. Update conversation status
-      const { error } = await supabase
-        .from("conversations")
-        .update({
-          status: "resolved",
-          resolved_at: resolvedAt,
-          current_session_id: null,
-          assigned_agent_id: null
-        } as any)
-        .eq("id", conv.id);
-      if (error) {
-        console.error("Error updating conversation:", error);
-        throw error;
-      }
-      
-      // 2. Atualiza TODAS as sessões em andamento (para garantir limpeza de zumbis criados pelo bug anterior)
-      const { data: openSessions } = await supabase.from('conversation_sessions' as any)
-         .select('id')
-         .eq('conversation_id', conv.id)
-         .is('resolved_at', null);
-
-      if (openSessions && openSessions.length > 0) {
-         for (const session of openSessions) {
-            await supabase.from("conversation_sessions" as any).update({
-               resolved_at: resolvedAt,
-               resolution_reason_id: reasonId || null,
-               resolution_observation: observation.trim() || null,
-            }).eq("id", session.id);
-            
-            await supabase.from("session_events" as any).insert({
-               session_id: session.id,
-               event_type: 'resolved',
-               actor_id: profile?.id
-            });
-         }
-      } else {
-         // Fallback retrocompatibilidade para conversas velhas sem sessão nenhuma
-         const { data: newSession, error: err } = await supabase
-           .from("conversation_sessions" as any)
-           .insert({
-             conversation_id: conv.id, contact_id: conv.contact?.id, whatsapp_instance_id: conv.whatsapp_instance_id,
-             started_at: conv.started_at || new Date().toISOString(), resolved_at: resolvedAt,
-             assigned_agent_id: conv.assigned_agent_id, department_id: conv.department_id,
-             resolution_reason_id: reasonId || null, resolution_observation: observation.trim() || null,
-           }).select().single();
-           
-         if (newSession && !err) {
-            await supabase.from("session_events" as any).insert({ session_id: newSession.id, event_type: 'resolved', actor_id: profile?.id });
-         }
-      }
+      await resolveConversationAction({ 
+        data: { 
+          conversationId: conv.id, 
+          reasonId: reasonId || null, 
+          observation: observation.trim() || null 
+        } 
+      });
     },
     onSuccess: () => {
       toast.success("Atendimento encerrado");

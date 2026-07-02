@@ -57,6 +57,8 @@ function SettingsPage() {
   const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
   const [instanceName, setInstanceName] = useState("");
+  const [customHost, setCustomHost] = useState("");
+  const [customApiKey, setCustomApiKey] = useState("");
   const [instanceProvider, setInstanceProvider] = useState("evogo");
   const [oficialNumberId, setOficialNumberId] = useState("");
   const [oficialWabaId, setOficialWabaId] = useState("");
@@ -67,7 +69,9 @@ function SettingsPage() {
   const [selectedMetaAccountId, setSelectedMetaAccountId] = useState("");
   const [useManualToken, setUseManualToken] = useState(false);
   const [host, setHost] = useState("");
+  const [stevoHost, setStevoHost] = useState("");
   const [token, setToken] = useState("");
+  const [stevoToken, setStevoToken] = useState("");
   const [useSignature, setUseSignature] = useState(profile?.use_signature ?? true);
 
   const [aiSettings, setAiSettings] = useState({
@@ -144,7 +148,7 @@ function SettingsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("id, name, evogo_host, evogo_global_token, meta_system_user_token, ai_settings, document, address, business_hours, custom_variables")
+        .select("id, name, evogo_host, evogo_global_token, stevo_host, stevo_global_token, meta_system_user_token, ai_settings, document, address, business_hours, custom_variables")
         .eq("id", activeCompanyId!)
         .single();
       if (error) throw error;
@@ -198,7 +202,9 @@ function SettingsPage() {
   useEffect(() => {
     if (company) {
       setHost(company.evogo_host || "");
+      setStevoHost(company.stevo_host || "");
       setToken(company.evogo_global_token || "");
+      setStevoToken(company.stevo_global_token || "");
       setNewCompanyName(company.name || "");
       setCompanyDocument(company.document || "");
       setCompanyAddress(company.address || "");
@@ -241,7 +247,7 @@ function SettingsPage() {
       if (!activeCompanyId) throw new Error("Sem empresa vinculada");
       const { error } = await supabase
         .from("companies")
-        .update({ evogo_host: host, evogo_global_token: token })
+        .update({ evogo_host: host, evogo_global_token: token, stevo_host: stevoHost, stevo_global_token: stevoToken })
         .eq("id", activeCompanyId);
       if (error) throw error;
     },
@@ -342,11 +348,17 @@ function SettingsPage() {
   });
 
   const createInstance = useMutation({
-    mutationFn: async (payload: { name: string, provider: string, numberId?: string, wabaId?: string, accessToken?: string, verifyToken?: string }) => {
-      const { name, provider, numberId, wabaId, accessToken, verifyToken } = payload;
+    mutationFn: async (payload: { name: string, provider: string, numberId?: string, wabaId?: string, accessToken?: string, verifyToken?: string, customHost?: string, customApiKey?: string }) => {
+      const { name, provider, numberId, wabaId, accessToken, verifyToken, customHost, customApiKey } = payload;
       if (!activeCompanyId) throw new Error("Sem empresa");
-      if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token)) {
-        throw new Error("Configure Host e Token primeiro para usar a EvoGo.");
+      if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token) && !customHost) {
+        throw new Error('Configure Host Global ou preencha o Host customizado da instância.');
+      }
+      if (provider === 'stevo' && (!company?.stevo_host || !company?.stevo_global_token) && !customHost) {
+        throw new Error('Configure Host Global ou preencha o Host customizado da instância.');
+      }
+      if (provider === 'stevo' && !customApiKey && !company?.stevo_global_token) {
+        throw new Error('O Stevo requer uma API Key informada ou o Token Global configurado.');
       }
 
       let finalNumberId = numberId;
@@ -417,17 +429,28 @@ function SettingsPage() {
         oficial_waba_id: finalWabaId || null,
         oficial_access_token: finalAccessToken,
         oficial_verify_token: finalVerifyToken,
-        webhook_url: defaultWebhookUrl
+        webhook_url: defaultWebhookUrl,
+        custom_host: customHost || null,
+        ...(customApiKey && provider === "evogo" ? { evogo_api_key: customApiKey } : {}),
+        ...(customApiKey && provider === "stevo" ? { stevo_api_key: customApiKey } : {}),
       }).select().single();
       
       if (error) throw error;
 
       if (provider === 'evogo') {
-        // Chama a EvoGo real
-        const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
+        const hostToUse = customHost || company.evogo_host;
+        const client = new EvoGoClient({ host: hostToUse, token: company.evogo_global_token });
         try {
-          const evoRes: any = await client.createInstance(technicalName, data.evogo_api_key);
-          const evogoId = evoRes?.data?.id || evoRes?.id;
+          let evogoId = null;
+          let apiKeyToUse = data.evogo_api_key;
+          
+          if (customApiKey) {
+            apiKeyToUse = customApiKey;
+            evogoId = "manual-" + technicalName;
+          } else {
+            const evoRes: any = await client.createInstance(technicalName, data.evogo_api_key);
+            evogoId = evoRes?.data?.id || evoRes?.id;
+          }
 
           if (evogoId) {
             const webhookUrl = `${window.location.origin}/api/webhooks/evogo`;
@@ -437,20 +460,46 @@ function SettingsPage() {
             webhook_url: webhookUrl
           }).eq("id", data.id);
 
-          // Configura Webhook no EvoGo (usa o token da instância)
-          await client.connectInstance(webhookUrl, data.evogo_api_key).catch(console.error);
-
-          // Configura Advanced Settings no EvoGo (usa o token da instância)
+          await client.connectInstance(webhookUrl, apiKeyToUse).catch(console.error);
           await client.updateAdvancedSettings(evogoId, {
-            rejectCalls: false,
-            readMessages: false,
-            readStatus: false,
-            alwaysOnline: false
-          }, data.evogo_api_key).catch(console.error);
+            rejectCalls: false, readMessages: false, readStatus: false, alwaysOnline: false
+          }, apiKeyToUse).catch(console.error);
         }
       } catch (e) {
         console.error("Falha ao criar/configurar na EvoGo, mas salvo no DB", e);
       }
+      } else if (provider === 'stevo') {
+        const hostToUse = customHost || company.stevo_host;
+        const client = new StevoClient({ host: hostToUse, token: company.stevo_global_token });
+        try {
+          let stevoId = null;
+          let apiKeyToUse = data.stevo_api_key;
+          
+          if (customApiKey) {
+            apiKeyToUse = customApiKey;
+            stevoId = "manual-" + technicalName;
+          } else {
+            const stevoRes: any = await client.createInstance(technicalName, data.stevo_api_key);
+            stevoId = stevoRes?.data?.id || stevoRes?.id;
+          }
+
+          if (stevoId) {
+            const webhookUrl = `${window.location.origin}/api/webhooks/stevo`;
+          
+            await supabase.from("whatsapp_instances").update({
+              stevo_instance_id: stevoId,
+              webhook_url: webhookUrl
+            }).eq("id", data.id);
+
+            await client.connectInstance(webhookUrl, apiKeyToUse).catch(console.error);
+            await client.updateAdvancedSettings(stevoId, {
+              rejectCalls: false, readMessages: false, readStatus: false, alwaysOnline: false
+            }, apiKeyToUse).catch(console.error);
+          }
+        } catch (e: any) {
+          console.error("Stevo Create Error:", e);
+          throw new Error("Falha ao configurar instância no Stevo: " + e.message);
+        }
       }
 
       return data;
@@ -462,6 +511,8 @@ function SettingsPage() {
       setOficialNumberId("");
       setOficialToken("");
       setOficialVerifyToken("");
+      setCustomHost("");
+      setCustomApiKey("");
       setCreateModalOpen(false);
       qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
     },
@@ -685,6 +736,54 @@ function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
+
+        <Card className="col-span-full lg:col-span-1 mt-4">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Server className="h-5 w-5" />
+              API StevoChat (Empresa Mãe)
+            </CardTitle>
+            <CardDescription>
+              Configure o servidor base e o token mestre do StevoChat.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Host (URL da API)</label>
+              <div className="relative">
+                <Server className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input 
+                  placeholder="https://stevo.chat/api" 
+                  value={stevoHost}
+                  onChange={(e) => setStevoHost(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Global Token</label>
+              <div className="relative">
+                <Key className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input 
+                  type="password"
+                  placeholder="Seu token global" 
+                  value={stevoToken}
+                  onChange={(e) => setStevoToken(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            <Button 
+              className="w-full" 
+              onClick={() => saveConfig.mutate()}
+              disabled={saveConfig.isPending || isLoadingCompany}
+            >
+              <Save className="mr-2 h-4 w-4" />
+              Salvar Credenciais
+            </Button>
+          </CardContent>
+        </Card>
+
         </TabsContent>
 
         <TabsContent value="channels" className="space-y-4">
@@ -1128,6 +1227,37 @@ function SettingsPage() {
                 autoFocus
               />
             </div>
+            {(instanceProvider === 'evogo' || instanceProvider === 'stevo') && (
+              <>
+                <div className="space-y-2 mt-4">
+                  <label className="text-sm font-medium">Host da API (URL)</label>
+                  <Input 
+                    placeholder="Deixe em branco para usar o Host Global" 
+                    value={customHost}
+                    onChange={(e) => setCustomHost(e.target.value)}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Opcional. Preencha se esta instância usar um servidor diferente da empresa.</p>
+                </div>
+                <div className="space-y-2 mt-4">
+                  <label className="text-sm font-medium">API Key da Instância</label>
+                  <Input 
+                    placeholder="Se preenchido, apenas conectará a instância" 
+                    value={customApiKey}
+                    onChange={(e) => setCustomApiKey(e.target.value)}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Opcional no EvoGo. Obrigatório no Stevo se não for gerar via API.</p>
+                </div>
+                <div className="space-y-2 mt-4 p-3 bg-slate-50 dark:bg-slate-900/50 border rounded-md">
+                  <p className="text-xs font-medium mb-1">Configuração de Webhook (Aviso)</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    O Atendi tentará configurar automaticamente o webhook na sua instância ao salvar. Caso o seu provedor bloqueie a alteração via API, você precisará colar esta URL manualmente no painel deles:
+                  </p>
+                  <code className="text-[10px] block p-2 bg-muted rounded">
+                    {window.location.origin}/api/webhooks/{instanceProvider === 'stevo' ? 'stevo' : 'evogo'}
+                  </code>
+                </div>
+              </>
+            )}
             
             <div className="space-y-2">
               <label className="text-sm font-medium">Provedor</label>
@@ -1140,7 +1270,7 @@ function SettingsPage() {
                   <SelectItem value="oficial">API Oficial (WhatsApp Cloud API)</SelectItem>
                   <SelectItem value="instagram">Instagram</SelectItem>
                   <SelectItem value="messenger">Messenger (Meta)</SelectItem>
-                  <SelectItem value="stevo" disabled>Stevo (Em Breve)</SelectItem>
+                  <SelectItem value="stevo">StevoChat</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1326,9 +1456,11 @@ function SettingsPage() {
                 numberId: oficialNumberId,
                 wabaId: oficialWabaId,
                 accessToken: oficialToken,
-                verifyToken: oficialVerifyToken
+                verifyToken: oficialVerifyToken,
+                customHost,
+                customApiKey
               })}
-              disabled={!instanceName || createInstance.isPending || (instanceProvider === 'evogo' && !company?.evogo_host)}
+              disabled={!instanceName || createInstance.isPending || (instanceProvider === 'evogo' && !company?.evogo_host && !customHost) || (instanceProvider === 'stevo' && !company?.stevo_host && !customHost)}
             >
               {createInstance.isPending ? "Criando..." : "Criar Instância"}
             </Button>
@@ -1345,8 +1477,13 @@ function InstanceRow({ instance, company, onConnect, onSettings }: { instance: a
 
   const handleDisconnect = async () => {
     try {
-      const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
-      await client.logoutInstance(instance.evogo_api_key);
+      if (instance.provider === 'stevo') {
+        const client = new StevoClient({ host: company.stevo_host, token: company.stevo_global_token });
+        await client.logoutInstance(instance.stevo_api_key);
+      } else {
+        const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
+        await client.logoutInstance(instance.evogo_api_key);
+      }
       await supabase.from("whatsapp_instances").update({ status: "disconnected" }).eq("id", instance.id);
       toast.success("Aparelho desconectado.");
       qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
@@ -1359,7 +1496,10 @@ function InstanceRow({ instance, company, onConnect, onSettings }: { instance: a
 
   const handleDelete = async () => {
     try {
-      if (instance.evogo_instance_id) {
+      if (instance.provider === 'stevo' && instance.stevo_instance_id) {
+        const client = new StevoClient({ host: company.stevo_host, token: company.stevo_global_token });
+        await client.deleteInstance(instance.stevo_instance_id);
+      } else if (instance.provider === 'evogo' && instance.evogo_instance_id) {
         const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
         await client.deleteInstance(instance.evogo_instance_id);
       }

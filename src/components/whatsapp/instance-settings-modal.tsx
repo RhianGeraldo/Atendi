@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Settings, Loader2, Save, Globe, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { EvoGoClient } from "@/integrations/evogo/client";
+import { StevoClient } from "@/integrations/stevo/client";
 import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WhatsappTemplatesTab } from "./whatsapp-templates-tab";
@@ -24,6 +25,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const [saving, setSaving] = useState(false);
   
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [customHost, setCustomHost] = useState("");
+  const [customApiKey, setCustomApiKey] = useState("");
   const [wavoipToken, setWavoipToken] = useState("");
   const [oficialPhoneId, setOficialPhoneId] = useState("");
   const [oficialWabaId, setOficialWabaId] = useState("");
@@ -43,7 +46,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     const isCloudAPI = isOficial || isInstagram || isMessenger;
 
     let providerWebhookPath = 'evogo';
-    if (instance.provider === 'stevo') providerWebhookPath = 'evogo';
+    if (instance.provider === 'stevo') providerWebhookPath = 'stevo';
     else if (isOficial) providerWebhookPath = 'whatsapp';
     else if (isInstagram) providerWebhookPath = 'instagram';
     else if (isMessenger) providerWebhookPath = 'messenger';
@@ -57,6 +60,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     }
 
     setWebhookUrl(defaultWebhook);
+    setCustomHost(instance.custom_host || "");
+    setCustomApiKey(instance.provider === "stevo" ? (instance.stevo_api_key || "") : (instance.evogo_api_key || ""));
     setWavoipToken(instance.wavoip_token || "");
     setOficialPhoneId(instance.oficial_phone_number_id || "");
     setOficialWabaId(instance.oficial_waba_id || "");
@@ -69,19 +74,22 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
         return;
       }
       
-      if (!company?.evogo_host) {
-        setLoading(false);
-        return;
-      }
+      if (instance.provider === 'stevo' && !company?.stevo_host) { setLoading(false); return; }
+      if (instance.provider === 'evogo' && !company?.evogo_host) { setLoading(false); return; }
 
       setLoading(true);
       try {
-        if (!instance.evogo_instance_id) {
-          throw new Error("Instância local sem ID do EvoGo vinculado.");
-        }
+        if (instance.provider === 'stevo' && !instance.stevo_instance_id) throw new Error("Instância local sem ID do Stevo vinculado.");
+        if (instance.provider === 'evogo' && !instance.evogo_instance_id) throw new Error("Instância local sem ID do EvoGo vinculado.");
 
-        const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
-        const res: any = await client.getAdvancedSettings(instance.evogo_instance_id, instance.evogo_api_key);
+        let res: any;
+        if (instance.provider === 'stevo') {
+          const client = new StevoClient({ host: instance.custom_host || company.stevo_host, token: company.stevo_global_token });
+          res = await client.getAdvancedSettings(instance.stevo_instance_id, instance.stevo_api_key);
+        } else {
+          const client = new EvoGoClient({ host: instance.custom_host || company.evogo_host, token: company.evogo_global_token });
+          res = await client.getAdvancedSettings(instance.evogo_instance_id, instance.evogo_api_key);
+        }
         
         if (res) {
           setAdvSettings({
@@ -121,21 +129,22 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           })
           .eq("id", instance.id);
       } else {
-        if (!company?.evogo_host) {
-          throw new Error("Host da EvoGo não configurado na empresa.");
-        }
-        const client = new EvoGoClient({ host: company.evogo_host, token: company.evogo_global_token });
-
-        // 1. Save Webhook and Wavoip Token
-        await client.connectInstance(webhookUrl, instance.evogo_api_key);
-        await supabase
-          .from("whatsapp_instances")
-          .update({ webhook_url: webhookUrl, wavoip_token: wavoipToken || null })
-          .eq("id", instance.id);
-
-        // 2. Save Advanced Settings
-        if (instance.evogo_instance_id) {
-          await client.updateAdvancedSettings(instance.evogo_instance_id, advSettings, instance.evogo_api_key);
+        if (instance.provider === 'stevo' && !company?.stevo_host) throw new Error("Host da Stevo não configurado na empresa.");
+        if (instance.provider === 'evogo' && !company?.evogo_host) throw new Error("Host da EvoGo não configurado na empresa.");
+        if (instance.provider === 'stevo') {
+          const client = new StevoClient({ host: customHost || company.stevo_host, token: company.stevo_global_token });
+          await client.connectInstance(webhookUrl, customApiKey || instance.stevo_api_key);
+          await supabase.from("whatsapp_instances").update({ webhook_url: webhookUrl, wavoip_token: wavoipToken || null, custom_host: customHost || null, stevo_api_key: customApiKey || instance.stevo_api_key }).eq("id", instance.id);
+          if (instance.stevo_instance_id) {
+            await client.updateAdvancedSettings(instance.stevo_instance_id, advSettings, customApiKey || instance.stevo_api_key);
+          }
+        } else {
+          const client = new EvoGoClient({ host: customHost || company.evogo_host, token: company.evogo_global_token });
+          await client.connectInstance(webhookUrl, customApiKey || instance.evogo_api_key);
+          await supabase.from("whatsapp_instances").update({ webhook_url: webhookUrl, wavoip_token: wavoipToken || null, custom_host: customHost || null, evogo_api_key: customApiKey || instance.evogo_api_key }).eq("id", instance.id);
+          if (instance.evogo_instance_id) {
+            await client.updateAdvancedSettings(instance.evogo_instance_id, advSettings, customApiKey || instance.evogo_api_key);
+          }
         }
       }
 
@@ -187,6 +196,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                     oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
                     oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
                     oficialAccessToken={oficialAccessToken} setOficialAccessToken={setOficialAccessToken}
+                    customHost={customHost} setCustomHost={setCustomHost}
+                    customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
                     advSettings={advSettings} setAdvSettings={setAdvSettings}
                     isOficial={isOficial}
                     isInstagram={isInstagram}
@@ -214,6 +225,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                   oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
                   oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
                   oficialAccessToken={oficialAccessToken} setOficialAccessToken={setOficialAccessToken}
+                  customHost={customHost} setCustomHost={setCustomHost}
+                  customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
                   advSettings={advSettings} setAdvSettings={setAdvSettings}
                   isOficial={isOficial}
                   isInstagram={isInstagram}
@@ -243,6 +256,8 @@ function SettingsFormContent({
   oficialPhoneId, setOficialPhoneId, 
   oficialWabaId, setOficialWabaId, 
   oficialAccessToken, setOficialAccessToken, 
+  customHost, setCustomHost,
+  customApiKey, setCustomApiKey,
   advSettings, setAdvSettings, 
   isOficial, isInstagram, isMessenger
 }: any) {
@@ -285,14 +300,32 @@ function SettingsFormContent({
           )}
         </div>
         {!isCloudAPI && (
-          <div className="space-y-1 mt-2">
-            <label className="text-xs text-muted-foreground">Wavoip Token (Chamadas)</label>
-            <Input 
-              placeholder="Seu token de dispositivo Wavoip" 
-              value={wavoipToken}
-              onChange={(e) => setWavoipToken(e.target.value)}
-            />
-          </div>
+          <>
+            <div className="space-y-1 mt-4">
+              <label className="text-xs text-muted-foreground">Host Customizado (URL)</label>
+              <Input 
+                placeholder="Opcional. Substitui o da empresa." 
+                value={customHost}
+                onChange={(e) => setCustomHost(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1 mt-2">
+              <label className="text-xs text-muted-foreground">API Key da Instância</label>
+              <Input 
+                placeholder="Token exato da instância" 
+                value={customApiKey}
+                onChange={(e) => setCustomApiKey(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1 mt-4">
+              <label className="text-xs text-muted-foreground">Wavoip Token (Chamadas)</label>
+              <Input 
+                placeholder="Seu token de dispositivo Wavoip" 
+                value={wavoipToken}
+                onChange={(e) => setWavoipToken(e.target.value)}
+              />
+            </div>
+          </>
         )}
       </div>
 

@@ -89,9 +89,9 @@ export default {
         return await handleMessengerWebhook(request);
       }
 
-      if (url.pathname === '/api/webhooks/stevochat' && request.method === 'POST') {
-        // Reservado para futura integração
-        return new Response(JSON.stringify({ success: true, message: "Stevo webhook not implemented yet" }), { status: 200 });
+      if ((url.pathname === '/api/webhooks/stevochat' || url.pathname === '/api/webhooks/stevo') && request.method === 'POST') {
+        const { handleStevoWebhook } = await import('./lib/server/stevo-webhook');
+        return await handleStevoWebhook(request);
       }
 
       // Outros webhooks

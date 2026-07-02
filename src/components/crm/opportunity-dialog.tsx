@@ -142,6 +142,7 @@ export function OpportunityDialog({
   const [contactId, setContactId] = useState(defaultContactId || "");
   const [pipelineId, setPipelineId] = useState(defaultPipelineId || "");
   const [stageId, setStageId] = useState("");
+  const [status, setStatus] = useState("open");
 
   const [contactSearch, setContactSearch] = useState("");
   const [contactComboboxOpen, setContactComboboxOpen] = useState(false);
@@ -156,6 +157,7 @@ export function OpportunityDialog({
         setContactId(opportunity.contact_id || defaultContactId || "");
         setPipelineId(opportunity.pipeline_stages?.pipeline_id || opportunity.pipeline_stages?.pipelines?.id || defaultPipelineId || "");
         setStageId(opportunity.stage_id || "");
+        setStatus(opportunity.status || "open");
       } else {
         setTitle("");
         setValue("");
@@ -164,6 +166,7 @@ export function OpportunityDialog({
         setContactId(defaultContactId || "");
         setPipelineId(defaultPipelineId || "");
         setStageId("");
+        setStatus("open");
       }
     }
   }, [open, opportunity, defaultContactId, defaultPipelineId]);
@@ -229,6 +232,7 @@ export function OpportunityDialog({
         stage_id: stageId,
         unit_id: effectiveUnitId,
         owner_id: opportunity?.owner_id || profile?.id,
+        status,
       };
 
       if (opportunity?.id) {
@@ -244,6 +248,23 @@ export function OpportunityDialog({
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
       if (!opportunity) setOpen(false); // Only close if creating new. If editing, they might want to stay in tabs.
+    },
+    onError: (e) => toast.error("Erro", { description: (e as Error).message })
+  });
+
+  const changeStatus = useMutation({
+    mutationFn: async (newStatus: string) => {
+      if (!opportunity?.id) return;
+      const { error } = await supabase.from("opportunities").update({ status: newStatus }).eq("id", opportunity.id);
+      if (error) throw error;
+      return newStatus;
+    },
+    onSuccess: (newStatus) => {
+      setStatus(newStatus as string);
+      toast.success(newStatus === 'won' ? "Oportunidade marcada como GANHA!" : newStatus === 'lost' ? "Oportunidade marcada como PERDIDA!" : "Oportunidade REABERTA!");
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
+      setOpen(false);
     },
     onError: (e) => toast.error("Erro", { description: (e as Error).message })
   });
@@ -289,9 +310,34 @@ export function OpportunityDialog({
       </DialogTrigger>
       <DialogContent className={cn("p-0 overflow-hidden flex flex-col", opportunity ? "sm:max-w-[750px] h-[80vh] max-h-[600px]" : "sm:max-w-[500px] max-h-[90vh]")}>
         <DialogHeader className="px-6 py-4 border-b shrink-0 bg-muted/10">
-          <DialogTitle className="text-xl">
-            {opportunity ? "Gerenciar Oportunidade" : "Nova Oportunidade"}
-          </DialogTitle>
+          <div className="flex items-center justify-between">
+            <DialogTitle className="text-xl">
+              {opportunity ? "Gerenciar Oportunidade" : "Nova Oportunidade"}
+            </DialogTitle>
+            {opportunity && (
+              <div className="flex items-center gap-2 pr-6">
+                {status === 'open' ? (
+                  <>
+                    <Button variant="outline" size="sm" className="h-7 px-3 text-xs border-emerald-500 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/50" onClick={() => changeStatus.mutate('won')} disabled={changeStatus.isPending}>
+                      Ganho
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-7 px-3 text-xs border-rose-500 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50" onClick={() => changeStatus.mutate('lost')} disabled={changeStatus.isPending}>
+                      Perdido
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Badge variant={status === 'won' ? "default" : "destructive"} className={status === 'won' ? 'bg-emerald-500' : ''}>
+                      {status === 'won' ? "Ganho" : "Perdido"}
+                    </Badge>
+                    <Button variant="outline" size="sm" className="h-7 px-3 text-xs" onClick={() => changeStatus.mutate('open')} disabled={changeStatus.isPending}>
+                      Reabrir
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </DialogHeader>
 
         {opportunity ? (
@@ -373,9 +419,12 @@ export function OpportunityDialog({
                   </Select>
                 </div>
               </div>
-              <Button className="w-full" onClick={() => saveOpportunity.mutate()} disabled={!title || !stageId || saveOpportunity.isPending}>
-                Salvar Alterações
-              </Button>
+              
+              <div className="pt-4 border-t border-border/40">
+                <Button className="w-full" onClick={() => saveOpportunity.mutate()} disabled={!title || !stageId || saveOpportunity.isPending}>
+                  Salvar Alterações
+                </Button>
+              </div>
             </TabsContent>
 
             {/* TAB: TAREFAS */}

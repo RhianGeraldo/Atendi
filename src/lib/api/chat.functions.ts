@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendEvogoText, sendEvogoLink, sendEvogoMedia, sendEvogoReaction, editEvogoMessage, deleteEvogoMessage } from "../evogo";
+import { sendStevoText, sendStevoLink, sendStevoMedia, sendStevoReaction, editStevoMessage, deleteStevoMessage } from "../stevo";
 import { getPhoneVariants } from "@/lib/utils";
 
 export const sendMessageAction = createServerFn({ method: "POST" })
@@ -155,7 +156,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       if (resolvedInstanceId) {
         const { data } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("id, instance_name, evogo_api_key, provider, companies(evogo_host)")
+          .select("id, instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
           .eq("id", resolvedInstanceId)
           .in("provider", ["evogo", "oficial", "stevo"])
           .maybeSingle();
@@ -165,7 +166,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       if (!instance && conv.unit_id) {
         const { data } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("id, instance_name, evogo_api_key, provider, companies(evogo_host)")
+          .select("id, instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
           .eq("unit_id", conv.unit_id)
           .in("provider", ["evogo", "oficial", "stevo"])
           .limit(1)
@@ -178,7 +179,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         if (unitData) {
           const { data } = await supabaseAdmin
             .from("whatsapp_instances")
-            .select("id, instance_name, evogo_api_key, provider, companies(evogo_host)")
+            .select("id, instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
             .eq("company_id", unitData.company_id)
             .in("provider", ["evogo", "oficial", "stevo"])
             .limit(1)
@@ -188,8 +189,8 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       }
 
       if (instance) {
-        host = instance.companies?.evogo_host;
-        token = instance.evogo_api_key;
+        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
+        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
         instanceName = instance.instance_name;
         provider = instance.provider || 'evogo';
         resolvedInstanceId = instance.id;
@@ -793,8 +794,8 @@ export const fetchContactInfoAction = createServerFn({ method: "POST" })
         .single();
 
       if (instance) {
-        host = instance.companies?.evogo_host;
-        token = instance.evogo_api_key;
+        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
+        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
         instanceName = instance.instance_name;
       }
     } else {
@@ -1075,8 +1076,8 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       if (instance) {
         resolvedInstanceId = instance.id;
         provider = instance.provider || 'coex';
-        host = instance.companies?.evogo_host;
-        token = instance.evogo_api_key;
+        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
+        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
         instanceName = instance.instance_name;
         oficialToken = instance.oficial_access_token;
         oficialPhoneId = instance.oficial_phone_number_id;
@@ -1155,14 +1156,20 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       } else {
         // Evogo / Coex
         if (!host || !token || !instanceName) throw new Error("EvoGo is not configured");
-        await sendEvogoReaction({
-          host,
-          token,
-          number: conv.contacts.phone,
-          remoteMsgId: msg.remote_msg_id,
-          emoji: data.emoji,
-          fromMe: msg.sender_type === 'agent',
-        });
+        if (provider === 'stevo') {
+          await sendStevoReaction({
+            host, token, number: conv.contacts.phone, remoteMsgId: msg.remote_msg_id, emoji: data.emoji
+          });
+        } else {
+          await sendEvogoReaction({
+            host,
+            token,
+            number: conv.contacts.phone,
+            remoteMsgId: msg.remote_msg_id,
+            emoji: data.emoji,
+            fromMe: msg.sender_type === 'agent',
+          });
+        }
       }
     } catch (err) {
       console.warn("Reaction API failed, still updating DB.", err);
@@ -1360,8 +1367,8 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
         .single();
 
       if (instance) {
-        host = instance.companies?.evogo_host;
-        token = instance.evogo_api_key;
+        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
+        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
         instanceName = instance.instance_name;
       }
     } else {
@@ -1487,18 +1494,18 @@ export const editMessageAction = createServerFn({ method: "POST" })
     }
 
     // 3. Get evogo configuration
-    let host, token, instanceName;
+    let host, token, instanceName, provider;
 
     if (conv.whatsapp_instance_id) {
       const { data: instance } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .select("instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
         .eq("id", conv.whatsapp_instance_id)
         .single();
 
       if (instance) {
-        host = instance.companies?.evogo_host;
-        token = instance.evogo_api_key;
+        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
+        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
         instanceName = instance.instance_name;
       }
     }
@@ -1508,14 +1515,15 @@ export const editMessageAction = createServerFn({ method: "POST" })
       if (unitData) {
         const { data: companyInstance } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("instance_name, evogo_api_key, companies(evogo_host)")
+          .select("instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
           .eq("company_id", unitData.company_id)
           .limit(1)
           .maybeSingle();
         if (companyInstance) {
-          host = companyInstance.companies?.evogo_host;
-          token = companyInstance.evogo_api_key;
+          host = companyInstance.custom_host || (companyInstance.provider === 'stevo' ? companyInstance.companies?.stevo_host : companyInstance.companies?.evogo_host);
+          token = companyInstance.provider === 'stevo' ? companyInstance.stevo_api_key : companyInstance.evogo_api_key;
           instanceName = companyInstance.instance_name;
+          provider = companyInstance.provider || 'evogo';
         }
       }
     }
@@ -1524,13 +1532,23 @@ export const editMessageAction = createServerFn({ method: "POST" })
 
     // 4. Send Edit Request via EvoGo API
     try {
-      await editEvogoMessage({
-        host,
-        token,
-        number: conv.contacts.phone,
-        remoteMsgId: msg.remote_msg_id,
-        message: textToSend,
-      });
+      if (provider === 'stevo') {
+        await editStevoMessage({
+          host,
+          token,
+          number: conv.contacts.phone,
+          remoteMsgId: msg.remote_msg_id,
+          message: textToSend,
+        });
+      } else {
+        await editEvogoMessage({
+          host,
+          token,
+          number: conv.contacts.phone,
+          remoteMsgId: msg.remote_msg_id,
+          message: textToSend,
+        });
+      }
     } catch (err: any) {
       console.error("EvoGo Edit failed:", err);
       throw new Error(`Failed to edit message in WhatsApp: ${err.message || String(err)}`);
@@ -1579,18 +1597,18 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
     if (!conv || !conv.contacts?.phone) throw new Error("Conversation or contact not found");
 
     // 2. Fetch EvoGo Credentials
-    let host, token, instanceName;
+    let host, token, instanceName, provider;
 
     if (conv.whatsapp_instance_id) {
       const { data: instance } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("instance_name, evogo_api_key, companies(evogo_host)")
+        .select("instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
         .eq("id", conv.whatsapp_instance_id)
         .single();
 
       if (instance) {
-        host = instance.companies?.evogo_host;
-        token = instance.evogo_api_key;
+        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
+        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
         instanceName = instance.instance_name;
       }
     }
@@ -1600,14 +1618,15 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
       if (unitData) {
         const { data: companyInstance } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("instance_name, evogo_api_key, companies(evogo_host)")
+          .select("instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
           .eq("company_id", unitData.company_id)
           .limit(1)
           .maybeSingle();
         if (companyInstance) {
-          host = companyInstance.companies?.evogo_host;
-          token = companyInstance.evogo_api_key;
+          host = companyInstance.custom_host || (companyInstance.provider === 'stevo' ? companyInstance.companies?.stevo_host : companyInstance.companies?.evogo_host);
+          token = companyInstance.provider === 'stevo' ? companyInstance.stevo_api_key : companyInstance.evogo_api_key;
           instanceName = companyInstance.instance_name;
+          provider = companyInstance.provider || 'evogo';
         }
       }
     }
@@ -1616,12 +1635,21 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
 
     // 3. Send Delete Request via EvoGo API
     try {
-      await deleteEvogoMessage({
-        host,
-        token,
-        number: conv.contacts.phone,
-        remoteMsgId: msg.remote_msg_id,
-      });
+      if (provider === 'stevo') {
+        await deleteStevoMessage({
+          host,
+          token,
+          number: conv.contacts.phone,
+          remoteMsgId: msg.remote_msg_id,
+        });
+      } else {
+        await deleteEvogoMessage({
+          host,
+          token,
+          number: conv.contacts.phone,
+          remoteMsgId: msg.remote_msg_id,
+        });
+      }
     } catch (err: any) {
       console.error("EvoGo Delete failed:", err);
       throw new Error(`Failed to delete message in WhatsApp: ${err.message || String(err)}`);
@@ -2257,4 +2285,159 @@ export const salesCoachSuggestAction = createServerFn({ method: "POST" })
     }
 
     return { success: true, text: suggestion.trim() };
+  });
+
+// --- Shared Resolve Logic ---
+export async function internalResolveConversation(
+  conversationId: string, 
+  userId: string, 
+  reasonId?: string | null, 
+  observation?: string | null
+) {
+  const resolvedAt = new Date().toISOString();
+
+  // 1. Fetch conversation details to build a fallback session if needed
+  const { data: conv } = await supabaseAdmin
+    .from("conversations")
+    .select("id, contact_id, whatsapp_instance_id, started_at, assigned_agent_id, department_id")
+    .eq("id", conversationId)
+    .single();
+
+  if (!conv) return { success: false, error: "Conversation not found" };
+
+  // 2. Update conversation status
+  const { error: convErr } = await supabaseAdmin
+    .from("conversations")
+    .update({
+      status: "resolved",
+      resolved_at: resolvedAt,
+      current_session_id: null,
+      assigned_agent_id: null
+    } as any)
+    .eq("id", conversationId);
+    
+  if (convErr) throw convErr;
+
+  // 3. Atualiza sessões em andamento
+  const { data: openSessions } = await supabaseAdmin
+    .from("conversation_sessions")
+    .select("id")
+    .eq("conversation_id", conversationId)
+    .is("resolved_at", null);
+
+  if (openSessions && openSessions.length > 0) {
+    for (const session of openSessions) {
+      await supabaseAdmin.from("conversation_sessions").update({
+        resolved_at: resolvedAt,
+        resolution_reason_id: reasonId || null,
+        resolution_observation: observation?.trim() || null,
+      }).eq("id", session.id);
+      
+      await supabaseAdmin.from("session_events").insert({
+        session_id: session.id,
+        event_type: "resolved",
+        actor_id: userId
+      });
+    }
+  } else {
+    // Fallback retrocompatibilidade para conversas sem sessão
+    const { data: newSession, error: err } = await supabaseAdmin
+      .from("conversation_sessions")
+      .insert({
+        conversation_id: conv.id, 
+        contact_id: conv.contact_id, 
+        whatsapp_instance_id: conv.whatsapp_instance_id,
+        started_at: conv.started_at || new Date().toISOString(), 
+        resolved_at: resolvedAt,
+        assigned_agent_id: conv.assigned_agent_id, 
+        department_id: conv.department_id,
+        resolution_reason_id: reasonId || null, 
+        resolution_observation: observation?.trim() || null,
+      }).select().single();
+      
+    if (newSession && !err) {
+      await supabaseAdmin.from("session_events").insert({ 
+        session_id: newSession.id, 
+        event_type: "resolved", 
+        actor_id: userId 
+      });
+    }
+  }
+
+  return { success: true };
+}
+
+export const resolveConversationAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    conversationId: z.string().uuid(),
+    reasonId: z.string().optional().nullable(),
+    observation: z.string().optional().nullable(),
+  }))
+  .handler(async ({ data, context }) => {
+    try {
+      await internalResolveConversation(data.conversationId, context.userId, data.reasonId, data.observation);
+      return { success: true };
+    } catch (e: any) {
+      console.error("[resolveConversationAction] Error:", e);
+      throw new Error("Falha ao encerrar atendimento.");
+    }
+  });
+
+export const blockContactAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    contactId: z.string().uuid(),
+    reason: z.string().min(1, "O motivo é obrigatório"),
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    
+    // Atualiza o contato marcando como bloqueado
+    const { error } = await supabase
+      .from("contacts")
+      .update({ is_blocked: true, block_reason: data.reason })
+      .eq("id", data.contactId);
+      
+    if (error) {
+      console.error("Failed to block contact:", error);
+      throw new Error("Não foi possível bloquear o contato.");
+    }
+
+    // Busca conversas ativas do contato
+    const { data: activeConvs } = await supabaseAdmin
+      .from("conversations")
+      .select("id")
+      .eq("contact_id", data.contactId)
+      .neq("status", "resolved");
+
+    if (activeConvs) {
+      for (const conv of activeConvs) {
+        // Encerra cada conversa formalmente usando a lógica centralizada
+        await internalResolveConversation(conv.id, userId, null, data.reason);
+      }
+    }
+    
+    return { success: true };
+  });
+
+export const unblockContactAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    contactId: z.string().uuid(),
+  }))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    
+    const { error } = await supabase
+      .from("contacts")
+      .update({ is_blocked: false, block_reason: null })
+      .eq("id", data.contactId);
+      
+    if (error) {
+      console.error("Failed to unblock contact:", error);
+      throw new Error("Não foi possível desbloquear o contato.");
+    }
+    
+    return { success: true };
   });

@@ -1,0 +1,2 @@
+ALTER TABLE public.contacts ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.contacts ADD COLUMN IF NOT EXISTS block_reason TEXT;

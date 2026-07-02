@@ -32,6 +32,7 @@ function PipelinePage() {
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("open");
 
   // Fetch Pipelines
   const { data: pipelines, isLoading: isLoadingPipelines } = useQuery({
@@ -70,19 +71,23 @@ function PipelinePage() {
 
   // Fetch Opportunities for this pipeline
   const { data: opportunities, isLoading: isLoadingOpps } = useQuery({
-    queryKey: ["opportunities", activeCompanyId, selectedPipelineId, profile?.role, profile?.id, selectedUnitId],
+    queryKey: ["opportunities", activeCompanyId, selectedPipelineId, profile?.role, profile?.id, selectedUnitId, statusFilter],
     enabled: !!selectedPipelineId && !!stages && stages.length > 0 && !!profile?.id && !!activeCompanyId,
     queryFn: async () => {
       const stageIds = stages!.map(s => s.id);
       let query = supabase
         .from("opportunities")
         .select(`
-          id, title, value, stage_id, expected_close_date, contact_id, created_at, notes, owner_id, unit_id,
+          id, title, value, stage_id, expected_close_date, contact_id, created_at, notes, owner_id, unit_id, status,
           contacts ( name ),
           tasks ( id, status ),
           units ( name )
         `)
         .in("stage_id", stageIds);
+        
+      if (statusFilter !== "all") {
+        query = query.eq("status", statusFilter);
+      }
       
       // Filtra para que usuários comuns vejam apenas as próprias oportunidades
       if (profile?.role !== "admin_company" && profile?.role !== "manager") {
@@ -151,6 +156,8 @@ function PipelinePage() {
     }
   };
 
+
+
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
@@ -197,6 +204,18 @@ function PipelinePage() {
               {pipelines.map(p => (
                 <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+          
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[180px] h-9">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="open">Aberto</SelectItem>
+              <SelectItem value="won">Ganho</SelectItem>
+              <SelectItem value="lost">Perdido</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -282,9 +301,14 @@ function PipelinePage() {
                                           </span>
                                         </div>
 
-                                        {/* Badges row: Unit, Tasks, Notes */}
-                                        {(!selectedUnitId && opp.units?.name || totalTasks > 0 || hasNotes) ? (
+                                        {/* Badges row: Status, Unit, Tasks, Notes */}
+                                        {(opp.status || (!selectedUnitId && opp.units?.name) || totalTasks > 0 || hasNotes) ? (
                                           <div className="flex items-center gap-2 flex-wrap">
+                                            {opp.status && (
+                                              <Badge variant={opp.status === 'won' ? 'default' : opp.status === 'lost' ? 'destructive' : 'secondary'} className={`text-[10px] px-1.5 h-5 font-medium ${opp.status === 'won' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}`}>
+                                                {opp.status === 'won' ? 'Ganho' : opp.status === 'lost' ? 'Perdido' : 'Aberto'}
+                                              </Badge>
+                                            )}
                                             {!selectedUnitId && opp.units?.name && (
                                               <div className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-muted/60 text-muted-foreground w-fit max-w-full">
                                                 <Building className="h-3 w-3 shrink-0" />
