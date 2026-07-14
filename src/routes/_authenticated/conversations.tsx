@@ -248,22 +248,23 @@ function ConversationsPage() {
       // Server-side status filter for non-group tabs
       if (tab === "waiting") {
         query = query.eq("status", "waiting");
-        // Non-admin: only see conversations in their dept or assigned to them
+        // Non-admin: only see conversations assigned to them, or unassigned ones in their dept/general
         if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
           if (profile?.department_id) {
-            query = query.or(`department_id.eq.${profile.department_id},assigned_agent_id.eq.${profile.id},department_id.is.null`);
+            query = query.or(`assigned_agent_id.eq.${profile.id},and(assigned_agent_id.is.null,or(department_id.eq.${profile.department_id},department_id.is.null))`);
           } else {
-            query = query.or(`assigned_agent_id.eq.${profile?.id},department_id.is.null`);
+            query = query.or(`assigned_agent_id.eq.${profile?.id},and(assigned_agent_id.is.null,department_id.is.null)`);
           }
         }
-      } else if (tab === "active") {
-        query = query.eq("status", "active");
-        if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
-          query = query.eq("assigned_agent_id", profile?.id ?? "");
-        }
-      } else if (tab === "resolved") {
-        query = query.eq("status", "resolved");
-        if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
+      } else if (tab === "active" || tab === "resolved") {
+        query = query.eq("status", tab);
+        if (profile?.role === "manager") {
+          if (profile?.department_id) {
+            query = query.or(`department_id.eq.${profile.department_id},assigned_agent_id.eq.${profile.id}`);
+          } else {
+            query = query.or(`assigned_agent_id.eq.${profile.id},department_id.is.null`);
+          }
+        } else if (profile?.role !== "admin_company" && profile?.role !== "super_admin") {
           query = query.eq("assigned_agent_id", profile?.id ?? "");
         }
       }
@@ -277,12 +278,12 @@ function ConversationsPage() {
       // Client-side: separate groups from regular convs
       if (tab === "groups") {
         rows = rows.filter(c =>
-          c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'))
+          c.contact?.phone && (c.contact.phone.startsWith('120363') || (c.contact.phone.includes('-') && c.contact.phone.length > 18))
         );
       } else {
         // Exclude groups from all other tabs
         rows = rows.filter(c =>
-          !(c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-')))
+          !(c.contact?.phone && (c.contact.phone.startsWith('120363') || (c.contact.phone.includes('-') && c.contact.phone.length > 18)))
         );
       }
 
@@ -389,7 +390,7 @@ function ConversationsPage() {
           return;
         }
 
-        const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || c.contact.phone.includes('-'));
+        const isGroup = c.contact?.phone && (c.contact.phone.startsWith('120363') || (c.contact.phone.includes('-') && c.contact.phone.length > 18));
         if (isGroup) {
           counts.groups.total++;
           counts.groups.unread += c.unread_count || 0;
@@ -469,7 +470,7 @@ function ConversationsPage() {
 
       // Determine if this conversation belongs to the current queryTab
       if (targetConv) {
-        const isGroup = !!((targetConv as ConvRow).contact?.phone && ((targetConv as ConvRow).contact.phone!.startsWith('120363') || (targetConv as ConvRow).contact.phone!.includes('-')));
+        const isGroup = !!((targetConv as ConvRow).contact?.phone && ((targetConv as ConvRow).contact.phone!.startsWith('120363') || ((targetConv as ConvRow).contact.phone!.includes('-') && (targetConv as ConvRow).contact.phone!.length > 18)));
         const matchesTab = isGroup ? (queryTab === "groups") : ((targetConv as ConvRow).status === queryTab);
         
         if (matchesTab) {
@@ -518,7 +519,7 @@ function ConversationsPage() {
   };
 
   const handleConversationStatusChangeInCache = (conv: ConvRow, oldStatus: "waiting" | "active" | "resolved", newStatus: "waiting" | "active" | "resolved") => {
-    const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-')));
+    const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith('120363') || (conv.contact.phone.includes('-') && conv.contact.phone.length > 18)));
     if (isGroup) return; // groups tab doesn't split by status
 
     updateUnreadCountsInCache(oldStatus, -1, -(conv.unread_count || 0));
@@ -558,7 +559,7 @@ function ConversationsPage() {
 
           if (oldConv) {
             // Update conversation details in-cache
-            const isGroup = !!((oldConv as ConvRow).contact?.phone && ((oldConv as ConvRow).contact.phone!.startsWith('120363') || (oldConv as ConvRow).contact.phone!.includes('-')));
+            const isGroup = !!((oldConv as ConvRow).contact?.phone && ((oldConv as ConvRow).contact.phone!.startsWith('120363') || ((oldConv as ConvRow).contact.phone!.includes('-') && (oldConv as ConvRow).contact.phone!.length > 18)));
             const targetStatus = isGroup ? "groups" : (updatedConv.status || "active");
             updateConversationInCache(convId, updatedConv, { moveToTop: false, status: targetStatus });
 
@@ -629,7 +630,7 @@ function ConversationsPage() {
             
             if (!isAlreadyUpdated) {
               const nextUnread = ((existingConv as ConvRow).unread_count || 0) + unreadIncrement;
-              const isGroup = !!((existingConv as ConvRow).contact?.phone && ((existingConv as ConvRow).contact.phone!.startsWith('120363') || (existingConv as ConvRow).contact.phone!.includes('-')));
+              const isGroup = !!((existingConv as ConvRow).contact?.phone && ((existingConv as ConvRow).contact.phone!.startsWith('120363') || ((existingConv as ConvRow).contact.phone!.includes('-') && (existingConv as ConvRow).contact.phone!.length > 18)));
               const targetStatus = isGroup ? "groups" : ((existingConv as ConvRow).status || "active");
 
               updateConversationInCache(convId, {
@@ -1067,7 +1068,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
     }
   });
 
-  const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
+  const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || (conv.contact.phone.includes('-') && conv.contact.phone.length > 18));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
   return (
@@ -1431,7 +1432,7 @@ function ConversationItem({
   currentUserId?: string;
   showUnitInfo?: boolean;
 }) {
-  const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
+  const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || (conv.contact.phone.includes('-') && conv.contact.phone.length > 18));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
   return (
@@ -1708,7 +1709,7 @@ function ChatPanel({
         });
 
         // Update unread counts in-cache
-        const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-')));
+        const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith('120363') || (conv.contact.phone.includes('-') && conv.contact.phone.length > 18)));
         const tabKey = isGroup ? 'groups' : (conv.status || 'active');
         qc.setQueriesData({ queryKey: ["unread-counts"] }, (oldData: any) => {
           if (!oldData) return oldData;
@@ -2195,7 +2196,7 @@ function ChatPanel({
     onError: (e) => toast.error("Erro ao alterar IA", { description: (e as Error).message })
   });
 
-  const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || conv.contact.phone.includes('-'));
+  const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || (conv.contact.phone.includes('-') && conv.contact.phone.length > 18));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
   const quickMsgItems = useMemo(() => {
