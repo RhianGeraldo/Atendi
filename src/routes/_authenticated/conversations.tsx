@@ -49,7 +49,7 @@ import { TransferDialog } from "@/components/chat/transfer-dialog";
 import { LinkPreview } from "@/components/chat/link-preview";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 import { ContactBlockDialog } from "@/components/contacts/contact-block-dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { WavoipCallOverlay } from "@/components/whatsapp/wavoip-call-overlay";
 import { WavoipDialer } from "@/components/whatsapp/wavoip-dialer";
@@ -125,6 +125,8 @@ function ConversationsPage() {
   const { activeCompanyId } = useActiveCompany();
   const { startCall } = useWavoip();
   const [dialerOpen, setDialerOpen] = useState(false);
+  const [departmentFilter, setDepartmentFilter] = useState<string | null>(null);
+  const [agentFilter, setAgentFilter] = useState<string | null>(null);
   
   const { data: instances } = useQuery({
     queryKey: ["whatsapp_instances_filter", selectedUnitId],
@@ -145,7 +147,43 @@ function ConversationsPage() {
     },
     enabled: !!activeCompanyId,
   });
-  
+
+  const { data: departments } = useQuery({
+    queryKey: ["departments_filter", activeCompanyId],
+    queryFn: async () => {
+      if (!activeCompanyId) return [];
+      const { data, error } = await supabase
+        .from("departments")
+        .select("id, name")
+        .eq("company_id", activeCompanyId)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!activeCompanyId,
+  });
+
+  const { data: agents } = useQuery({
+    queryKey: ["agents_filter", activeCompanyId, selectedUnitId],
+    queryFn: async () => {
+      if (!activeCompanyId) return [];
+      let query = supabase
+        .from("profiles")
+        .select("id, name, active, role")
+        .eq("company_id", activeCompanyId)
+        .eq("active", true)
+        .order("name", { ascending: true });
+
+      if (selectedUnitId && selectedUnitId !== "all") {
+        query = query.contains("units", [selectedUnitId]);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!activeCompanyId,
+  });
+
   const PAGE_SIZE = 20;
 
   const {
@@ -155,7 +193,7 @@ function ConversationsPage() {
     isFetchingNextPage,
     isFetching: isConvFetching,
   } = useInfiniteQuery({
-    queryKey: ["conversations", activeCompanyId, tab, selectedUnitId, profile?.id, profile?.role, profile?.department_id, debouncedSearch, instanceFilter],
+    queryKey: ["conversations", activeCompanyId, tab, selectedUnitId, profile?.id, profile?.role, profile?.department_id, debouncedSearch, instanceFilter, departmentFilter, agentFilter],
     initialPageParam: 0,
     queryFn: async ({ pageParam = 0 }) => {
       const from = pageParam as number;
@@ -185,6 +223,18 @@ function ConversationsPage() {
       
       if (instanceFilter && instanceFilter !== "all") {
         query = query.eq("whatsapp_instance_id", instanceFilter);
+      }
+
+      if (departmentFilter && departmentFilter !== "all") {
+        query = query.eq("department_id", departmentFilter);
+      }
+
+      if (agentFilter && agentFilter !== "all") {
+        if (agentFilter === "unassigned") {
+          query = query.is("assigned_agent_id", null);
+        } else {
+          query = query.eq("assigned_agent_id", agentFilter);
+        }
       }
 
       if (debouncedSearch) {
@@ -279,7 +329,7 @@ function ConversationsPage() {
   }, [searchConvId]);
 
   const { data: unreadCounts } = useQuery({
-    queryKey: ["unread-counts", activeCompanyId, selectedUnitId, profile?.id, profile?.department_id, instanceFilter, debouncedSearch],
+    queryKey: ["unread-counts", activeCompanyId, selectedUnitId, profile?.id, profile?.department_id, instanceFilter, debouncedSearch, departmentFilter, agentFilter],
     queryFn: async () => {
       let selectString = "id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts!inner(id, phone, name, company_id, is_blocked), unit_id";
 
@@ -299,6 +349,22 @@ function ConversationsPage() {
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
+      }
+
+      if (instanceFilter && instanceFilter !== "all") {
+        query = query.eq("whatsapp_instance_id", instanceFilter);
+      }
+
+      if (departmentFilter && departmentFilter !== "all") {
+        query = query.eq("department_id", departmentFilter);
+      }
+
+      if (agentFilter && agentFilter !== "all") {
+        if (agentFilter === "unassigned") {
+          query = query.is("assigned_agent_id", null);
+        } else {
+          query = query.eq("assigned_agent_id", agentFilter);
+        }
       }
 
       if (debouncedSearch) {
@@ -665,21 +731,57 @@ function ConversationsPage() {
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="icon" variant={instanceFilter && instanceFilter !== "all" ? "default" : "outline"} className="h-9 w-9 shrink-0">
+                <Button size="icon" variant={(instanceFilter && instanceFilter !== "all") || (departmentFilter && departmentFilter !== "all") || (agentFilter && agentFilter !== "all") ? "default" : "outline"} className="h-9 w-9 shrink-0">
                   <Filter className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setInstanceFilter("all")}>
-                  Todas as instâncias
-                  {(!instanceFilter || instanceFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4" />}
-                </DropdownMenuItem>
-                {instances?.map(inst => (
-                  <DropdownMenuItem key={inst.id} onClick={() => setInstanceFilter(inst.id)}>
-                    {inst.name || inst.instance_name}
-                    {instanceFilter === inst.id && <CheckCircle2 className="ml-auto h-4 w-4" />}
+              <DropdownMenuContent align="end" className="w-64 p-0">
+                <ScrollArea className="h-[350px] w-full p-1">
+                  <DropdownMenuLabel className="text-xs uppercase text-muted-foreground pb-1">Instâncias</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => setInstanceFilter("all")} className="cursor-pointer">
+                    Todas as instâncias
+                    {(!instanceFilter || instanceFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
                   </DropdownMenuItem>
-                ))}
+                  {instances?.map(inst => (
+                    <DropdownMenuItem key={inst.id} onClick={() => setInstanceFilter(inst.id)} className="flex items-center gap-2 cursor-pointer">
+                      <ProviderIcon provider={inst.provider} className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{inst.name || inst.instance_name}</span>
+                      {instanceFilter === inst.id && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                    </DropdownMenuItem>
+                  ))}
+                  
+                  <DropdownMenuSeparator className="my-2" />
+                  
+                  <DropdownMenuLabel className="text-xs uppercase text-muted-foreground pb-1">Departamentos</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => setDepartmentFilter("all")} className="cursor-pointer">
+                    Todos os departamentos
+                    {(!departmentFilter || departmentFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                  </DropdownMenuItem>
+                  {departments?.map(dept => (
+                    <DropdownMenuItem key={dept.id} onClick={() => setDepartmentFilter(dept.id)} className="cursor-pointer">
+                      <span className="truncate">{dept.name}</span>
+                      {departmentFilter === dept.id && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                    </DropdownMenuItem>
+                  ))}
+                  
+                  <DropdownMenuSeparator className="my-2" />
+                  
+                  <DropdownMenuLabel className="text-xs uppercase text-muted-foreground pb-1">Atendentes</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => setAgentFilter("all")} className="cursor-pointer">
+                    Todos os atendentes
+                    {(!agentFilter || agentFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setAgentFilter("unassigned")} className="cursor-pointer">
+                    Sem Atendente (Fila Geral)
+                    {agentFilter === "unassigned" && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                  </DropdownMenuItem>
+                  {agents?.map(agent => (
+                    <DropdownMenuItem key={agent.id} onClick={() => setAgentFilter(agent.id)} className="cursor-pointer flex items-center justify-between gap-2">
+                      <span className="truncate flex-1">{agent.name}</span>
+                      {agentFilter === agent.id && <CheckCircle2 className="ml-auto h-4 w-4 shrink-0 text-primary" />}
+                    </DropdownMenuItem>
+                  ))}
+                </ScrollArea>
               </DropdownMenuContent>
             </DropdownMenu>
             <NewConversationDialog onCreated={(id) => {
