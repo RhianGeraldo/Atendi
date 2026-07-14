@@ -563,6 +563,24 @@ function ConversationsPage() {
             const targetStatus = isGroup ? "groups" : (updatedConv.status || "active");
             updateConversationInCache(convId, updatedConv, { moveToTop: false, status: targetStatus });
 
+            // Fetch relations to ensure we have names (agent, department, etc) if they changed
+            if (
+              updatedConv.assigned_agent_id !== (oldConv as ConvRow).assigned_agent_id ||
+              updatedConv.department_id !== (oldConv as ConvRow).department_id ||
+              updatedConv.whatsapp_instance_id !== (oldConv as ConvRow).whatsapp_instance_id
+            ) {
+              supabase
+                .from("conversations")
+                .select("assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), department:departments(name), whatsapp_instance:whatsapp_instances(name)")
+                .eq("id", convId)
+                .single()
+                .then(({ data, error }) => {
+                  if (data && !error) {
+                    updateConversationInCache(convId, data as any);
+                  }
+                });
+            }
+
             // Handle status changes in-cache
             if ((oldConv as ConvRow).status !== updatedConv.status) {
               handleConversationStatusChangeInCache(oldConv as ConvRow, (oldConv as ConvRow).status, updatedConv.status);
@@ -1500,9 +1518,9 @@ function ConversationItem({
               {conv.department.name}
             </Badge>
           )}
-          {conv.status === "active" && (conv.ai_active || conv.assigned_agent?.name) && (
+          {conv.status === "active" && (conv.ai_active || conv.assigned_agent?.name || conv.assigned_agent_id) && (
             <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal text-muted-foreground bg-muted/30">
-              {conv.ai_active ? `🤖 ${conv.ai_agent?.name || 'IA'}` : conv.assigned_agent?.name}
+              {conv.ai_active ? `🤖 ${conv.ai_agent?.name || 'IA'}` : (conv.assigned_agent?.name || (conv.assigned_agent_id === currentUserId ? "Você" : "Atendente"))}
             </Badge>
           )}
           {conv.status === "waiting" && conv.assigned_agent_id && conv.assigned_agent_id === currentUserId && (
