@@ -49,7 +49,7 @@ import { TransferDialog } from "@/components/chat/transfer-dialog";
 import { LinkPreview } from "@/components/chat/link-preview";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 import { ContactBlockDialog } from "@/components/contacts/contact-block-dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuPortal } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { WavoipCallOverlay } from "@/components/whatsapp/wavoip-call-overlay";
 import { WavoipDialer } from "@/components/whatsapp/wavoip-dialer";
@@ -735,53 +735,96 @@ function ConversationsPage() {
                   <Filter className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64 p-0">
-                <ScrollArea className="h-[350px] w-full p-1">
-                  <DropdownMenuLabel className="text-xs uppercase text-muted-foreground pb-1">Instâncias</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => setInstanceFilter("all")} className="cursor-pointer">
-                    Todas as instâncias
-                    {(!instanceFilter || instanceFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
-                  </DropdownMenuItem>
-                  {instances?.map(inst => (
-                    <DropdownMenuItem key={inst.id} onClick={() => setInstanceFilter(inst.id)} className="flex items-center gap-2 cursor-pointer">
-                      <ProviderIcon provider={inst.provider} className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{inst.name || inst.instance_name}</span>
-                      {instanceFilter === inst.id && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+              <DropdownMenuContent align="end" className="w-48">
+                {((instanceFilter && instanceFilter !== "all") || (departmentFilter && departmentFilter !== "all") || (agentFilter && agentFilter !== "all")) && (
+                  <>
+                    <DropdownMenuItem 
+                      className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer font-medium"
+                      onClick={() => {
+                        setInstanceFilter("all");
+                        setDepartmentFilter("all");
+                        setAgentFilter("all");
+                      }}
+                    >
+                      Limpar Filtros
                     </DropdownMenuItem>
-                  ))}
-                  
-                  <DropdownMenuSeparator className="my-2" />
-                  
-                  <DropdownMenuLabel className="text-xs uppercase text-muted-foreground pb-1">Departamentos</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => setDepartmentFilter("all")} className="cursor-pointer">
-                    Todos os departamentos
-                    {(!departmentFilter || departmentFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
-                  </DropdownMenuItem>
-                  {departments?.map(dept => (
-                    <DropdownMenuItem key={dept.id} onClick={() => setDepartmentFilter(dept.id)} className="cursor-pointer">
-                      <span className="truncate">{dept.name}</span>
-                      {departmentFilter === dept.id && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
-                    </DropdownMenuItem>
-                  ))}
-                  
-                  <DropdownMenuSeparator className="my-2" />
-                  
-                  <DropdownMenuLabel className="text-xs uppercase text-muted-foreground pb-1">Atendentes</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => setAgentFilter("all")} className="cursor-pointer">
-                    Todos os atendentes
-                    {(!agentFilter || agentFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setAgentFilter("unassigned")} className="cursor-pointer">
-                    Sem Atendente (Fila Geral)
-                    {agentFilter === "unassigned" && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
-                  </DropdownMenuItem>
-                  {agents?.map(agent => (
-                    <DropdownMenuItem key={agent.id} onClick={() => setAgentFilter(agent.id)} className="cursor-pointer flex items-center justify-between gap-2">
-                      <span className="truncate flex-1">{agent.name}</span>
-                      {agentFilter === agent.id && <CheckCircle2 className="ml-auto h-4 w-4 shrink-0 text-primary" />}
-                    </DropdownMenuItem>
-                  ))}
-                </ScrollArea>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    Instâncias
+                    {instanceFilter && instanceFilter !== "all" && <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent className="w-64">
+                      <ScrollArea className="h-[300px] w-full p-1">
+                        <DropdownMenuItem onClick={() => setInstanceFilter("all")} className="cursor-pointer">
+                          Todas as instâncias
+                          {(!instanceFilter || instanceFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                        </DropdownMenuItem>
+                        {instances?.map(inst => (
+                          <DropdownMenuItem key={inst.id} onClick={() => setInstanceFilter(inst.id)} className="flex items-center gap-2 cursor-pointer">
+                            <ProviderIcon provider={inst.provider} className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{inst.name || inst.instance_name}</span>
+                            {instanceFilter === inst.id && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                          </DropdownMenuItem>
+                        ))}
+                      </ScrollArea>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+                
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    Departamentos
+                    {departmentFilter && departmentFilter !== "all" && <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent className="w-64">
+                      <ScrollArea className="h-[300px] w-full p-1">
+                        <DropdownMenuItem onClick={() => setDepartmentFilter("all")} className="cursor-pointer">
+                          Todos os departamentos
+                          {(!departmentFilter || departmentFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                        </DropdownMenuItem>
+                        {departments?.map(dept => (
+                          <DropdownMenuItem key={dept.id} onClick={() => setDepartmentFilter(dept.id)} className="cursor-pointer">
+                            <span className="truncate">{dept.name}</span>
+                            {departmentFilter === dept.id && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                          </DropdownMenuItem>
+                        ))}
+                      </ScrollArea>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+                
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    Atendentes
+                    {agentFilter && agentFilter !== "all" && <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent className="w-64">
+                      <ScrollArea className="h-[300px] w-full p-1">
+                        <DropdownMenuItem onClick={() => setAgentFilter("all")} className="cursor-pointer">
+                          Todos os atendentes
+                          {(!agentFilter || agentFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setAgentFilter("unassigned")} className="cursor-pointer">
+                          Sem Atendente (Fila Geral)
+                          {agentFilter === "unassigned" && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
+                        </DropdownMenuItem>
+                        {agents?.map(agent => (
+                          <DropdownMenuItem key={agent.id} onClick={() => setAgentFilter(agent.id)} className="cursor-pointer flex items-center justify-between gap-2">
+                            <span className="truncate flex-1">{agent.name}</span>
+                            {agentFilter === agent.id && <CheckCircle2 className="ml-auto h-4 w-4 shrink-0 text-primary" />}
+                          </DropdownMenuItem>
+                        ))}
+                      </ScrollArea>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
               </DropdownMenuContent>
             </DropdownMenu>
             <NewConversationDialog onCreated={(id) => {
