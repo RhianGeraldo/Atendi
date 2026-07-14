@@ -542,7 +542,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(z.object({
     phone: z.string().min(10),
-    text: z.string().min(1),
+    text: z.string().optional(),
     instanceName: z.string().min(1),
     companyId: z.string().uuid(),
   }))
@@ -588,32 +588,32 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       .single();
 
     let textToSend = data.text;
-    if (userProfile?.use_signature && userProfile?.name) {
+    if (textToSend && userProfile?.use_signature && userProfile?.name) {
       textToSend = textToSend?.trim() ? `*${userProfile.name}*:\n${textToSend}` : `*${userProfile.name}*:`;
     }
 
     // 4. Send message via EvoGo
-    await sendEvogoText({
-      host,
-      token,
-      instanceName,
-      number: rawPhone,
-      text: textToSend,
-    });
+    if (textToSend) {
+      await sendEvogoText({
+        host,
+        token,
+        instanceName,
+        number: rawPhone,
+        text: textToSend,
+      });
+    }
 
     // 4. Find or create Contact
-    let contactId;
+    let contactIds: string[] = [];
     const phoneVariants = getPhoneVariants(rawPhone);
-    const { data: existingContact } = await supabaseAdmin
+    const { data: existingContacts } = await supabaseAdmin
       .from('contacts')
       .select('id, merged_into_id')
       .eq('company_id', data.companyId)
-      .in('phone', phoneVariants)
-      .limit(1)
-      .maybeSingle();
+      .in('phone', phoneVariants);
 
-    if (existingContact) {
-      contactId = existingContact.merged_into_id || existingContact.id;
+    if (existingContacts && existingContacts.length > 0) {
+      contactIds = existingContacts.map(c => c.merged_into_id || c.id);
     } else {
       const { data: newContact, error: contactErr } = await supabaseAdmin
         .from('contacts')
@@ -625,16 +625,17 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
         .select()
         .single();
       if (contactErr) throw new Error("Failed to create contact.");
-      contactId = newContact.id;
+      contactIds = [newContact.id];
     }
+
+    const contactId = contactIds[0];
 
     // 5. Find or create Conversation
     let conversationId;
     const { data: latestConvs } = await supabaseAdmin
       .from('conversations')
       .select('id, status, assigned_agent_id, assigned_agent:profiles!conversations_assigned_agent_id_fkey(name)')
-      .eq('unit_id', unitId)
-      .eq('contact_id', contactId)
+      .in('contact_id', contactIds)
       .eq('whatsapp_instance_id', instance.id)
       .order('started_at', { ascending: false })
       .limit(1);
@@ -743,23 +744,25 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     }
 
     // 6. Save message in DB
-    const { error: msgErr } = await supabase
-      .from("messages")
-      .insert({
-        conversation_id: conversationId,
-        sender_type: "agent",
-        sender_id: userId,
-        content: textToSend,
-        media_type: "text"
-      });
+    if (textToSend) {
+      const { error: msgErr } = await supabase
+        .from("messages")
+        .insert({
+          conversation_id: conversationId,
+          sender_type: "agent",
+          sender_id: userId,
+          content: textToSend,
+          media_type: "text"
+        });
 
-    if (msgErr) {
-      console.error("Failed to save message in DB:", msgErr);
-    } else {
-      await supabaseAdmin
-        .from("conversations")
-        .update({ last_message_at: new Date().toISOString(), status: 'active' })
-        .eq("id", conversationId);
+      if (msgErr) {
+        console.error("Failed to save message in DB:", msgErr);
+      } else {
+        await supabaseAdmin
+          .from("conversations")
+          .update({ last_message_at: new Date().toISOString(), status: 'active' })
+          .eq("id", conversationId);
+      }
     }
 
     return { success: true, conversationId };
@@ -1267,8 +1270,26 @@ export const transferConversationAction = createServerFn({ method: "POST" })
 
     if (data.targetType === "department") {
       updateData.department_id = data.targetId;
-      updateData.assigned_agent_id = null; // back to queue
       updateData.status = "waiting"; 
+      updateData.assigned_agent_id = null; // default to queue
+
+      // Fetch company and unit info to check Round Robin
+      const { data: convInfo } = await supabaseAdmin
+        .from("conversations")
+        .select("company_id, whatsapp_instances(unit_id)")
+        .eq("id", data.conversationId)
+        .limit(1)
+        .maybeSingle();
+
+      if (convInfo?.company_id) {
+        const unitId = convInfo.whatsapp_instances?.[0]?.unit_id || null;
+        const { assignDepartmentRoundRobin } = await import("../server/routing");
+        const roundRobinAgent = await assignDepartmentRoundRobin(convInfo.company_id, data.targetId, unitId);
+        
+        if (roundRobinAgent) {
+          updateData.assigned_agent_id = roundRobinAgent;
+        }
+      }
     } else {
       updateData.assigned_agent_id = data.targetId;
       updateData.status = "waiting";

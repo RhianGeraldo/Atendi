@@ -47,6 +47,7 @@ import { UsersTab } from "@/components/settings/users-tab";
 import { LabelsTab } from "@/components/settings/labels-tab";
 import { CrmTab } from "@/components/settings/crm-tab";
 import { AiAgentsTab } from "@/components/settings/ai-agents-tab";
+import { LeadRoutingSettings } from "@/components/settings/lead-routing-settings";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
@@ -809,6 +810,10 @@ function SettingsPage() {
                 <CheckCircle2 className="mr-2 h-4 w-4" />
                 Encerramento
               </TabsTrigger>
+              <TabsTrigger value="routing" className="w-full justify-start data-[state=active]:bg-muted">
+                <Users className="mr-2 h-4 w-4" />
+                Distribuição (Roleta)
+              </TabsTrigger>
             </TabsList>
             
             <div className="flex-1 w-full min-w-0">
@@ -878,6 +883,10 @@ function SettingsPage() {
           
           <TabsContent value="labels" className="mt-0 border-none p-0">
             <LabelsTab />
+          </TabsContent>
+
+          <TabsContent value="routing" className="mt-0 border-none p-0">
+            <LeadRoutingSettings />
           </TabsContent>
         </div>
       </Tabs>

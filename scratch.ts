@@ -1,24 +1,14 @@
-    // UPDATE PARA O SALES COACH ACTION
+import { createClient } from '@supabase/supabase-js'
 
-    let systemPrompt = aiSettings.sales_coach_prompt || "Você é um treinador de vendas de elite.";
-    systemPrompt += "\n\nO usuário enviará o histórico recente de uma conversa. Sua tarefa é analisar o atendimento e gerar uma tabela de análise em Markdown (exatamente com as colunas: Item, Avaliação e Trechos de Referência). Avalie Abertura, Descoberta de necessidades, Comunicação, Técnicas de Vendas, Oportunidades Perdidas e Erros. No final da tabela dê Notas de 0 a 10 para Empatia, Qualificação, Persuasão e uma Nota Geral. Finalize com um Resumo Executivo em bullet points.";
-    
-    // ... [código de fetch] ...
-    
-    // depois de obter a resposta (suggestion):
-    
-    // 4. Salvar Análise no Banco
-    const { data: insertedAnalysis, error: insertError } = await supabaseAdmin
-      .from('sales_coach_analyses')
-      .insert({
-        conversation_id: data.conversationId,
-        company_id: companyId,
-        analysis_markdown: suggestion,
-        created_by: userId
-      })
-      .select()
-      .single();
-      
-    if (insertError) {
-      console.error("Erro ao salvar análise:", insertError);
-    }
+const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const supabaseKey = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || '';
+
+const supabase = createClient(supabaseUrl, supabaseKey)
+
+async function test() {
+  const { data, error } = await supabase.from('conversations').select('*').limit(1)
+  if (data && data.length > 0) {
+    console.log(Object.keys(data[0]))
+  }
+}
+test()

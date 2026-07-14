@@ -535,6 +535,21 @@ Para encerrar, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] n
         updatePayload.department_id = agent.handoff_department_id;
         const { data: dept } = await supabaseAdmin.from('departments').select('name').eq('id', agent.handoff_department_id).single();
         if (dept) deptName = dept.name;
+
+        // Verify Round Robin for this department
+        const { data: convData } = await supabaseAdmin
+          .from("conversations")
+          .select("whatsapp_instances(unit_id)")
+          .eq("id", conversationId)
+          .single();
+        const unitId = convData?.whatsapp_instances?.[0]?.unit_id || null;
+        
+        const { assignDepartmentRoundRobin } = await import("./routing");
+        const roundRobinAgent = await assignDepartmentRoundRobin(companyId, agent.handoff_department_id, unitId);
+        
+        if (roundRobinAgent) {
+          updatePayload.assigned_agent_id = roundRobinAgent;
+        }
       }
 
       await supabaseAdmin

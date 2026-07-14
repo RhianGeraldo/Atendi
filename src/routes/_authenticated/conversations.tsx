@@ -428,8 +428,8 @@ function ConversationsPage() {
           // If status/tab changed and it no longer belongs here, it is removed from this tab
           nextData = { ...oldData, pages: updatedPages };
         }
-      } else if (moveToTop && targetStatus === queryTab) {
-        // If not found in cache and moveToTop was requested, and it belongs to this queryTab, trigger a refetch
+      } else if (targetStatus === queryTab) {
+        // If it belongs to this tab but wasn't in cache, trigger a refetch to pull it in
         setTimeout(() => qc.invalidateQueries({ queryKey: queryKey }), 0);
       }
       
@@ -1164,19 +1164,20 @@ function NewConversationDialog({
   });
 
   const send = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (overrideText?: string) => {
+      const textToUse = overrideText !== undefined ? overrideText : text;
       if (!activeCompanyId) throw new Error("Usuário sem empresa");
       const res = await sendProactiveMessageAction({
         data: {
           phone,
-          text,
+          text: textToUse,
           instanceName,
           companyId: activeCompanyId,
         }
       });
-      return res;
+      return { res, isOpening: overrideText === "" };
     },
-    onSuccess: (res) => {
+    onSuccess: ({ res, isOpening }) => {
       if (res.conversationId && onCreated) {
         onCreated(res.conversationId);
       }
@@ -1185,10 +1186,10 @@ function NewConversationDialog({
       setText("");
       setInstanceName("");
       qc.invalidateQueries({ queryKey: ["conversations"] });
-      toast.success("Mensagem enviada com sucesso!");
+      toast.success(isOpening ? "Chat aberto com sucesso!" : "Mensagem enviada com sucesso!");
     },
     onError: (e) => {
-      toast.error("Erro ao enviar mensagem", { description: (e as Error).message });
+      toast.error("Erro ao iniciar conversa", { description: (e as Error).message });
     }
   });
 
@@ -1205,7 +1206,7 @@ function NewConversationDialog({
         <DialogHeader>
           <DialogTitle>Nova Conversa</DialogTitle>
           <DialogDescription>
-            Inicie um atendimento enviando uma mensagem ativa para o cliente.
+            Inicie um atendimento enviando uma mensagem ativa para o cliente ou abrindo o chat diretamente.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
@@ -1240,7 +1241,7 @@ function NewConversationDialog({
             <p className="text-[10px] text-muted-foreground">Inclua o DDI (55) e o DDD.</p>
           </div>
           <div className="space-y-2">
-            <Label>Mensagem</Label>
+            <Label>Mensagem <span className="text-muted-foreground font-normal">(Opcional se for apenas abrir o chat)</span></Label>
             <Textarea 
               placeholder="Digite a primeira mensagem..." 
               value={text} 
@@ -1249,14 +1250,22 @@ function NewConversationDialog({
             />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="flex-wrap gap-2 sm:justify-end">
           <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
           <Button 
-            onClick={() => send.mutate()} 
+            variant="secondary"
+            onClick={() => send.mutate("")} 
+            disabled={!phone || !instanceName || send.isPending}
+          >
+            {send.isPending && send.variables === "" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-2 h-4 w-4" />}
+            Abrir Chat
+          </Button>
+          <Button 
+            onClick={() => send.mutate(undefined)} 
             disabled={!phone || !text || !instanceName || send.isPending}
           >
-            {send.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            Enviar
+            {send.isPending && send.variables !== "" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+            Enviar e Abrir
           </Button>
         </DialogFooter>
       </DialogContent>

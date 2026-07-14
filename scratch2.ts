@@ -1,9 +1,18 @@
-import { createClient } from '@supabase/supabase-js';
-const supabase = createClient(process.env.VITE_SUPABASE_URL!, process.env.VITE_SUPABASE_ANON_KEY!);
-async function run() {
-  const q = supabase.from('conversations').select('id, contact:contacts!inner(is_blocked)');
-  q.or('is_blocked.eq.false,is_blocked.is.null', { foreignTable: 'contact' });
-  q.or('name.ilike.%carl%', { foreignTable: 'contact' });
-  console.log(q.url.toString());
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+const supabaseKey = process.env.SERVICE_ROLE || '';
+const supabase = createClient(supabaseUrl, supabaseKey)
+
+async function test() {
+  const tables = ['departments', 'units', 'profiles']
+  for (const table of tables) {
+    const { data } = await supabase.from(table).select('*').limit(1)
+    if (data && data.length > 0) {
+      console.log(`Table ${table} keys:`, Object.keys(data[0]))
+    } else {
+      console.log(`Table ${table} is empty`)
+    }
+  }
 }
-run();
+test()

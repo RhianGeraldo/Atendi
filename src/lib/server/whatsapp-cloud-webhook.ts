@@ -3,6 +3,7 @@ import { enqueueAiMessage } from './ai-queue';
 import { syncCloudTemplates } from './whatsapp-cloud-api';
 import { v4 as uuidv4 } from 'uuid';
 import { getPhoneVariants } from '@/lib/utils';
+import { assignTrafficLeadRoundRobin } from './routing';
 
 export async function handleWhatsappCloudWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -522,26 +523,42 @@ async function processIncomingMessage(params: any) {
     const defaultAgentName = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].name : 'IA';
     const isActiveByDefault = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
     
+    let targetAgentId = null;
+    let targetDepartmentId = null;
+    let targetStatus = 'waiting';
+    let targetAiActive = false;
+
+    if (isActiveByDefault) {
+       targetAiActive = true;
+       targetStatus = 'active';
+    } else if (resolvedConv && resolvedConv.assigned_agent_id) {
+       targetAgentId = resolvedConv.assigned_agent_id;
+       targetStatus = 'waiting'; 
+    }
+
     if (resolvedConv) {
       conversationId = resolvedConv.id;
-      aiActive = isActiveByDefault || (resolvedConv.ai_active ?? false);
+      aiActive = targetAiActive;
       
       const updatePayload: any = {
-        status: isActiveByDefault ? 'active' : 'waiting',
+        status: targetStatus,
         last_message_at: new Date(timestamp).toISOString(),
         last_message_preview: textContent?.substring(0, 50),
         remote_id: phoneWithoutPlus,
         resolved_at: null,
-        ai_active: aiActive,
+        ai_active: targetAiActive,
         ai_followup_count: 0
       };
-      if (aiActive && defaultAgentId) updatePayload.ai_agent_id = defaultAgentId;
+      
+      if (targetAiActive && defaultAgentId) updatePayload.ai_agent_id = defaultAgentId;
+      if (targetAgentId) updatePayload.assigned_agent_id = targetAgentId;
+      if (targetDepartmentId) updatePayload.department_id = targetDepartmentId;
 
       await supabaseAdmin.from('conversations')
         .update(updatePayload)
         .eq('id', conversationId);
     } else {
-      if (isActiveByDefault) aiActive = true;
+      aiActive = targetAiActive;
       // Cria nova conversa
       const { data: newConv, error: convError } = await supabaseAdmin
         .from('conversations')
@@ -550,13 +567,15 @@ async function processIncomingMessage(params: any) {
           remote_id: phoneWithoutPlus,
           whatsapp_instance_id: instanceId,
           unit_id: unitId,
-          status: isActiveByDefault ? 'active' : 'waiting',
+          status: targetStatus,
           started_at: new Date(timestamp).toISOString(),
           last_message_at: new Date(timestamp).toISOString(),
           last_message_preview: textContent?.substring(0, 50),
           channel: 'whatsapp',
-          ai_active: isActiveByDefault,
-          ai_agent_id: defaultAgentId
+          ai_active: targetAiActive,
+          ai_agent_id: targetAiActive ? defaultAgentId : null,
+          assigned_agent_id: targetAgentId,
+          department_id: targetDepartmentId || null
         })
         .select('id')
         .single();
