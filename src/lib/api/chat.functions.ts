@@ -1483,8 +1483,15 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
       console.warn("Failed to fetch avatar:", e);
     }
 
+    const updatePayload: any = {};
+    if (pushName) updatePayload.name = pushName;
+    if (avatarUrl) updatePayload.avatar_url = avatarUrl;
+
+    if (Object.keys(updatePayload).length > 0) {
+      await supabaseAdmin.from('contacts').update(updatePayload).eq('id', data.contactId);
+    }
+
     if (pushName) {
-      await supabaseAdmin.from('contacts').update({ name: pushName }).eq('id', data.contactId);
       return { success: true, updatedName: pushName, avatarFound: !!avatarUrl };
     } else if (avatarUrl) {
       // Name not found, but avatar was! Return success so the UI gives a positive toast

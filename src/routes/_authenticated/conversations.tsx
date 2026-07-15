@@ -201,7 +201,7 @@ function ConversationsPage() {
       const from = pageParam as number;
       const to = from + PAGE_SIZE - 1;
 
-      let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+      let selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
       
       if (debouncedSearch || tab === "groups") {
         selectString = selectString; // No replacement needed, inner join is already default
@@ -1063,15 +1063,6 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
     onError: (e) => toast.error((e as Error).message)
   });
   
-  const { data: profilePictureUrl } = useQuery({
-    queryKey: ["contact-profile-pic", conv.contact?.id, selectedUnitId],
-    queryFn: async () => {
-      if (!conv.contact?.id || (!conv.unit_id && !conv.whatsapp_instance_id)) return null;
-      return await fetchContactInfoAction({ data: { contactId: conv.contact?.id, unitId: conv.unit_id, whatsappInstanceId: conv.whatsapp_instance_id } });
-    },
-    enabled: !!conv.contact?.id && !!conv.unit_id,
-    staleTime: 1000 * 60 * 60, // 1 hour
-  });
 
   const updateContact = useMutation({
     mutationFn: async () => {
@@ -1090,7 +1081,6 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
         toast.info(data.message);
       }
       qc.invalidateQueries({ queryKey: ["conversations"] });
-      if (conv.contact?.id) qc.invalidateQueries({ queryKey: ["contact-profile-pic", conv.contact?.id] });
     },
     onError: (e) => {
       toast.error(e.message || "Erro ao atualizar contato.");
@@ -1112,8 +1102,8 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
       <div className="p-5 pt-2 flex flex-col items-center justify-center relative">
         <div className="relative mb-4 group">
           <Avatar className="h-24 w-24 ring-4 ring-background shadow-xl">
-            {profilePictureUrl ? (
-              <img src={profilePictureUrl} alt={conv.contact?.name} className="h-full w-full object-cover" />
+            {conv.contact?.avatar_url ? (
+              <img src={conv.contact.avatar_url} alt={conv.contact?.name} className="h-full w-full object-cover" />
             ) : (
               <AvatarFallback className={cn("text-3xl font-medium", isGroup ? "bg-primary/20 text-primary" : "bg-gradient-to-br from-primary/20 to-primary/5 text-primary")}>
                 {isGroup ? <Users className="h-10 w-10 opacity-80" /> : initials(contactName || "?")}
@@ -1321,6 +1311,9 @@ function ConversationItem({
       )}
     >
       <Avatar className="h-10 w-10">
+        {conv.contact?.avatar_url && (
+          <AvatarImage src={conv.contact.avatar_url} alt={contactName || ""} className="object-cover" />
+        )}
         <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
           {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
         </AvatarFallback>

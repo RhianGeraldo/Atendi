@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
+import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import { useNavigate } from "@tanstack/react-router";
 import { initials } from "@/lib/format";
 
@@ -79,7 +80,7 @@ function PipelinePage() {
         .from("opportunities")
         .select(`
           id, title, value, stage_id, expected_close_date, contact_id, created_at, notes, owner_id, unit_id, status,
-          contacts ( name ),
+          contacts ( name, phone ),
           tasks ( id, status ),
           units ( name )
         `)
@@ -162,19 +163,7 @@ function PipelinePage() {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
 
-  const goToConversation = async (contactId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      const { data } = await supabase.from('conversations').select('id, status').eq('contact_id', contactId).order('last_message_at', { ascending: false }).limit(1).single();
-      if (data) {
-        navigate({ to: "/conversations", search: { c: data.id, tab: data.status } as any });
-      } else {
-        toast.error("Este contato ainda não possui conversas.");
-      }
-    } catch (err) {
-      toast.error("Erro ao buscar conversa.");
-    }
-  };
+  // goToConversation removido em favor do StartConversationDialog
 
   if (isLoadingPipelines) return <div className="p-6">Carregando CRM...</div>;
   if (!pipelines || pipelines.length === 0) {
@@ -349,16 +338,23 @@ function PipelinePage() {
                                     <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
                                       <TooltipProvider>
                                         <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <Button 
-                                              variant="secondary" 
-                                              size="icon" 
-                                              className="h-7 w-7 rounded-full shadow-sm bg-background/80 backdrop-blur border hover:bg-primary hover:text-primary-foreground transition-colors"
-                                              onClick={(e) => goToConversation(opp.contact_id, e)}
-                                            >
-                                              <MessageCircle className="h-3.5 w-3.5" />
-                                            </Button>
-                                          </TooltipTrigger>
+                                          <StartConversationDialog 
+                                            contactName={opp.contacts?.name || ""}
+                                            initialPhone={opp.contacts?.phone || ""}
+                                            onCreated={(id) => navigate({ to: "/conversations", search: { c: id } as any })}
+                                            trigger={
+                                              <TooltipTrigger asChild>
+                                                <Button 
+                                                  variant="secondary" 
+                                                  size="icon" 
+                                                  className="h-7 w-7 rounded-full shadow-sm bg-background/80 backdrop-blur border hover:bg-primary hover:text-primary-foreground transition-colors"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                >
+                                                  <MessageCircle className="h-3.5 w-3.5" />
+                                                </Button>
+                                              </TooltipTrigger>
+                                            }
+                                          />
                                           <TooltipContent side="top">
                                             <p className="text-xs">Ir para conversa</p>
                                           </TooltipContent>

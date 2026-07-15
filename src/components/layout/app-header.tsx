@@ -48,7 +48,6 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
         .from("tasks")
         .select(`*`)
         .eq("status", "pending")
-        .eq("company_id", activeCompanyId)
         .order("due_date", { ascending: true })
         .limit(5);
 

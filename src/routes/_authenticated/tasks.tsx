@@ -81,10 +81,6 @@ function TasksPage() {
         query = query.eq("task_type", taskTypeFilter);
       }
       
-      if (activeCompanyId) {
-        query = query.eq("company_id", activeCompanyId);
-      }
-
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
       } else if (activeCompanyId) {

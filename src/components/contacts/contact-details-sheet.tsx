@@ -32,6 +32,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Link } from "@tanstack/react-router";
 import { MergeContactDialog } from "./merge-contact-dialog";
 import { ContactBlockDialog } from "./contact-block-dialog";
+import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import { blockContactAction, unblockContactAction } from "@/lib/api/chat.functions";
 
 interface ContactDetailsSheetProps {
@@ -1223,26 +1224,21 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                         <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button 
-                                variant="secondary" 
-                                size="icon" 
-                                className="h-6 w-6 ml-1 rounded-full shadow-sm hover:bg-primary hover:text-primary-foreground transition-colors"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  try {
-                                    const { data } = await supabase.from('conversations').select('id, status').eq('contact_id', contact.id).order('last_message_at', { ascending: false }).limit(1).single();
-                                    if (data) {
-                                      window.location.href = `/conversations?c=${data.id}&tab=${data.status}`;
-                                    } else {
-                                      toast.error("Este contato ainda não possui conversas.");
-                                    }
-                                  } catch (err) {
-                                    toast.error("Erro ao buscar conversa.");
+                                <StartConversationDialog
+                                  contactName={contact.name || ""}
+                                  initialPhone={contact.phone || ""}
+                                  onCreated={(id) => { window.location.href = `/conversations?c=${id}`; }}
+                                  trigger={
+                                    <Button 
+                                      variant="secondary" 
+                                      size="icon" 
+                                      className="h-6 w-6 ml-1 rounded-full shadow-sm hover:bg-primary hover:text-primary-foreground transition-colors"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <MessageCircle className="h-3 w-3" />
+                                    </Button>
                                   }
-                                }}
-                              >
-                                <MessageCircle className="h-3 w-3" />
-                              </Button>
+                                />
                             </TooltipTrigger>
                             <TooltipContent side="top">
                               <p className="text-xs">Ir para conversa</p>

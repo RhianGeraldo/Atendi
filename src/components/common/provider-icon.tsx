@@ -22,18 +22,22 @@ export function ProviderIcon({ provider, className }: Props) {
   
   if (provider === "official") {
     return (
-      <span className={cn("inline-flex items-center gap-1", className)} title="WhatsApp Oficial">
-        <ChannelIcon channel="whatsapp" />
-        <BadgeCheck className="h-3.5 w-3.5 text-blue-500" />
+      <span className="relative inline-flex items-center justify-center shrink-0" title="WhatsApp Oficial">
+        <ChannelIcon channel="whatsapp" className={className} />
+        <div className="absolute -bottom-1 -right-1 rounded-full bg-background leading-none">
+          <BadgeCheck className="h-3 w-3 text-blue-500" />
+        </div>
       </span>
     );
   }
 
   // Evogo / Coex
   return (
-    <span className={cn("inline-flex items-center gap-1", className)} title="WhatsApp Coex (Evogo)">
-      <ChannelIcon channel="whatsapp" />
-      <Smartphone className="h-3.5 w-3.5 text-muted-foreground" />
+    <span className="relative inline-flex items-center justify-center shrink-0" title="WhatsApp Coex (Evogo)">
+      <ChannelIcon channel="whatsapp" className={className} />
+      <div className="absolute -bottom-1 -right-1 rounded-full bg-background p-[1px] leading-none">
+        <Smartphone className="h-[10px] w-[10px] text-muted-foreground" />
+      </div>
     </span>
   );
 }
