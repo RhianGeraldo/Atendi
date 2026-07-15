@@ -1362,7 +1362,7 @@ export const transferConversationAction = createServerFn({ method: "POST" })
       const { data: actorProfile } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).single();
       const { data: convData } = await supabaseAdmin
         .from('conversations')
-        .select('contacts(company_id, name, phone)')
+        .select('channel, contacts(company_id, name, phone)')
         .eq('id', data.conversationId)
         .single();
         
@@ -1371,7 +1371,7 @@ export const transferConversationAction = createServerFn({ method: "POST" })
         await supabaseAdmin.from('notifications' as any).insert({
           company_id: convData.contacts.company_id,
           user_id: data.targetId,
-          type: 'transfer',
+          type: `transfer_${convData.channel || 'whatsapp'}`,
           title: 'Novo Atendimento',
           message: `${actorProfile.name} transferiu o contato ${contactName} para você.`,
           link: `/conversations?id=${data.conversationId}`,

@@ -46,6 +46,8 @@ import { Sheet, SheetContent, SheetTitle, SheetDescription } from "@/components/
 import EmojiPicker from "emoji-picker-react";
 import TextareaAutosize from "react-textarea-autosize";
 import { TransferDialog } from "@/components/chat/transfer-dialog";
+import { ConversationSearch } from "@/components/chat/conversation-search";
+import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import { LinkPreview } from "@/components/chat/link-preview";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 import { ContactBlockDialog } from "@/components/contacts/contact-block-dialog";
@@ -326,6 +328,15 @@ function ConversationsPage() {
   useEffect(() => {
     if (searchConvId && searchConvId !== selectedId) {
       setSelectedId(searchConvId);
+      // Clear any pending transfer notification for this conversation
+      supabase
+        .from('notifications' as any)
+        .update({ is_read: true })
+        .eq('link', `/conversations?id=${searchConvId}`)
+        .eq('is_read', false)
+        .then(() => {
+           // Optionally invalidate if needed, but it's handled by Realtime anyway
+        });
     }
   }, [searchConvId]);
 
@@ -846,7 +857,7 @@ function ConversationsPage() {
                 </DropdownMenuSub>
               </DropdownMenuContent>
             </DropdownMenu>
-            <NewConversationDialog onCreated={(id) => {
+            <StartConversationDialog onCreated={(id) => {
               setTab("active");
               setSelectedId(id);
             }} />
@@ -1284,158 +1295,6 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
   );
 }
 
-function NewConversationDialog({ 
-  onCreated,
-  trigger,
-  initialPhone
-}: { 
-  onCreated?: (id: string) => void;
-  trigger?: React.ReactNode;
-  initialPhone?: string;
-}) {
-  const qc = useQueryClient();
-  const { profile } = useAuth();
-  const { activeCompanyId } = useActiveCompany();
-  const [open, setOpen] = useState(false);
-  const [phone, setPhone] = useState(initialPhone || "");
-  const [text, setText] = useState("");
-  const [instanceName, setInstanceName] = useState("");
-
-  useEffect(() => {
-    if (open && initialPhone) setPhone(initialPhone);
-  }, [open, initialPhone]);
-
-  const { selectedUnitId } = useUnit();
-
-  const { data: instances } = useQuery({
-    queryKey: ["whatsapp_instances", selectedUnitId],
-    queryFn: async () => {
-      if (!activeCompanyId) return [];
-      let query = supabase
-        .from("whatsapp_instances")
-        .select("id, name, instance_name, provider")
-        .eq("company_id", activeCompanyId);
-      
-      if (selectedUnitId && selectedUnitId !== "all") {
-        query = query.eq("unit_id", selectedUnitId);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return data ?? [];
-    },
-    enabled: !!activeCompanyId,
-  });
-
-  const send = useMutation({
-    mutationFn: async (overrideText?: string) => {
-      const textToUse = overrideText !== undefined ? overrideText : text;
-      if (!activeCompanyId) throw new Error("Usuário sem empresa");
-      const res = await sendProactiveMessageAction({
-        data: {
-          phone,
-          text: textToUse,
-          instanceName,
-          companyId: activeCompanyId,
-        }
-      });
-      return { res, isOpening: overrideText === "" };
-    },
-    onSuccess: ({ res, isOpening }) => {
-      if (res.conversationId && onCreated) {
-        onCreated(res.conversationId);
-      }
-      setOpen(false);
-      setPhone(initialPhone || "");
-      setText("");
-      setInstanceName("");
-      qc.invalidateQueries({ queryKey: ["conversations"] });
-      toast.success(isOpening ? "Chat aberto com sucesso!" : "Mensagem enviada com sucesso!");
-    },
-    onError: (e) => {
-      toast.error("Erro ao iniciar conversa", { description: (e as Error).message });
-    }
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {trigger || (
-          <Button size="icon" variant="outline" className="h-9 w-9 shrink-0">
-            <MessageSquarePlus className="h-4 w-4" />
-          </Button>
-        )}
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Nova Conversa</DialogTitle>
-          <DialogDescription>
-            Inicie um atendimento enviando uma mensagem ativa para o cliente ou abrindo o chat diretamente.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <Label>Instância (Remetente)</Label>
-            <Select value={instanceName} onValueChange={setInstanceName}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione a instância" />
-              </SelectTrigger>
-              <SelectContent>
-                {instances?.map((inst) => (
-                  <SelectItem key={inst.instance_name} value={inst.instance_name}>
-                    <div className="flex items-center gap-2">
-                      <ProviderIcon provider={inst.provider} />
-                      <span>{inst.name || inst.instance_name}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-                {!instances?.length && (
-                  <SelectItem value="none" disabled>Nenhuma instância encontrada</SelectItem>
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Número do Cliente</Label>
-            <Input 
-              placeholder="Ex: 5511999999999" 
-              value={phone} 
-              onChange={e => setPhone(e.target.value)} 
-            />
-            <p className="text-[10px] text-muted-foreground">Inclua o DDI (55) e o DDD.</p>
-          </div>
-          <div className="space-y-2">
-            <Label>Mensagem <span className="text-muted-foreground font-normal">(Opcional se for apenas abrir o chat)</span></Label>
-            <Textarea 
-              placeholder="Digite a primeira mensagem..." 
-              value={text} 
-              onChange={e => setText(e.target.value)} 
-              rows={3}
-            />
-          </div>
-        </div>
-        <DialogFooter className="flex-wrap gap-2 sm:justify-end">
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-          <Button 
-            variant="secondary"
-            onClick={() => send.mutate("")} 
-            disabled={!phone || !instanceName || send.isPending}
-          >
-            {send.isPending && send.variables === "" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-2 h-4 w-4" />}
-            Abrir Chat
-          </Button>
-          <Button 
-            onClick={() => send.mutate(undefined)} 
-            disabled={!phone || !text || !instanceName || send.isPending}
-          >
-            {send.isPending && send.variables !== "" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            Enviar e Abrir
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 function ConversationItem({
   conv,
@@ -2954,6 +2813,8 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
     );
   }
 
+  const [showMobileActions, setShowMobileActions] = useState(false);
+
   const mine = m.sender_type === "agent";
   const isInternal = m.is_internal;
   
@@ -2991,8 +2852,15 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
   return (
     <div className={cn("flex relative", mine ? "justify-end" : "justify-start")} id={`msg-${m.id}`}>
       <div
+        tabIndex={-1}
+        onClick={() => setShowMobileActions(!showMobileActions)}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) {
+            setShowMobileActions(false);
+          }
+        }}
         className={cn(
-          "max-w-[70%] flex flex-col rounded-2xl px-3.5 py-2 text-sm shadow-sm relative group",
+          "max-w-[70%] flex flex-col rounded-2xl px-3.5 py-2 text-sm shadow-sm relative group cursor-pointer lg:cursor-default",
           mine
             ? (isInternal ? "rounded-br-sm bg-amber-100 dark:bg-amber-900/30 text-amber-900 dark:text-amber-100 border border-amber-200 dark:border-amber-800/50" : "rounded-br-sm bg-primary text-primary-foreground")
             : "rounded-bl-sm bg-card text-foreground border border-border",
@@ -3016,7 +2884,8 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
         )}
         {onReact && !m.isOptimistic && !m.is_deleted && (
           <div className={cn(
-            "absolute top-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 p-0.5 rounded-full bg-background border border-border shadow-sm text-muted-foreground z-10",
+            "absolute top-1 transition-opacity flex items-center gap-1 p-0.5 rounded-full bg-background border border-border shadow-sm text-muted-foreground z-10",
+            showMobileActions ? "opacity-100" : "opacity-0 group-hover:opacity-100",
             mine ? "-left-20" : "-right-20"
           )}>
             {onReply && (
@@ -3386,8 +3255,9 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
                       >
                         {contact.phone || contact.waid}
                       </a>
-                      <NewConversationDialog 
+                      <StartConversationDialog 
                         initialPhone={contact.waid || (contact.phone || '').replace(/\D/g, '')}
+                        contactName={contact.name || ""}
                         trigger={
                           <Button size="sm" variant="secondary" className={cn("h-6 text-[10px] px-2 w-fit", mine ? "bg-white/20 text-white hover:bg-white/30" : "bg-primary/10 text-primary hover:bg-primary/20")}>
                             <MessageSquarePlus className="h-3 w-3 mr-1.5" />
