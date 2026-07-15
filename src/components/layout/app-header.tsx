@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useRouterState, Link } from "@tanstack/react-router";
+import { useRouterState, Link, useNavigate } from "@tanstack/react-router";
 import { Bell, Menu, CheckSquare, Clock, Info, MessageSquare } from "lucide-react";
 import { ChannelIcon } from "@/components/common/channel-icon";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +33,7 @@ const titles: Record<string, string> = {
 
 export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const title =
     Object.entries(titles).find(([k]) => pathname.startsWith(k))?.[1] ?? "Omni";
 
@@ -110,7 +111,15 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
   const markAsRead = async (id: string, link: string | null) => {
     await supabase.from("notifications" as any).update({ is_read: true }).eq("id", id);
     refetchNotifications();
-    // Router Link is used in the UI, but we can also use window.location if it's external, for now let the Link handle navigation
+    if (link) {
+      if (link.startsWith('/conversations?c=')) {
+        navigate({ to: '/conversations', search: { c: link.split('=')[1] } });
+      } else if (link.startsWith('/conversations?id=')) {
+        navigate({ to: '/conversations', search: { c: link.split('=')[1] } });
+      } else {
+        window.location.href = link;
+      }
+    }
   };
 
   const pendingTasksCount = tasks?.length || 0;
@@ -156,16 +165,16 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
                     const channel = isTransfer ? notif.type.split('_')[1] || 'whatsapp' : null;
                     
                     return (
-                      <DropdownMenuItem key={`notif-${notif.id}`} asChild className="cursor-pointer">
-                        <Link to={notif.link || "#"} onClick={() => markAsRead(notif.id, notif.link)} className="flex flex-col gap-1 items-start">
+                      <DropdownMenuItem key={`notif-${notif.id}`} className="cursor-pointer p-0" onSelect={() => markAsRead(notif.id, notif.link)}>
+                        <div className="flex flex-col gap-1 items-start w-full px-2 py-1.5">
                           <div className="flex items-center gap-2 font-medium w-full">
                             {isTransfer ? <ChannelIcon channel={channel as any} className="h-5 w-5 shrink-0" /> : <Info className="h-5 w-5 text-primary shrink-0" />}
                             <span className="truncate">{notif.title}</span>
                           </div>
-                          <div className="text-xs text-muted-foreground pl-6 line-clamp-2">
+                          <div className="text-xs text-muted-foreground pl-7 line-clamp-2">
                             {notif.message}
                           </div>
-                        </Link>
+                        </div>
                       </DropdownMenuItem>
                     );
                   })}

@@ -1374,7 +1374,7 @@ export const transferConversationAction = createServerFn({ method: "POST" })
           type: `transfer_${convData.channel || 'whatsapp'}`,
           title: 'Novo Atendimento',
           message: `${actorProfile.name} transferiu o contato ${contactName} para você.`,
-          link: `/conversations?id=${data.conversationId}`,
+          link: `/conversations?c=${data.conversationId}`,
         });
       }
     }
