@@ -1485,7 +1485,7 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
 
     const updatePayload: any = {};
     if (pushName) updatePayload.name = pushName;
-    if (avatarUrl) updatePayload.avatar_url = avatarUrl;
+    if (avatarUrl) updatePayload.profile_picture_url = avatarUrl;
 
     if (Object.keys(updatePayload).length > 0) {
       await supabaseAdmin.from('contacts').update(updatePayload).eq('id', data.contactId);
