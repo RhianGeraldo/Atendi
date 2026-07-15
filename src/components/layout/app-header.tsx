@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useRouterState, Link } from "@tanstack/react-router";
 import { Bell, Menu, CheckSquare, Clock, Info, MessageSquare } from "lucide-react";
-import { ProviderIcon } from "@/components/common/provider-icon";
+import { ChannelIcon } from "@/components/common/channel-icon";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -159,7 +159,7 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
                       <DropdownMenuItem key={`notif-${notif.id}`} asChild className="cursor-pointer">
                         <Link to={notif.link || "#"} onClick={() => markAsRead(notif.id, notif.link)} className="flex flex-col gap-1 items-start">
                           <div className="flex items-center gap-2 font-medium w-full">
-                            {isTransfer ? <ProviderIcon provider={channel} className="h-4 w-4 shrink-0" /> : <Info className="h-4 w-4 text-primary shrink-0" />}
+                            {isTransfer ? <ChannelIcon channel={channel as any} className="h-5 w-5 shrink-0" /> : <Info className="h-5 w-5 text-primary shrink-0" />}
                             <span className="truncate">{notif.title}</span>
                           </div>
                           <div className="text-xs text-muted-foreground pl-6 line-clamp-2">
