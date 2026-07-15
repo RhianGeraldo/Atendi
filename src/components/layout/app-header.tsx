@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useRouterState, Link } from "@tanstack/react-router";
 import { Bell, Menu, CheckSquare, Clock, Info, MessageSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -79,6 +80,31 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
       return data || [];
     },
   });
+
+  // Escutar notificações em tempo real
+  useEffect(() => {
+    if (!profile?.id || !activeCompanyId) return;
+
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${profile.id}`,
+        },
+        () => {
+          refetchNotifications();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [profile?.id, activeCompanyId, refetchNotifications]);
 
   const markAsRead = async (id: string, link: string | null) => {
     await supabase.from("notifications" as any).update({ is_read: true }).eq("id", id);
