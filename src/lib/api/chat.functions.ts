@@ -1362,14 +1362,14 @@ export const transferConversationAction = createServerFn({ method: "POST" })
       const { data: actorProfile } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).single();
       const { data: convData } = await supabaseAdmin
         .from('conversations')
-        .select('company_id, contacts(name, phone)')
+        .select('contacts(company_id, name, phone)')
         .eq('id', data.conversationId)
         .single();
         
-      if (convData && actorProfile) {
+      if (convData && actorProfile && convData.contacts?.company_id) {
         const contactName = convData.contacts?.name || convData.contacts?.phone || 'um contato';
         await supabaseAdmin.from('notifications' as any).insert({
-          company_id: convData.company_id,
+          company_id: convData.contacts.company_id,
           user_id: data.targetId,
           type: 'transfer',
           title: 'Novo Atendimento',
