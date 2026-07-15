@@ -654,7 +654,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
           await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
         } else if (conv.assigned_agent_id) {
           // With another agent
-          throw new Error(`Essa conversa já está em andamento com o(a) atendente ${(conv as any).assigned_agent?.name || 'Desconhecido'}.`);
+          throw new Error(`Este contato já está em andamento com o(a) usuário(a) ${(conv as any).assigned_agent?.name || 'Desconhecido'} nesta instância. Peça a ele(a) para te transferir.`);
         } else {
           // Active but no agent
           const updatePayload: any = { 
@@ -1355,6 +1355,28 @@ export const transferConversationAction = createServerFn({ method: "POST" })
              session_id: sessionId, event_type: 'transferred', actor_id: userId, metadata: { targetType: data.targetType, targetId: data.targetId, targetName }
           });
        }
+    }
+
+    // Criar notificação para o atendente recebendo
+    if (data.targetType === "agent") {
+      const { data: actorProfile } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).single();
+      const { data: convData } = await supabaseAdmin
+        .from('conversations')
+        .select('company_id, contacts(name, phone)')
+        .eq('id', data.conversationId)
+        .single();
+        
+      if (convData && actorProfile) {
+        const contactName = convData.contacts?.name || convData.contacts?.phone || 'um contato';
+        await supabaseAdmin.from('notifications' as any).insert({
+          company_id: convData.company_id,
+          user_id: data.targetId,
+          type: 'transfer',
+          title: 'Novo Atendimento',
+          message: `${actorProfile.name} transferiu o contato ${contactName} para você.`,
+          link: `/conversations?id=${data.conversationId}`,
+        });
+      }
     }
 
     return { success: true };
