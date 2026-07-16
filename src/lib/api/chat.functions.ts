@@ -1397,8 +1397,9 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
       if (convData?.whatsapp_instance_id) instanceId = convData.whatsapp_instance_id;
     }
     
-    const { data: contact } = await supabaseAdmin.from('contacts').select('phone, company_id').eq('id', contactId).single();
-    if (!contact?.phone) return { success: false, message: "Contato sem telefone." };
+    const { data: contact, error: contactErr } = await supabaseAdmin.from('contacts').select('phone, company_id').eq('id', contactId).maybeSingle();
+    if (contactErr || !contact) return { success: false, message: "Contato não encontrado (talvez tenha sido excluído)." };
+    if (!contact.phone) return { success: false, message: "Contato sem telefone." };
 
     let host, token, instanceName;
     if (instanceId) {
