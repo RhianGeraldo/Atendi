@@ -627,10 +627,12 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       if (contactErr) throw new Error("Failed to create contact.");
       contactIds = [newContact.id];
       
-      // Auto-sync profile picture in background
-      syncContactProfile(newContact.id, instance.id).catch(err => {
-        console.error('[sendProactiveMessage] Background syncContactProfile failed:', err);
-      });
+      // Auto-sync profile picture (MUST await in Vercel)
+      try {
+        await syncContactProfile(newContact.id, instance.id);
+      } catch (err) {
+        console.error('[sendProactiveMessage] syncContactProfile failed:', err);
+      }
     }
 
     const contactId = contactIds[0];

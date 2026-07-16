@@ -607,11 +607,13 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         if (contactErr) throw contactErr;
         contactId = newContact.id;
         
-        // Auto-sync profile picture in background
+        // Auto-sync profile picture (MUST await in Vercel so the serverless function doesn't die)
         if (!remoteJid.includes('@g.us')) {
-          syncContactProfile(contactId, instance_id).catch(err => {
-            console.error('[evogo-webhook] Background syncContactProfile failed:', err);
-          });
+          try {
+            await syncContactProfile(contactId, instance_id);
+          } catch (err) {
+            console.error('[evogo-webhook] syncContactProfile failed:', err);
+          }
         }
       }
 
