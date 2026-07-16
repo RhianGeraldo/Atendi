@@ -2128,6 +2128,9 @@ function ChatPanel({
             )}
             <div className="relative shrink-0">
               <Avatar className="h-10 w-10 ring-2 ring-primary/10 ring-offset-2">
+                {conv.contact?.avatar_url && (
+                  <AvatarImage src={conv.contact.avatar_url} alt={contactName || ""} className="object-cover" />
+                )}
                 <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
                   {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
                 </AvatarFallback>
