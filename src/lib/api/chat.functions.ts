@@ -626,6 +626,11 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
         .single();
       if (contactErr) throw new Error("Failed to create contact.");
       contactIds = [newContact.id];
+      
+      // Auto-sync profile picture in background
+      syncContactProfile(newContact.id, instance.id).catch(err => {
+        console.error('[sendProactiveMessage] Background syncContactProfile failed:', err);
+      });
     }
 
     const contactId = contactIds[0];
@@ -1382,31 +1387,23 @@ export const transferConversationAction = createServerFn({ method: "POST" })
     return { success: true };
   });
 
-export const updateContactFromWhatsappAction = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    contactId: z.string().uuid(),
-    unitId: z.string().uuid().optional().nullable(),
-    whatsappInstanceId: z.string().uuid().optional().nullable()
-  }))
-  .handler(async ({ data, context }) => {
-    const { supabase } = context;
-    
-    let whatsappInstanceId = data.whatsappInstanceId;
-    if (!whatsappInstanceId) {
-      const { data: convData } = await supabaseAdmin.from('conversations').select('whatsapp_instance_id').eq('contact_id', data.contactId).order('last_message_at', { ascending: false }).limit(1).maybeSingle();
-      if (convData?.whatsapp_instance_id) whatsappInstanceId = convData.whatsapp_instance_id;
+export async function syncContactProfile(contactId: string, whatsappInstanceId?: string | null) {
+  try {
+    let instanceId = whatsappInstanceId;
+    if (!instanceId) {
+      const { data: convData } = await supabaseAdmin.from('conversations').select('whatsapp_instance_id').eq('contact_id', contactId).order('last_message_at', { ascending: false }).limit(1).maybeSingle();
+      if (convData?.whatsapp_instance_id) instanceId = convData.whatsapp_instance_id;
     }
     
-    const { data: contact } = await supabase.from('contacts').select('phone').eq('id', data.contactId).single();
-    if (!contact?.phone) throw new Error("Contato sem telefone.");
+    const { data: contact } = await supabaseAdmin.from('contacts').select('phone, company_id').eq('id', contactId).single();
+    if (!contact?.phone) return { success: false, message: "Contato sem telefone." };
 
     let host, token, instanceName;
-    if (whatsappInstanceId) {
+    if (instanceId) {
       const { data: instance } = await supabaseAdmin
         .from("whatsapp_instances")
         .select("instance_name, evogo_api_key, companies(evogo_host)")
-        .eq("id", whatsappInstanceId)
+        .eq("id", instanceId)
         .single();
 
       if (instance) {
@@ -1416,12 +1413,11 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
       }
     } else {
       // Fallback for old conversations
-      const { data: contactFull } = await supabase.from('contacts').select('company_id').eq('id', data.contactId).single();
-      if (contactFull?.company_id) {
+      if (contact?.company_id) {
         const { data: compInstance } = await supabaseAdmin
           .from("whatsapp_instances")
           .select("instance_name, evogo_api_key, companies(evogo_host)")
-          .eq("company_id", contactFull.company_id)
+          .eq("company_id", contact.company_id)
           .limit(1)
           .maybeSingle();
         if (compInstance) {
@@ -1433,54 +1429,66 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
     }
 
     if (!host || !token || !instanceName) {
-      throw new Error("EvoGo não configurado para esta unidade/empresa.");
+      return { success: false, message: "EvoGo não configurado para esta unidade/empresa." };
     }
+    
     let pushName = null;
+    let avatarUrl = null;
+    const jid = contact.phone.includes('@') ? contact.phone : `${contact.phone}@s.whatsapp.net`;
 
     try {
+      console.log(`[syncContactProfile] Fetching info for ${jid} on ${host} (Instance: ${instanceName})`);
       const resInfo = await fetch(`${host}/user/info`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': token },
-        body: JSON.stringify({ number: contact.phone }),
+        headers: { 
+          'Content-Type': 'application/json', 
+          'apikey': token,
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ number: [jid] }),
         signal: AbortSignal.timeout(5000)
       });
       
+      console.log(`[syncContactProfile] resInfo status: ${resInfo.status}`);
       if (resInfo.ok) {
         const jsonInfo = await resInfo.json();
         pushName = jsonInfo.name || jsonInfo.pushName || jsonInfo.pushname || jsonInfo.contactName || null;
-      } else {
-        const resProfile = await fetch(`${host}/chat/fetchProfile/${instanceName}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': token },
-          body: JSON.stringify({ number: contact.phone }),
-          signal: AbortSignal.timeout(5000)
-        });
-        if (resProfile.ok) {
-          const jsonProfile = await resProfile.json();
-          pushName = jsonProfile.name || jsonProfile.pushName || jsonProfile.pushname || null;
-        }
       }
     } catch (e) {
-      console.warn("Failed to fetch user info:", e);
-      throw new Error("Falha ao buscar informações no WhatsApp.");
+      console.warn("[syncContactProfile] Failed to fetch user info:", e);
     }
 
-    let avatarUrl = null;
     try {
-      // Alguns endpoints Evolution usam /chat/fetchProfilePictureUrl/:instance ou similar. 
-      // Vamos tentar /user/avatar primeiro com timeout curto
+      console.log(`[syncContactProfile] Fetching avatar for ${jid} (Instance: ${instanceName})`);
       const resAvatar = await fetch(`${host}/user/avatar`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': token },
-        body: JSON.stringify({ number: contact.phone, preview: false }),
-        signal: AbortSignal.timeout(5000)
+        headers: { 
+          'Content-Type': 'application/json', 
+          'apikey': token,
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ number: jid, preview: true }),
+        signal: AbortSignal.timeout(10000)
       });
+      console.log(`[syncContactProfile] resAvatar status: ${resAvatar.status}`);
       if (resAvatar.ok) {
         const jsonAvatar = await resAvatar.json();
-        avatarUrl = jsonAvatar.url || jsonAvatar.profilePictureUrl || jsonAvatar.picture || null;
+        
+        let finalUrl = jsonAvatar?.data?.url || jsonAvatar.url || jsonAvatar.profilePictureUrl || jsonAvatar.picture || null;
+        
+        let base64str = jsonAvatar.avatar;
+        if (base64str && !finalUrl) {
+          if (!base64str.startsWith('data:')) {
+            const mimeType = base64str.startsWith('iVBORw0KGgo') ? 'image/png' : 'image/jpeg';
+            base64str = `data:${mimeType};base64,${base64str}`;
+          }
+          finalUrl = base64str;
+        }
+        
+        avatarUrl = finalUrl;
       }
     } catch (e) {
-      console.warn("Failed to fetch avatar:", e);
+      console.warn("[syncContactProfile] Failed to fetch avatar via /user/avatar:", e);
     }
 
     const updatePayload: any = {};
@@ -1488,17 +1496,35 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
     if (avatarUrl) updatePayload.profile_picture_url = avatarUrl;
 
     if (Object.keys(updatePayload).length > 0) {
-      await supabaseAdmin.from('contacts').update(updatePayload).eq('id', data.contactId);
+      await supabaseAdmin.from('contacts').update(updatePayload).eq('id', contactId);
     }
 
     if (pushName) {
       return { success: true, updatedName: pushName, avatarFound: !!avatarUrl };
     } else if (avatarUrl) {
-      // Name not found, but avatar was! Return success so the UI gives a positive toast
       return { success: true, updatedName: "Foto Encontrada", avatarFound: true, message: "Foto de perfil atualizada!" };
     } else {
       return { success: false, message: "Nenhum nome público ou foto encontrados no WhatsApp." };
     }
+  } catch (error: any) {
+    console.error("[syncContactProfile] Error:", error);
+    return { success: false, message: error.message };
+  }
+}
+
+export const updateContactFromWhatsappAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(z.object({
+    contactId: z.string().uuid(),
+    unitId: z.string().uuid().optional().nullable(),
+    whatsappInstanceId: z.string().uuid().optional().nullable()
+  }))
+  .handler(async ({ data }) => {
+    const res = await syncContactProfile(data.contactId, data.whatsappInstanceId);
+    if (!res.success) {
+      throw new Error(res.message);
+    }
+    return res;
   });
 
 export const editMessageAction = createServerFn({ method: "POST" })

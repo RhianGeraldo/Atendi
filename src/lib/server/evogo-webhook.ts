@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
 import { getPhoneVariants } from '@/lib/utils';
 import { enqueueAiMessage } from './ai-queue';
+import { syncContactProfile } from '@/lib/api/chat.functions';
 
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
@@ -605,6 +606,13 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           
         if (contactErr) throw contactErr;
         contactId = newContact.id;
+        
+        // Auto-sync profile picture in background
+        if (!remoteJid.includes('@g.us')) {
+          syncContactProfile(contactId, instance_id).catch(err => {
+            console.error('[evogo-webhook] Background syncContactProfile failed:', err);
+          });
+        }
       }
 
       // 3. Find latest conversation for this contact in THIS EXACT INSTANCE

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Clock, MessageCircle, CheckCircle2, Users } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { Clock, MessageCircle, CheckCircle2, Users, Timer } from "lucide-react";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 import { format, subDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -24,6 +24,15 @@ interface Metrics {
   active: number;
   resolvedToday: number;
   agentsOnline: number;
+  tmaMinutes: number;
+}
+
+function formatTMA(minutes: number) {
+  if (!minutes) return "0m";
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h}h ${m}m`;
 }
 
 function DashboardPage() {
@@ -35,7 +44,7 @@ function DashboardPage() {
     queryFn: async () => {
       let qWaiting = supabase.from("conversations").select("id, contact:contacts!inner(company_id)", { count: "exact", head: true }).eq("status", "waiting");
       let qActive = supabase.from("conversations").select("id, contact:contacts!inner(company_id)", { count: "exact", head: true }).eq("status", "active");
-      let qResolved = supabase.from("conversations").select("id, contact:contacts!inner(company_id)", { count: "exact", head: true })
+      let qResolved = supabase.from("conversations").select("id, started_at, resolved_at, contact:contacts!inner(company_id)")
         .eq("status", "resolved")
         .gte("resolved_at", new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
       
@@ -61,11 +70,22 @@ function DashboardPage() {
         qAgents,
       ]);
       
+      const resolvedCount = resolved.data?.length ?? 0;
+      let totalTime = 0;
+      resolved.data?.forEach(r => {
+        if (r.started_at && r.resolved_at) {
+          totalTime += new Date(r.resolved_at).getTime() - new Date(r.started_at).getTime();
+        }
+      });
+      const avgTimeMs = resolvedCount > 0 ? totalTime / resolvedCount : 0;
+      const tmaMinutes = Math.round(avgTimeMs / 60000);
+      
       return {
         waiting: waiting.count ?? 0,
         active: active.count ?? 0,
-        resolvedToday: resolved.count ?? 0,
+        resolvedToday: resolvedCount,
         agentsOnline: agents.count ?? 0,
+        tmaMinutes,
       };
     },
   });
@@ -91,6 +111,43 @@ function DashboardPage() {
         if (slot) slot.total += 1;
       });
       return days;
+    },
+  });
+
+  const { data: hourlyChartData } = useQuery({
+    queryKey: ["dashboard-hourly-chart", activeCompanyId, selectedUnitId],
+    queryFn: async () => {
+      const since = subDays(new Date(), 6);
+      
+      let qConversations = supabase.from("conversations").select("started_at, contact:contacts!inner(company_id)").gte("started_at", since.toISOString());
+      if (activeCompanyId) qConversations = qConversations.eq("contact.company_id", activeCompanyId);
+      if (selectedUnitId) qConversations = qConversations.eq("unit_id", selectedUnitId);
+
+      const { data: convsData } = await qConversations;
+      
+      let qMessages = supabase.from("messages").select("created_at, conversation:conversations!inner(unit_id, contact:contacts!inner(company_id))").eq("sender_type", "contact").gte("created_at", since.toISOString());
+      if (activeCompanyId) qMessages = qMessages.eq("conversation.contact.company_id", activeCompanyId);
+      if (selectedUnitId) qMessages = qMessages.eq("conversation.unit_id", selectedUnitId);
+
+      const { data: msgData } = await qMessages;
+
+      const hours = Array.from({ length: 24 }).map((_, i) => ({
+        hour: `${i.toString().padStart(2, '0')}:00`,
+        conversas: 0,
+        mensagens: 0
+      }));
+
+      convsData?.forEach((row) => {
+        const h = new Date(row.started_at).getHours();
+        hours[h].conversas += 1;
+      });
+
+      msgData?.forEach((row) => {
+        const h = new Date(row.created_at).getHours();
+        hours[h].mensagens += 1;
+      });
+
+      return hours;
     },
   });
 
@@ -134,7 +191,7 @@ function DashboardPage() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           label="Aguardando"
           value={metrics?.waiting ?? 0}
@@ -143,6 +200,7 @@ function DashboardPage() {
         />
         <MetricCard label="Em andamento" value={metrics?.active ?? 0} icon={MessageCircle} />
         <MetricCard label="Resolvidos hoje" value={metrics?.resolvedToday ?? 0} icon={CheckCircle2} />
+        <MetricCard label="TMA (Hoje)" value={formatTMA(metrics?.tmaMinutes ?? 0)} icon={Timer} />
         <MetricCard label="Agentes online" value={metrics?.agentsOnline ?? 0} icon={Users} />
       </div>
 
@@ -193,33 +251,60 @@ function DashboardPage() {
         </Card>
       </div>
 
-      <Card className="p-4 md:p-6">
-        <h2 className="mb-4 text-sm font-semibold">Aguardando há mais tempo</h2>
-        <div className="space-y-2">
-          {(oldestWaiting ?? []).map((c: any) => (
-            <div
-              key={c.id}
-              className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2"
-            >
-              <Avatar className="h-8 w-8">
-                <AvatarFallback className="bg-muted text-xs">
-                  {initials(c.contact?.name)}
-                </AvatarFallback>
-              </Avatar>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{c.contact?.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  Iniciado {formatRelative(c.started_at)}
+      <div className="grid gap-4 md:gap-6 xl:grid-cols-3">
+        <Card className="xl:col-span-2 p-4 md:p-6">
+          <h2 className="mb-1 text-sm font-semibold">Horários de Pico (Últimos 7 dias)</h2>
+          <p className="mb-4 text-xs text-muted-foreground">Conversas iniciadas e mensagens recebidas</p>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={hourlyChartData ?? []}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="hour" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "var(--card)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    fontSize: 12,
+                  }}
+                />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
+                <Line type="monotone" name="Novas Conversas" dataKey="conversas" stroke="var(--primary)" strokeWidth={2} dot={false} />
+                <Line type="monotone" name="Mensagens Recebidas" dataKey="mensagens" stroke="#10b981" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        <Card className="p-4 md:p-6">
+          <h2 className="mb-4 text-sm font-semibold">Aguardando há mais tempo</h2>
+          <div className="space-y-2">
+            {(oldestWaiting ?? []).map((c: any) => (
+              <div
+                key={c.id}
+                className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2"
+              >
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-muted text-xs">
+                    {initials(c.contact?.name)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{c.contact?.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Iniciado {formatRelative(c.started_at)}
+                  </div>
                 </div>
+                <ChannelIcon channel={c.channel} />
               </div>
-              <ChannelIcon channel={c.channel} />
-            </div>
-          ))}
-          {!oldestWaiting?.length && (
-            <p className="text-sm text-muted-foreground">Sem atendimentos aguardando. ✨</p>
-          )}
-        </div>
-      </Card>
+            ))}
+            {!oldestWaiting?.length && (
+              <p className="text-sm text-muted-foreground">Sem atendimentos aguardando. ✨</p>
+            )}
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }
@@ -231,7 +316,7 @@ function MetricCard({
   alert,
 }: {
   label: string;
-  value: number;
+  value: number | string;
   icon: React.ComponentType<{ className?: string }>;
   alert?: boolean;
 }) {
@@ -261,3 +346,4 @@ function PriorityDot({ p }: { p: "low" | "medium" | "high" }) {
   const cls = p === "high" ? "bg-destructive" : p === "medium" ? "bg-warning" : "bg-muted-foreground/40";
   return <span className={cn("mt-1.5 h-2 w-2 rounded-full", cls)} />;
 }
+
