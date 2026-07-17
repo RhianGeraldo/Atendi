@@ -3054,14 +3054,27 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
           <div className="mb-2 flex flex-col gap-1">
             {(m.metadata as any)?.is_ptv ? (
               <div className="relative w-56 h-56 mx-auto overflow-hidden rounded-full border-4 border-primary/20 shadow-md">
-                <video 
-                  controls 
-                  src={m.media_url} 
-                  className="absolute inset-0 w-full h-full object-cover" 
-                />
+                {m.media_url.startsWith("data:image/") ? (
+                  <img src={m.media_url} className="absolute inset-0 w-full h-full object-cover" />
+                ) : (
+                  <video 
+                    controls 
+                    src={m.media_url} 
+                    className="absolute inset-0 w-full h-full object-cover" 
+                  />
+                )}
               </div>
             ) : (
-              <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
+              m.media_url.startsWith("data:image/") ? (
+                <div className="relative max-w-[200px]">
+                  <img src={m.media_url} className="rounded-lg w-full h-auto" />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-lg">
+                    <Video className="w-8 h-8 text-white opacity-80" />
+                  </div>
+                </div>
+              ) : (
+                <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
+              )
             )}
             {displayContent && displayContent !== "🎥 Vídeo" && displayContent !== "🎥 Vídeo Instantâneo" && (
               <div className="text-xs"><FormattedText text={displayContent} mine={mine} /></div>
