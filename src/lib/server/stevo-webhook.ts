@@ -154,11 +154,11 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         if (body.data?.isQuoted && body.data?.quoted) {
           quotedStanzaId = body.data.quoted.stanzaID;
           const qm = body.data.quoted.quotedMessage;
-          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || (qm?.audioMessage || qm?.ptvMessage ? '🎵 Áudio' : qm?.videoMessage ? '🎥 Vídeo' : qm?.documentMessage ? '📄 Documento' : qm?.stickerMessage ? '🖼️ Figurinha' : 'Anexo');
+          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || (qm?.audioMessage ? '🎵 Áudio' : (qm?.videoMessage || qm?.ptvMessage) ? '🎥 Vídeo' : qm?.documentMessage ? '📄 Documento' : qm?.stickerMessage ? '🖼️ Figurinha' : 'Anexo');
         } else if (msg.extendedTextMessage?.contextInfo?.stanzaId) {
           quotedStanzaId = msg.extendedTextMessage.contextInfo.stanzaId;
           const qm = msg.extendedTextMessage.contextInfo.quotedMessage;
-          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || (qm?.audioMessage || qm?.ptvMessage ? '🎵 Áudio' : qm?.videoMessage ? '🎥 Vídeo' : qm?.documentMessage ? '📄 Documento' : qm?.stickerMessage ? '🖼️ Figurinha' : 'Anexo');
+          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || (qm?.audioMessage ? '🎵 Áudio' : (qm?.videoMessage || qm?.ptvMessage) ? '🎥 Vídeo' : qm?.documentMessage ? '📄 Documento' : qm?.stickerMessage ? '🖼️ Figurinha' : 'Anexo');
         }
 
         const ci = msg.extendedTextMessage?.contextInfo;
@@ -192,13 +192,21 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
             // Show thumbnail as image preview for videos
             mediaUrl = `data:image/jpeg;base64,${msg.videoMessage.jpegThumbnail}`;
           }
-        } else if (msg.audioMessage || msg.ptvMessage) {
+        } else if (msg.audioMessage) {
           mediaType = 'audio';
           textContent = '🎵 Áudio';
-          const audioMsg = msg.audioMessage || msg.ptvMessage;
           if (msg.base64) {
             audioBase64 = msg.base64;
-            mediaUrl = `data:${audioMsg?.mimetype || 'audio/ogg'};base64,${msg.base64}`;
+            mediaUrl = `data:${msg.audioMessage.mimetype || 'audio/ogg'};base64,${msg.base64}`;
+          }
+        } else if (msg.ptvMessage) {
+          mediaType = 'video';
+          textContent = '🎥 Vídeo Instantâneo';
+          metadata.is_ptv = true;
+          if (msg.base64) {
+            mediaUrl = `data:${msg.ptvMessage.mimetype || 'video/mp4'};base64,${msg.base64}`;
+          } else if (msg.ptvMessage.jpegThumbnail) {
+            mediaUrl = `data:image/jpeg;base64,${msg.ptvMessage.jpegThumbnail}`;
           }
         } else if (msg.documentMessage) {
           mediaType = 'document';
@@ -340,7 +348,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         if (msgType?.extendedTextMessage?.contextInfo?.stanzaId) {
           quotedStanzaId = msgType.extendedTextMessage.contextInfo.stanzaId;
           const qm = msgType.extendedTextMessage.contextInfo.quotedMessage;
-          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || (qm?.audioMessage || qm?.ptvMessage ? '🎵 Áudio' : qm?.videoMessage ? '🎥 Vídeo' : qm?.documentMessage ? '📄 Documento' : qm?.stickerMessage ? '🖼️ Figurinha' : 'Anexo');
+          quotedContent = qm?.conversation || qm?.extendedTextMessage?.text || qm?.imageMessage?.caption || (qm?.audioMessage ? '🎵 Áudio' : (qm?.videoMessage || qm?.ptvMessage) ? '🎥 Vídeo' : qm?.documentMessage ? '📄 Documento' : qm?.stickerMessage ? '🖼️ Figurinha' : 'Anexo');
         }
 
         const ci2 = msgType?.extendedTextMessage?.contextInfo;
@@ -375,13 +383,21 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
             } else if (msgType.videoMessage.jpegThumbnail) {
               mediaUrl = `data:image/jpeg;base64,${msgType.videoMessage.jpegThumbnail}`;
             }
-          } else if (msgType.audioMessage || msgType.ptvMessage) {
+          } else if (msgType.audioMessage) {
             mediaType = 'audio';
             textContent = '🎵 Áudio';
             if (base64Content) {
               audioBase64 = base64Content;
-              const audioMsg = msgType.audioMessage || msgType.ptvMessage;
-              mediaUrl = `data:${audioMsg.mimetype || 'audio/ogg'};base64,${base64Content}`;
+              mediaUrl = `data:${msgType.audioMessage.mimetype || 'audio/ogg'};base64,${base64Content}`;
+            }
+          } else if (msgType.ptvMessage) {
+            mediaType = 'video';
+            textContent = '🎥 Vídeo Instantâneo';
+            metadata.is_ptv = true;
+            if (base64Content) {
+              mediaUrl = `data:${msgType.ptvMessage.mimetype || 'video/mp4'};base64,${base64Content}`;
+            } else if (msgType.ptvMessage.jpegThumbnail) {
+              mediaUrl = `data:image/jpeg;base64,${msgType.ptvMessage.jpegThumbnail}`;
             }
           } else if (msgType.documentMessage) {
             mediaType = 'document';

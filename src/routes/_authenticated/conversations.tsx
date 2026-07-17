@@ -3052,8 +3052,20 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
           </div>
         ) : m.media_type === "video" && m.media_url ? (
           <div className="mb-2 flex flex-col gap-1">
-            <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
-            {displayContent && displayContent !== "🎥 Vídeo" && <div className="text-xs"><FormattedText text={displayContent} mine={mine} /></div>}
+            {(m.metadata as any)?.is_ptv ? (
+              <div className="relative w-56 h-56 mx-auto overflow-hidden rounded-full border-4 border-primary/20 shadow-md">
+                <video 
+                  controls 
+                  src={m.media_url} 
+                  className="absolute inset-0 w-full h-full object-cover" 
+                />
+              </div>
+            ) : (
+              <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
+            )}
+            {displayContent && displayContent !== "🎥 Vídeo" && displayContent !== "🎥 Vídeo Instantâneo" && (
+              <div className="text-xs"><FormattedText text={displayContent} mine={mine} /></div>
+            )}
           </div>
         ) : m.media_type === "document" ? (
           <div className="mb-2">
