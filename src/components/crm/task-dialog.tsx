@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,10 +7,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Phone, MessageSquare, Video, CalendarClock, MoreHorizontal } from "lucide-react";
+import { Phone, MessageSquare, Video, CalendarClock, MoreHorizontal, User } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useUnit } from "@/lib/unit-context";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
 
 export function TaskDialog({ 
   children, 
@@ -36,11 +37,28 @@ export function TaskDialog({
   const qc = useQueryClient();
   const { selectedUnitId } = useUnit();
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
 
   const [title, setTitle] = useState("");
   const [taskType, setTaskType] = useState("other");
   const [dueDate, setDueDate] = useState("");
   const [description, setDescription] = useState("");
+  const [assignedTo, setAssignedTo] = useState("");
+
+  // Query team members for assigned_to selection
+  const { data: teamMembers } = useQuery({
+    queryKey: ["team-members", activeCompanyId],
+    enabled: open && !!activeCompanyId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, name, email")
+        .eq("company_id", activeCompanyId!)
+        .order("name");
+      if (error) throw error;
+      return data || [];
+    },
+  });
 
   useEffect(() => {
     if (open) {
@@ -49,14 +67,16 @@ export function TaskDialog({
         setTaskType(taskToEdit.task_type || "other");
         setDueDate(taskToEdit.due_date ? new Date(taskToEdit.due_date).toISOString().slice(0, 16) : "");
         setDescription(taskToEdit.description || "");
+        setAssignedTo(taskToEdit.assigned_to || profile?.id || "");
       } else {
         setTitle("");
         setTaskType("other");
         setDueDate("");
         setDescription("");
+        setAssignedTo(profile?.id || "");
       }
     }
-  }, [open, taskToEdit]);
+  }, [open, taskToEdit, profile?.id]);
 
   const addTask = useMutation({
     mutationFn: async () => {
@@ -92,12 +112,12 @@ export function TaskDialog({
         task_type: taskType,
         status: taskToEdit?.status || "pending",
         due_date: dueDate ? new Date(dueDate).toISOString() : null,
-        description: description || null
+        description: description || null,
+        assigned_to: assignedTo || profile?.id || null
       };
 
       if (!taskToEdit) {
         payload.unit_id = unitId;
-        payload.assigned_to = profile?.id;
         if (contactId) payload.contact_id = contactId;
         if (opportunityId) payload.opportunity_id = opportunityId;
         
@@ -111,6 +131,7 @@ export function TaskDialog({
     onSuccess: () => {
       setOpen(false);
       toast.success(taskToEdit ? "Tarefa atualizada!" : "Tarefa criada!");
+      qc.invalidateQueries({ queryKey: ["all-tasks"] });
       if (contactId) qc.invalidateQueries({ queryKey: ["contact-tasks", contactId] });
       if (opportunityId) qc.invalidateQueries({ queryKey: ["opp-tasks", opportunityId] });
       qc.invalidateQueries({ queryKey: ["opportunities"] });
@@ -170,6 +191,30 @@ export function TaskDialog({
             </div>
           </div>
           <div className="space-y-2">
+            <Label>Responsável (Atendente)</Label>
+            <Select value={assignedTo} onValueChange={setAssignedTo}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Selecione o responsável" />
+              </SelectTrigger>
+              <SelectContent>
+                {teamMembers && teamMembers.length > 0 ? (
+                  teamMembers.map((m: any) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      <div className="flex items-center gap-2">
+                        <User className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>{m.name || m.email}</span>
+                      </div>
+                    </SelectItem>
+                  ))
+                ) : (
+                  <SelectItem value={profile?.id || "current"}>
+                    {profile?.name || profile?.email || "Você"}
+                  </SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
             <Label>Descrição (opcional)</Label>
             <Textarea 
               placeholder="Detalhes adicionais..." 
@@ -190,3 +235,4 @@ export function TaskDialog({
     </Dialog>
   );
 }
+

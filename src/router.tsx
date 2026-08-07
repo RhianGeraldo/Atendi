@@ -22,9 +22,10 @@ export const getRouter = () => {
       }
     } catch (e) {
       console.warn("Failed to hydrate query cache:", e);
+      try { localStorage.removeItem("ATENDI_QUERY_CACHE"); } catch {}
     }
 
-    // 2. Subscribe to query cache changes to persist new data
+    // 2. Subscribe to query cache changes to persist new data safely
     let saveTimeout: any = null;
     queryClient.getQueryCache().subscribe(() => {
       if (saveTimeout) clearTimeout(saveTimeout);
@@ -32,19 +33,29 @@ export const getRouter = () => {
         try {
           const dehydratedState = dehydrate(queryClient, {
             shouldDehydrateQuery: (query) => {
-              // We only persist messages, unread counts and conversations list to save space and egress.
-              // Also only persist successful queries that don't have errors.
+              // Only persist lightweight queries (unread counts) to save space.
+              // Heavy objects (messages/conversations lists) are excluded to prevent localStorage quota errors.
               const queryKey = query.queryKey;
-              const isConversations = queryKey[0] === "conversations";
-              const isMessages = queryKey[0] === "messages";
               const isUnread = queryKey[0] === "unread-counts";
               
-              return (isConversations || isMessages || isUnread) && query.state.status === "success";
+              return isUnread && query.state.status === "success";
             }
           });
-          localStorage.setItem("ATENDI_QUERY_CACHE", JSON.stringify(dehydratedState));
-        } catch (e) {
+          const serialized = JSON.stringify(dehydratedState);
+          if (serialized.length > 200000) {
+            console.warn("[QueryCache] Cache payload exceeds 200KB limit, removing persisted cache.");
+            try { localStorage.removeItem("ATENDI_QUERY_CACHE"); } catch {}
+          } else {
+            try {
+              localStorage.setItem("ATENDI_QUERY_CACHE", serialized);
+            } catch (e: any) {
+              console.warn("[QueryCache] Failed to set item in localStorage:", e);
+              try { localStorage.removeItem("ATENDI_QUERY_CACHE"); } catch {}
+            }
+          }
+        } catch (e: any) {
           console.warn("Failed to persist query cache:", e);
+          try { localStorage.removeItem("ATENDI_QUERY_CACHE"); } catch {}
         }
       }, 1000);
     });

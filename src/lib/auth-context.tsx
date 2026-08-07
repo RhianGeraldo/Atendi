@@ -76,23 +76,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profile,
     loading,
     async signIn(email, password) {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      return { error: error?.message ?? null };
+      try {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        return { error: error?.message ?? null };
+      } catch (err: any) {
+        console.error("[Auth] signIn error:", err);
+        return { error: err?.message || "Erro ao realizar login. Tente novamente." };
+      }
     },
     async signUp(name, email, password, companyId) {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            name,
-            ...(companyId ? { company_id: companyId } : {})
+      try {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              name,
+              ...(companyId ? { company_id: companyId } : {})
+            }
           }
-        }
-      });
-      return { error: error?.message ?? null };
+        });
+        return { error: error?.message ?? null };
+      } catch (err: any) {
+        console.error("[Auth] signUp error:", err);
+        return { error: err?.message || "Erro ao criar conta. Tente novamente." };
+      }
     },
     async signOut() {
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("ATENDI_QUERY_CACHE");
+          sessionStorage.removeItem("ATENDI_QUERY_CACHE");
+        }
+      } catch (e) {
+        console.warn("[Auth] Failed to clear query cache on sign out:", e);
+      }
       await supabase.auth.signOut();
     },
   };

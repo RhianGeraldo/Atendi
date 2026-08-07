@@ -2,6 +2,70 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
+const safeStorage = {
+  getItem: (key: string): string | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const val = localStorage.getItem(key);
+      if (val !== null) return val;
+    } catch {}
+    try {
+      return sessionStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(key, value);
+      return;
+    } catch (e: any) {
+      console.warn('[Supabase Storage] Failed to set item in localStorage:', key, e);
+      if (
+        e?.name === 'QuotaExceededError' ||
+        e?.code === 22 ||
+        e?.number === -2147024882 ||
+        String(e).includes('QuotaExceededError') ||
+        String(e).includes('quota')
+      ) {
+        console.warn('[Supabase Storage] Quota exceeded. Cleaning up non-essential cache...');
+        try {
+          localStorage.removeItem('ATENDI_QUERY_CACHE');
+          const keysToRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k !== key && !k.includes('selected_company') && !k.includes('selected_unit')) {
+              keysToRemove.push(k);
+            }
+          }
+          keysToRemove.forEach((k) => {
+            try { localStorage.removeItem(k); } catch {}
+          });
+          localStorage.setItem(key, value);
+          return;
+        } catch (retryError) {
+          console.warn('[Supabase Storage] Retry failed. Falling back to sessionStorage...', retryError);
+          try {
+            sessionStorage.setItem(key, value);
+          } catch (sessionErr) {
+            console.error('[Supabase Storage] Storage setItem failed in both localStorage and sessionStorage:', sessionErr);
+          }
+        }
+      }
+    }
+  },
+  removeItem: (key: string): void => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.removeItem(key);
+    } catch {}
+    try {
+      sessionStorage.removeItem(key);
+    } catch {}
+  },
+};
+
 function createSupabaseClient() {
   // Use import.meta.env for client-side (Vite build-time replacement)
   // Fall back to process.env for SSR (server-side rendering)
@@ -20,7 +84,7 @@ function createSupabaseClient() {
 
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     auth: {
-      storage: typeof window !== 'undefined' ? localStorage : undefined,
+      storage: safeStorage,
       persistSession: true,
       autoRefreshToken: true,
     }
