@@ -107,8 +107,8 @@ function ContactTasks({ contactId }: { contactId: string }) {
             <div key={task.id} className="flex flex-col gap-1 p-3 border rounded-lg group bg-muted/30 hover:bg-muted/50 transition-colors">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 flex-1 overflow-hidden">
-                  <button onClick={() => toggleTask.mutate(task)} className="text-muted-foreground hover:text-primary transition-colors">
-                    {task.status === 'done' ? <CheckSquare className="h-5 w-5 text-emerald-500" /> : <Circle className="h-5 w-5" />}
+                  <button onClick={() => toggleTask.mutate(task)} className="text-muted-foreground hover:text-primary transition-colors cursor-pointer p-0.5 rounded-full hover:bg-primary/10">
+                    {task.status === 'done' ? <CheckCircle2 className="h-5 w-5 text-emerald-500 fill-emerald-500/15 cursor-pointer" /> : <Circle className="h-5 w-5 text-muted-foreground hover:text-emerald-600 cursor-pointer" />}
                   </button>
                   {task.task_type === "call" && <Phone className="h-4 w-4 text-blue-500 flex-shrink-0" />}
                   {task.task_type === "message" && <MessageSquare className="h-4 w-4 text-emerald-500 flex-shrink-0" />}
@@ -1589,7 +1589,7 @@ function ContactNotes({ contactId }: { contactId: string }) {
                 <span>•</span>
                 <div className="flex items-center gap-1.5">
                   <Clock className="h-3 w-3" />
-                  <span>{format(new Date(note.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</span>
+                  <span>{note.created_at && !isNaN(new Date(note.created_at).getTime()) ? format(new Date(note.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR }) : ""}</span>
                 </div>
                 {note.type === 'opportunity' && note.opportunity && (
                   <>

@@ -248,6 +248,34 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           if (parsedContacts.length > 0) {
             metadata.contacts = parsedContacts;
           }
+        }
+
+        // Native decryption fallback if EvoGo did not send base64 but sent the encrypted URL and mediaKey
+        if (!msg.base64) {
+          const mediaObj = msg.ptvMessage || msg.videoMessage || msg.imageMessage || msg.audioMessage || msg.documentMessage || msg.stickerMessage;
+          if (mediaObj && mediaObj.URL && mediaObj.mediaKey) {
+            try {
+              const { decryptWhatsAppMedia } = await import('./whatsapp-decrypt');
+              
+              let typeKey = 'document';
+              if (msg.ptvMessage || msg.videoMessage) typeKey = 'video';
+              else if (msg.imageMessage || msg.stickerMessage) typeKey = 'image';
+              else if (msg.audioMessage) typeKey = 'audio';
+
+              console.log(`[webhook] Native decrypting ${typeKey} for ${remoteJid}...`);
+              const decryptedBuf = await decryptWhatsAppMedia(mediaObj.URL, mediaObj.mediaKey, typeKey);
+              
+              const mime = mediaObj.mimetype || (typeKey === 'video' ? 'video/mp4' : typeKey === 'image' ? 'image/jpeg' : typeKey === 'audio' ? 'audio/ogg' : 'application/pdf');
+              mediaUrl = `data:${mime};base64,${decryptedBuf.toString('base64')}`;
+              
+              if (typeKey === 'audio') {
+                audioBase64 = decryptedBuf.toString('base64');
+              }
+              console.log(`[webhook] Native decryption successful (${decryptedBuf.length} bytes)`);
+            } catch (err) {
+              console.error('[webhook] Native decryption failed:', err);
+            }
+          }
         } else if (msg.locationMessage || msg.liveLocationMessage) {
           mediaType = 'text';
           textContent = '📍 Localização recebida';
@@ -405,7 +433,36 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
             if (base64Content) {
               mediaUrl = `data:${msgType.stickerMessage.mimetype || 'image/webp'};base64,${base64Content}`;
             }
-          } else if (msgType.locationMessage || msgType.liveLocationMessage) {
+          }
+          
+          const base64ContentInner = body.base64 || messageData.base64;
+          if (!base64ContentInner) {
+            const mtObj = msgType.ptvMessage || msgType.videoMessage || msgType.imageMessage || msgType.audioMessage || msgType.documentMessage || msgType.stickerMessage;
+            if (mtObj && mtObj.URL && mtObj.mediaKey) {
+              try {
+                const { decryptWhatsAppMedia } = await import('./whatsapp-decrypt');
+                
+                let typeKey = 'document';
+                if (msgType.ptvMessage || msgType.videoMessage) typeKey = 'video';
+                else if (msgType.imageMessage || msgType.stickerMessage) typeKey = 'image';
+                else if (msgType.audioMessage) typeKey = 'audio';
+
+                console.log(`[webhook] Native decrypting (msgType) ${typeKey} for ${remoteJid}...`);
+                const decryptedBuf = await decryptWhatsAppMedia(mtObj.URL, mtObj.mediaKey, typeKey);
+                
+                const mime = mtObj.mimetype || (typeKey === 'video' ? 'video/mp4' : typeKey === 'image' ? 'image/jpeg' : typeKey === 'audio' ? 'audio/ogg' : 'application/pdf');
+                mediaUrl = `data:${mime};base64,${decryptedBuf.toString('base64')}`;
+                
+                if (typeKey === 'audio') {
+                  audioBase64 = decryptedBuf.toString('base64');
+                }
+              } catch (err) {
+                console.error('[webhook] Native decryption (msgType) failed:', err);
+              }
+            }
+          }
+          
+          if (msgType.locationMessage || msgType.liveLocationMessage) {
             mediaType = 'text';
             textContent = '📍 Localização recebida';
             const locMsg = msgType.locationMessage || msgType.liveLocationMessage;

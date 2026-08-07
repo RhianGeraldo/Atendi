@@ -28,14 +28,16 @@ const titles: Record<string, string> = {
   "/tasks": "Tarefas",
   "/campaigns": "Campanhas",
   "/reports": "Relatórios",
+  "/units": "Gestão de Unidades",
   "/settings": "Configurações",
+  "/companies": "Empresas Cadastradas",
 };
 
 export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const title =
-    Object.entries(titles).find(([k]) => pathname.startsWith(k))?.[1] ?? "Omni";
+    Object.entries(titles).find(([k]) => pathname.startsWith(k))?.[1] ?? "AtendiAI";
 
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
@@ -51,7 +53,7 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
         .order("due_date", { ascending: true })
         .limit(5);
 
-      if (profile?.role !== "admin_company" && profile?.role !== "manager") {
+      if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
         query = query.eq("assigned_to", profile!.id);
       }
 

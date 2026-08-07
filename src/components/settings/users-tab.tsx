@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, Link as LinkIcon, Shield, Trash2, UserPlus, UserMinus, Building, Plus, ChevronsUpDown, Check } from "lucide-react";
+import { Copy, Link as LinkIcon, Shield, Trash2, UserPlus, UserMinus, Building, Plus, ChevronsUpDown, Check, Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ALL_MENU_PERMISSIONS } from "@/lib/permissions";
 import { createClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,6 +83,9 @@ export function UsersTab() {
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
   const [manageAccessUser, setManageAccessUser] = useState<any>(null);
+  const [manageRoleUser, setManageRoleUser] = useState<any>(null);
+  const [selectedCustomRoleId, setSelectedCustomRoleId] = useState<string>("none");
+  const [selectedExtraMenus, setSelectedExtraMenus] = useState<string[]>([]);
   
   // Create User State
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -88,6 +93,7 @@ export function UsersTab() {
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
   const [newUserRole, setNewUserRole] = useState("agent");
+  const [newUserCustomRole, setNewUserCustomRole] = useState<string>("none");
   const [newUserUnits, setNewUserUnits] = useState<string[]>([]);
   const [newUserDepartment, setNewUserDepartment] = useState<string>("none");
   const [isCreating, setIsCreating] = useState(false);
@@ -99,11 +105,63 @@ export function UsersTab() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, email, role, department_id, has_matriz_access, departments!profiles_department_id_fkey(name), user_units(unit_id, role)")
+        .select("id, name, email, role, department_id, has_matriz_access, custom_role_id, allowed_menus, custom_role:company_roles(id, name, allowed_menus, base_role), departments!profiles_department_id_fkey(name), user_units(unit_id, role)")
         .eq("company_id", activeCompanyId!);
       if (error) throw error;
       return data;
     }
+  });
+
+  const { data: companyRoles } = useQuery({
+    queryKey: ["company-roles", activeCompanyId],
+    enabled: !!activeCompanyId,
+    queryFn: async () => {
+      const { data } = await supabase.from("company_roles" as any).select("id, name, base_role, allowed_menus").eq("company_id", activeCompanyId!).order("name");
+      return (data as any[]) ?? [];
+    }
+  });
+
+  const updateUserRoleAndPermissions = useMutation({
+    mutationFn: async ({ userId, customRoleId, allowedMenus }: { userId: string; customRoleId: string | null; allowedMenus: string[] | null }) => {
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          custom_role_id: customRoleId || null,
+          allowed_menus: allowedMenus
+        })
+        .eq("id", userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Cargo e permissões salvas!");
+      qc.invalidateQueries({ queryKey: ["users"] });
+      setManageRoleUser(null);
+    },
+    onError: (e) => toast.error("Erro ao salvar cargo/permissões", { description: (e as Error).message })
+  });
+
+  const changeUserRoleAndCustomRole = useMutation({
+    mutationFn: async ({ userId, roleValue }: { userId: string; roleValue: string }) => {
+      const customRole = companyRoles?.find((cr: any) => cr.id === roleValue);
+      if (customRole) {
+        const { error } = await supabase.from("profiles").update({
+          role: customRole.base_role,
+          custom_role_id: customRole.id,
+        }).eq("id", userId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("profiles").update({
+          role: roleValue as any,
+          custom_role_id: null,
+        }).eq("id", userId);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      toast.success("Cargo atualizado com sucesso!");
+      qc.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (e) => toast.error("Erro ao atualizar cargo", { description: (e as Error).message })
   });
 
   const { data: units } = useQuery({
@@ -394,7 +452,7 @@ export function UsersTab() {
                   <tr className="border-b bg-muted/50">
                     <th className="h-10 px-4 text-left font-medium">Nome / E-mail</th>
                     <th className="h-10 px-4 text-left font-medium">Departamento</th>
-                    <th className="h-10 px-4 text-left font-medium">Nível Global</th>
+                    <th className="h-10 px-4 text-left font-medium">Cargo (Nível Global)</th>
                     {!selectedUnitId && <th className="h-10 px-4 text-right font-medium">Ações</th>}
                   </tr>
                 </thead>
@@ -435,22 +493,35 @@ export function UsersTab() {
                         <td className="p-4">
                           {!selectedUnitId ? (
                             <Select 
-                              disabled={isSelf || updateGlobalRole.isPending} 
-                              defaultValue={u.role} 
-                              onValueChange={(val) => updateGlobalRole.mutate({ userId: u.id, role: val })}
+                              disabled={isSelf || changeUserRoleAndCustomRole.isPending} 
+                              value={u.custom_role_id || u.role} 
+                              onValueChange={(val) => changeUserRoleAndCustomRole.mutate({ userId: u.id, roleValue: val })}
                             >
-                              <SelectTrigger className="h-8 w-[140px]">
+                              <SelectTrigger className="h-8 w-[180px]">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="agent">Agente</SelectItem>
-                                <SelectItem value="manager">Gerente</SelectItem>
-                                <SelectItem value="admin_company">Administrador</SelectItem>
+                                {(profile?.role === "super_admin" || u.role === "super_admin") && (
+                                  <SelectItem value="super_admin">Super Administrador</SelectItem>
+                                )}
+                                <SelectItem value="agent">Agente (Padrão)</SelectItem>
+                                <SelectItem value="manager">Gerente (Padrão)</SelectItem>
+                                <SelectItem value="admin_company">Administrador (Padrão)</SelectItem>
+                                {companyRoles && companyRoles.length > 0 && (
+                                  <>
+                                    <div className="px-2 py-1 text-[10px] font-semibold uppercase text-muted-foreground border-t mt-1">Cargos Customizados</div>
+                                    {companyRoles.map((cr: any) => (
+                                      <SelectItem key={cr.id} value={cr.id}>
+                                        {cr.name}
+                                      </SelectItem>
+                                    ))}
+                                  </>
+                                )}
                               </SelectContent>
                             </Select>
                           ) : (
-                            <Badge variant={u.role === 'admin_company' ? 'default' : 'secondary'}>
-                              {u.role === 'admin_company' ? 'Admin' : u.role === 'manager' ? 'Gerente' : 'Agente'}
+                            <Badge variant={u.role === 'super_admin' || u.role === 'admin_company' ? 'default' : 'secondary'}>
+                              {u.role === 'super_admin' ? 'Super Admin' : u.custom_role?.name || (u.role === 'admin_company' ? 'Admin' : u.role === 'manager' ? 'Gerente' : 'Agente')}
                             </Badge>
                           )}
                         </td>
@@ -460,12 +531,25 @@ export function UsersTab() {
                               <Button 
                                 variant="outline" 
                                 size="sm" 
+                                className="h-8 gap-1.5"
+                                onClick={() => {
+                                  setManageRoleUser(u);
+                                  setSelectedCustomRoleId(u.custom_role_id || "none");
+                                  setSelectedExtraMenus(Array.isArray(u.allowed_menus) ? [...u.allowed_menus] : []);
+                                }}
+                              >
+                                <Shield className="h-3.5 w-3.5" />
+                                {u.custom_role?.name ? u.custom_role.name : "Cargo & Permissões"}
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
                                 className="h-8"
                                 disabled={u.role === 'admin_company'} // Admins têm acesso global a todas
                                 onClick={() => setManageAccessUser(u)}
                               >
                                 <Building className="h-4 w-4 mr-2" />
-                                Acessos às Unidades
+                                Unidades
                               </Button>
                               <Button 
                                 variant="ghost" 
@@ -582,15 +666,40 @@ export function UsersTab() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Nível de Acesso (Matriz)</Label>
-              <Select value={newUserRole} onValueChange={setNewUserRole}>
+              <Label>Cargo / Nível de Acesso</Label>
+              <Select
+                value={newUserCustomRole !== "none" ? newUserCustomRole : newUserRole}
+                onValueChange={(val) => {
+                  const customRole = companyRoles?.find((cr: any) => cr.id === val);
+                  if (customRole) {
+                    setNewUserCustomRole(customRole.id);
+                    setNewUserRole(customRole.base_role);
+                  } else {
+                    setNewUserCustomRole("none");
+                    setNewUserRole(val);
+                  }
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="agent">Agente</SelectItem>
-                  <SelectItem value="manager">Gerente</SelectItem>
-                  <SelectItem value="admin_company">Administrador</SelectItem>
+                  {profile?.role === "super_admin" && (
+                    <SelectItem value="super_admin">Super Administrador</SelectItem>
+                  )}
+                  <SelectItem value="agent">Agente (Padrão)</SelectItem>
+                  <SelectItem value="manager">Gerente (Padrão)</SelectItem>
+                  <SelectItem value="admin_company">Administrador (Padrão)</SelectItem>
+                  {companyRoles && companyRoles.length > 0 && (
+                    <>
+                      <div className="px-2 py-1 text-[10px] font-semibold uppercase text-muted-foreground border-t mt-1">Cargos Customizados</div>
+                      {companyRoles.map((cr: any) => (
+                        <SelectItem key={cr.id} value={cr.id}>
+                          {cr.name}
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -613,6 +722,112 @@ export function UsersTab() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Cargo & Permissões do Usuário */}
+      <Dialog open={!!manageRoleUser} onOpenChange={(open) => !open && setManageRoleUser(null)}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="h-5 w-5 text-primary" />
+              Cargo & Permissões: {manageRoleUser?.name}
+            </DialogTitle>
+            <DialogDescription>
+              Vincule este usuário a um Cargo cadastrado na empresa e defina permissões adicionais de menu se necessário.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 py-3">
+            {/* Cargo Selection */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Cargo (Role)</Label>
+              <Select
+                value={selectedCustomRoleId}
+                onValueChange={(val) => setSelectedCustomRoleId(val)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Selecione um cargo..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nenhum (Usar cargo padrão do nível global)</SelectItem>
+                  {companyRoles?.map((cr) => (
+                    <SelectItem key={cr.id} value={cr.id}>
+                      {cr.name} ({cr.allowed_menus?.length || 0} menus permitidos)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Ao selecionar um cargo, o usuário herdará automaticamente todas as permissões de menu configuradas para aquele cargo.
+              </p>
+            </div>
+
+            {/* Additional Menu Permissions */}
+            <div className="space-y-3 pt-2 border-t">
+              <div>
+                <Label className="text-sm font-semibold">Permissões Adicionais de Menu (Exceções)</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Marque os menus adicionais que este usuário específico poderá acessar além dos menus permitidos pelo seu Cargo.
+                </p>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2 rounded-lg border border-border p-3 bg-muted/30 max-h-56 overflow-y-auto">
+                {ALL_MENU_PERMISSIONS.map((menu) => {
+                  const isChecked = selectedExtraMenus.includes(menu.key);
+                  const toggleExtraMenu = (key: string) => {
+                    setSelectedExtraMenus((prev) =>
+                      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+                    );
+                  };
+
+                  return (
+                    <div
+                      key={menu.key}
+                      onClick={() => toggleExtraMenu(menu.key)}
+                      className={`flex items-start gap-2.5 p-2 rounded-md border transition-colors cursor-pointer ${
+                        isChecked
+                          ? "bg-primary/10 border-primary/40 text-foreground"
+                          : "bg-background border-border hover:bg-accent/50"
+                      }`}
+                    >
+                      <Checkbox
+                        checked={isChecked}
+                        onCheckedChange={() => toggleExtraMenu(menu.key)}
+                        className="mt-0.5"
+                      />
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-semibold">{menu.label}</div>
+                        <div className="text-[10px] text-muted-foreground leading-tight line-clamp-1">
+                          {menu.description}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t">
+            <Button variant="outline" onClick={() => setManageRoleUser(null)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (manageRoleUser) {
+                  updateUserRoleAndPermissions.mutate({
+                    userId: manageRoleUser.id,
+                    customRoleId: selectedCustomRoleId === "none" ? null : selectedCustomRoleId,
+                    allowedMenus: selectedExtraMenus.length > 0 ? selectedExtraMenus : null,
+                  });
+                }
+              }}
+              disabled={updateUserRoleAndPermissions.isPending}
+            >
+              {updateUserRoleAndPermissions.isPending ? "Salvando..." : "Salvar Permissões"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

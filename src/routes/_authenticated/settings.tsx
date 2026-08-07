@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe, Facebook } from "lucide-react";
+import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe, Facebook, Shield } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { DepartmentsTab } from "@/components/settings/departments-tab";
 import { UsersTab } from "@/components/settings/users-tab";
+import { RolesTab } from "@/components/settings/roles-tab";
 import { LabelsTab } from "@/components/settings/labels-tab";
 import { CrmTab } from "@/components/settings/crm-tab";
 import { AiAgentsTab } from "@/components/settings/ai-agents-tab";
@@ -530,7 +531,7 @@ function SettingsPage() {
         <div className="max-w-md mx-auto mt-20">
           <Card>
             <CardHeader>
-              <CardTitle>Bem-vindo ao Omni!</CardTitle>
+              <CardTitle>Bem-vindo ao AtendiAI!</CardTitle>
               <CardDescription>Para acessar as configurações, você precisa cadastrar a sua Empresa Mãe primeiro.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -558,11 +559,6 @@ function SettingsPage() {
 
   return (
     <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-      <div className="flex items-center justify-between space-y-2">
-        <h2 className="text-3xl font-bold tracking-tight">
-          {selectedUnitId ? "Configurações da Unidade" : "Configurações Globais"}
-        </h2>
-      </div>
       
       <Tabs defaultValue="general" className="space-y-6">
         <TabsList className="flex flex-wrap md:flex-nowrap h-auto gap-1 justify-start overflow-x-auto pb-1">
@@ -571,6 +567,7 @@ function SettingsPage() {
           <TabsTrigger value="ai">Inteligência Artificial</TabsTrigger>
           <TabsTrigger value="crm">CRM & Funis</TabsTrigger>
           <TabsTrigger value="team">Equipe & Perfis</TabsTrigger>
+          <TabsTrigger value="roles">Cargos & Permissões</TabsTrigger>
         </TabsList>
         
         <TabsContent value="general" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -907,6 +904,10 @@ function SettingsPage() {
             <Building2 className="mr-2 h-4 w-4" />
             Departamentos
           </TabsTrigger>
+          <TabsTrigger value="roles" className="w-full justify-start data-[state=active]:bg-muted">
+            <Shield className="mr-2 h-4 w-4" />
+            Cargos & Permissões
+          </TabsTrigger>
         </TabsList>
         
         <div className="flex-1 w-full min-w-0">
@@ -946,8 +947,15 @@ function SettingsPage() {
         <TabsContent value="departments" className="mt-0 border-none p-0">
           <DepartmentsTab />
         </TabsContent>
+        <TabsContent value="roles" className="mt-0 border-none p-0">
+          <RolesTab />
+        </TabsContent>
       </div>
     </Tabs>
+  </TabsContent>
+
+  <TabsContent value="roles" className="space-y-4">
+    <RolesTab />
   </TabsContent>
 
   <TabsContent value="ai" className="space-y-4">

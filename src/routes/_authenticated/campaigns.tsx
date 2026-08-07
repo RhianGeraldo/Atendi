@@ -9,7 +9,6 @@ export const Route = createFileRoute("/_authenticated/campaigns")({
         <div className="grid h-14 w-14 place-items-center rounded-full bg-muted text-muted-foreground">
           <Construction className="h-6 w-6" />
         </div>
-        <h2 className="text-lg font-semibold">Campanhas</h2>
         <p className="max-w-md text-sm text-muted-foreground">Em breve.</p>
       </Card>
     </div>

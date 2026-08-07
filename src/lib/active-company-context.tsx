@@ -11,7 +11,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "./auth-context";
 
-const STORAGE_KEY = "omni_selected_company_id";
+const STORAGE_KEY = "atendiai_selected_company_id";
+const LEGACY_STORAGE_KEY = "omni_selected_company_id";
 
 interface ActiveCompanyContextType {
   /** ID da empresa ativa (pode ser null se super_admin não selecionou nenhuma) */
@@ -30,7 +31,7 @@ export function ActiveCompanyProvider({ children }: { children: ReactNode }) {
 
   const [superCompanyId, setSuperCompanyId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem(STORAGE_KEY);
+    return localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
   });
 
   const setActiveCompanyId = (id: string | null) => {

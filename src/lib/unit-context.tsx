@@ -14,7 +14,7 @@ export function UnitProvider({ children }: { children: ReactNode }) {
   // Inicializa o estado a partir do localStorage, se existir (com proteção para SSR)
   const [selectedUnitId, setSelectedUnitIdState] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
-    const saved = localStorage.getItem("omni_selected_unit_id");
+    const saved = localStorage.getItem("atendiai_selected_unit_id") || localStorage.getItem("omni_selected_unit_id");
     return saved ? saved : null;
   });
 
@@ -22,9 +22,9 @@ export function UnitProvider({ children }: { children: ReactNode }) {
     setSelectedUnitIdState(id);
     if (typeof window !== "undefined") {
       if (id) {
-        localStorage.setItem("omni_selected_unit_id", id);
+        localStorage.setItem("atendiai_selected_unit_id", id);
       } else {
-        localStorage.removeItem("omni_selected_unit_id");
+        localStorage.removeItem("atendiai_selected_unit_id");
       }
     }
   };

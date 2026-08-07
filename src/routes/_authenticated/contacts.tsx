@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Search, Phone, Mail, User, Loader2, Building } from "lucide-react";
+import { Search, Phone, Mail, User, UserPlus, Loader2, Building, RefreshCw, ShieldAlert, X, Link, ExternalLink, Image as ImageIcon, Calendar as CalendarIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
@@ -15,10 +15,11 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContactDetailsSheet } from "@/components/contacts/contact-details-sheet";
 import { CreateContactDialog } from "@/components/contacts/create-contact-dialog";
-import { Link, ExternalLink, Image as ImageIcon, Calendar as CalendarIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
 
@@ -30,7 +31,10 @@ function ContactsPage() {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
+  const qc = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
+  const [channelFilter, setChannelFilter] = useState("all");
+  const [activeTab, setActiveTab] = useState("all");
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
@@ -174,143 +178,244 @@ function ContactsPage() {
     }
   });
 
-  const regularContacts = contacts?.filter((c: any) => !c.is_blocked) || [];
-  const blockedContacts = contacts?.filter((c: any) => c.is_blocked) || [];
+  const regularContacts = (contacts || []).filter((c: any) => !c.is_blocked);
+  const blockedContacts = (contacts || []).filter((c: any) => c.is_blocked);
+
+  const filteredRegularContacts = regularContacts.filter((contact: any) => {
+    if (channelFilter === "whatsapp") {
+      if (contact.instagram_username && !contact.phone) return false;
+    }
+    if (channelFilter === "instagram") {
+      if (!contact.instagram_username) return false;
+    }
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      const name = (contact.name || "").toLowerCase();
+      const phone = (contact.phone || "").toLowerCase();
+      const email = (contact.email || "").toLowerCase();
+      const insta = (contact.instagram_username || "").toLowerCase();
+
+      if (
+        !name.includes(term) &&
+        !phone.includes(term) &&
+        !email.includes(term) &&
+        !insta.includes(term)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  const now = new Date();
+  const newThisMonthCount = regularContacts.filter((c: any) => {
+    if (!c.created_at) return false;
+    const dt = new Date(c.created_at);
+    return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+  }).length;
 
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between space-y-2 md:space-y-0">
-        <h2 className="text-3xl font-bold tracking-tight">Gestão de Contatos</h2>
-        <div className="flex items-center gap-2">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "w-[240px] justify-start text-left font-normal",
-                  !dateRange && "text-muted-foreground"
-                )}
-              >
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {dateRange?.from ? (
-                  dateRange.to ? (
-                    <>
-                      {format(dateRange.from, "dd/MM/yyyy")} -{" "}
-                      {format(dateRange.to, "dd/MM/yyyy")}
-                    </>
-                  ) : (
-                    format(dateRange.from, "dd/MM/yyyy")
-                  )
-                ) : (
-                  <span>Filtrar por data</span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="end">
-              <Calendar
-                initialFocus
-                mode="range"
-                defaultMonth={dateRange?.from}
-                selected={dateRange}
-                onSelect={setDateRange}
-                numberOfMonths={2}
-              />
-            </PopoverContent>
-          </Popover>
-          {dateRange && (
-            <Button variant="ghost" size="sm" onClick={() => setDateRange(undefined)}>
-              Limpar
-            </Button>
-          )}
-          <CreateContactDialog />
-        </div>
-      </div>
-
+    <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
+      {/* Top KPI Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total de Contatos</CardTitle>
-            <User className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{regularContacts.length}</div>
-            <p className="text-xs text-muted-foreground">
-              {dateRange ? "No período selecionado" : "Total histórico"}
-            </p>
-          </CardContent>
+        <Card className="p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Total Contatos
+            </span>
+            <div className="rounded-lg bg-primary/10 p-2 text-primary">
+              <User className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold">{regularContacts.length}</div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {dateRange ? "No período selecionado" : "Base ativa"}
+          </p>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Leads de Anúncios</CardTitle>
-            <Link className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{adLeads?.length || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              {dateRange ? "No período selecionado" : "Total histórico"}
-            </p>
-          </CardContent>
+
+        <Card className="p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Leads de Anúncios
+            </span>
+            <div className="rounded-lg bg-blue-500/10 p-2 text-blue-500">
+              <Link className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold text-blue-600 dark:text-blue-400">
+            {adLeads?.length || 0}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">Origem Meta Ads</p>
+        </Card>
+
+        <Card className="p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Novos no Mês
+            </span>
+            <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-500">
+              <UserPlus className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+            {newThisMonthCount}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">Cadastrados neste mês</p>
+        </Card>
+
+        <Card className="p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Bloqueados
+            </span>
+            <div className="rounded-lg bg-red-500/10 p-2 text-red-500">
+              <ShieldAlert className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold text-red-600 dark:text-red-400">
+            {blockedContacts.length}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">Lista negra</p>
         </Card>
       </div>
 
-      <Tabs defaultValue="all" className="space-y-4">
-        <div className="flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="all">Todos os Contatos</TabsTrigger>
-            <TabsTrigger value="ads">Origem Anúncio</TabsTrigger>
-            <TabsTrigger value="blocked">Bloqueados</TabsTrigger>
-          </TabsList>
-          <div className="relative w-full max-w-sm ml-auto">
-            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Buscar por nome ou telefone..."
-              className="pl-9"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-        </div>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <Card>
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <TabsList className="h-9 w-fit">
+                <TabsTrigger value="all" className="text-xs">Todos os Contatos</TabsTrigger>
+                <TabsTrigger value="ads" className="text-xs">Origem Anúncio</TabsTrigger>
+                <TabsTrigger value="blocked" className="text-xs">Bloqueados</TabsTrigger>
+              </TabsList>
 
-        <TabsContent value="all">
-          <Card>
-            <CardHeader>
-              <CardTitle>Contatos</CardTitle>
-              <CardDescription>
-                Lista de todos os contatos que interagiram com a sua empresa.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Search Input */}
+                <div className="relative w-full sm:w-48 md:w-56">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  <Input
+                    placeholder="Buscar nome, fone, e-mail..."
+                    className="pl-8 h-8 text-xs"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Channel Filter */}
+                <Select value={channelFilter} onValueChange={setChannelFilter}>
+                  <SelectTrigger className="w-[125px] h-8 text-xs">
+                    <SelectValue placeholder="Canal" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos Canais</SelectItem>
+                    <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                    <SelectItem value="instagram">Instagram</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Date Filter */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn(
+                        "h-8 text-xs font-normal",
+                        !dateRange && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
+                      {dateRange?.from ? (
+                        dateRange.to ? (
+                          <>
+                            {format(dateRange.from, "dd/MM")} - {format(dateRange.to, "dd/MM")}
+                          </>
+                        ) : (
+                          format(dateRange.from, "dd/MM/yyyy")
+                        )
+                      ) : (
+                        "Filtrar Data"
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <Calendar
+                      initialFocus
+                      mode="range"
+                      defaultMonth={dateRange?.from}
+                      selected={dateRange}
+                      onSelect={setDateRange}
+                      numberOfMonths={2}
+                    />
+                  </PopoverContent>
+                </Popover>
+
+                {dateRange && (
+                  <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => setDateRange(undefined)}>
+                    Limpar
+                  </Button>
+                )}
+
+                {/* Refresh Button */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-xs"
+                  onClick={() => {
+                    qc.invalidateQueries({ queryKey: ["contacts"] });
+                    qc.invalidateQueries({ queryKey: ["ad-leads"] });
+                  }}
+                >
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Atualizar
+                </Button>
+
+                {/* Create Contact Action Button */}
+                <CreateContactDialog />
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="pt-0">
+            <TabsContent value="all" className="m-0 border-none p-0">
               {isLoading ? (
-                <div className="flex justify-center p-8">
+                <div className="flex justify-center p-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : regularContacts.length > 0 ? (
+              ) : filteredRegularContacts.length > 0 ? (
                 <div className="rounded-md border overflow-x-auto">
-                  <table className="w-full text-sm min-w-[600px]">
-                    <thead>
-                      <tr className="border-b bg-muted/50">
-                        <th className="h-10 px-4 text-left font-medium">Nome</th>
-                        <th className="h-10 px-4 text-left font-medium">Contato</th>
-                        <th className="h-10 px-4 text-left font-medium hidden md:table-cell">Tags</th>
-                        <th className="h-10 px-4 text-left font-medium hidden sm:table-cell">Data de Cadastro</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {regularContacts.map((contact: any) => (
-                        <tr 
+                  <Table className="min-w-[650px]">
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead>Nome</TableHead>
+                        <TableHead>Contato / Canal</TableHead>
+                        <TableHead className="hidden md:table-cell">Tags</TableHead>
+                        <TableHead className="hidden sm:table-cell">Data de Cadastro</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredRegularContacts.map((contact: any) => (
+                        <TableRow 
                           key={contact.id} 
-                          className="border-b last:border-0 hover:bg-muted/50 cursor-pointer"
+                          className="hover:bg-muted/50 cursor-pointer"
                           onClick={() => setSelectedContactId(contact.id)}
                         >
-                          <td className="p-4">
+                          <TableCell className="p-4">
                             <div className="flex items-center gap-2">
                               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
                                 <User className="h-4 w-4 text-primary" />
                               </div>
                               <span className="font-medium">{contact.name}</span>
                             </div>
-                          </td>
-                          <td className="p-4">
+                          </TableCell>
+                          <TableCell className="p-4">
                             <div className="flex flex-col gap-1 text-muted-foreground">
                               {contact.phone && contact.phone.length <= 15 && (
                                 <div className="flex items-center gap-1.5">
@@ -343,8 +448,8 @@ function ContactsPage() {
                                 <span className="truncate">Última unid: {contact.last_unit_name}</span>
                               </div>
                             )}
-                          </td>
-                          <td className="p-4 hidden md:table-cell">
+                          </TableCell>
+                          <TableCell className="p-4 hidden md:table-cell">
                             {contact.tags && contact.tags.length > 0 ? (
                               <div className="flex flex-wrap gap-1">
                                 {contact.tags.slice(0, 2).map((tag: string) => (
@@ -361,14 +466,14 @@ function ContactsPage() {
                             ) : (
                               <span className="text-muted-foreground">-</span>
                             )}
-                          </td>
-                          <td className="p-4 hidden sm:table-cell text-muted-foreground">
+                          </TableCell>
+                          <TableCell className="p-4 hidden sm:table-cell text-muted-foreground">
                             {format(new Date(contact.created_at), "dd/MM/yyyy", { locale: ptBR })}
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -383,43 +488,33 @@ function ContactsPage() {
                   </p>
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+            </TabsContent>
 
-        <TabsContent value="ads">
-          <Card>
-            <CardHeader>
-              <CardTitle>Leads de Anúncios</CardTitle>
-              <CardDescription>
-                Contatos que iniciaram conversa através de campanhas e anúncios (Click to WhatsApp).
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+            <TabsContent value="ads" className="m-0 border-none p-0">
               {isLoadingAds ? (
-                <div className="flex justify-center p-8">
+                <div className="flex justify-center p-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
               ) : adLeads && adLeads.length > 0 ? (
                 <div className="rounded-md border overflow-x-auto">
-                  <table className="w-full text-sm min-w-[800px]">
-                    <thead>
-                      <tr className="border-b bg-muted/50">
-                        <th className="h-10 px-4 text-left font-medium">Lead</th>
-                        <th className="h-10 px-4 text-left font-medium">Anúncio</th>
-                        <th className="h-10 px-4 text-left font-medium hidden sm:table-cell">Mídia</th>
-                        <th className="h-10 px-4 text-left font-medium hidden md:table-cell">Origem</th>
-                        <th className="h-10 px-4 text-left font-medium">Data do Contato</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table className="min-w-[800px]">
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead>Lead</TableHead>
+                        <TableHead>Anúncio</TableHead>
+                        <TableHead className="hidden sm:table-cell">Mídia</TableHead>
+                        <TableHead className="hidden md:table-cell">Origem</TableHead>
+                        <TableHead>Data do Contato</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {adLeads.map((lead: any) => (
-                        <tr 
+                        <TableRow 
                           key={lead.messageId} 
-                          className="border-b last:border-0 hover:bg-muted/50 cursor-pointer"
+                          className="hover:bg-muted/50 cursor-pointer"
                           onClick={() => setSelectedContactId(lead.contact.id)}
                         >
-                          <td className="p-4">
+                          <TableCell className="p-4">
                             <div className="flex flex-col">
                               <span className="font-medium">{lead.contact.name || "Sem nome"}</span>
                               <div className="flex items-center gap-1.5 text-muted-foreground mt-1">
@@ -427,8 +522,8 @@ function ContactsPage() {
                                 <span>{lead.contact.phone}</span>
                               </div>
                             </div>
-                          </td>
-                          <td className="p-4">
+                          </TableCell>
+                          <TableCell className="p-4">
                             <div className="flex flex-col gap-1 max-w-[200px] sm:max-w-[300px]">
                               <span className="font-medium line-clamp-2" title={lead.adData.title}>
                                 {lead.adData.title || "Anúncio sem título"}
@@ -439,8 +534,8 @@ function ContactsPage() {
                                 </span>
                               )}
                             </div>
-                          </td>
-                          <td className="p-4 hidden sm:table-cell">
+                          </TableCell>
+                          <TableCell className="p-4 hidden sm:table-cell">
                             {lead.adData.thumbnailURL || lead.adData.originalImageURL ? (
                               <div className="relative h-12 w-12 rounded overflow-hidden bg-muted flex items-center justify-center border shrink-0">
                                 <img 
@@ -459,8 +554,8 @@ function ContactsPage() {
                                 <ImageIcon className="h-4 w-4" />
                               </div>
                             )}
-                          </td>
-                          <td className="p-4 hidden md:table-cell">
+                          </TableCell>
+                          <TableCell className="p-4 hidden md:table-cell">
                             <div className="flex flex-col gap-2">
                               <div className="flex flex-wrap gap-1">
                                 {lead.conversionSource && (
@@ -486,14 +581,14 @@ function ContactsPage() {
                                 </a>
                               )}
                             </div>
-                          </td>
-                          <td className="p-4 text-muted-foreground">
+                          </TableCell>
+                          <TableCell className="p-4 text-muted-foreground">
                             {format(new Date(lead.createdAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -508,49 +603,39 @@ function ContactsPage() {
                   </p>
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+            </TabsContent>
 
-        <TabsContent value="blocked">
-          <Card>
-            <CardHeader>
-              <CardTitle>Black List</CardTitle>
-              <CardDescription>
-                Contatos bloqueados. Eles não aparecem nas conversas ativas e não geram notificações.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+            <TabsContent value="blocked" className="m-0 border-none p-0">
               {isLoading ? (
-                <div className="flex justify-center p-8">
+                <div className="flex justify-center p-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
               ) : blockedContacts.length > 0 ? (
                 <div className="rounded-md border overflow-x-auto">
-                  <table className="w-full text-sm min-w-[600px]">
-                    <thead>
-                      <tr className="border-b bg-muted/50">
-                        <th className="h-10 px-4 text-left font-medium">Nome</th>
-                        <th className="h-10 px-4 text-left font-medium">Contato</th>
-                        <th className="h-10 px-4 text-left font-medium">Motivo do Bloqueio</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  <Table className="min-w-[600px]">
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead>Nome</TableHead>
+                        <TableHead>Contato</TableHead>
+                        <TableHead>Motivo do Bloqueio</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {blockedContacts.map((contact: any) => (
-                        <tr 
+                        <TableRow 
                           key={contact.id} 
-                          className="border-b last:border-0 hover:bg-muted/50 cursor-pointer"
+                          className="hover:bg-muted/50 cursor-pointer"
                           onClick={() => setSelectedContactId(contact.id)}
                         >
-                          <td className="p-4">
+                          <TableCell className="p-4">
                             <div className="flex items-center gap-2">
                               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-destructive/10">
                                 <User className="h-4 w-4 text-destructive" />
                               </div>
                               <span className="font-medium text-destructive">{contact.name}</span>
                             </div>
-                          </td>
-                          <td className="p-4">
+                          </TableCell>
+                          <TableCell className="p-4">
                             <div className="flex flex-col gap-1 text-muted-foreground">
                               {contact.phone && (
                                 <div className="flex items-center gap-1.5">
@@ -559,14 +644,14 @@ function ContactsPage() {
                                 </div>
                               )}
                             </div>
-                          </td>
-                          <td className="p-4">
+                          </TableCell>
+                          <TableCell className="p-4">
                             <span className="text-muted-foreground">{contact.block_reason || "-"}</span>
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -579,9 +664,9 @@ function ContactsPage() {
                   </p>
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+            </TabsContent>
+          </CardContent>
+        </Card>
       </Tabs>
 
       <ContactDetailsSheet 

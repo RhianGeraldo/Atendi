@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Phone,
   PhoneIncoming,
   PhoneOutgoing,
   Clock,
@@ -27,12 +28,22 @@ import {
   Sparkles,
   Loader2,
   FileText,
+  Search,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { transcribeCallAction } from "@/lib/api/chat.functions";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 
 export const Route = createFileRoute("/_authenticated/calls")({
   component: CallsPage,
@@ -89,6 +100,11 @@ function CallsPage() {
   const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
   const [selectedCall, setSelectedCall] = useState<CallLog | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [directionFilter, setDirectionFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [instanceFilter, setInstanceFilter] = useState<string>("all");
+  const [agentFilter, setAgentFilter] = useState<string>("all");
 
   const { data: calls, isLoading } = useQuery({
     queryKey: ["call_logs", activeCompanyId],
@@ -112,6 +128,95 @@ function CallsPage() {
     },
     enabled: !!activeCompanyId,
   });
+
+  const uniqueInstances = useMemo(() => {
+    if (!calls) return [];
+    const set = new Set<string>();
+    calls.forEach((c) => {
+      if (c.whatsapp_instance?.name) set.add(c.whatsapp_instance.name);
+    });
+    return Array.from(set).sort();
+  }, [calls]);
+
+  const uniqueAgents = useMemo(() => {
+    if (!calls) return [];
+    const set = new Set<string>();
+    calls.forEach((c) => {
+      if (c.assigned_agent?.name) set.add(c.assigned_agent.name);
+    });
+    return Array.from(set).sort();
+  }, [calls]);
+
+  const filteredCalls = (calls || []).filter((call) => {
+    if (directionFilter !== "all" && call.direction !== directionFilter) {
+      return false;
+    }
+    if (statusFilter !== "all" && call.status !== statusFilter) {
+      return false;
+    }
+    if (instanceFilter !== "all" && call.whatsapp_instance?.name !== instanceFilter) {
+      return false;
+    }
+    if (agentFilter !== "all" && call.assigned_agent?.name !== agentFilter) {
+      return false;
+    }
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      const contactName = (call.contact?.name || "").toLowerCase();
+      const phone = (call.peer_number || call.contact?.phone || "").toLowerCase();
+      const agentName = (call.assigned_agent?.name || "").toLowerCase();
+      const instanceName = (call.whatsapp_instance?.name || "").toLowerCase();
+
+      if (
+        !contactName.includes(term) &&
+        !phone.includes(term) &&
+        !agentName.includes(term) &&
+        !instanceName.includes(term)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  // Helper to extract clean duration in seconds for ENDED calls
+  const getCallDurationSeconds = (c: CallLog): number | null => {
+    if (c.status !== "ENDED") return null;
+    let secs = c.duration_seconds;
+    if (secs !== null && secs > 0) {
+      // If duration is stored in milliseconds (> 24 hours in seconds), convert to seconds
+      if (secs > 86400) {
+        secs = Math.round(secs / 1000);
+      }
+      return secs;
+    }
+    // Fallback using started_at & ended_at timestamps if valid
+    if (c.started_at && c.ended_at) {
+      const diff = Math.round(
+        (new Date(c.ended_at).getTime() - new Date(c.started_at).getTime()) / 1000
+      );
+      if (diff > 0 && diff < 7200) {
+        return diff;
+      }
+    }
+    return null;
+  };
+
+  // KPI Calculations
+  const totalCount = filteredCalls.length;
+  const incomingCount = filteredCalls.filter((c) => c.direction === "INCOMING").length;
+  const outgoingCount = filteredCalls.filter((c) => c.direction === "OUTGOING").length;
+  const missedCount = filteredCalls.filter(
+    (c) => c.status === "NOT_ANSWERED" || c.status === "REJECTED"
+  ).length;
+
+  const endedCallsWithDuration = filteredCalls
+    .map((c) => ({ call: c, secs: getCallDurationSeconds(c) }))
+    .filter((item): item is { call: CallLog; secs: number } => item.secs !== null && item.secs > 0);
+
+  const totalDurationSecs = endedCallsWithDuration.reduce((acc, item) => acc + item.secs, 0);
+  const avgSecs = endedCallsWithDuration.length > 0 ? Math.round(totalDurationSecs / endedCallsWithDuration.length) : 0;
+  const avgDurationFormatted = `${Math.floor(avgSecs / 60)}m ${(avgSecs % 60).toString().padStart(2, "0")}s`;
 
   const transcribeMutation = useMutation({
     mutationFn: async (callId: string) => {
@@ -141,17 +246,24 @@ function CallsPage() {
   const formatDuration = (
     start: string,
     end: string | null,
-    durationSecs: number | null
+    durationSecs: number | null,
+    status?: string
   ) => {
-    if (durationSecs !== null) {
-      const m = Math.floor(durationSecs / 60);
-      const s = durationSecs % 60;
+    if (status && status !== "ENDED" && status !== "ACTIVE") {
+      return "--:--";
+    }
+    let secs = durationSecs;
+    if (secs !== null && secs > 0) {
+      if (secs > 86400) secs = Math.round(secs / 1000);
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
       return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
     }
-    if (!end) return "--:--";
+    if (!end || !start) return "--:--";
     const diff = Math.round(
       (new Date(end).getTime() - new Date(start).getTime()) / 1000
     );
+    if (diff <= 0 || diff > 7200) return "--:--";
     const m = Math.floor(diff / 60);
     const s = diff % 60;
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
@@ -170,21 +282,168 @@ function CallsPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">
-          Histórico de Chamadas
-        </h1>
-        <Button
-          variant="outline"
-          onClick={() => qc.invalidateQueries({ queryKey: ["call_logs"] })}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" /> Atualizar
-        </Button>
+      {/* KPI Cards */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+        <Card className="p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Total Chamadas
+            </span>
+            <div className="rounded-lg bg-primary/10 p-2 text-primary">
+              <Phone className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold">{totalCount}</div>
+        </Card>
+
+        <Card className="p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Recebidas
+            </span>
+            <div className="rounded-lg bg-blue-500/10 p-2 text-blue-500">
+              <PhoneIncoming className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold text-blue-600 dark:text-blue-400">
+            {incomingCount}
+          </div>
+        </Card>
+
+        <Card className="p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Realizadas
+            </span>
+            <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-500">
+              <PhoneOutgoing className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+            {outgoingCount}
+          </div>
+        </Card>
+
+        <Card className="p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Não Atendidas
+            </span>
+            <div className="rounded-lg bg-red-500/10 p-2 text-red-500">
+              <PhoneMissed className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold text-red-600 dark:text-red-400">
+            {missedCount}
+          </div>
+        </Card>
+
+        <Card className="p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Duração Média
+            </span>
+            <div className="rounded-lg bg-purple-500/10 p-2 text-purple-500">
+              <Clock className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold">{avgDurationFormatted}</div>
+        </Card>
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Últimas 100 Chamadas</CardTitle>
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-4">
+          <CardTitle className="text-lg font-semibold">Últimas 100 Chamadas</CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Search Input */}
+            <div className="relative w-full sm:w-48 md:w-56">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Buscar contato, número..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8 h-8 text-xs"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Direction Filter */}
+            <Select value={directionFilter} onValueChange={setDirectionFilter}>
+              <SelectTrigger className="w-[125px] h-8 text-xs">
+                <SelectValue placeholder="Direção" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas Direções</SelectItem>
+                <SelectItem value="INCOMING">Recebidas</SelectItem>
+                <SelectItem value="OUTGOING">Realizadas</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Status Filter */}
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[135px] h-8 text-xs">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos Status</SelectItem>
+                <SelectItem value="ENDED">Atendidas</SelectItem>
+                <SelectItem value="NOT_ANSWERED">Não Atendidas</SelectItem>
+                <SelectItem value="REJECTED">Rejeitadas</SelectItem>
+                <SelectItem value="ACTIVE">Em Andamento</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Instance Filter */}
+            {uniqueInstances.length > 0 && (
+              <Select value={instanceFilter} onValueChange={setInstanceFilter}>
+                <SelectTrigger className="w-[135px] h-8 text-xs">
+                  <SelectValue placeholder="Instância" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas Instâncias</SelectItem>
+                  {uniqueInstances.map((inst) => (
+                    <SelectItem key={inst} value={inst}>
+                      {inst}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {/* Agent Filter */}
+            {uniqueAgents.length > 0 && (
+              <Select value={agentFilter} onValueChange={setAgentFilter}>
+                <SelectTrigger className="w-[135px] h-8 text-xs">
+                  <SelectValue placeholder="Atendente" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos Atendentes</SelectItem>
+                  {uniqueAgents.map((ag) => (
+                    <SelectItem key={ag} value={ag}>
+                      {ag}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {/* Refresh Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-3 text-xs"
+              onClick={() => qc.invalidateQueries({ queryKey: ["call_logs"] })}
+            >
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Atualizar
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border overflow-x-auto">
@@ -208,7 +467,7 @@ function CallsPage() {
                       Carregando chamadas...
                     </TableCell>
                   </TableRow>
-                ) : !calls || calls.length === 0 ? (
+                ) : !filteredCalls || filteredCalls.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={8}
@@ -218,7 +477,7 @@ function CallsPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  calls.map((call) => (
+                  filteredCalls.map((call) => (
                     <TableRow key={call.id}>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -326,7 +585,8 @@ function CallsPage() {
                           {formatDuration(
                             call.started_at,
                             call.ended_at,
-                            call.duration_seconds
+                            call.duration_seconds,
+                            call.status
                           )}
                         </div>
                       </TableCell>

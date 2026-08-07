@@ -54,7 +54,7 @@ function AuthPage() {
           <div className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground">
             <MessageSquare className="h-5 w-5" />
           </div>
-          Omni
+          AtendiAI
         </div>
         <div className="space-y-3">
           <h2 className="text-3xl font-semibold leading-tight">
@@ -66,7 +66,7 @@ function AuthPage() {
           </p>
         </div>
         <p className="text-xs text-sidebar-foreground/50">
-          © {new Date().getFullYear()} Grupo Omni
+          © {new Date().getFullYear()} Grupo AtendiAI
         </p>
       </div>
 

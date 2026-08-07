@@ -137,18 +137,12 @@ function CompaniesPage() {
 
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
-      {/* Header */}
+      {/* Header Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Badge variant="secondary" className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 bg-violet-100 text-violet-700 border-violet-200">
-              Super Admin
-            </Badge>
-          </div>
-          <h2 className="text-3xl font-bold tracking-tight">Empresas Cadastradas</h2>
-          <p className="text-muted-foreground mt-1">
-            Gerencie todas as empresas e suas unidades no sistema.
-          </p>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 bg-violet-100 text-violet-700 border-violet-200">
+            Super Admin
+          </Badge>
         </div>
         <Button
           onClick={() => setCreateOpen(true)}

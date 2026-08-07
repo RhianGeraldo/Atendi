@@ -89,8 +89,8 @@ function TasksPage() {
         // We just let RLS do its job for units.
       }
 
-      // Permission Logic
-      if (profile?.role !== "admin_company" && profile?.role !== "manager") {
+      // Permission Logic (Admins, Super Admins & Managers see all)
+      if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
         query = query.eq("assigned_to", profile!.id);
       }
 
@@ -150,7 +150,6 @@ function TasksPage() {
     <div className="flex flex-col h-full overflow-hidden bg-muted/20">
       <header className="flex items-center justify-between border-b bg-card px-6 py-4 shrink-0 flex-wrap gap-4">
         <div className="flex items-center gap-4 flex-wrap">
-          <h1 className="text-2xl font-bold tracking-tight">Tarefas</h1>
           <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-[250px] sm:w-[300px]">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="pending">Pendentes</TabsTrigger>

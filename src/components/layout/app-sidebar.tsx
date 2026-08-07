@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useActiveCompany } from "@/lib/active-company-context";
+import { canAccessMenu } from "@/lib/permissions";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -35,17 +36,17 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
 const items = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/conversations", label: "Atendimentos", icon: MessageSquare },
-  { to: "/calls", label: "Ligações", icon: Phone },
-  { to: "/contacts", label: "Contatos", icon: Users },
-  { to: "/pipeline", label: "Funil de Vendas", icon: KanbanSquare },
-  { to: "/tasks", label: "Tarefas", icon: CheckSquare },
-  { to: "/campaigns", label: "Campanhas", icon: Megaphone },
-  { to: "/reports", label: "Relatórios", icon: BarChart3 },
-  { to: "/units", label: "Gestão de Unidades", icon: Building2, globalOnly: true },
-  { to: "/settings", label: "Configurações", icon: Settings },
-  { to: "/companies", label: "Empresas", icon: Building, superAdminOnly: true },
+  { key: "dashboard", to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { key: "conversations", to: "/conversations", label: "Atendimentos", icon: MessageSquare },
+  { key: "calls", to: "/calls", label: "Ligações", icon: Phone },
+  { key: "contacts", to: "/contacts", label: "Contatos", icon: Users },
+  { key: "pipeline", to: "/pipeline", label: "Funil de Vendas", icon: KanbanSquare },
+  { key: "tasks", to: "/tasks", label: "Tarefas", icon: CheckSquare },
+  { key: "campaigns", to: "/campaigns", label: "Campanhas", icon: Megaphone },
+  { key: "reports", to: "/reports", label: "Relatórios", icon: BarChart3 },
+  { key: "units", to: "/units", label: "Gestão de Unidades", icon: Building2, globalOnly: true },
+  { key: "settings", to: "/settings", label: "Configurações", icon: Settings },
+  { key: "companies", to: "/companies", label: "Empresas", icon: Building, superAdminOnly: true },
 ];
 
 interface Props {
@@ -141,11 +142,20 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
       )}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground transition-transform duration-300 ease-in-out md:relative md:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex flex-col bg-sidebar text-sidebar-foreground transition-all duration-300 ease-in-out md:relative md:translate-x-0",
           collapsed ? "md:w-[64px]" : "md:w-[240px]",
           mobileOpen ? "translate-x-0 w-[240px]" : "-translate-x-full w-[240px]",
         )}
       >
+        {/* Collapse toggle button on border (desktop) */}
+        <button
+          onClick={onToggle}
+          className="hidden md:flex absolute -right-3 top-5 z-20 h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground border-2 border-background shadow-md transition-all hover:bg-primary/90 hover:scale-110 focus:outline-none"
+          title={collapsed ? "Expandir menu" : "Recolher menu"}
+        >
+          {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+        </button>
+
       {/* Brand */}
       <div
         className={cn(
@@ -153,12 +163,15 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
           collapsed && "justify-center px-0",
         )}
       >
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
-          <MessageSquare className="h-5 w-5" />
+        <div className={cn(
+          "grid shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground transition-all",
+          collapsed ? "h-8 w-8" : "h-9 w-9"
+        )}>
+          <MessageSquare className={cn("transition-all", collapsed ? "h-4 w-4" : "h-5 w-5")} />
         </div>
         {!collapsed && (
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">Omni</div>
+            <div className="truncate text-sm font-semibold">AtendiAI</div>
             <div className="truncate text-xs text-sidebar-foreground/60">
               Painel de Gestão
             </div>
@@ -275,8 +288,8 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
       <nav className="mt-4 flex-1 space-y-0.5 px-2">
         {items.filter(item => {
           if (item.superAdminOnly) return profile?.role === 'super_admin';
-          if (item.globalOnly) return !selectedUnitId;
-          return true;
+          if (item.globalOnly) return !selectedUnitId && canAccessMenu(item.key, profile);
+          return canAccessMenu(item.key, profile);
         }).map((item) => {
           const active = pathname.startsWith(item.to);
           const Icon = item.icon;
@@ -321,12 +334,16 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{profile?.name ?? "—"}</div>
               <div className="flex items-center gap-1 truncate text-xs text-sidebar-foreground/60">
-                <span className="shrink-0">
-                  {profile?.role === "admin_company"
-                    ? "Admin"
-                    : profile?.role === "manager"
-                      ? "Gerente"
-                      : "Agente"}
+                <span className="shrink-0 font-medium">
+                  {profile?.custom_role?.name
+                    ? profile.custom_role.name
+                    : profile?.role === "super_admin"
+                      ? "Super Admin"
+                      : profile?.role === "admin_company"
+                        ? "Admin"
+                        : profile?.role === "manager"
+                          ? "Gerente"
+                          : "Agente"}
                 </span>
                 {departmentName && (
                   <>
@@ -347,18 +364,6 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
             </button>
           )}
         </div>
-        <button
-          onClick={onToggle}
-          className={cn(
-            "mt-3 flex w-full items-center justify-center gap-1 rounded-md bg-sidebar-accent/40 py-1.5 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
-          )}
-        >
-          {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : (
-            <>
-              <ChevronLeft className="h-3.5 w-3.5" /> Recolher
-            </>
-          )}
-        </button>
       </div>
       </aside>
     </>

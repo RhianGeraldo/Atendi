@@ -78,7 +78,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Omni — Atendimento e CRM" },
+      { title: "AtendiAI — Atendimento e CRM" },
       { name: "description", content: "Plataforma de atendimento omnichannel com CRM integrado." },
     ],
     links: [
