@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
+import { conferirPorta } from './webhook-auth';
 
 export async function handleFacebookWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -19,7 +20,16 @@ export async function handleFacebookWebhook(request: Request): Promise<Response>
   // 2. Recebimento de mensagens (POST request)
   if (request.method === 'POST') {
     try {
-      const body = await request.json();
+      // A tranca do POST. O `GET` de verificação já existia; o corpo que traz as
+      // mensagens entrava sem conferência nenhuma.
+      const porta = await conferirPorta(request, {
+        provedor: 'facebook',
+        segredoDaAssinatura: process.env.META_APP_SECRET,
+        exigirAssinatura: !!process.env.META_APP_SECRET,
+      });
+      if (!porta.ok) return porta.resposta;
+
+      const body = JSON.parse(porta.corpoBruto);
       await processFacebookWebhookBody(body);
       return new Response('EVENT_RECEIVED', { status: 200 });
     } catch (err) {

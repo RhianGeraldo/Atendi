@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
+import { conferirPorta } from './webhook-auth';
 
 import { enqueueAiMessage } from './ai-queue';
 
@@ -19,7 +20,16 @@ export async function handleInstagramWebhook(request: Request): Promise<Response
 
   if (request.method === 'POST') {
     try {
-      const body = await request.json();
+      // A tranca do POST. O `GET` de verificação já existia; o corpo que traz as
+      // mensagens entrava sem conferência nenhuma.
+      const porta = await conferirPorta(request, {
+        provedor: 'instagram',
+        segredoDaAssinatura: process.env.META_APP_SECRET,
+        exigirAssinatura: !!process.env.META_APP_SECRET,
+      });
+      if (!porta.ok) return porta.resposta;
+
+      const body = JSON.parse(porta.corpoBruto);
       await processInstagramWebhookBody(body);
       return new Response('EVENT_RECEIVED', { status: 200 });
     } catch (err) {

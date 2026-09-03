@@ -4,6 +4,7 @@ import { syncCloudTemplates } from './whatsapp-cloud-api';
 import { v4 as uuidv4 } from 'uuid';
 import { getPhoneVariants } from '@/lib/utils';
 import { assignTrafficLeadRoundRobin } from './routing';
+import { conferirPorta } from './webhook-auth';
 
 export async function handleWhatsappCloudWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -38,7 +39,16 @@ export async function handleWhatsappCloudWebhook(request: Request): Promise<Resp
   // 2. Recebimento de mensagens (POST request)
   if (request.method === 'POST') {
     try {
-      const body = await request.json();
+      // A tranca do POST. A verificação por `hub.verify_token` acima vale só
+      // para o `GET`; o corpo que traz as mensagens entrava sem conferência.
+      const porta = await conferirPorta(request, {
+        provedor: 'whatsapp-cloud',
+        segredoDaAssinatura: process.env.META_APP_SECRET,
+        exigirAssinatura: !!process.env.META_APP_SECRET,
+      });
+      if (!porta.ok) return porta.resposta;
+
+      const body = JSON.parse(porta.corpoBruto);
       
       // Responde com 200 imediatamente para a Meta (exigido) e processa em background se não for Edge Runtime
       // Em Vercel Edge Runtime, talvez precisemos usar waitUntil() ou await. Vamos aguardar pra não derrubar.

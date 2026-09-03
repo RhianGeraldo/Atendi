@@ -2,6 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { abrirCanal, destinatarioDe } from "@/lib/canais/motor";
+import type { CanalAberto, Destinatario } from "@/lib/canais/tipos";
 import { sendEvogoText, sendEvogoLink, sendEvogoMedia, sendEvogoReaction, editEvogoMessage, deleteEvogoMessage } from "../evogo";
 import { sendStevoText, sendStevoLink, sendStevoMedia, sendStevoReaction, editStevoMessage, deleteStevoMessage } from "../stevo";
 import { getPhoneVariants } from "@/lib/utils";
@@ -24,7 +26,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     
     const { data: conv, error: convErr } = await supabase
       .from("conversations")
-      .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid, company_id)")
+      .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, assigned_agent_id, contacts(phone, whatsapp_lid, company_id)")
       .eq("id", data.conversationId)
       .single();
 
@@ -32,191 +34,53 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       throw new Error("Conversation not found or access denied.");
     }
 
+    if (!data.isInternal && conv.status === 'active' && conv.assigned_agent_id && conv.assigned_agent_id !== userId) {
+      throw new Error("Esta conversa está em atendimento por outro atendente. Assuma o atendimento antes de enviar mensagens.");
+    }
+
     const targetConversationId = data.conversationId;
 
     // O identificador final será resolvido após descobrir o provedor
 
-    // 2. Get configuration for the conversation's instance based on channel
-    let host: string | null = null;
-    let token: string | null = null;
-    let instanceName: string | null = null;
-    let provider: string = 'evogo';
-    let resolvedInstanceId = conv.whatsapp_instance_id;
+    /**
+     * O canal, e só então o destinatário.
+     *
+     * Eram ~150 linhas idênticas às de `message-sender.ts`, deduzindo o provedor
+     * a partir do `channel` da conversa. Quem resolve agora é `abrirCanal`, que
+     * parte da instância — ver `src/lib/canais/motor.ts`.
+     *
+     * **Nota interna não abre canal.** Ela não atravessa provedor nenhum, e
+     * exigir conexão para escrevê-la impediria anotar numa conversa cuja
+     * instância foi removida — que é justamente quando alguém quer anotar.
+     */
+    let canal: CanalAberto | null = null;
+    let destino: Destinatario | null = null;
 
-    if ((conv.channel as string) === 'instagram') {
-      provider = 'instagram';
-      let instance = null;
-
-      if (resolvedInstanceId) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id")
-          .eq("id", resolvedInstanceId)
-          .eq("provider", "instagram")
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id")
-          .eq("unit_id", conv.unit_id)
-          .eq("provider", "instagram")
-          .limit(1)
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
-        if (unitData) {
-          const { data } = await supabaseAdmin
-            .from("whatsapp_instances")
-            .select("id")
-            .eq("company_id", unitData.company_id)
-            .eq("provider", "instagram")
-            .limit(1)
-            .maybeSingle();
-          instance = data;
-        }
-      }
-
-      if (!instance && conv.contacts?.company_id) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id")
-          .eq("company_id", conv.contacts.company_id)
-          .eq("provider", "instagram")
-          .limit(1)
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (instance) {
-        resolvedInstanceId = instance.id;
-      }
-    } else if ((conv.channel as string) === 'messenger') {
-      provider = 'messenger';
-      let instance = null;
-
-      if (resolvedInstanceId) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id")
-          .eq("id", resolvedInstanceId)
-          .eq("provider", "messenger")
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id")
-          .eq("unit_id", conv.unit_id)
-          .eq("provider", "messenger")
-          .limit(1)
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
-        if (unitData) {
-          const { data } = await supabaseAdmin
-            .from("whatsapp_instances")
-            .select("id")
-            .eq("company_id", unitData.company_id)
-            .eq("provider", "messenger")
-            .limit(1)
-            .maybeSingle();
-          instance = data;
-        }
-      }
-
-      if (!instance && conv.contacts?.company_id) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id")
-          .eq("company_id", conv.contacts.company_id)
-          .eq("provider", "messenger")
-          .limit(1)
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (instance) {
-        resolvedInstanceId = instance.id;
-      }
-    } else {
-      // WhatsApp channel
-      let instance = null;
-
-      if (resolvedInstanceId) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id, instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
-          .eq("id", resolvedInstanceId)
-          .in("provider", ["evogo", "oficial", "stevo"])
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id, instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
-          .eq("unit_id", conv.unit_id)
-          .in("provider", ["evogo", "oficial", "stevo"])
-          .limit(1)
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
-        if (unitData) {
-          const { data } = await supabaseAdmin
-            .from("whatsapp_instances")
-            .select("id, instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
-            .eq("company_id", unitData.company_id)
-            .in("provider", ["evogo", "oficial", "stevo"])
-            .limit(1)
-            .maybeSingle();
-          instance = data;
-        }
-      }
-
-      if (instance) {
-        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
-        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
-        instanceName = instance.instance_name;
-        provider = instance.provider || 'evogo';
-        resolvedInstanceId = instance.id;
-      }
+    if (!data.isInternal) {
+      canal = await abrirCanal({
+        id: targetConversationId,
+        channel: conv.channel as string,
+        unit_id: conv.unit_id,
+        whatsapp_instance_id: conv.whatsapp_instance_id,
+      });
+      destino = destinatarioDe(canal, conv, conv.contacts);
     }
 
-    // Auto-repair conversation whatsapp_instance_id
-    if (resolvedInstanceId && conv.whatsapp_instance_id !== resolvedInstanceId) {
-      await supabaseAdmin.from("conversations").update({ whatsapp_instance_id: resolvedInstanceId }).eq("id", targetConversationId);
+    const provider = canal?.provedor ?? 'evogo';
+    const host = canal?.host ?? null;
+    const token = canal?.token ?? null;
+    const instanceName = canal?.instanceName ?? null;
+    const resolvedInstanceId = canal?.id ?? conv.whatsapp_instance_id;
+    const phone = destino?.identificador ?? "";
+
+    // Os provedores de sessão precisam dos três; os da Meta, de nenhum deles.
+    if (canal && (canal.provedor === 'evogo' || canal.provedor === 'stevo') && (!host || !token || !instanceName)) {
+      throw new Error(
+        `A conexão ${canal.provedor === 'stevo' ? 'Stevo' : 'EvoGo'} desta conversa está incompleta: ` +
+        "falta host, token ou o nome da instância.",
+      );
     }
 
-    if (!data.isInternal && provider !== 'oficial' && provider !== 'instagram' && provider !== 'messenger' && (!host || !token || !instanceName)) {
-      throw new Error("EvoGo is not configured for this conversation.");
-    }
-
-    let phone = "";
-    if (provider === 'instagram' || provider === 'messenger') {
-      phone = conv.remote_id || conv.contacts?.whatsapp_lid || conv.contacts?.phone || "";
-    } else {
-      // Para WhatsApp (oficial e evogo), o identificador prioritário é o telefone real.
-      phone = conv.contacts?.phone || conv.remote_id || conv.contacts?.whatsapp_lid || "";
-    }
-
-    if (!phone) {
-      throw new Error("Contact has no remote_id or phone number.");
-    }
 
     // 3. Get user profile for signature
     const { data: userProfile } = await supabase
@@ -312,15 +176,15 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           throw new Error(`Falha API Oficial: ${cloudErr.message || 'Erro desconhecido'}`);
         }
       } else if (provider === 'instagram') {
-        const { data: instance } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("oficial_phone_number_id, oficial_waba_id, oficial_access_token")
-          .eq("id", resolvedInstanceId!)
-          .single();
-
-        if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
+        // As credenciais vieram com o canal; esta consulta repetia a de `abrirCanal`.
+        if (!canal?.contaId || !canal?.contaToken) {
           throw new Error("Instagram Account ID ou Token faltando");
         }
+        const instance = {
+          oficial_phone_number_id: canal.contaId,
+          oficial_access_token: canal.contaToken,
+          oficial_waba_id: canal.contaPaiId,
+        };
 
         const payload: any = {
           recipient: { id: phone },
@@ -386,15 +250,11 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         evogoResponse = { id: result.message_id, isInstagram: true, participant: instance.oficial_phone_number_id };
 
       } else if (provider === 'messenger') {
-        const { data: instance } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("oficial_phone_number_id, oficial_access_token") // oficial_phone_number_id guarda o Page ID para Messenger
-          .eq("id", resolvedInstanceId!)
-          .single();
-
-        if (!instance || !instance.oficial_phone_number_id || !instance.oficial_access_token) {
+        // `contaId` guarda o Page ID quando a rede é Messenger.
+        if (!canal?.contaId || !canal?.contaToken) {
           throw new Error("Facebook Page ID ou Token faltando");
         }
+        const instance = { oficial_phone_number_id: canal.contaId, oficial_access_token: canal.contaToken };
 
         const payload: any = {
           recipient: { id: phone },
@@ -564,13 +424,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     const host = instance.companies?.evogo_host;
     const token = instance.evogo_api_key;
     const instanceName = instance.instance_name;
-    let unitId = instance.unit_id;
-
-    if (!unitId) {
-      const { data: fallbackUnit } = await supabaseAdmin.from('units').select('id').eq('company_id', data.companyId).order('created_at').limit(1).maybeSingle();
-      if (!fallbackUnit) throw new Error("No units available in this company.");
-      unitId = fallbackUnit.id;
-    }
+    const unitId = instance.unit_id || null;
 
     if (!host || !token) {
       throw new Error("EvoGo is not fully configured for this instance.");
@@ -580,27 +434,19 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     let rawPhone = data.phone.replace(/\D/g, "");
     if (!rawPhone.startsWith("55")) rawPhone = "55" + rawPhone; // basic br fallback
 
-    // 3. Get user profile for signature
+    // 3. Get user profile for signature & role
     const { data: userProfile } = await supabaseAdmin
       .from("profiles")
-      .select("name, use_signature, department_id")
+      .select("name, use_signature, department_id, role")
       .eq("id", userId)
       .single();
+
+    const isOpeningOnly = !data.text || data.text.trim() === "";
+    const isAdminOrManager = userProfile?.role === "admin_company" || userProfile?.role === "super_admin" || userProfile?.role === "manager";
 
     let textToSend = data.text;
     if (textToSend && userProfile?.use_signature && userProfile?.name) {
       textToSend = textToSend?.trim() ? `*${userProfile.name}*:\n${textToSend}` : `*${userProfile.name}*:`;
-    }
-
-    // 4. Send message via EvoGo
-    if (textToSend) {
-      await sendEvogoText({
-        host,
-        token,
-        instanceName,
-        number: rawPhone,
-        text: textToSend,
-      });
     }
 
     // 4. Find or create Contact
@@ -652,67 +498,77 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       conversationId = conv.id;
       
       if (conv.status === 'active') {
-        if (conv.assigned_agent_id === userId) {
-          // Already with me, update last message time and ensure department is set
-          const updatePayload: any = { 
-            last_message_at: new Date().toISOString(),
-            department_id: userProfile?.department_id || null
-          };
-          await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
-        } else if (conv.assigned_agent_id) {
-          // With another agent
-          throw new Error(`Este contato já está em andamento com o(a) usuário(a) ${(conv as any).assigned_agent?.name || 'Desconhecido'} nesta instância. Peça a ele(a) para te transferir.`);
-        } else {
-          // Active but no agent
-          const updatePayload: any = { 
-            last_message_at: new Date().toISOString(),
-            assigned_agent_id: userId,
-            department_id: userProfile?.department_id || null,
-          };
-          await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
-        }
-      } else {
-        // waiting or resolved -> reopen and assign
-        const updatePayload: any = { 
-          last_message_at: new Date().toISOString(),
-          status: 'active',
-          assigned_agent_id: userId,
-          department_id: userProfile?.department_id || null,
-          resolved_at: null 
-        };
+        const isWithAnotherAgent = Boolean(conv.assigned_agent_id && conv.assigned_agent_id !== userId);
 
-        const { data: convData } = await supabaseAdmin.from('conversations').select('current_session_id').eq('id', conversationId).single();
-        let currentSessionId = convData?.current_session_id;
-        
-        // Force new session if resolved, or if missing session
-        if (conv.status === 'resolved' || !currentSessionId) {
-          const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
-            conversation_id: conversationId,
-            contact_id: contactId,
-            whatsapp_instance_id: instance.id,
-            assigned_agent_id: userId,
-            department_id: userProfile?.department_id || null,
-            started_at: new Date().toISOString()
-          }).select().single();
-
-          if (newSession) {
-            updatePayload.current_session_id = newSession.id;
-            await supabaseAdmin.from('session_events').insert([
-              { session_id: newSession.id, event_type: 'started', actor_id: userId },
-              { session_id: newSession.id, event_type: 'assigned', actor_id: userId, metadata: { assigned_to: userId } }
-            ]);
+        if (isWithAnotherAgent && !isAdminOrManager) {
+          if (isOpeningOnly) {
+            throw new Error(`Este contato já está em andamento com o(a) atendente ${(conv as any).assigned_agent?.name || 'outro(a) atendente'} nesta instância. Apenas administradores podem abrir atendimentos de outros atendentes.`);
+          } else {
+            throw new Error(`Este contato já está em andamento com o(a) atendente ${(conv as any).assigned_agent?.name || 'outro(a) atendente'} nesta instância. Peça a ele(a) para te transferir.`);
           }
-        } else if (currentSessionId && conv.status === 'waiting') {
-          // Record assignment event for existing waiting session
-          await supabaseAdmin.from('session_events').insert({
-             session_id: currentSessionId,
-             event_type: 'assigned',
-             actor_id: userId,
-             metadata: { assigned_to: userId }
-          });
         }
-        
-        await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
+
+        if (!isOpeningOnly) {
+          const updatePayload: any = { 
+            last_message_at: new Date().toISOString(),
+          };
+          if (!conv.assigned_agent_id) {
+            updatePayload.assigned_agent_id = userId;
+            updatePayload.department_id = userProfile?.department_id || null;
+          }
+          await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
+        }
+        // Se isOpeningOnly e for admin, apenas retorna o conversationId para abrir
+      } else {
+        // waiting or resolved
+        const isWithAnotherAgent = Boolean(conv.assigned_agent_id && conv.assigned_agent_id !== userId);
+        if (isWithAnotherAgent && !isAdminOrManager) {
+          throw new Error(`Este contato já está atribuído ao(à) atendente ${(conv as any).assigned_agent?.name || 'outro(a) atendente'}. Apenas administradores podem acessar.`);
+        }
+
+        if (!isOpeningOnly) {
+          // Se enviou mensagem e não tem ninguém com ela (ou é admin), reabre e atribui para o remetente
+          const updatePayload: any = { 
+            last_message_at: new Date().toISOString(),
+            status: 'active',
+            assigned_agent_id: userId,
+            department_id: userProfile?.department_id || null,
+            resolved_at: null 
+          };
+
+          const { data: convData } = await supabaseAdmin.from('conversations').select('current_session_id').eq('id', conversationId).single();
+          let currentSessionId = convData?.current_session_id;
+          
+          // Force new session if resolved, or if missing session
+          if (conv.status === 'resolved' || !currentSessionId) {
+            const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
+              conversation_id: conversationId,
+              contact_id: contactId,
+              whatsapp_instance_id: instance.id,
+              assigned_agent_id: userId,
+              department_id: userProfile?.department_id || null,
+              started_at: new Date().toISOString()
+            }).select().single();
+
+            if (newSession) {
+              updatePayload.current_session_id = newSession.id;
+              await supabaseAdmin.from('session_events').insert([
+                { session_id: newSession.id, event_type: 'started', actor_id: userId },
+                { session_id: newSession.id, event_type: 'assigned', actor_id: userId, metadata: { assigned_to: userId } }
+              ]);
+            }
+          } else if (currentSessionId && conv.status === 'waiting') {
+            // Record assignment event for existing waiting session
+            await supabaseAdmin.from('session_events').insert({
+               session_id: currentSessionId,
+               event_type: 'assigned',
+               actor_id: userId,
+               metadata: { assigned_to: userId }
+            });
+          }
+          
+          await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
+        }
       }
     } else {
       const { data: newConv, error: convErr } = await supabaseAdmin
@@ -750,8 +606,16 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       }
     }
 
-    // 6. Save message in DB
-    if (textToSend) {
+    // 6. Send message via EvoGo and save in DB (only if text is provided and not just opening)
+    if (!isOpeningOnly && textToSend) {
+      await sendEvogoText({
+        host,
+        token,
+        instanceName,
+        number: rawPhone,
+        text: textToSend,
+      });
+
       const { error: msgErr } = await supabase
         .from("messages")
         .insert({

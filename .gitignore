@@ -50,3 +50,16 @@ clear_*.js
 *.jpg
 *.png
 .vercel
+
+# Scripts de scratch / patch / one-off (não versionar)
+scratch*
+patch_*
+debug-*
+query_*
+test.*
+test[0-9]*
+test_*
+test-*
+*.snippet.ts
+*.mp4
+*.zip

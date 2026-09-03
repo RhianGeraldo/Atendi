@@ -475,24 +475,33 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     </span>
                   </div>
                   <div className="flex gap-4">
-                    {adData.thumbnailURL || adData.originalImageURL ? (
-                      <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-md overflow-hidden bg-muted flex items-center justify-center border shrink-0">
-                        <img 
-                          src={adData.thumbnailURL || adData.originalImageURL} 
-                          alt="Ad thumbnail" 
-                          className="h-full w-full object-cover"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                            e.currentTarget.parentElement?.classList.add('p-2');
-                          }}
-                        />
-                        <ImageIcon className="h-5 w-5 text-muted-foreground absolute -z-10" />
-                      </div>
-                    ) : (
-                      <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-md bg-muted flex items-center justify-center border text-muted-foreground shrink-0">
-                        <ImageIcon className="h-5 w-5" />
-                      </div>
-                    )}
+                    {(() => {
+                      const adThumb = adData.thumbnailURL || 
+                                      adData.thumbnailUrl || 
+                                      adData.originalImageURL || 
+                                      adData.originalImageUrl || 
+                                      (adData.jpegThumbnail ? (adData.jpegThumbnail.startsWith('data:') ? adData.jpegThumbnail : `data:image/jpeg;base64,${adData.jpegThumbnail}`) : null) ||
+                                      (adData.thumbnail ? (adData.thumbnail.startsWith('http') || adData.thumbnail.startsWith('data:') ? adData.thumbnail : `data:image/jpeg;base64,${adData.thumbnail}`) : null);
+
+                      return adThumb ? (
+                        <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-md overflow-hidden bg-muted flex items-center justify-center border shrink-0 relative">
+                          <img 
+                            src={adThumb} 
+                            alt="Ad thumbnail" 
+                            className="h-full w-full object-cover"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                              e.currentTarget.parentElement?.classList.add('p-2');
+                            }}
+                          />
+                          <ImageIcon className="h-5 w-5 text-muted-foreground absolute -z-10" />
+                        </div>
+                      ) : (
+                        <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-md bg-muted flex items-center justify-center border text-muted-foreground shrink-0">
+                          <ImageIcon className="h-5 w-5" />
+                        </div>
+                      );
+                    })()}
                     <div className="flex-1 min-w-0 flex flex-col justify-center">
                       <span className="text-xs font-semibold text-primary mb-1">Interação via Anúncio</span>
                       <h4 className="font-semibold text-sm sm:text-base line-clamp-2 leading-tight" title={adData.title}>
@@ -717,6 +726,9 @@ export function ContactDetailsTabs({ contactId, conversationId }: { contactId: s
     });
   };
 
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin_company' || profile?.role === 'super_admin' || profile?.role === 'manager';
+
   const { data: contact, isLoading: isLoadingContact } = useQuery({
     queryKey: ["contact-details", contactId],
     enabled: !!contactId,
@@ -934,6 +946,19 @@ export function ContactDetailsTabs({ contactId, conversationId }: { contactId: s
                         <div className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full">
                           {getDuration(session.started_at, session.resolved_at)}
                         </div>
+                        {session.conversation_id && (isAdmin || !session.assigned_agent_id || session.assigned_agent_id === profile?.id) && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 text-[11px] gap-1 px-2 text-primary hover:text-primary hover:bg-primary/10 mt-0.5"
+                            onClick={() => {
+                              window.location.href = `/conversations?c=${session.conversation_id}`;
+                            }}
+                          >
+                            <MessageSquare className="h-3 w-3" />
+                            Ir para chat
+                          </Button>
+                        )}
                       </div>
                     </div>
 

@@ -131,12 +131,12 @@ function ConversationsPage() {
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
   
   const { data: instances } = useQuery({
-    queryKey: ["whatsapp_instances_filter", selectedUnitId],
+    queryKey: ["whatsapp_instances_filter", activeCompanyId, selectedUnitId],
     queryFn: async () => {
       if (!activeCompanyId) return [];
       let query = supabase
         .from("whatsapp_instances")
-        .select("id, name, instance_name, provider")
+        .select("id, name, instance_name, provider, unit_id, units(id, name, color)")
         .eq("company_id", activeCompanyId);
       
       if (selectedUnitId && selectedUnitId !== "all") {
@@ -169,19 +169,26 @@ function ConversationsPage() {
     queryKey: ["agents_filter", activeCompanyId, selectedUnitId],
     queryFn: async () => {
       if (!activeCompanyId) return [];
-      let query = supabase
+      const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, active, role")
+        .select("id, name, active, role, has_matriz_access, user_units(unit_id)")
         .eq("company_id", activeCompanyId)
         .eq("active", true)
         .order("name", { ascending: true });
 
-      if (selectedUnitId && selectedUnitId !== "all") {
-        query = query.contains("units", [selectedUnitId]);
-      }
-      const { data, error } = await query;
       if (error) throw error;
-      return data ?? [];
+
+      let list = (data ?? []) as any[];
+      if (selectedUnitId && selectedUnitId !== "all") {
+        list = list.filter((a: any) =>
+          a.role === 'admin_company' ||
+          a.role === 'super_admin' ||
+          (selectedUnitId === 'matriz'
+            ? a.has_matriz_access
+            : a.user_units?.some((uu: any) => uu.unit_id === selectedUnitId))
+        );
+      }
+      return list;
     },
     enabled: !!activeCompanyId,
   });
@@ -462,19 +469,35 @@ function ConversationsPage() {
       
       const queryTab = queryKey[2] as TabType;
       let targetConv: ConvRow | null = null;
-      
-      // Find the conversation across all pages
+      let wasFound = false;
+
+      // Map through all pages
       const updatedPages = oldData.pages.map((page: any) => {
         if (!page || !page.rows) return page;
-        const filteredRows = page.rows.filter((c: ConvRow) => {
-          if (c.id === convId) {
-            targetConv = { ...c, ...updates } as ConvRow;
-            // Remove from current position so we can move it if appropriate
-            return false;
-          }
-          return true;
-        });
-        return { ...page, rows: filteredRows };
+
+        if (moveToTop) {
+          // If moving to top, filter out from current position so we can prepend to page 0
+          const filteredRows = page.rows.filter((c: ConvRow) => {
+            if (c.id === convId) {
+              targetConv = { ...c, ...updates } as ConvRow;
+              wasFound = true;
+              return false;
+            }
+            return true;
+          });
+          return { ...page, rows: filteredRows };
+        } else {
+          // In-place update: preserve exact list ordering and pagination
+          const updatedRows = page.rows.map((c: ConvRow) => {
+            if (c.id === convId) {
+              targetConv = { ...c, ...updates } as ConvRow;
+              wasFound = true;
+              return targetConv;
+            }
+            return c;
+          });
+          return { ...page, rows: updatedRows };
+        }
       });
 
       let nextData = oldData;
@@ -485,28 +508,32 @@ function ConversationsPage() {
         const matchesTab = isGroup ? (queryTab === "groups") : ((targetConv as ConvRow).status === queryTab);
         
         if (matchesTab) {
-          // Prepend to the first page immutably
-          if (updatedPages.length > 0 && updatedPages[0]) {
-            const firstPage = updatedPages[0];
-            const updatedFirstPage = {
-              ...firstPage,
-              rows: [targetConv, ...(firstPage.rows || [])]
-            };
-            nextData = {
-              ...oldData,
-              pages: [updatedFirstPage, ...updatedPages.slice(1)]
-            };
+          if (moveToTop) {
+            // Prepend to the first page immutably
+            if (updatedPages.length > 0 && updatedPages[0]) {
+              const firstPage = updatedPages[0];
+              const updatedFirstPage = {
+                ...firstPage,
+                rows: [targetConv, ...(firstPage.rows || [])]
+              };
+              nextData = {
+                ...oldData,
+                pages: [updatedFirstPage, ...updatedPages.slice(1)]
+              };
+            } else {
+              nextData = {
+                ...oldData,
+                pages: [{ rows: [targetConv], rawCount: 1 }]
+              };
+            }
           } else {
-            nextData = {
-              ...oldData,
-              pages: [{ rows: [targetConv], rawCount: 1 }]
-            };
+            nextData = { ...oldData, pages: updatedPages };
           }
         } else {
           // If status/tab changed and it no longer belongs here, it is removed from this tab
           nextData = { ...oldData, pages: updatedPages };
         }
-      } else if (targetStatus === queryTab) {
+      } else if (targetStatus === queryTab && !wasFound) {
         // If it belongs to this tab but wasn't in cache, trigger a refetch to pull it in
         setTimeout(() => qc.invalidateQueries({ queryKey: queryKey }), 0);
       }
@@ -542,126 +569,141 @@ function ConversationsPage() {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
-  // Realtime
-  useEffect(() => {
-    // Usando um ID aleatório para o canal para evitar problemas de desconexão silenciosa no Vite HMR
-    const channelId = `conversations-rt-${Math.random()}`;
-    const ch = supabase
-      .channel(channelId)
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, (payload) => {
-        console.log("Realtime: conversations updated", payload);
-        
-        if (payload.eventType === "UPDATE") {
-          const updatedConv = payload.new as ConvRow;
-          const convId = updatedConv.id;
+  // Realtime com Auto-Reconexão e Sincronização Inteligente (Zero Polling Desnecessário)
+  const [realtimeConnected, setRealtimeConnected] = useState<boolean>(true);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-          let oldConv: ConvRow | null = null;
-          qc.getQueriesData({ queryKey: ["conversations"] }).forEach(([key, oldData]: any) => {
-            if (oldData?.pages) {
-              for (const page of oldData.pages) {
-                const found = page.rows?.find((c: any) => c.id === convId);
-                if (found) {
-                  oldConv = found;
-                  break;
+  useEffect(() => {
+    let isMounted = true;
+    let ch: any = null;
+
+    const connectRealtime = () => {
+      if (!isMounted) return;
+      if (ch) {
+        try { supabase.removeChannel(ch); } catch {}
+        ch = null;
+      }
+
+      const channelId = `conversations-rt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      ch = supabase
+        .channel(channelId)
+        .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, (payload) => {
+          console.log("Realtime: conversations updated", payload);
+          
+          if (payload.eventType === "UPDATE") {
+            const updatedConv = payload.new as ConvRow;
+            const convId = updatedConv.id;
+
+            let oldConv: ConvRow | null = null;
+            qc.getQueriesData({ queryKey: ["conversations"] }).forEach(([key, oldData]: any) => {
+              if (oldData?.pages) {
+                for (const page of oldData.pages) {
+                  const found = page.rows?.find((c: any) => c.id === convId);
+                  if (found) {
+                    oldConv = found;
+                    break;
+                  }
                 }
               }
-            }
-          });
+            });
 
-          if (oldConv) {
-            // Update conversation details in-cache
-            const isGroup = !!((oldConv as ConvRow).contact?.phone && ((oldConv as ConvRow).contact.phone!.startsWith('120363') || ((oldConv as ConvRow).contact.phone!.includes('-') && (oldConv as ConvRow).contact.phone!.length > 18)));
-            const targetStatus = isGroup ? "groups" : (updatedConv.status || "active");
-            updateConversationInCache(convId, updatedConv, { moveToTop: false, status: targetStatus });
+            if (oldConv) {
+              const isGroup = !!((oldConv as ConvRow).contact?.phone && ((oldConv as ConvRow).contact.phone!.startsWith('120363') || ((oldConv as ConvRow).contact.phone!.includes('-') && (oldConv as ConvRow).contact.phone!.length > 18)));
+              const targetStatus = isGroup ? "groups" : (updatedConv.status || "active");
+              updateConversationInCache(convId, updatedConv, { moveToTop: false, status: targetStatus });
 
-            // Fetch relations to ensure we have names (agent, department, etc) if they changed
-            if (
-              updatedConv.assigned_agent_id !== (oldConv as ConvRow).assigned_agent_id ||
-              updatedConv.department_id !== (oldConv as ConvRow).department_id ||
-              updatedConv.whatsapp_instance_id !== (oldConv as ConvRow).whatsapp_instance_id
-            ) {
-              supabase
-                .from("conversations")
-                .select("assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), department:departments(name), whatsapp_instance:whatsapp_instances(name)")
-                .eq("id", convId)
-                .single()
-                .then(({ data, error }) => {
-                  if (data && !error) {
-                    updateConversationInCache(convId, data as any);
-                  }
-                });
-            }
+              // Se mudou atendente ou departamento, busca os nomes das relações
+              if (
+                updatedConv.assigned_agent_id !== (oldConv as ConvRow).assigned_agent_id ||
+                updatedConv.department_id !== (oldConv as ConvRow).department_id ||
+                updatedConv.whatsapp_instance_id !== (oldConv as ConvRow).whatsapp_instance_id
+              ) {
+                supabase
+                  .from("conversations")
+                  .select("assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), department:departments(name), whatsapp_instance:whatsapp_instances(name)")
+                  .eq("id", convId)
+                  .single()
+                  .then(({ data, error }) => {
+                    if (data && !error && isMounted) {
+                      updateConversationInCache(convId, data as any);
+                    }
+                  });
+              }
 
-            // Handle status changes in-cache
-            if ((oldConv as ConvRow).status !== updatedConv.status) {
-              handleConversationStatusChangeInCache(oldConv as ConvRow, (oldConv as ConvRow).status, updatedConv.status);
+              if ((oldConv as ConvRow).status !== updatedConv.status) {
+                handleConversationStatusChangeInCache(oldConv as ConvRow, (oldConv as ConvRow).status, updatedConv.status);
+              }
+              
+              const unreadDiff = (updatedConv.unread_count || 0) - ((oldConv as ConvRow).unread_count || 0);
+              if (unreadDiff !== 0) {
+                const tabKey = isGroup ? "groups" : (updatedConv.status || "active");
+                updateUnreadCountsInCache(tabKey, 0, unreadDiff);
+              }
+            } else {
+              // Conversa não estava em memória, invalida consultas
+              qc.invalidateQueries({ queryKey: ["conversations"] });
+              qc.invalidateQueries({ queryKey: ["unread-counts"] });
             }
-            
-            // Handle unread counts bubble changes in-cache
-            const unreadDiff = (updatedConv.unread_count || 0) - ((oldConv as ConvRow).unread_count || 0);
-            if (unreadDiff !== 0) {
-              const tabKey = isGroup ? "groups" : (updatedConv.status || "active");
-              updateUnreadCountsInCache(tabKey, 0, unreadDiff);
-            }
-          } else {
-            // Fallback: not in cache, refetch
+          } 
+          
+          else if (payload.eventType === "INSERT") {
             qc.invalidateQueries({ queryKey: ["conversations"] });
             qc.invalidateQueries({ queryKey: ["unread-counts"] });
           }
-        } 
-        
-        else if (payload.eventType === "INSERT") {
-          // New conversation created, full refetch
-          qc.invalidateQueries({ queryKey: ["conversations"] });
-          qc.invalidateQueries({ queryKey: ["unread-counts"] });
-        }
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, (payload) => {
-        console.log("Realtime: messages updated", payload);
-        
-        if (payload.eventType === "INSERT") {
-          const newMsg = payload.new as any;
-          const convId = newMsg.conversation_id;
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, (payload) => {
+          console.log("Realtime: messages updated", payload);
+          
+          if (payload.eventType === "INSERT") {
+            const newMsg = payload.new as any;
+            const convId = newMsg.conversation_id;
 
-          // 1. Append message to cache if loaded
-          qc.setQueryData(["messages", convId], (old: any) => {
-            if (!old) return old;
-            if (old.some((m: any) => m.id === newMsg.id)) return old;
-            return [...old, newMsg];
-          });
+            // 1. Atualiza mensagens no cache da conversa aberta
+            qc.setQueryData(["messages", convId], (old: any) => {
+              if (!old) return old;
+              if (old.some((m: any) => m.id === newMsg.id)) return old;
 
-          // 2. Update conversation preview and move it to top (guarded to prevent double updates)
-          let previewText = newMsg.content || "";
-          if (newMsg.media_type === "image") previewText = "📷 Foto";
-          else if (newMsg.media_type === "video") previewText = "🎥 Vídeo";
-          else if (newMsg.media_type === "audio") previewText = "🎵 Áudio";
-          else if (newMsg.media_type === "document") previewText = "📄 Documento";
+              // Substitui mensagem otimista se houver correspondência
+              const optIndex = old.findIndex((m: any) => m.isOptimistic && m.sender_type === newMsg.sender_type && m.content === newMsg.content);
+              if (optIndex !== -1) {
+                const copy = [...old];
+                copy[optIndex] = newMsg;
+                return copy;
+              }
 
-          const isFromContact = newMsg.sender_type === "contact";
-          const isNotOpened = selectedIdRef.current !== convId;
-          const unreadIncrement = (isFromContact && isNotOpened) ? 1 : 0;
+              return [...old, newMsg];
+            });
 
-          let existingConv: ConvRow | null = null;
-          qc.getQueriesData({ queryKey: ["conversations"] }).forEach(([key, oldData]: any) => {
-            if (oldData?.pages) {
-              for (const page of oldData.pages) {
-                const found = page.rows?.find((c: any) => c.id === convId);
-                if (found) {
-                  existingConv = found;
-                  break;
+            // 2. Atualiza preview da conversa e move para o topo da lista
+            let previewText = newMsg.content || "";
+            if (newMsg.media_type === "image") previewText = "📷 Foto";
+            else if (newMsg.media_type === "video") previewText = "🎥 Vídeo";
+            else if (newMsg.media_type === "audio") previewText = "🎵 Áudio";
+            else if (newMsg.media_type === "document") previewText = "📄 Documento";
+
+            const isFromContact = newMsg.sender_type === "contact";
+            const isNotOpened = selectedIdRef.current !== convId;
+            const unreadIncrement = (isFromContact && isNotOpened) ? 1 : 0;
+
+            let existingConv: ConvRow | null = null;
+            qc.getQueriesData({ queryKey: ["conversations"] }).forEach(([key, oldData]: any) => {
+              if (oldData?.pages) {
+                for (const page of oldData.pages) {
+                  const found = page.rows?.find((c: any) => c.id === convId);
+                  if (found) {
+                    existingConv = found;
+                    break;
+                  }
                 }
               }
-            }
-          });
+            });
 
-          if (existingConv) {
-            const isAlreadyUpdated = existingConv.last_message_at && new Date(existingConv.last_message_at).getTime() >= new Date(newMsg.created_at).getTime();
-            
-            if (!isAlreadyUpdated) {
+            if (existingConv) {
               const nextUnread = ((existingConv as ConvRow).unread_count || 0) + unreadIncrement;
               const isGroup = !!((existingConv as ConvRow).contact?.phone && ((existingConv as ConvRow).contact.phone!.startsWith('120363') || ((existingConv as ConvRow).contact.phone!.includes('-') && (existingConv as ConvRow).contact.phone!.length > 18)));
               const targetStatus = isGroup ? "groups" : ((existingConv as ConvRow).status || "active");
 
+              // Move para o topo e atualiza preview em memória sem bater no banco
               updateConversationInCache(convId, {
                 last_message_preview: previewText,
                 last_message_at: newMsg.created_at,
@@ -672,38 +714,96 @@ function ConversationsPage() {
                 const tabKey = isGroup ? "groups" : ((existingConv as ConvRow).status || "active");
                 updateUnreadCountsInCache(tabKey, 0, unreadIncrement);
               }
+            } else {
+              qc.invalidateQueries({ queryKey: ["conversations"] });
+              qc.invalidateQueries({ queryKey: ["unread-counts"] });
             }
-          } else {
-            qc.invalidateQueries({ queryKey: ["conversations"] });
-            qc.invalidateQueries({ queryKey: ["unread-counts"] });
-          }
-        } 
-        
-        else if (payload.eventType === "UPDATE") {
-          const updatedMsg = payload.new as any;
-          const convId = updatedMsg.conversation_id;
-
-          qc.setQueryData(["messages", convId], (old: any) => {
-            if (!old) return old;
-            return old.map((m: any) => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m);
-          });
-        } 
-        
-        else if (payload.eventType === "DELETE") {
-          const oldMsg = payload.old as any;
-          const convId = oldMsg.conversation_id;
+          } 
           
-          qc.setQueryData(["messages", convId], (old: any) => {
-            if (!old) return old;
-            return old.filter((m: any) => m.id !== oldMsg.id);
-          });
+          else if (payload.eventType === "UPDATE") {
+            const updatedMsg = payload.new as any;
+            const convId = updatedMsg.conversation_id;
+
+            qc.setQueryData(["messages", convId], (old: any) => {
+              if (!old) return old;
+              return old.map((m: any) => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m);
+            });
+          } 
+          
+          else if (payload.eventType === "DELETE") {
+            const oldMsg = payload.old as any;
+            const convId = oldMsg.conversation_id;
+            
+            qc.setQueryData(["messages", convId], (old: any) => {
+              if (!old) return old;
+              return old.filter((m: any) => m.id !== oldMsg.id);
+            });
+          }
+        })
+        .subscribe((status) => {
+          if (!isMounted) return;
+          console.log(`[Realtime] Status da assinatura: ${status}`);
+          
+          if (status === "SUBSCRIBED") {
+            setRealtimeConnected(true);
+            if (reconnectTimerRef.current) {
+              clearTimeout(reconnectTimerRef.current);
+              reconnectTimerRef.current = null;
+            }
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            setRealtimeConnected(false);
+            if (!reconnectTimerRef.current) {
+              reconnectTimerRef.current = setTimeout(() => {
+                reconnectTimerRef.current = null;
+                if (isMounted) {
+                  console.log("[Realtime] Tentando reconectar canal após falha de conexão...");
+                  connectRealtime();
+                }
+              }, 4000);
+            }
+          }
+        });
+    };
+
+    connectRealtime();
+
+    // Sincronização inteligente ao voltar para a aba após suspensão/segundo plano
+    let lastHidden = 0;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        lastHidden = Date.now();
+      } else if (document.visibilityState === "visible") {
+        const timeAway = Date.now() - lastHidden;
+        // Se a aba ficou em segundo plano por mais de 20 segundos
+        if (timeAway > 20000) {
+          console.log(`[Realtime] Aba voltou ao foco após ${Math.round(timeAway / 1000)}s.`);
+          if (!ch || ch.state !== "joined") {
+            connectRealtime();
+          }
+          // Atualiza levemente apenas a lista e a conversa aberta na tela
+          qc.invalidateQueries({ queryKey: ["conversations"] });
+          qc.invalidateQueries({ queryKey: ["unread-counts"] });
+          if (selectedIdRef.current) {
+            qc.invalidateQueries({ queryKey: ["messages", selectedIdRef.current] });
+          }
         }
-      })
-      .subscribe((status) => {
-        console.log("Realtime subscription status:", status);
-      });
-    return () => { supabase.removeChannel(ch); };
-  }, [qc]);
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (ch) {
+        try { supabase.removeChannel(ch); } catch {}
+      }
+    };
+  }, [qc, activeCompanyId]);
 
 
   const filtered = conversations.filter(c => !!c?.id);
@@ -794,13 +894,25 @@ function ConversationsPage() {
                           Todas as instâncias
                           {(!instanceFilter || instanceFilter === "all") && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
                         </DropdownMenuItem>
-                        {instances?.map(inst => (
-                          <DropdownMenuItem key={inst.id} onClick={() => setInstanceFilter(inst.id)} className="flex items-center gap-2 cursor-pointer">
-                            <ProviderIcon provider={inst.provider} className="h-4 w-4 shrink-0" />
-                            <span className="truncate">{inst.name || inst.instance_name}</span>
-                            {instanceFilter === inst.id && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
-                          </DropdownMenuItem>
-                        ))}
+                        {instances?.map((inst: any) => {
+                          const unitName = inst.units?.name || (!inst.unit_id ? "Sede" : "");
+                          return (
+                            <DropdownMenuItem key={inst.id} onClick={() => setInstanceFilter(inst.id)} className="flex items-center justify-between gap-2 cursor-pointer">
+                              <div className="flex items-center gap-2 truncate min-w-0">
+                                <ProviderIcon provider={inst.provider} className="h-4 w-4 shrink-0" />
+                                <span className="truncate">{inst.name || inst.instance_name}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {unitName && (
+                                  <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 font-normal text-muted-foreground bg-muted/30">
+                                    {unitName}
+                                  </Badge>
+                                )}
+                                {instanceFilter === inst.id && <CheckCircle2 className="h-4 w-4 text-primary" />}
+                              </div>
+                            </DropdownMenuItem>
+                          );
+                        })}
                       </ScrollArea>
                     </DropdownMenuSubContent>
                   </DropdownMenuPortal>
@@ -2971,34 +3083,53 @@ function MessageBubble({ m, isGroup, onReact, onReply, onEdit, onDelete, onTrans
           </div>
         )}
 
-        {adReply && !m.is_deleted && (
-          <div className="mb-2 w-full max-w-sm rounded-lg border border-border/60 bg-black/5 dark:bg-white/5 overflow-hidden">
-            {adReply.thumbnailURL ? (
-              <a href={adReply.sourceURL || '#'} target="_blank" rel="noopener noreferrer" className="block relative h-40 w-full bg-black/10 dark:bg-white/5 overflow-hidden flex items-center justify-center group/ad">
-                {/* Blurred background for aspect ratio differences */}
-                <div 
-                  className="absolute inset-0 w-full h-full bg-cover bg-center blur-sm opacity-40 scale-110 transition-transform group-hover/ad:scale-125" 
-                  style={{ backgroundImage: `url(${adReply.thumbnailURL})` }} 
-                />
-                <img src={adReply.thumbnailURL} alt="Ad Thumbnail" className="relative z-10 w-full h-full object-contain drop-shadow-md transition-transform group-hover/ad:scale-105" />
-                <div className="absolute top-2 left-2 z-20 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm">
-                  Anúncio
+        {adReply && !m.is_deleted && (() => {
+          const adThumb = adReply.thumbnailURL || 
+                          adReply.thumbnailUrl || 
+                          adReply.originalImageURL || 
+                          adReply.originalImageUrl || 
+                          (adReply.jpegThumbnail ? (adReply.jpegThumbnail.startsWith('data:') ? adReply.jpegThumbnail : `data:image/jpeg;base64,${adReply.jpegThumbnail}`) : null) ||
+                          (adReply.thumbnail ? (adReply.thumbnail.startsWith('http') || adReply.thumbnail.startsWith('data:') ? adReply.thumbnail : `data:image/jpeg;base64,${adReply.thumbnail}`) : null);
+
+          return (
+            <div className="mb-2 w-full max-w-sm rounded-lg border border-border/60 bg-black/5 dark:bg-white/5 overflow-hidden">
+              {adThumb ? (
+                <a href={adReply.sourceURL || adReply.sourceUrl || '#'} target="_blank" rel="noopener noreferrer" className="block relative h-40 w-full bg-black/10 dark:bg-white/5 overflow-hidden flex items-center justify-center group/ad">
+                  {/* Blurred background for aspect ratio differences */}
+                  <div 
+                    className="absolute inset-0 w-full h-full bg-cover bg-center blur-sm opacity-40 scale-110 transition-transform group-hover/ad:scale-125" 
+                    style={{ backgroundImage: `url(${adThumb})` }} 
+                  />
+                  <img 
+                    src={adThumb} 
+                    alt="Ad Thumbnail" 
+                    className="relative z-10 w-full h-full object-contain drop-shadow-md transition-transform group-hover/ad:scale-105" 
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
+                  />
+                  <div className="absolute top-2 left-2 z-20 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm flex items-center gap-1">
+                    <span>Anúncio</span>
+                    {(adReply.sourceApp || adReply.source_app) && (
+                      <span className="capitalize opacity-80">• {adReply.sourceApp || adReply.source_app}</span>
+                    )}
+                  </div>
+                </a>
+              ) : (
+                <div className="bg-black/60 text-white text-[10px] font-bold px-2 py-1 flex justify-between items-center w-full">
+                  <span>Anúncio</span>
+                  {(adReply.sourceApp || adReply.source_app) && <span className="capitalize">{adReply.sourceApp || adReply.source_app}</span>}
                 </div>
-              </a>
-            ) : (
-              <div className="bg-black/60 text-white text-[10px] font-bold px-2 py-1 flex justify-between items-center w-full">
-                <span>Anúncio</span>
-                {adReply.sourceApp && <span className="capitalize">{adReply.sourceApp}</span>}
-              </div>
-            )}
-            <div className="p-2.5">
-              <h4 className="font-bold text-xs truncate mb-1">{adReply.title || "Anúncio do Meta"}</h4>
-              {adReply.body && (
-                <p className="text-[11px] opacity-80 line-clamp-3 whitespace-pre-wrap">{adReply.body}</p>
               )}
+              <div className="p-2.5">
+                <h4 className="font-bold text-xs truncate mb-1">{adReply.title || "Anúncio do Meta"}</h4>
+                {adReply.body && (
+                  <p className="text-[11px] opacity-80 line-clamp-3 whitespace-pre-wrap">{adReply.body}</p>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {m.media_type === "image" && m.media_url ? (
           <div className="mb-2">
