@@ -102,6 +102,38 @@ interface ConvRow {
   whatsapp_instance?: { name: string } | null;
 }
 
+export interface MessageRow {
+  id: string;
+  conversation_id: string;
+  sender_type: "agent" | "contact" | "system";
+  is_internal?: boolean;
+  content: string | null;
+  media_type: "text" | "image" | "audio" | "video" | "document";
+  media_url?: string | null;
+  created_at: string;
+  quoted_content?: string | null;
+  is_edited?: boolean;
+  is_deleted?: boolean;
+  reactions?: Record<string, string[]>;
+  isOptimistic?: boolean;
+  remote_msg_id?: string | null;
+  profiles?: { name: string };
+  metadata?: any;
+  quoted_message_id?: string | null;
+}
+
+const fetchConversationMessages = async (convId: string) => {
+  const { data, error } = await supabase
+    .from("messages")
+    .select("id, conversation_id, sender_type, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
+    .eq("conversation_id", convId)
+    .order("created_at", { ascending: false })
+    .limit(15);
+
+  if (error) throw error;
+  return ((data ?? []) as MessageRow[]).reverse();
+};
+
 function ConversationsPage() {
   const { c: searchConvId, tab: searchTab } = Route.useSearch();
   const navigate = Route.useNavigate();
@@ -1040,6 +1072,13 @@ function ConversationsPage() {
               conv={c}
               selected={selectedId === c.id}
               onClick={() => setSelectedId(c.id)}
+              onPrefetch={() => {
+                qc.prefetchQuery({
+                  queryKey: ["messages", c.id],
+                  queryFn: () => fetchConversationMessages(c.id),
+                  staleTime: 1000 * 60 * 5,
+                });
+              }}
               currentUserId={profile?.id}
               showUnitInfo={!selectedUnitId}
             />
@@ -1093,6 +1132,7 @@ function ConversationsPage() {
       )}>
         {selected ? (
           <ChatPanel 
+            key={selected.id}
             conv={selected} 
             showSidebar={showSidebar}
             onToggleSidebar={() => setShowSidebar(!showSidebar)}
@@ -1413,12 +1453,14 @@ function ConversationItem({
   conv,
   selected,
   onClick,
+  onPrefetch,
   currentUserId,
   showUnitInfo,
 }: {
   conv: ConvRow;
   selected: boolean;
   onClick: () => void;
+  onPrefetch?: () => void;
   currentUserId?: string;
   showUnitInfo?: boolean;
 }) {
@@ -1428,6 +1470,8 @@ function ConversationItem({
   return (
     <button
       onClick={onClick}
+      onMouseEnter={onPrefetch}
+      onTouchStart={onPrefetch}
       className={cn(
         "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-colors hover:bg-accent/40",
         selected && "bg-accent/60",
@@ -1533,26 +1577,6 @@ function EmptyChat() {
   );
 }
 
-interface MessageRow {
-  id: string;
-  conversation_id: string;
-  sender_type: "agent" | "contact" | "system";
-  is_internal?: boolean;
-  content: string | null;
-  media_type: "text" | "image" | "audio" | "video" | "document";
-  media_url?: string | null;
-  created_at: string;
-  quoted_content?: string | null;
-  is_edited?: boolean;
-  is_deleted?: boolean;
-  reactions?: Record<string, string[]>;
-  isOptimistic?: boolean;
-  remote_msg_id?: string | null;
-  profiles?: { name: string };
-  metadata?: any;
-  quoted_message_id?: string | null;
-}
-
 function ChatPanel({ 
   conv,
   showSidebar,
@@ -1640,24 +1664,18 @@ function ChatPanel({
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Consulta otimizada: busca apenas as 15 mensagens mais recentes inicialmente
-  const { data: messages } = useQuery({
+  // Consulta otimizada: busca apenas as 15 mensagens mais recentes inicialmente (com cache rápido)
+  const { data: messages, isLoading: loadingMessages } = useQuery({
     queryKey: ["messages", conv.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("id, conversation_id, sender_type, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
-        .eq("conversation_id", conv.id)
-        .order("created_at", { ascending: false })
-        .limit(15);
-        
-      if (error) throw error;
-      const list = ((data ?? []) as MessageRow[]).reverse();
+      const list = await fetchConversationMessages(conv.id);
       if (list.length < 15) {
         setHasMoreOlder(false);
       }
       return list;
     },
+    staleTime: 1000 * 60 * 5, // Mantém dados frescos por 5 minutos
+    gcTime: 1000 * 60 * 30, // Mantém em memória por 30 minutos
   });
 
   // Função para buscar mensagens mais antigas (paginação infinita para cima)
@@ -2482,49 +2500,77 @@ function ChatPanel({
         </header>
 
         {/* Messages */}
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="flex-1 space-y-3 overflow-y-auto bg-muted/30 px-6 py-4"
-        >
-          {hasMoreOlder && (
-            <div className="flex justify-center py-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-xs text-muted-foreground hover:text-foreground h-7 gap-1.5 bg-background/50 border border-border/40 shadow-xs"
-                onClick={loadOlderMessages}
-                disabled={isLoadingOlder}
-              >
-                {isLoadingOlder ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Carregando mensagens anteriores...
-                  </>
-                ) : (
-                  <>
-                    <ChevronUp className="h-3.5 w-3.5" />
-                    Carregar mensagens anteriores
-                  </>
-                )}
-              </Button>
+        {loadingMessages && (!messages || messages.length === 0) ? (
+          <div className="flex-1 space-y-4 px-6 py-6 overflow-hidden animate-pulse bg-muted/20">
+            <div className="flex items-start gap-2.5 max-w-[65%]">
+              <div className="w-8 h-8 rounded-full bg-muted/80 shrink-0" />
+              <div className="space-y-1.5 flex-1">
+                <div className="h-3.5 w-20 bg-muted/60 rounded" />
+                <div className="h-12 bg-muted/80 rounded-2xl rounded-tl-none p-3" />
+              </div>
             </div>
-          )}
+            <div className="flex items-end justify-end">
+              <div className="max-w-[65%] space-y-1.5 flex flex-col items-end">
+                <div className="h-10 w-44 bg-primary/20 rounded-2xl rounded-br-none" />
+              </div>
+            </div>
+            <div className="flex items-start gap-2.5 max-w-[55%]">
+              <div className="w-8 h-8 rounded-full bg-muted/80 shrink-0" />
+              <div className="space-y-1.5 flex-1">
+                <div className="h-10 bg-muted/80 rounded-2xl rounded-tl-none" />
+              </div>
+            </div>
+            <div className="flex items-end justify-end">
+              <div className="max-w-[65%] space-y-1.5 flex flex-col items-end">
+                <div className="h-14 w-60 bg-primary/20 rounded-2xl rounded-br-none" />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="flex-1 space-y-3 overflow-y-auto bg-muted/30 px-6 py-4"
+          >
+            {hasMoreOlder && (
+              <div className="flex justify-center py-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground hover:text-foreground h-7 gap-1.5 bg-background/50 border border-border/40 shadow-xs"
+                  onClick={loadOlderMessages}
+                  disabled={isLoadingOlder}
+                >
+                  {isLoadingOlder ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Carregando mensagens anteriores...
+                    </>
+                  ) : (
+                    <>
+                      <ChevronUp className="h-3.5 w-3.5" />
+                      Carregar mensagens anteriores
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
 
-          {messages?.map((m) => (
-            <MessageBubble 
-              key={m.id} 
-              m={m} 
-              isGroup={isGroup}
-              onReact={(emoji) => react.mutate({ messageId: m.id, emoji })} 
-              onReply={(msg) => { setReplyingTo(msg); document.getElementById('chat-input')?.focus(); }}
-              onEdit={startEdit}
-              onDelete={(msg) => deleteMsg.mutate(msg.id)}
-              onTranscribe={(id) => transcribeAudio.mutate(id)}
-              isTranscribingId={transcribeAudio.isPending ? transcribeAudio.variables : null}
-            />
-          ))}
-        </div>
+            {messages?.map((m) => (
+              <MessageBubble 
+                key={m.id} 
+                m={m} 
+                isGroup={isGroup}
+                onReact={(emoji) => react.mutate({ messageId: m.id, emoji })} 
+                onReply={(msg) => { setReplyingTo(msg); document.getElementById('chat-input')?.focus(); }}
+                onEdit={startEdit}
+                onDelete={(msg) => deleteMsg.mutate(msg.id)}
+                onTranscribe={(id) => transcribeAudio.mutate(id)}
+                isTranscribingId={transcribeAudio.isPending ? transcribeAudio.variables : null}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Input */}
         <div className="border-t border-border bg-card p-3 flex flex-col gap-2 relative">
