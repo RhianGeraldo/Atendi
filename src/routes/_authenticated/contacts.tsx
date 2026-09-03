@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Search, Phone, Mail, User, UserPlus, Loader2, Building, RefreshCw, ShieldAlert, X, Link, ExternalLink, Image as ImageIcon, Calendar as CalendarIcon } from "lucide-react";
+import { Search, Phone, Mail, User, UserPlus, Loader2, Building, RefreshCw, ShieldAlert, X, Link, ExternalLink, Image as ImageIcon, Calendar as CalendarIcon, Tag, CheckSquare } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
@@ -11,7 +12,9 @@ import { useUnit } from "@/lib/unit-context";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContactDetailsSheet } from "@/components/contacts/contact-details-sheet";
 import { CreateContactDialog } from "@/components/contacts/create-contact-dialog";
@@ -20,6 +23,14 @@ import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +49,11 @@ function ContactsPage() {
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
+  // Estados para seleção e ações em massa
+  const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
+  const [isAddLabelModalOpen, setIsAddLabelModalOpen] = useState(false);
+  const [bulkLabelId, setBulkLabelId] = useState("");
+
   const { data: contacts, isLoading } = useQuery({
     queryKey: ["contacts", activeCompanyId, searchTerm, selectedUnitId, dateRange],
     enabled: !!activeCompanyId,
@@ -50,6 +66,10 @@ function ContactsPage() {
         .from("contacts")
         .select(`
           *,
+          contact_labels (
+            label_id,
+            labels ( id, name, color )
+          ),
           ${relation} (
             unit_id,
             units ( name ),
@@ -205,6 +225,74 @@ function ContactsPage() {
       }
     }
     return true;
+  });
+
+  // Consulta etiquetas disponíveis para a ação em massa
+  const { data: labels } = useQuery({
+    queryKey: ["labels", activeCompanyId],
+    enabled: !!activeCompanyId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("labels")
+        .select("id, name, color")
+        .eq("company_id", activeCompanyId!)
+        .order("name");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const allVisibleIds = filteredRegularContacts.map((c: any) => c.id);
+  const isAllSelected = allVisibleIds.length > 0 && allVisibleIds.every((id: string) => selectedContactIds.has(id));
+  const isSomeSelected = allVisibleIds.some((id: string) => selectedContactIds.has(id));
+
+  const toggleSelectContact = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelectedContactIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedContactIds(new Set());
+    } else {
+      setSelectedContactIds(new Set(allVisibleIds));
+    }
+  };
+
+  // Mutação para aplicar etiqueta em massa
+  const applyBulkLabel = useMutation({
+    mutationFn: async (labelId: string) => {
+      if (!labelId) throw new Error("Selecione uma etiqueta");
+      const contactIds = Array.from(selectedContactIds);
+      if (!contactIds.length) throw new Error("Nenhum contato selecionado");
+
+      const rows = contactIds.map((cId) => ({
+        contact_id: cId,
+        label_id: labelId,
+      }));
+
+      const { error } = await supabase
+        .from("contact_labels")
+        .upsert(rows, { onConflict: "contact_id, label_id" });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      const labelObj = labels?.find((l) => l.id === bulkLabelId);
+      toast.success(`Etiqueta "${labelObj?.name || 'selecionada'}" aplicada a ${selectedContactIds.size} contato(s)!`);
+      setIsAddLabelModalOpen(false);
+      setSelectedContactIds(new Set());
+      setBulkLabelId("");
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Erro ao aplicar etiqueta em lote.");
+    },
   });
 
   const now = new Date();
@@ -391,87 +479,126 @@ function ContactsPage() {
                 </div>
               ) : filteredRegularContacts.length > 0 ? (
                 <div className="rounded-md border overflow-x-auto">
-                  <Table className="min-w-[650px]">
+                  <Table className="min-w-[700px]">
                     <TableHeader>
                       <TableRow className="bg-muted/50">
+                        <TableHead className="w-12 px-4">
+                          <Checkbox
+                            checked={isAllSelected}
+                            onCheckedChange={toggleSelectAll}
+                            aria-label="Selecionar todos os contatos"
+                          />
+                        </TableHead>
                         <TableHead>Nome</TableHead>
                         <TableHead>Contato / Canal</TableHead>
-                        <TableHead className="hidden md:table-cell">Tags</TableHead>
+                        <TableHead className="hidden md:table-cell">Etiquetas</TableHead>
                         <TableHead className="hidden sm:table-cell">Data de Cadastro</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredRegularContacts.map((contact: any) => (
-                        <TableRow 
-                          key={contact.id} 
-                          className="hover:bg-muted/50 cursor-pointer"
-                          onClick={() => setSelectedContactId(contact.id)}
-                        >
-                          <TableCell className="p-4">
-                            <div className="flex items-center gap-2">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
-                                <User className="h-4 w-4 text-primary" />
-                              </div>
-                              <span className="font-medium">{contact.name}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="p-4">
-                            <div className="flex flex-col gap-1 text-muted-foreground">
-                              {contact.phone && contact.phone.length <= 15 && (
-                                <div className="flex items-center gap-1.5">
-                                  <Phone className="h-3 w-3" />
-                                  <span>{contact.phone}</span>
-                                </div>
-                              )}
-                              {contact.phone && contact.phone.length > 15 && !contact.instagram_username && (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs" title="ID do Canal">ID: {contact.phone}</span>
-                                </div>
-                              )}
-                              {contact.instagram_username && (
-                                <div className="flex items-center gap-1.5">
-                                  <User className="h-3 w-3 text-pink-500" />
-                                  <span>@{contact.instagram_username}</span>
-                                </div>
-                              )}
-                              {contact.email && (
-                                <div className="flex items-center gap-1.5">
-                                  <Mail className="h-3 w-3" />
-                                  <span className="truncate max-w-[150px]">{contact.email}</span>
-                                </div>
-                              )}
-                              {!contact.phone && !contact.email && !contact.instagram_username && <span>-</span>}
-                            </div>
-                            {!selectedUnitId && contact.last_unit_name && (
-                              <div className="flex items-center gap-1 mt-2 text-[10px] font-medium px-2 py-0.5 rounded bg-muted/60 text-muted-foreground w-fit">
-                                <Building className="h-3 w-3 shrink-0" />
-                                <span className="truncate">Última unid: {contact.last_unit_name}</span>
-                              </div>
+                      {filteredRegularContacts.map((contact: any) => {
+                        const isSelected = selectedContactIds.has(contact.id);
+                        return (
+                          <TableRow 
+                            key={contact.id} 
+                            className={cn(
+                              "hover:bg-muted/50 cursor-pointer transition-colors",
+                              isSelected && "bg-primary/5 hover:bg-primary/10"
                             )}
-                          </TableCell>
-                          <TableCell className="p-4 hidden md:table-cell">
-                            {contact.tags && contact.tags.length > 0 ? (
+                            onClick={() => setSelectedContactId(contact.id)}
+                          >
+                            <TableCell 
+                              className="w-12 px-4" 
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Checkbox
+                                checked={isSelected}
+                                onCheckedChange={() => toggleSelectContact(contact.id)}
+                                aria-label={`Selecionar ${contact.name}`}
+                              />
+                            </TableCell>
+                            <TableCell className="p-4">
+                              <div className="flex items-center gap-2">
+                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
+                                  <User className="h-4 w-4 text-primary" />
+                                </div>
+                                <span className="font-medium">{contact.name}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="p-4">
+                              <div className="flex flex-col gap-1 text-muted-foreground">
+                                {contact.phone && contact.phone.length <= 15 && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Phone className="h-3 w-3" />
+                                    <span>{contact.phone}</span>
+                                  </div>
+                                )}
+                                {contact.phone && contact.phone.length > 15 && !contact.instagram_username && (
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs" title="ID do Canal">ID: {contact.phone}</span>
+                                  </div>
+                                )}
+                                {contact.instagram_username && (
+                                  <div className="flex items-center gap-1.5">
+                                    <User className="h-3 w-3 text-pink-500" />
+                                    <span>@{contact.instagram_username}</span>
+                                  </div>
+                                )}
+                                {contact.email && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Mail className="h-3 w-3" />
+                                    <span className="truncate max-w-[150px]">{contact.email}</span>
+                                  </div>
+                                )}
+                                {!contact.phone && !contact.email && !contact.instagram_username && <span>-</span>}
+                              </div>
+                              {!selectedUnitId && contact.last_unit_name && (
+                                <div className="flex items-center gap-1 mt-2 text-[10px] font-medium px-2 py-0.5 rounded bg-muted/60 text-muted-foreground w-fit">
+                                  <Building className="h-3 w-3 shrink-0" />
+                                  <span className="truncate">Última unid: {contact.last_unit_name}</span>
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="p-4 hidden md:table-cell">
                               <div className="flex flex-wrap gap-1">
-                                {contact.tags.slice(0, 2).map((tag: string) => (
+                                {contact.contact_labels?.map((cl: any) => {
+                                  const label = cl.labels;
+                                  if (!label) return null;
+                                  return (
+                                    <Badge 
+                                      key={label.id} 
+                                      variant="outline" 
+                                      className="text-[10px] gap-1 px-2 py-0 h-5 font-normal"
+                                      style={{
+                                        backgroundColor: `${label.color || '#6b7280'}15`,
+                                        color: label.color || '#6b7280',
+                                        borderColor: `${label.color || '#6b7280'}40`,
+                                      }}
+                                    >
+                                      <span 
+                                        className="h-1.5 w-1.5 rounded-full shrink-0" 
+                                        style={{ backgroundColor: label.color || '#6b7280' }} 
+                                      />
+                                      {label.name}
+                                    </Badge>
+                                  );
+                                })}
+                                {contact.tags && contact.tags.length > 0 && contact.tags.map((tag: string) => (
                                   <Badge key={tag} variant="secondary" className="text-[10px]">
                                     {tag}
                                   </Badge>
                                 ))}
-                                {contact.tags.length > 2 && (
-                                  <Badge variant="outline" className="text-[10px]">
-                                    +{contact.tags.length - 2}
-                                  </Badge>
+                                {!contact.contact_labels?.length && (!contact.tags || contact.tags.length === 0) && (
+                                  <span className="text-muted-foreground">-</span>
                                 )}
                               </div>
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="p-4 hidden sm:table-cell text-muted-foreground">
-                            {format(new Date(contact.created_at), "dd/MM/yyyy", { locale: ptBR })}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                            </TableCell>
+                            <TableCell className="p-4 hidden sm:table-cell text-muted-foreground">
+                              {format(new Date(contact.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -668,6 +795,112 @@ function ContactsPage() {
           </CardContent>
         </Card>
       </Tabs>
+
+      {/* Barra Flutuante de Ações em Massa */}
+      {selectedContactIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-card/95 backdrop-blur-md border border-border px-4 py-2.5 rounded-full shadow-2xl animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <div className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-primary/10 text-primary">
+            <CheckSquare className="h-3.5 w-3.5" />
+            <span>{selectedContactIds.size} selecionado{selectedContactIds.size > 1 ? "s" : ""}</span>
+          </div>
+
+          <div className="h-4 w-px bg-border" />
+
+          <Button
+            size="sm"
+            className="h-8 gap-1.5 text-xs font-medium shadow-xs"
+            onClick={() => {
+              if (labels && labels.length > 0 && !bulkLabelId) {
+                setBulkLabelId(labels[0].id);
+              }
+              setIsAddLabelModalOpen(true);
+            }}
+          >
+            <Tag className="h-3.5 w-3.5" />
+            Adicionar Etiqueta
+          </Button>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setSelectedContactIds(new Set())}
+          >
+            Desmarcar
+          </Button>
+        </div>
+      )}
+
+      {/* Modal para Adicionar Etiqueta em Massa */}
+      <Dialog open={isAddLabelModalOpen} onOpenChange={setIsAddLabelModalOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold">
+              <Tag className="h-4 w-4 text-primary" />
+              Adicionar Etiqueta em Massa
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Selecione qual etiqueta será vinculada aos {selectedContactIds.size} contato{selectedContactIds.size > 1 ? "s" : ""} selecionado{selectedContactIds.size > 1 ? "s" : ""}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-3">
+            {!labels?.length ? (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-800 dark:text-amber-200">
+                Você ainda não possui etiquetas cadastradas. Crie suas etiquetas em <b>Configurações &gt; Etiquetas</b>.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="bulk-label-select" className="text-xs text-muted-foreground">
+                  Selecione a etiqueta:
+                </Label>
+                <Select value={bulkLabelId} onValueChange={setBulkLabelId}>
+                  <SelectTrigger id="bulk-label-select" className="w-full">
+                    <SelectValue placeholder="Selecione uma etiqueta..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {labels.map((l: any) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-2.5 w-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: l.color || "#6b7280" }}
+                          />
+                          <span>{l.name}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setIsAddLabelModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => applyBulkLabel.mutate(bulkLabelId)}
+              disabled={applyBulkLabel.isPending || !bulkLabelId || selectedContactIds.size === 0}
+            >
+              {applyBulkLabel.isPending ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Aplicando...
+                </>
+              ) : (
+                `Aplicar a ${selectedContactIds.size} contato(s)`
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ContactDetailsSheet 
         contactId={selectedContactId} 
