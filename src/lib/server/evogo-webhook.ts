@@ -188,6 +188,76 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           if (fallbackAd) metadata.externalAdReply = fallbackAd;
         }
         
+        // 1. Handle Protocol Messages (Edit, Ephemeral, Revoke)
+        if (msg.protocolMessage) {
+          if (msg.protocolMessage.type === 14 || msg.protocolMessage.type === 'MESSAGE_EDIT') {
+            const targetId = msg.protocolMessage.key?.ID || msg.protocolMessage.key?.id;
+            const editedMsg = msg.protocolMessage.editedMessage;
+            const newText = editedMsg?.conversation || editedMsg?.extendedTextMessage?.text;
+
+            if (targetId && newText) {
+              console.log(`[evogo-webhook] Updating message ${targetId} with edited text: ${newText}`);
+              await supabaseAdmin
+                .from('messages')
+                .update({ 
+                  content: `✏️ *Editado:* ${newText}`,
+                  is_edited: true 
+                })
+                .eq('remote_msg_id', targetId);
+            } else if (targetId) {
+              console.log(`[evogo-webhook] Marking message ${targetId} as edited (protocolMessage without decrypted text)`);
+              await supabaseAdmin
+                .from('messages')
+                .update({ is_edited: true })
+                .eq('remote_msg_id', targetId);
+            }
+            return;
+          } else if (msg.protocolMessage.type === 3 || msg.protocolMessage.type === 'EPHEMERAL_SETTING') {
+            textContent = '⏱️ *Aviso:* Configuração de mensagens temporárias alterada.';
+          } else if (msg.protocolMessage.type === 0 || msg.protocolMessage.type === 'REVOKE') {
+            const targetId = msg.protocolMessage.key?.id || msg.protocolMessage.key?.ID;
+            if (targetId) {
+              console.log('[evogo-webhook] Revoking message ID:', targetId);
+              const { error } = await supabaseAdmin
+                .from('messages')
+                .update({ is_deleted: true })
+                .eq('remote_msg_id', targetId);
+              if (error) console.error('[evogo-webhook] Error revoking message:', error);
+            }
+            return;
+          } else {
+            return;
+          }
+        }
+
+        // 2. Handle secretEncryptedMessage / Edit events without decrypted text
+        if (msg.secretEncryptedMessage || info?.Edit === "1" || body.data?.IsEdit) {
+          const targetId = msg.secretEncryptedMessage?.targetMessageKey?.ID 
+            || msg.secretEncryptedMessage?.targetMessageKey?.id;
+
+          if (targetId) {
+            console.log(`[evogo-webhook] Marking target message ${targetId} as edited (secretEncryptedMessage/Edit)`);
+            await supabaseAdmin
+              .from('messages')
+              .update({ is_edited: true })
+              .eq('remote_msg_id', targetId);
+          } else {
+            console.log('[evogo-webhook] Ignoring secretEncryptedMessage without targetId');
+          }
+          return;
+        }
+
+        // 3. Handle Reactions
+        if (info?.Type === 'reaction' || msg.reactionMessage) {
+          const targetId = msg.reactionMessage?.key?.ID || msg.reactionMessage?.key?.id;
+          const emoji = msg.reactionMessage?.text || '';
+          if (targetId) {
+            return await handleReaction(targetId, emoji);
+          }
+          return;
+        }
+
+        // 4. Standard Message Types
         if (msg.conversation) {
           textContent = msg.conversation;
         } else if (msg.extendedTextMessage?.text) {
@@ -270,34 +340,6 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           if (parsedContacts.length > 0) {
             metadata.contacts = parsedContacts;
           }
-        }
-
-        // Native decryption fallback if EvoGo did not send base64 but sent the encrypted URL and mediaKey
-        if (!msg.base64) {
-          const mediaObj = msg.ptvMessage || msg.videoMessage || msg.imageMessage || msg.audioMessage || msg.documentMessage || msg.stickerMessage;
-          if (mediaObj && mediaObj.URL && mediaObj.mediaKey) {
-            try {
-              const { decryptWhatsAppMedia } = await import('./whatsapp-decrypt');
-              
-              let typeKey = 'document';
-              if (msg.ptvMessage || msg.videoMessage) typeKey = 'video';
-              else if (msg.imageMessage || msg.stickerMessage) typeKey = 'image';
-              else if (msg.audioMessage) typeKey = 'audio';
-
-              console.log(`[webhook] Native decrypting ${typeKey} for ${remoteJid}...`);
-              const decryptedBuf = await decryptWhatsAppMedia(mediaObj.URL, mediaObj.mediaKey, typeKey);
-              
-              const mime = mediaObj.mimetype || (typeKey === 'video' ? 'video/mp4' : typeKey === 'image' ? 'image/jpeg' : typeKey === 'audio' ? 'audio/ogg' : 'application/pdf');
-              mediaUrl = `data:${mime};base64,${decryptedBuf.toString('base64')}`;
-              
-              if (typeKey === 'audio') {
-                audioBase64 = decryptedBuf.toString('base64');
-              }
-              console.log(`[webhook] Native decryption successful (${decryptedBuf.length} bytes)`);
-            } catch (err) {
-              console.error('[webhook] Native decryption failed:', err);
-            }
-          }
         } else if (msg.locationMessage || msg.liveLocationMessage) {
           mediaType = 'text';
           textContent = '📍 Localização recebida';
@@ -327,49 +369,41 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         } else if (info?.Type === 'call' || msg.messageStubType === 'CALL_MISSED_VOICE' || msg.messageStubType === 'CALL_MISSED_VIDEO' || msg.messageStubType === 40 || msg.messageStubType === 41) {
           mediaType = 'text';
           textContent = '📞 Chamada de voz/vídeo perdida';
-        } else if (info.Type === 'reaction' || msg.reactionMessage) {
-          const targetId = msg.reactionMessage?.key?.ID || msg.reactionMessage?.key?.id;
-          const emoji = msg.reactionMessage?.text || '';
-          if (targetId) {
-            return await handleReaction(targetId, emoji);
-          }
         } else if (msg.albumMessage) {
           // albumMessage is just an album cover notification - images arrive as separate imageMessage events
-          return;
-        } else if (msg.protocolMessage) {
-          if (msg.protocolMessage.type === 14 || msg.protocolMessage.type === 'MESSAGE_EDIT') {
-            const editedMsg = msg.protocolMessage.editedMessage;
-            if (editedMsg) {
-              textContent = editedMsg.conversation || editedMsg.extendedTextMessage?.text || '[Mensagem Editada]';
-              textContent = `✏️ *Editado:* ${textContent}`;
-            } else {
-              return;
-            }
-          } else if (msg.protocolMessage.type === 3 || msg.protocolMessage.type === 'EPHEMERAL_SETTING') {
-            textContent = '⏱️ *Aviso:* Configuração de mensagens temporárias alterada.';
-          } else if (msg.protocolMessage.type === 0 || msg.protocolMessage.type === 'REVOKE') {
-            const targetId = msg.protocolMessage.key?.id || msg.protocolMessage.key?.ID;
-            if (targetId) {
-              console.log('[evogo-webhook] Revoking message ID:', targetId);
-              const { error } = await supabaseAdmin
-                .from('messages')
-                .update({ is_deleted: true })
-                .eq('remote_msg_id', targetId);
-              if (error) console.error('[evogo-webhook] Error revoking message:', error);
-            }
-            return;
-          } else {
-            return;
-          }
-        } else if (msg.secretEncryptedMessage || (info && info.Edit === "1" && !msg.conversation && !msg.extendedTextMessage)) {
-          // Evogo sends edited messages as secretEncryptedMessage if it fails to decrypt them
-          // We must ignore them to prevent "[Mídia/Mensagem não suportada]" spam
-          console.log('[evogo-webhook] Ignoring secretEncryptedMessage/Edit without decrypted content');
           return;
         } else if (info?.Type === 'text' && !msg.conversation && !msg.extendedTextMessage) {
           // Ignore empty text messages (like PushName or system events sent as messages)
           console.log('[evogo-webhook] Ignoring empty text message');
           return;
+        }
+
+        // Native decryption fallback if EvoGo did not send base64 but sent the encrypted URL and mediaKey
+        if (!msg.base64 && mediaType !== 'text') {
+          const mediaObj = msg.ptvMessage || msg.videoMessage || msg.imageMessage || msg.audioMessage || msg.documentMessage || msg.stickerMessage;
+          if (mediaObj && mediaObj.URL && mediaObj.mediaKey) {
+            try {
+              const { decryptWhatsAppMedia } = await import('./whatsapp-decrypt');
+              
+              let typeKey = 'document';
+              if (msg.ptvMessage || msg.videoMessage) typeKey = 'video';
+              else if (msg.imageMessage || msg.stickerMessage) typeKey = 'image';
+              else if (msg.audioMessage) typeKey = 'audio';
+
+              console.log(`[webhook] Native decrypting ${typeKey} for ${remoteJid}...`);
+              const decryptedBuf = await decryptWhatsAppMedia(mediaObj.URL, mediaObj.mediaKey, typeKey);
+              
+              const mime = mediaObj.mimetype || (typeKey === 'video' ? 'video/mp4' : typeKey === 'image' ? 'image/jpeg' : typeKey === 'audio' ? 'audio/ogg' : 'application/pdf');
+              mediaUrl = `data:${mime};base64,${decryptedBuf.toString('base64')}`;
+              
+              if (typeKey === 'audio') {
+                audioBase64 = decryptedBuf.toString('base64');
+              }
+              console.log(`[webhook] Native decryption successful (${decryptedBuf.length} bytes)`);
+            } catch (err) {
+              console.error('[webhook] Native decryption failed:', err);
+            }
+          }
         }
         
       } else {
