@@ -54,13 +54,62 @@ function ContactsPage() {
   const [isAddLabelModalOpen, setIsAddLabelModalOpen] = useState(false);
   const [bulkLabelId, setBulkLabelId] = useState("");
 
+  const { data: counts } = useQuery({
+    queryKey: ["contacts-counts", activeCompanyId, selectedUnitId, dateRange],
+    enabled: !!activeCompanyId,
+    queryFn: async () => {
+      let qTotal = supabase
+        .from("contacts")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", activeCompanyId!)
+        .eq("is_blocked", false)
+        .is("merged_into_id", null);
+
+      let qAds = supabase
+        .from("contacts")
+        .select("id, ad_leads!inner(id)", { count: "exact", head: true })
+        .eq("company_id", activeCompanyId!)
+        .eq("is_blocked", false)
+        .is("merged_into_id", null);
+
+      let qBlocked = supabase
+        .from("contacts")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", activeCompanyId!)
+        .eq("is_blocked", true)
+        .is("merged_into_id", null);
+
+      if (dateRange?.from) {
+        qTotal = qTotal.gte("created_at", dateRange.from.toISOString());
+        qAds = qAds.gte("created_at", dateRange.from.toISOString());
+        qBlocked = qBlocked.gte("created_at", dateRange.from.toISOString());
+      }
+      if (dateRange?.to) {
+        const toDate = new Date(dateRange.to);
+        toDate.setHours(23, 59, 59, 999);
+        qTotal = qTotal.lte("created_at", toDate.toISOString());
+        qAds = qAds.lte("created_at", toDate.toISOString());
+        qBlocked = qBlocked.lte("created_at", toDate.toISOString());
+      }
+
+      const [resTotal, resAds, resBlocked] = await Promise.all([qTotal, qAds, qBlocked]);
+
+      return {
+        total: resTotal.count || 0,
+        ads: resAds.count || 0,
+        blocked: resBlocked.count || 0,
+      };
+    },
+  });
+
   const { data: contacts, isLoading } = useQuery({
-    queryKey: ["contacts", activeCompanyId, searchTerm, selectedUnitId, dateRange],
+    queryKey: ["contacts", activeCompanyId, searchTerm, selectedUnitId, dateRange, activeTab],
     enabled: !!activeCompanyId,
     queryFn: async () => {
       // Se não tem unidade selecionada (Empresa Mãe), pega todos os contatos.
       // Se tem unidade, pega apenas os contatos que têm conversas na unidade logada.
       const relation = selectedUnitId ? 'conversations!inner' : 'conversations';
+      const adRelation = activeTab === 'ads' ? 'ad_leads!inner' : 'ad_leads';
       
       let query = supabase
         .from("contacts")
@@ -70,7 +119,7 @@ function ContactsPage() {
             label_id,
             labels ( id, name, color )
           ),
-          ad_leads (
+          ${adRelation} (
             id,
             ad_title,
             ad_body,
@@ -89,6 +138,12 @@ function ContactsPage() {
         .eq("company_id", activeCompanyId!)
         .is("merged_into_id", null)
         .order("created_at", { ascending: false });
+
+      if (activeTab === "blocked") {
+        query = query.eq("is_blocked", true);
+      } else {
+        query = query.eq("is_blocked", false);
+      }
 
       if (selectedUnitId) {
         query = query.eq("conversations.unit_id", selectedUnitId);
@@ -137,10 +192,10 @@ function ContactsPage() {
   const allContacts = contacts || [];
   const regularContacts = allContacts.filter((c: any) => !c.is_blocked);
   const blockedContacts = allContacts.filter((c: any) => c.is_blocked);
-  const adContactsCount = regularContacts.filter((c: any) => c.has_ad).length;
+  const adContactsCount = allContacts.filter((c: any) => c.has_ad).length;
 
   const filteredContacts = allContacts.filter((contact: any) => {
-    // 1. Tab filter
+    // 1. Tab filter (already filtered in query, but extra client check)
     if (activeTab === "blocked") {
       if (!contact.is_blocked) return false;
     } else {
@@ -276,7 +331,7 @@ function ContactsPage() {
               <User className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-2 text-2xl font-bold">{regularContacts.length}</div>
+          <div className="mt-2 text-2xl font-bold">{counts?.total ?? regularContacts.length}</div>
           <p className="text-xs text-muted-foreground mt-0.5">
             {dateRange ? "No período selecionado" : "Base ativa"}
           </p>
@@ -298,7 +353,7 @@ function ContactsPage() {
             </div>
           </div>
           <div className="mt-2 text-2xl font-bold text-blue-600 dark:text-blue-400">
-            {adContactsCount}
+            {counts?.ads ?? adContactsCount}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">Origem Meta Ads (CTWA)</p>
         </Card>
@@ -334,7 +389,7 @@ function ContactsPage() {
             </div>
           </div>
           <div className="mt-2 text-2xl font-bold text-red-600 dark:text-red-400">
-            {blockedContacts.length}
+            {counts?.blocked ?? blockedContacts.length}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">Lista negra</p>
         </Card>
@@ -346,13 +401,13 @@ function ContactsPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <TabsList className="h-9 w-fit">
                 <TabsTrigger value="all" className="text-xs">
-                  Todos os Contatos ({regularContacts.length})
+                  Todos os Contatos ({counts?.total ?? regularContacts.length})
                 </TabsTrigger>
                 <TabsTrigger value="ads" className="text-xs">
-                  Origem Anúncio ({adContactsCount})
+                  Origem Anúncio ({counts?.ads ?? adContactsCount})
                 </TabsTrigger>
                 <TabsTrigger value="blocked" className="text-xs">
-                  Bloqueados ({blockedContacts.length})
+                  Bloqueados ({counts?.blocked ?? blockedContacts.length})
                 </TabsTrigger>
               </TabsList>
 
@@ -438,6 +493,7 @@ function ContactsPage() {
                   className="h-8 px-3 text-xs"
                   onClick={() => {
                     qc.invalidateQueries({ queryKey: ["contacts"] });
+                    qc.invalidateQueries({ queryKey: ["contacts-counts"] });
                   }}
                 >
                   <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Atualizar
