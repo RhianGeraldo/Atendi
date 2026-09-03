@@ -49,6 +49,7 @@ import { LabelsTab } from "@/components/settings/labels-tab";
 import { CrmTab } from "@/components/settings/crm-tab";
 import { AiAgentsTab } from "@/components/settings/ai-agents-tab";
 import { LeadRoutingSettings } from "@/components/settings/lead-routing-settings";
+import { AutomationsTab } from "@/components/settings/automations-tab";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
@@ -803,6 +804,10 @@ function SettingsPage() {
                 <Tags className="mr-2 h-4 w-4" />
                 Etiquetas
               </TabsTrigger>
+              <TabsTrigger value="automations" className="w-full justify-start data-[state=active]:bg-muted">
+                <Zap className="mr-2 h-4 w-4 text-amber-500" />
+                Automações
+              </TabsTrigger>
               <TabsTrigger value="reasons" className="w-full justify-start data-[state=active]:bg-muted">
                 <CheckCircle2 className="mr-2 h-4 w-4" />
                 Encerramento
@@ -880,6 +885,10 @@ function SettingsPage() {
           
           <TabsContent value="labels" className="mt-0 border-none p-0">
             <LabelsTab />
+          </TabsContent>
+
+          <TabsContent value="automations" className="mt-0 border-none p-0">
+            <AutomationsTab />
           </TabsContent>
 
           <TabsContent value="routing" className="mt-0 border-none p-0">

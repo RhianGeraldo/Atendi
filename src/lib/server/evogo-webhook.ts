@@ -4,6 +4,7 @@ import { getPhoneVariants } from '@/lib/utils';
 import { enqueueAiMessage } from './ai-queue';
 import { syncContactProfile } from '@/lib/api/chat.functions';
 import { extractExternalAdReply, processAndCacheAdPreview } from './ad-preview-cache';
+import { dispatchAutomationEvent } from './automation-engine';
 
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
@@ -1101,6 +1102,19 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
                 media_type: metadata.externalAdReply.mediaType || null,
               });
               console.log(`[evogo-webhook] Registered new ad lead for contact ${contactId} and ad ${sourceId}`);
+
+              // Dispara automações desacopladas (ManyChat / BotConversa style)
+              dispatchAutomationEvent({
+                companyId: company_id,
+                unitId: unit_id || null,
+                contactId: contactId,
+                conversationId: conversationId || null,
+                triggerType: 'ad_lead_first_message',
+                metadata: {
+                  sourceId,
+                  ad: metadata.externalAdReply,
+                },
+              }).catch((err) => console.error('[evogo-webhook] automation event error:', err));
             }
           }
         } catch (e) {

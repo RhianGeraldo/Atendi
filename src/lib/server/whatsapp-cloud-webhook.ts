@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getPhoneVariants } from '@/lib/utils';
 import { assignTrafficLeadRoundRobin } from './routing';
 import { conferirPorta } from './webhook-auth';
+import { dispatchAutomationEvent } from './automation-engine';
 
 export async function handleWhatsappCloudWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -771,6 +772,19 @@ async function processIncomingMessage(params: any) {
             media_type: messageReferral.media_type || null,
           });
           console.log(`[Whatsapp Cloud] Registered new ad lead for contact ${contact.id} and ad ${sourceId}`);
+
+          // Dispara automações desacopladas (ManyChat / BotConversa style)
+          dispatchAutomationEvent({
+            companyId: companyId,
+            unitId: unitId || null,
+            contactId: contact.id,
+            conversationId: conversationId || null,
+            triggerType: 'ad_lead_first_message',
+            metadata: {
+              sourceId,
+              referral: messageReferral,
+            },
+          }).catch((err) => console.error('[Whatsapp Cloud] automation event error:', err));
         }
       } catch (e) {
         console.error('[Whatsapp Cloud] Failed to register ad lead:', e);

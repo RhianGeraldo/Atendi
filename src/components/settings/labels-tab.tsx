@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Tag, Trash2, Edit2 } from "lucide-react";
+import { Plus, Tag, Trash2, Edit2, Zap } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -108,7 +108,14 @@ export function LabelsTab() {
             Nova Etiqueta
           </Button>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-xs text-amber-800 dark:text-amber-300 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-amber-500 shrink-0" />
+              <span>Deseja vincular etiquetas automaticamente quando um lead mandar mensagem de anúncio? Acesse a aba <b>Automações</b> para configurar.</span>
+            </div>
+          </div>
+
           {isLoading ? (
             <div className="text-sm text-muted-foreground">Carregando etiquetas...</div>
           ) : !labels?.length ? (
