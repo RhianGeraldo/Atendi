@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useInfiniteQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List, Hash, Smartphone, LayoutTemplate, ChevronLeft } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List, Hash, Smartphone, LayoutTemplate, ChevronLeft, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -104,12 +104,19 @@ interface ConvRow {
 
 function ConversationsPage() {
   const { c: searchConvId, tab: searchTab } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const qc = useQueryClient();
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const [tab, setTab] = useState<TabType>(searchTab || "waiting");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(searchConvId || null);
+
+  const handleCloseChat = () => {
+    setSelectedId(null);
+    setLastSelectedConv(null);
+    navigate({ search: (prev: any) => ({ ...prev, c: undefined }) });
+  };
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -818,6 +825,9 @@ function ConversationsPage() {
     const current = filtered.find((c) => c.id === selectedId) ?? null;
     if (current) return current;
     if (selectedId && lastSelectedConv?.id === selectedId) {
+      if (lastSelectedConv.status === "resolved" && tab !== "resolved") {
+        return null;
+      }
       return { ...lastSelectedConv, status: tab === "active" ? "active" : lastSelectedConv.status } as ConvRow;
     }
     return null;
@@ -1087,7 +1097,8 @@ function ConversationsPage() {
             showSidebar={showSidebar}
             onToggleSidebar={() => setShowSidebar(!showSidebar)}
             onAssigned={() => setTab("active")}
-            onBack={() => setSelectedId(null)}
+            onBack={handleCloseChat}
+            onClose={handleCloseChat}
           />
         ) : (
           <EmptyChat />
@@ -1547,13 +1558,15 @@ function ChatPanel({
   showSidebar,
   onToggleSidebar,
   onAssigned,
-  onBack
+  onBack,
+  onClose,
 }: { 
   conv: ConvRow;
   showSidebar?: boolean;
   onToggleSidebar?: () => void;
   onAssigned?: () => void;
   onBack?: () => void;
+  onClose?: () => void;
 }) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
@@ -1566,7 +1579,16 @@ function ChatPanel({
   const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
   const [isCoaching, setIsCoaching] = useState(false);
   const [editingMessage, setEditingMessage] = useState<MessageRow | null>(null);
-  
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const isInitialLoadRef = useRef(true);
+
+  // Reset paginação ao trocar de conversa
+  useEffect(() => {
+    setHasMoreOlder(true);
+    setIsLoadingOlder(false);
+    isInitialLoadRef.current = true;
+  }, [conv.id]);
 
   const { data: companySettings } = useQuery({
     queryKey: ["company-settings-chat", activeCompanyId],
@@ -1618,21 +1640,88 @@ function ChatPanel({
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Consulta otimizada: busca apenas as 15 mensagens mais recentes inicialmente
   const { data: messages } = useQuery({
     queryKey: ["messages", conv.id],
     queryFn: async () => {
-      // 1. Get all conversation IDs for this contact on this instance
-      // Fetch messages for this conversation
       const { data, error } = await supabase
         .from("messages")
         .select("id, conversation_id, sender_type, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
         .eq("conversation_id", conv.id)
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: false })
+        .limit(15);
         
       if (error) throw error;
-      return (data ?? []) as MessageRow[];
+      const list = ((data ?? []) as MessageRow[]).reverse();
+      if (list.length < 15) {
+        setHasMoreOlder(false);
+      }
+      return list;
     },
   });
+
+  // Função para buscar mensagens mais antigas (paginação infinita para cima)
+  const loadOlderMessages = async () => {
+    if (isLoadingOlder || !hasMoreOlder || !messages || messages.length === 0) return;
+
+    const oldestMessage = messages[0];
+    if (!oldestMessage) return;
+
+    setIsLoadingOlder(true);
+    const container = scrollRef.current;
+    const oldScrollHeight = container ? container.scrollHeight : 0;
+    const oldScrollTop = container ? container.scrollTop : 0;
+
+    try {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("id, conversation_id, sender_type, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
+        .eq("conversation_id", conv.id)
+        .lt("created_at", oldestMessage.created_at)
+        .order("created_at", { ascending: false })
+        .limit(15);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        setHasMoreOlder(false);
+        return;
+      }
+
+      if (data.length < 15) {
+        setHasMoreOlder(false);
+      }
+
+      const olderMessages = (data as MessageRow[]).reverse();
+
+      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
+        if (!old) return olderMessages;
+        const existingIds = new Set(old.map(m => m.id));
+        const filteredNew = olderMessages.filter(m => !existingIds.has(m.id));
+        return [...filteredNew, ...old];
+      });
+
+      // Preserva a posição exata da rolagem para a tela não pular
+      requestAnimationFrame(() => {
+        if (container) {
+          const newScrollHeight = container.scrollHeight;
+          container.scrollTop = newScrollHeight - oldScrollHeight + oldScrollTop;
+        }
+      });
+    } catch (err) {
+      console.error("Erro ao carregar mensagens anteriores:", err);
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  };
+
+  // Detecta quando o usuário rolou até o topo para buscar mais mensagens antigas
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollTop <= 40 && hasMoreOlder && !isLoadingOlder && !isInitialLoadRef.current) {
+      loadOlderMessages();
+    }
+  };
 
   const { data: quickMessageFolders } = useQuery({
     queryKey: ["quick-message-folders", activeCompanyId],
@@ -1663,14 +1752,20 @@ function ChatPanel({
   });
 
   useEffect(() => {
+    let timeout: NodeJS.Timeout | null = null;
     const scrollToBottom = () => {
       if (scrollRef.current) {
         scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "auto" });
       }
     };
     
-    scrollToBottom();
-    const timeout = setTimeout(scrollToBottom, 150);
+    if (isInitialLoadRef.current && messages && messages.length > 0) {
+      scrollToBottom();
+      timeout = setTimeout(() => {
+        scrollToBottom();
+        isInitialLoadRef.current = false;
+      }, 150);
+    }
     
     // Reset unread count when chat is opened
     if (conv.id && conv.unread_count && conv.unread_count > 0) {
@@ -1707,7 +1802,9 @@ function ChatPanel({
       });
     }
 
-    return () => clearTimeout(timeout);
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
   }, [messages?.length, conv.id, conv.unread_count, qc]);
 
   const send = useMutation({
@@ -2109,6 +2206,8 @@ function ChatPanel({
       setResolveObservation("");
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["contact-conversations"] });
+      qc.invalidateQueries({ queryKey: ["unread-counts"] });
+      onClose?.();
     },
     onError: (e) => {
       toast.error("Erro ao encerrar atendimento", { description: (e as Error).message });
@@ -2149,6 +2248,8 @@ function ChatPanel({
     onSuccess: () => {
       toast.success("Atendimento retornado para a fila");
       qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["unread-counts"] });
+      onClose?.();
     },
   });
 
@@ -2383,8 +2484,33 @@ function ChatPanel({
         {/* Messages */}
         <div
           ref={scrollRef}
+          onScroll={handleScroll}
           className="flex-1 space-y-3 overflow-y-auto bg-muted/30 px-6 py-4"
         >
+          {hasMoreOlder && (
+            <div className="flex justify-center py-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs text-muted-foreground hover:text-foreground h-7 gap-1.5 bg-background/50 border border-border/40 shadow-xs"
+                onClick={loadOlderMessages}
+                disabled={isLoadingOlder}
+              >
+                {isLoadingOlder ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Carregando mensagens anteriores...
+                  </>
+                ) : (
+                  <>
+                    <ChevronUp className="h-3.5 w-3.5" />
+                    Carregar mensagens anteriores
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+
           {messages?.map((m) => (
             <MessageBubble 
               key={m.id} 
