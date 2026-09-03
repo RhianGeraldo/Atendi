@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Search, Phone, Mail, User, UserPlus, Loader2, Building, RefreshCw, ShieldAlert, X, Link, ExternalLink, Image as ImageIcon, Calendar as CalendarIcon, Tag, CheckSquare, Megaphone } from "lucide-react";
+import { Search, Phone, Mail, User, UserPlus, Loader2, Building, RefreshCw, ShieldAlert, X, Link, ExternalLink, Image as ImageIcon, Calendar as CalendarIcon, Tag, CheckSquare, Megaphone, ChevronLeft, ChevronRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
@@ -48,16 +48,22 @@ function ContactsPage() {
   const [activeTab, setActiveTab] = useState("all");
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
 
   // Estados para seleção e ações em massa
   const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
   const [isAddLabelModalOpen, setIsAddLabelModalOpen] = useState(false);
   const [bulkLabelId, setBulkLabelId] = useState("");
 
+  // KPIs calculados via contagem de linhas no banco (sem baixar payload, 0 bytes)
   const { data: counts } = useQuery({
     queryKey: ["contacts-counts", activeCompanyId, selectedUnitId, dateRange],
     enabled: !!activeCompanyId,
     queryFn: async () => {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
       let qTotal = supabase
         .from("contacts")
         .select("id", { count: "exact", head: true })
@@ -72,6 +78,14 @@ function ContactsPage() {
         .eq("is_blocked", false)
         .is("merged_into_id", null);
 
+      let qNewThisMonth = supabase
+        .from("contacts")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", activeCompanyId!)
+        .eq("is_blocked", false)
+        .is("merged_into_id", null)
+        .gte("created_at", startOfMonth);
+
       let qBlocked = supabase
         .from("contacts")
         .select("id", { count: "exact", head: true })
@@ -82,6 +96,7 @@ function ContactsPage() {
       if (dateRange?.from) {
         qTotal = qTotal.gte("created_at", dateRange.from.toISOString());
         qAds = qAds.gte("created_at", dateRange.from.toISOString());
+        qNewThisMonth = qNewThisMonth.gte("created_at", dateRange.from.toISOString());
         qBlocked = qBlocked.gte("created_at", dateRange.from.toISOString());
       }
       if (dateRange?.to) {
@@ -89,25 +104,31 @@ function ContactsPage() {
         toDate.setHours(23, 59, 59, 999);
         qTotal = qTotal.lte("created_at", toDate.toISOString());
         qAds = qAds.lte("created_at", toDate.toISOString());
+        qNewThisMonth = qNewThisMonth.lte("created_at", toDate.toISOString());
         qBlocked = qBlocked.lte("created_at", toDate.toISOString());
       }
 
-      const [resTotal, resAds, resBlocked] = await Promise.all([qTotal, qAds, qBlocked]);
+      const [resTotal, resAds, resNew, resBlocked] = await Promise.all([
+        qTotal,
+        qAds,
+        qNewThisMonth,
+        qBlocked,
+      ]);
 
       return {
         total: resTotal.count || 0,
         ads: resAds.count || 0,
+        newThisMonth: resNew.count || 0,
         blocked: resBlocked.count || 0,
       };
     },
   });
 
-  const { data: contacts, isLoading } = useQuery({
-    queryKey: ["contacts", activeCompanyId, searchTerm, selectedUnitId, dateRange, activeTab],
+  // Consulta paginada (traz apenas os 50 primeiros da página atual)
+  const { data: contactsResult, isLoading } = useQuery({
+    queryKey: ["contacts", activeCompanyId, searchTerm, channelFilter, selectedUnitId, dateRange, activeTab, page],
     enabled: !!activeCompanyId,
     queryFn: async () => {
-      // Se não tem unidade selecionada (Empresa Mãe), pega todos os contatos.
-      // Se tem unidade, pega apenas os contatos que têm conversas na unidade logada.
       const relation = selectedUnitId ? 'conversations!inner' : 'conversations';
       const adRelation = activeTab === 'ads' ? 'ad_leads!inner' : 'ad_leads';
       
@@ -134,7 +155,7 @@ function ContactsPage() {
             units ( name ),
             started_at
           )
-        `)
+        `, { count: "exact" })
         .eq("company_id", activeCompanyId!)
         .is("merged_into_id", null)
         .order("created_at", { ascending: false });
@@ -149,8 +170,15 @@ function ContactsPage() {
         query = query.eq("conversations.unit_id", selectedUnitId);
       }
 
-      if (searchTerm) {
-        query = query.ilike("name", `%${searchTerm}%`);
+      if (searchTerm.trim()) {
+        const term = searchTerm.trim();
+        query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%,email.ilike.%${term}%,instagram_username.ilike.%${term}%`);
+      }
+
+      if (channelFilter === "whatsapp") {
+        query = query.not("phone", "is", null);
+      } else if (channelFilter === "instagram") {
+        query = query.not("instagram_username", "is", null);
       }
 
       if (dateRange?.from) {
@@ -162,11 +190,14 @@ function ContactsPage() {
         query = query.lte("created_at", toDate.toISOString());
       }
 
-      const { data, error } = await query;
+      const from = (page - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      query = query.range(from, to);
+
+      const { data, count, error } = await query;
       if (error) throw error;
       
-      // Filter out groups (WhatsApp group IDs are usually 18 digits, Instagram PSIDs are ~16)
-      return data.filter(c => !c.phone || c.phone.length <= 17).map(c => {
+      const list = (data || []).filter(c => !c.phone || c.phone.length <= 17).map(c => {
         // Sort conversations to get the latest
         const sortedConvs = (c.conversations || []).sort((a: any, b: any) => 
           new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
@@ -186,56 +217,19 @@ function ContactsPage() {
           has_ad: !!latestAd,
         };
       });
+
+      return {
+        contacts: list,
+        totalCount: count || 0,
+      };
     },
   });
 
-  const allContacts = contacts || [];
-  const regularContacts = allContacts.filter((c: any) => !c.is_blocked);
-  const blockedContacts = allContacts.filter((c: any) => c.is_blocked);
-  const adContactsCount = allContacts.filter((c: any) => c.has_ad).length;
-
-  const filteredContacts = allContacts.filter((contact: any) => {
-    // 1. Tab filter (already filtered in query, but extra client check)
-    if (activeTab === "blocked") {
-      if (!contact.is_blocked) return false;
-    } else {
-      if (contact.is_blocked) return false;
-
-      if (activeTab === "ads") {
-        if (!contact.has_ad) return false;
-      }
-    }
-
-    // 2. Channel dropdown filter
-    if (channelFilter === "whatsapp") {
-      if (contact.instagram_username && !contact.phone) return false;
-    }
-    if (channelFilter === "instagram") {
-      if (!contact.instagram_username && !contact.instagram_id) return false;
-    }
-
-    // 3. Search filter
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      const name = (contact.name || "").toLowerCase();
-      const phone = (contact.phone || "").toLowerCase();
-      const email = (contact.email || "").toLowerCase();
-      const insta = (contact.instagram_username || "").toLowerCase();
-      const adTitle = (contact.latest_ad?.ad_title || "").toLowerCase();
-
-      if (
-        !name.includes(term) &&
-        !phone.includes(term) &&
-        !email.includes(term) &&
-        !insta.includes(term) &&
-        !adTitle.includes(term)
-      ) {
-        return false;
-      }
-    }
-
-    return true;
-  });
+  const filteredContacts = contactsResult?.contacts || [];
+  const currentTabTotalCount = contactsResult?.totalCount || 0;
+  const totalPages = Math.max(1, Math.ceil(currentTabTotalCount / PAGE_SIZE));
+  const startItem = currentTabTotalCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const endItem = Math.min(page * PAGE_SIZE, currentTabTotalCount);
 
   // Consulta etiquetas disponíveis para a ação em massa
   const { data: labels } = useQuery({
@@ -305,13 +299,6 @@ function ContactsPage() {
     },
   });
 
-  const now = new Date();
-  const newThisMonthCount = regularContacts.filter((c: any) => {
-    if (!c.created_at) return false;
-    const dt = new Date(c.created_at);
-    return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
-  }).length;
-
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
       {/* Top KPI Cards */}
@@ -321,7 +308,11 @@ function ContactsPage() {
             "p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm cursor-pointer transition-all hover:border-primary/50",
             activeTab === "all" && "ring-1 ring-primary/50"
           )}
-          onClick={() => setActiveTab("all")}
+          onClick={() => {
+            setActiveTab("all");
+            setPage(1);
+            setSelectedContactIds(new Set());
+          }}
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -331,7 +322,7 @@ function ContactsPage() {
               <User className="h-4 w-4" />
             </div>
           </div>
-          <div className="mt-2 text-2xl font-bold">{counts?.total ?? regularContacts.length}</div>
+          <div className="mt-2 text-2xl font-bold">{counts?.total ?? 0}</div>
           <p className="text-xs text-muted-foreground mt-0.5">
             {dateRange ? "No período selecionado" : "Base ativa"}
           </p>
@@ -342,7 +333,11 @@ function ContactsPage() {
             "p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm cursor-pointer transition-all hover:border-blue-500/50",
             activeTab === "ads" && "ring-1 ring-blue-500/50"
           )}
-          onClick={() => setActiveTab("ads")}
+          onClick={() => {
+            setActiveTab("ads");
+            setPage(1);
+            setSelectedContactIds(new Set());
+          }}
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -353,7 +348,7 @@ function ContactsPage() {
             </div>
           </div>
           <div className="mt-2 text-2xl font-bold text-blue-600 dark:text-blue-400">
-            {counts?.ads ?? adContactsCount}
+            {counts?.ads ?? 0}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">Origem Meta Ads (CTWA)</p>
         </Card>
@@ -368,7 +363,7 @@ function ContactsPage() {
             </div>
           </div>
           <div className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-            {newThisMonthCount}
+            {counts?.newThisMonth ?? 0}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">Cadastrados neste mês</p>
         </Card>
@@ -378,7 +373,11 @@ function ContactsPage() {
             "p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm cursor-pointer transition-all hover:border-destructive/50",
             activeTab === "blocked" && "ring-1 ring-destructive/50"
           )}
-          onClick={() => setActiveTab("blocked")}
+          onClick={() => {
+            setActiveTab("blocked");
+            setPage(1);
+            setSelectedContactIds(new Set());
+          }}
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -389,25 +388,33 @@ function ContactsPage() {
             </div>
           </div>
           <div className="mt-2 text-2xl font-bold text-red-600 dark:text-red-400">
-            {counts?.blocked ?? blockedContacts.length}
+            {counts?.blocked ?? 0}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">Lista negra</p>
         </Card>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs 
+        value={activeTab} 
+        onValueChange={(val) => {
+          setActiveTab(val);
+          setPage(1);
+          setSelectedContactIds(new Set());
+        }} 
+        className="space-y-4"
+      >
         <Card>
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <TabsList className="h-9 w-fit">
                 <TabsTrigger value="all" className="text-xs">
-                  Todos os Contatos ({counts?.total ?? regularContacts.length})
+                  Todos os Contatos ({counts?.total ?? 0})
                 </TabsTrigger>
                 <TabsTrigger value="ads" className="text-xs">
-                  Origem Anúncio ({counts?.ads ?? adContactsCount})
+                  Origem Anúncio ({counts?.ads ?? 0})
                 </TabsTrigger>
                 <TabsTrigger value="blocked" className="text-xs">
-                  Bloqueados ({counts?.blocked ?? blockedContacts.length})
+                  Bloqueados ({counts?.blocked ?? 0})
                 </TabsTrigger>
               </TabsList>
 
@@ -419,11 +426,17 @@ function ContactsPage() {
                     placeholder="Buscar nome, fone, e-mail..."
                     className="pl-8 h-8 text-xs"
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setPage(1);
+                    }}
                   />
                   {searchTerm && (
                     <button
-                      onClick={() => setSearchTerm("")}
+                      onClick={() => {
+                        setSearchTerm("");
+                        setPage(1);
+                      }}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     >
                       <X className="h-3 w-3" />
@@ -432,7 +445,13 @@ function ContactsPage() {
                 </div>
 
                 {/* Channel Filter */}
-                <Select value={channelFilter} onValueChange={setChannelFilter}>
+                <Select 
+                  value={channelFilter} 
+                  onValueChange={(val) => {
+                    setChannelFilter(val);
+                    setPage(1);
+                  }}
+                >
                   <SelectTrigger className="w-[125px] h-8 text-xs">
                     <SelectValue placeholder="Canal" />
                   </SelectTrigger>
@@ -474,14 +493,25 @@ function ContactsPage() {
                       mode="range"
                       defaultMonth={dateRange?.from}
                       selected={dateRange}
-                      onSelect={setDateRange}
+                      onSelect={(val) => {
+                        setDateRange(val);
+                        setPage(1);
+                      }}
                       numberOfMonths={2}
                     />
                   </PopoverContent>
                 </Popover>
 
                 {dateRange && (
-                  <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => setDateRange(undefined)}>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-8 px-2 text-xs" 
+                    onClick={() => {
+                      setDateRange(undefined);
+                      setPage(1);
+                    }}
+                  >
                     Limpar
                   </Button>
                 )}
@@ -511,8 +541,9 @@ function ContactsPage() {
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : filteredContacts.length > 0 ? (
-              <div className="rounded-md border overflow-x-auto">
-                <Table className="min-w-[750px]">
+              <div className="space-y-4">
+                <div className="rounded-md border overflow-x-auto">
+                  <Table className="min-w-[750px]">
                   <TableHeader>
                     <TableRow className="bg-muted/50">
                       <TableHead className="w-12 px-4">
@@ -717,6 +748,48 @@ function ContactsPage() {
                     })}
                   </TableBody>
                 </Table>
+              </div>
+
+              {/* Controles de Paginação */}
+              {currentTabTotalCount > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 px-1">
+                  <span className="text-xs text-muted-foreground">
+                    Mostrando <span className="font-medium text-foreground">{startItem}</span> a{" "}
+                    <span className="font-medium text-foreground">{endItem}</span> de{" "}
+                    <span className="font-medium text-foreground">{currentTabTotalCount}</span> contatos
+                  </span>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground mr-1">
+                      Página {page} de {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-3 text-xs"
+                      disabled={page <= 1 || isLoading}
+                      onClick={() => {
+                        setPage((p) => Math.max(1, p - 1));
+                        setSelectedContactIds(new Set());
+                      }}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 px-3 text-xs"
+                      disabled={page >= totalPages || isLoading}
+                      onClick={() => {
+                        setPage((p) => Math.min(totalPages, p + 1));
+                        setSelectedContactIds(new Set());
+                      }}
+                    >
+                      Próxima <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                    </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-12 text-center">
