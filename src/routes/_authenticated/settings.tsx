@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe, Facebook, Shield } from "lucide-react";
+import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe, Facebook, Shield, Target } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -88,6 +88,7 @@ function SettingsPage() {
     ],
     active_chatbot_model: "",
     sales_coach_prompt: "",
+    sales_coach_evaluation_prompt: "",
     sales_coach_model: "",
     sales_coach_instances: [] as string[]
   });
@@ -240,6 +241,7 @@ function SettingsPage() {
           ],
           active_chatbot_model: company.ai_settings.active_chatbot_model || "",
           sales_coach_prompt: company.ai_settings.sales_coach_prompt || "",
+          sales_coach_evaluation_prompt: company.ai_settings.sales_coach_evaluation_prompt || "",
           sales_coach_model: company.ai_settings.sales_coach_model || "",
           sales_coach_instances: company.ai_settings.sales_coach_instances || []
         });
@@ -1145,6 +1147,23 @@ function SettingsPage() {
                       value={aiSettings.sales_coach_prompt}
                       onChange={(e) => setAiSettings({...aiSettings, sales_coach_prompt: e.target.value})}
                     />
+
+                    {/* Critérios do Scorecard da Arena de Treinamento */}
+                    <div className="mt-4 pt-4 border-t border-border/50">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Target className="h-4 w-4 text-amber-500" />
+                        <h4 className="font-semibold text-sm">Critérios do Scorecard da Arena de Treinamento</h4>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        Define os critérios de notas (0 a 10) que o Sales Coach usará para auditar a simulação das consultoras. Deixe em branco para usar os 6 critérios padrão (Condução do Funil, Investigação de Dor, Construção de Valor, Ancoragem de Preço, Contorno de Objeções e Chance de Conversão).
+                      </p>
+                      <Textarea 
+                        placeholder={`CRITÉRIOS DE AVALIAÇÃO (Scorecard 0 a 10):\n1. Condução do Funil: Liderou a conversa com perguntas?\n2. Investigação de Dor: Fez perguntas abertas antes de ofertar?\n3. Construção de Valor: Conectou benefícios às dores do cliente?\n4. Ancoragem de Preço: Defendeu valor antes de falar o preço?\n5. Contorno de Objeções: Desarmou hesitações sem dar desconto precipitado?\n6. Chance de Conversão: Qual a probabilidade real de fechamento?`}
+                        className="min-h-[120px] text-xs font-mono"
+                        value={aiSettings.sales_coach_evaluation_prompt}
+                        onChange={(e) => setAiSettings({...aiSettings, sales_coach_evaluation_prompt: e.target.value})}
+                      />
+                    </div>
 
                     <div className="mt-4 pt-4 border-t border-border/50">
                       <label className="text-sm font-medium">Modelo da IA do Sales Coach</label>

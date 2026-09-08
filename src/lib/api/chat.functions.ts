@@ -7,6 +7,7 @@ import type { CanalAberto, Destinatario } from "@/lib/canais/tipos";
 import { sendEvogoText, sendEvogoLink, sendEvogoMedia, sendEvogoReaction, editEvogoMessage, deleteEvogoMessage } from "../evogo";
 import { sendStevoText, sendStevoLink, sendStevoMedia, sendStevoReaction, editStevoMessage, deleteStevoMessage } from "../stevo";
 import { getPhoneVariants } from "@/lib/utils";
+import { getCompanyPlaybookSummary } from "./training.functions";
 
 export const sendMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -2027,7 +2028,12 @@ export const salesCoachAction = createServerFn({ method: "POST" })
       return `${role}: ${text}`;
     }).join('\n');
 
+    const playbookSummary = await getCompanyPlaybookSummary(companyId);
+
     let systemPrompt = aiSettings.sales_coach_prompt || "Você é um treinador de vendas de elite.";
+    if (playbookSummary) {
+      systemPrompt += `\n\n${playbookSummary}\n\nIMPORTANTE: Avalie se o atendimento do vendedor seguiu os procedimentos, explicações e regras oficiais do Playbook da empresa acima. Identifique se o vendedor deixou de usar os argumentos e benefícios oficiais da empresa.`;
+    }
     systemPrompt += `
     
 Abaixo está o histórico recente da conversa. Analise o atendimento e gere uma tabela de análise estruturada em Markdown com exatamente as seguintes colunas: Item, Avaliação, e Trechos de Referência.
@@ -2182,7 +2188,13 @@ export const salesCoachSuggestAction = createServerFn({ method: "POST" })
       return `${role}: ${text}`;
     }).join('\n');
 
-    let systemPrompt = "Você é um treinador de vendas tático. Baseado na análise do atendimento e nas últimas mensagens abaixo, dê uma instrução RÁPIDA, TÁTICA e DIRETA para o vendedor sobre o que ele deve fazer agora.\n\nSua resposta deve obrigatoriamente seguir este formato em Markdown:\n**🎯 Objetivo:** [Qual o objetivo da próxima mensagem]\n**💡 Estratégia:** [Qual técnica de vendas usar]\n**💬 Sugestão de fala:** \"[Uma ou duas frases bem curtas e naturais para o vendedor enviar]\"\n\nNão escreva NADA fora desse formato.\n\n";
+    const playbookSummary = await getCompanyPlaybookSummary(companyId);
+
+    let systemPrompt = "Você é um treinador de vendas tático. Baseado na análise do atendimento e nas últimas mensagens abaixo, dê uma instrução RÁPIDA, TÁTICA e DIRETA para o vendedor sobre o que ele deve fazer agora.\n\n";
+    if (playbookSummary) {
+      systemPrompt += `${playbookSummary}\n\nDIRETRIZ OBRIGATÓRIA: Em "💬 Sugestão de fala", utilize EXATAMENTE os nomes dos procedimentos, diferenciais, formas de pagamento e argumentos oficiais da empresa listados no Playbook acima.\n\n`;
+    }
+    systemPrompt += "Sua resposta deve obrigatoriamente seguir este formato em Markdown:\n**🎯 Objetivo:** [Qual o objetivo da próxima mensagem]\n**💡 Estratégia:** [Qual técnica de vendas usar]\n**💬 Sugestão de fala:** \"[Uma ou duas frases bem curtas e naturais para o vendedor enviar]\"\n\nNão escreva NADA fora desse formato.\n\n";
     systemPrompt += `=== ANÁLISE ===\n${latestAnalysis.analysis_markdown}\n\n`;
     systemPrompt += `=== ÚLTIMAS MENSAGENS ===\n${formattedHistory}`;
 

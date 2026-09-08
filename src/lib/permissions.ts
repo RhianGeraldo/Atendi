@@ -15,6 +15,7 @@ export const ALL_MENU_PERMISSIONS: MenuItemPermission[] = [
   { key: "tasks", label: "Tarefas", description: "Lista de tarefas e acompanhamento de equipe" },
   { key: "campaigns", label: "Campanhas", description: "Disparos em massa e campanhas ativas" },
   { key: "reports", label: "Relatórios", description: "Relatórios de desempenho e SLA de atendimento" },
+  { key: "training", label: "Treinamento & IA", description: "Simulador de vendas às cegas e mineração de objeções com Sales Coach" },
   { key: "units", label: "Gestão de Unidades", description: "Gerenciamento das filiais/unidades da empresa" },
   { key: "settings", label: "Configurações", description: "Configurações gerais, conexões e equipe" },
 ];
@@ -22,8 +23,8 @@ export const ALL_MENU_PERMISSIONS: MenuItemPermission[] = [
 export const DEFAULT_ROLE_MENUS: Record<string, string[]> = {
   super_admin: ALL_MENU_PERMISSIONS.map(m => m.key).concat(["companies"]),
   admin_company: ALL_MENU_PERMISSIONS.map(m => m.key),
-  manager: ["dashboard", "conversations", "calls", "contacts", "pipeline", "tasks", "campaigns", "reports", "settings"],
-  agent: ["conversations", "calls", "contacts", "tasks"],
+  manager: ["dashboard", "conversations", "calls", "contacts", "pipeline", "tasks", "campaigns", "reports", "training", "settings"],
+  agent: ["conversations", "calls", "contacts", "tasks", "training"],
 };
 
 /**

@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useInfiniteQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, Fragment } from "react";
-import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List, Hash, Smartphone, LayoutTemplate, ChevronLeft, ChevronUp } from "lucide-react";
+import { Filter, Send, Paperclip, Smile, MoreVertical, Search, MessageCircle, Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Mail, Tag, MessageSquarePlus, Loader2, Mic, Square, X, Image as ImageIcon, SmilePlus, Plus, PanelRight, Users, User, RefreshCw, Undo2, CheckCircle2, CornerUpLeft, Pencil, Trash2, FileText, Sparkles, Folder, FolderOpen, Video, Headphones, Bot, MapPin, List, Hash, Smartphone, LayoutTemplate, ChevronLeft, ChevronUp, BookOpen } from "lucide-react";
 import { toast } from "sonner";
+import { PlaybookSheet } from "@/components/training/playbook-sheet";
 
 import { supabase } from "@/integrations/supabase/client";
 import { sendMessageAction, sendProactiveMessageAction, reactToMessageAction, fetchContactInfoAction, toggleContactLabelAction, createLabelAction, assignConversationAction, transferConversationAction, updateContactFromWhatsappAction, editMessageAction, deleteMessageAction, transcribeAudioAction, fixMessageTextAction, salesCoachAction, salesCoachSuggestAction } from "@/lib/api/chat.functions";
@@ -1602,6 +1603,7 @@ function ChatPanel({
   const [selectedFile, setSelectedFile] = useState<{ file: File; base64: string; type: string } | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
   const [isCoaching, setIsCoaching] = useState(false);
+  const [isPlaybookSheetOpen, setIsPlaybookSheetOpen] = useState(false);
   const [editingMessage, setEditingMessage] = useState<MessageRow | null>(null);
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
@@ -2705,6 +2707,29 @@ function ChatPanel({
                       {isCoaching ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bot className="h-5 w-5" />}
                     </button>
                   )}
+
+                  {/* Left Side: Playbook & Procedimentos */}
+                  <button 
+                    type="button"
+                    className="rounded-full p-2.5 text-emerald-600 hover:text-emerald-700 mb-0.5 shrink-0 transition-colors bg-emerald-500/10 hover:bg-emerald-500/20" 
+                    title="Playbook Comercial (Procedimentos, Explicações e Scripts)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsPlaybookSheetOpen(true);
+                    }}
+                  >
+                    <BookOpen className="h-5 w-5" />
+                  </button>
+
+                  <PlaybookSheet
+                    isOpen={isPlaybookSheetOpen}
+                    onClose={() => setIsPlaybookSheetOpen(false)}
+                    companyId={activeCompanyId || ""}
+                    onInsertText={(content) => {
+                      setText((prev) => prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + content);
+                      setTimeout(() => document.getElementById("chat-input")?.focus(), 100);
+                    }}
+                  />
 
                   {/* Text Input */}
                   <TextareaAutosize
