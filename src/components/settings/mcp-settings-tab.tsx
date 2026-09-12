@@ -58,6 +58,8 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
   const [generatedKey, setGeneratedKey] = useState<{ name: string; token: string } | null>(null);
   const [copiedToken, setCopiedToken] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [copiedClientId, setCopiedClientId] = useState(false);
+  const [copiedClientSecret, setCopiedClientSecret] = useState(false);
 
   // Determinar URL base do endpoint MCP
   const mcpServerUrl = typeof window !== "undefined"
@@ -214,6 +216,111 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               {copiedUrl ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
               {copiedUrl ? "Copiado" : "Copiar URL"}
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Card Especial: Conexão com Claude.ai (Web) via OAuth 2.1 */}
+      <Card className="border-violet-500/30 bg-gradient-to-br from-violet-500/5 via-transparent to-transparent shadow-xs">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-violet-600 dark:text-violet-400">
+                <Sparkles className="h-4 w-4" />
+                Conexão com Claude.ai (Web) via OAuth 2.1
+              </CardTitle>
+              <CardDescription className="text-xs">
+                O Claude.ai utiliza o protocolo RFC 9728 com Descoberta Automática de OAuth e Dynamic Client Registration (RFC 7591).
+              </CardDescription>
+            </div>
+            <Badge className="bg-violet-600 hover:bg-violet-700 text-white text-[10px]">
+              OAuth 2.1 Ativo
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">URL do Conector para o Claude.ai</label>
+            <div className="flex items-center gap-2 max-w-xl">
+              <Input
+                readOnly
+                value={typeof window !== "undefined" ? `${window.location.origin}/mcp` : "http://localhost:8080/mcp"}
+                className="font-mono text-xs bg-muted/50 select-all"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const url = typeof window !== "undefined" ? `${window.location.origin}/mcp` : "http://localhost:8080/mcp";
+                  navigator.clipboard.writeText(url);
+                  toast.success("URL do conector Claude copiada!");
+                }}
+                className="gap-1.5 shrink-0"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copiar
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              No Claude.ai, cole este endereço em <strong>Configurações &gt; Conectores &gt; Adicionar conector personalizado</strong>.
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-muted/40 border border-border/80 space-y-3">
+            <div className="text-xs font-semibold flex items-center gap-2">
+              <Key className="h-3.5 w-3.5 text-amber-500" />
+              Credenciais Pré-Registradas (caso o conector do Claude solicite OAuth Client ID manual):
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="space-y-1">
+                <span className="text-[11px] text-muted-foreground font-medium">OAuth Client ID</span>
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    readOnly
+                    value="atendi-claude-mcp"
+                    className="font-mono text-xs bg-background select-all h-8"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText("atendi-claude-mcp");
+                      setCopiedClientId(true);
+                      setTimeout(() => setCopiedClientId(false), 2000);
+                      toast.success("Client ID copiado!");
+                    }}
+                    className="h-8 px-2"
+                  >
+                    {copiedClientId ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-[11px] text-muted-foreground font-medium">OAuth Client Secret</span>
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    readOnly
+                    value="atendi-secret-claude-mcp"
+                    className="font-mono text-xs bg-background select-all h-8"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText("atendi-secret-claude-mcp");
+                      setCopiedClientSecret(true);
+                      setTimeout(() => setCopiedClientSecret(false), 2000);
+                      toast.success("Client Secret copiado!");
+                    }}
+                    className="h-8 px-2"
+                  >
+                    {copiedClientSecret ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>

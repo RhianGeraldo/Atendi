@@ -2,8 +2,19 @@ import { validateMcpToken } from "./auth";
 import { getAllMcpTools, executeMcpTool } from "./registry";
 import type { JsonRpcRequest, JsonRpcResponse, McpContext } from "./types";
 
+export const MCP_CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, mcp-session-id, X-Requested-With",
+};
+
 export async function handleMcpRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
+
+  // 0. Preflight CORS
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: MCP_CORS_HEADERS });
+  }
 
   // 1. Extrair token de autenticação
   let token = "";
@@ -22,12 +33,16 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         jsonrpc: "2.0",
         error: {
           code: -32000,
-          message: "Autenticação necessária. Forneça o header 'Authorization: Bearer <atendi_mcp_live_...>' ou parâmetro '?token=...'",
+          message: "Autenticação necessária. Conecte sua conta do AtendiAI ou forneça o header 'Authorization: Bearer <token>'",
         },
       }),
       {
         status: 401,
-        headers: { "Content-Type": "application/json; charset=utf-8" },
+        headers: {
+          ...MCP_CORS_HEADERS,
+          "Content-Type": "application/json; charset=utf-8",
+          "WWW-Authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource/mcp"`,
+        },
       }
     );
   }
@@ -40,12 +55,15 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         jsonrpc: "2.0",
         error: {
           code: -32001,
-          message: "Chave de API do Atendi inválida, expirada ou inativa.",
+          message: "Token ou Chave de API do Atendi inválida, expirada ou inativa.",
         },
       }),
       {
         status: 403,
-        headers: { "Content-Type": "application/json; charset=utf-8" },
+        headers: {
+          ...MCP_CORS_HEADERS,
+          "Content-Type": "application/json; charset=utf-8",
+        },
       }
     );
   }
@@ -66,7 +84,10 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
           jsonrpc: "2.0",
           error: { code: -32700, message: "Parse error: JSON inválido." },
         }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
+        {
+          status: 400,
+          headers: { ...MCP_CORS_HEADERS, "Content-Type": "application/json" },
+        }
       );
     }
 
@@ -74,21 +95,21 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
       // Batch JSON-RPC
       const responses = await Promise.all(body.map((req) => processJsonRpc(req, context)));
       return new Response(JSON.stringify(responses.filter(Boolean)), {
-        headers: { "Content-Type": "application/json; charset=utf-8" },
+        headers: { ...MCP_CORS_HEADERS, "Content-Type": "application/json; charset=utf-8" },
       });
     } else {
       const response = await processJsonRpc(body, context);
       if (!response) {
         // Notificação JSON-RPC (sem id)
-        return new Response(null, { status: 204 });
+        return new Response(null, { status: 204, headers: MCP_CORS_HEADERS });
       }
       return new Response(JSON.stringify(response), {
-        headers: { "Content-Type": "application/json; charset=utf-8" },
+        headers: { ...MCP_CORS_HEADERS, "Content-Type": "application/json; charset=utf-8" },
       });
     }
   }
 
-  return new Response("Method not allowed", { status: 405 });
+  return new Response("Method not allowed", { status: 405, headers: MCP_CORS_HEADERS });
 }
 
 // Processador individual de mensagem JSON-RPC 2.0
@@ -230,6 +251,7 @@ function handleSseConnection(request: Request, _context: McpContext): Response {
 
   return new Response(stream, {
     headers: {
+      ...MCP_CORS_HEADERS,
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",

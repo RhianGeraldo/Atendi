@@ -102,6 +102,48 @@ export default {
         return await handleCronFollowUps(request);
       }
 
+      // Descoberta de Recursos Protegidos OAuth 2.0 (RFC 9728) para Claude.ai / MCP
+      if (url.pathname === '/.well-known/oauth-protected-resource' || url.pathname === '/.well-known/oauth-protected-resource/mcp') {
+        const { getOauthProtectedResourceMetadata } = await import('./lib/mcp/oauth');
+        return new Response(JSON.stringify(getOauthProtectedResourceMetadata(url.origin)), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      }
+
+      // Descoberta do Servidor de Autorização OAuth 2.0 / OIDC (RFC 8414)
+      if (url.pathname === '/.well-known/oauth-authorization-server' || url.pathname === '/.well-known/openid-configuration') {
+        const { getOauthAuthorizationServerMetadata } = await import('./lib/mcp/oauth');
+        return new Response(JSON.stringify(getOauthAuthorizationServerMetadata(url.origin)), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      }
+
+      // Registro Dinâmico de Clientes OAuth 2.0 (RFC 7591)
+      if (url.pathname === '/api/oauth/register') {
+        const { handleOauthRegister } = await import('./lib/mcp/oauth');
+        return await handleOauthRegister(request);
+      }
+
+      // Troca de Token OAuth 2.1 (RFC 6749 / PKCE)
+      if (url.pathname === '/api/oauth/token') {
+        const { handleOauthToken } = await import('./lib/mcp/oauth');
+        return await handleOauthToken(request);
+      }
+
+      // Tela de Login e Consentimento OAuth 2.1
+      if (url.pathname === '/oauth/authorize') {
+        const { handleOauthAuthorize } = await import('./lib/mcp/oauth');
+        return await handleOauthAuthorize(request);
+      }
+
       // Endpoint oficial do Model Context Protocol (MCP)
       if (url.pathname === '/api/mcp' || url.pathname === '/mcp') {
         const { handleMcpRequest } = await import('./lib/mcp/handler');
