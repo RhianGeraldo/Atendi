@@ -340,6 +340,34 @@ async function processarMensagem(
   const windowExpiry =
     evento.rede === "whatsapp" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
 
+  const isSticker = evento.anexo?.tipo === "sticker";
+  const validMediaType: "text" | "image" | "video" | "audio" | "document" = isSticker
+    ? "image"
+    : evento.anexo?.tipo === "image"
+    ? "image"
+    : evento.anexo?.tipo === "video"
+    ? "video"
+    : evento.anexo?.tipo === "audio"
+    ? "audio"
+    : evento.anexo
+    ? "document"
+    : "text";
+
+  const messageDefaultLabel = isSticker
+    ? "🖼️ Figurinha"
+    : evento.anexo?.tipo === "image"
+    ? "📷 Imagem"
+    : evento.anexo?.tipo === "video"
+    ? "🎥 Vídeo"
+    : evento.anexo?.tipo === "audio"
+    ? "🎵 Áudio"
+    : evento.anexo
+    ? "📄 Documento"
+    : "";
+
+  const messageContent = evento.texto || messageDefaultLabel;
+  const previewText = (evento.texto || messageDefaultLabel || "Mensagem").substring(0, 50);
+
   if (activeConv) {
     conversationId = activeConv.id;
     aiActive = activeConv.ai_active ?? false;
@@ -349,7 +377,7 @@ async function processarMensagem(
       .from("conversations")
       .update({
         last_message_at: nowIso,
-        last_message_preview: (evento.texto || "Anexo de mídia").substring(0, 50),
+        last_message_preview: previewText,
         provider_thread_id: evento.threadId || activeConv.provider_thread_id,
         remote_id: contactIdOrPhone,
         has_window: evento.rede === "whatsapp",
@@ -380,7 +408,7 @@ async function processarMensagem(
         status: isFromMe ? "resolved" : isAiDefault ? "active" : "waiting",
         started_at: nowIso,
         last_message_at: nowIso,
-        last_message_preview: (evento.texto || "Anexo de mídia").substring(0, 50),
+        last_message_preview: previewText,
         remote_id: contactIdOrPhone,
         provider_thread_id: evento.threadId || null,
         has_window: evento.rede === "whatsapp",
@@ -415,12 +443,13 @@ async function processarMensagem(
     .insert({
       conversation_id: conversationId,
       sender_type: isFromMe ? "agent" : "contact",
-      content: evento.texto || "",
-      media_type: evento.anexo?.tipo || "text",
+      content: messageContent,
+      media_type: validMediaType,
       media_url: evento.anexo?.url || null,
       remote_msg_id: evento.platformMessageId,
       metadata: {
         zernio: true,
+        is_sticker: isSticker,
         threadId: evento.threadId,
         referral: evento.anuncioReferral || null,
         attachments: evento.anexo ? [evento.anexo] : [],
@@ -437,12 +466,22 @@ async function processarMensagem(
 
   // 5. Download de Mídia em Background (§11)
   if (evento.anexo?.url) {
+    let keyToUse = company?.zernio_api_key;
+    if (!keyToUse && companyId) {
+      const { data: c } = await supabaseAdmin
+        .from("companies")
+        .select("zernio_api_key")
+        .eq("id", companyId)
+        .maybeSingle();
+      keyToUse = c?.zernio_api_key;
+    }
+
     baixarEArmazenarMidiaZernio({
       messageId: insertedMsg.id,
       conversationId,
       mediaUrl: evento.anexo.url,
       isWhatsApp: evento.rede === "whatsapp",
-      apiKey: company?.zernio_api_key,
+      apiKey: keyToUse,
       accountId: evento.accountId,
     }).catch((err) => {
       console.error("[zernio:midia] Erro no download de mídia:", err);
@@ -484,7 +523,10 @@ async function baixarEArmazenarMidiaZernio(params: {
   const { buffer, mimeType, fileName } = result;
   const storagePath = `zernio_${conversationId}/${Date.now()}_${fileName}`;
 
-  const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
+  let uploadData = null;
+  let uploadErr = null;
+
+  const uploadRes1 = await supabaseAdmin.storage
     .from("media")
     .upload(storagePath, buffer, {
       contentType: mimeType,
@@ -492,7 +534,28 @@ async function baixarEArmazenarMidiaZernio(params: {
       cacheControl: "31536000, must-revalidate",
     });
 
-  if (!uploadErr && uploadData) {
+  uploadData = uploadRes1.data;
+  uploadErr = uploadRes1.error;
+
+  if (uploadErr && uploadErr.message?.includes("Bucket not found")) {
+    await supabaseAdmin.storage.createBucket("media", { public: true });
+    const uploadRes2 = await supabaseAdmin.storage
+      .from("media")
+      .upload(storagePath, buffer, {
+        contentType: mimeType,
+        upsert: true,
+        cacheControl: "31536000, must-revalidate",
+      });
+    uploadData = uploadRes2.data;
+    uploadErr = uploadRes2.error;
+  }
+
+  if (uploadErr) {
+    console.error("[zernio:storage] Erro ao subir arquivo para o Storage:", uploadErr);
+    return;
+  }
+
+  if (uploadData) {
     const { data: publicUrlData } = supabaseAdmin.storage
       .from("media")
       .getPublicUrl(uploadData.path);
