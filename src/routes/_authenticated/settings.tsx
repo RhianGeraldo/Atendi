@@ -482,7 +482,7 @@ function SettingsPage() {
         name,
         instance_name: technicalName,
         provider,
-        network: provider === 'zernio' ? (zernioNetwork || 'whatsapp') : null,
+        network: provider === 'zernio' ? (zernioNetwork || 'whatsapp') : (provider === 'instagram' ? 'instagram' : provider === 'messenger' ? 'messenger' : 'whatsapp'),
         zernio_account_id: provider === 'zernio' ? zernioAccountId : null,
         status: provider === 'zernio' ? 'connected' : 'disconnected',
         oficial_phone_number_id: finalNumberId,
@@ -1517,7 +1517,9 @@ function SettingsPage() {
                           setSelectedZernioAccountId(val);
                           const acc = zernioAccounts.find(a => a.id === val);
                           if (acc) {
-                            const suggestedName = acc.displayName || (acc.platform === 'instagram' ? `@${acc.username}` : (acc.metadata?.displayPhoneNumber || 'Canal Zernio'));
+                            const suggestedName = acc.platform === 'instagram'
+                              ? (acc.username ? `@${acc.username} (Instagram Direct)` : `${acc.displayName || 'Instagram'} (Instagram Direct)`)
+                              : (acc.displayName || acc.metadata?.displayPhoneNumber || 'Canal WhatsApp Zernio');
                             setInstanceName(suggestedName);
                           }
                         }}
@@ -1527,12 +1529,17 @@ function SettingsPage() {
                           <SelectValue placeholder={isLoadingZernioAccounts ? "Carregando contas da Zernio..." : zernioAccounts.length === 0 ? "Nenhuma conta desta rede na Zernio" : "Selecione uma conta"} />
                         </SelectTrigger>
                         <SelectContent>
-                          {zernioAccounts.map((acc) => (
-                            <SelectItem key={acc.id} value={acc.id}>
-                              {acc.displayName || (acc.platform === 'instagram' ? `@${acc.username}` : acc.metadata?.displayPhoneNumber || acc.id)}
-                              {acc.metadata?.qualityRating ? ` (${acc.metadata.qualityRating})` : ''}
-                            </SelectItem>
-                          ))}
+                          {zernioAccounts.map((acc) => {
+                            const label = acc.platform === 'instagram'
+                              ? (acc.username ? `@${acc.username} (${acc.displayName || 'Instagram'})` : (acc.displayName || acc.id))
+                              : (acc.displayName || acc.metadata?.displayPhoneNumber || acc.id);
+                            return (
+                              <SelectItem key={acc.id} value={acc.id}>
+                                {label}
+                                {acc.metadata?.qualityRating ? ` (${acc.metadata.qualityRating})` : ''}
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                       <p className="text-[11px] text-muted-foreground">

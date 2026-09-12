@@ -215,11 +215,13 @@ async function processarMensagem(
   const unitId = instance.unit_id;
   const isFromMe = evento.direcao === "saida";
   const contactIdOrPhone = evento.remetente.identificador;
+  const redeFinal: "whatsapp" | "instagram" =
+    instance.network === "instagram" || evento.rede === "instagram" ? "instagram" : "whatsapp";
 
   // 2. Localizar ou criar Contato
   let contact: any = null;
 
-  if (evento.rede === "instagram") {
+  if (redeFinal === "instagram") {
     // Busca por instagram_id ou username
     let query = supabaseAdmin.from("contacts").select("*").eq("company_id", companyId);
     if (evento.remetente.username) {
@@ -242,10 +244,9 @@ async function processarMensagem(
           name: evento.remetente.nome || (evento.remetente.username ? `@${evento.remetente.username}` : "Usuário Instagram"),
           instagram_id: contactIdOrPhone,
           instagram_username: evento.remetente.username || null,
-          metadata: {
-            origin: "zernio_instagram",
-            instagramProfile: evento.perfilInstagram || null,
-          },
+          source: "instagram",
+          source_details: "zernio",
+          profile_picture_url: evento.remetente.fotoPerfil || null,
         })
         .select()
         .single();
@@ -283,10 +284,8 @@ async function processarMensagem(
           name: evento.remetente.nome || contactIdOrPhone,
           phone: contactIdOrPhone,
           whatsapp_lid: evento.remetente.bsuid || null,
-          metadata: {
-            origin: "zernio_whatsapp",
-            adReferral: evento.anuncioReferral || null,
-          },
+          source: "whatsapp",
+          source_details: "zernio",
         })
         .select()
         .single();
@@ -337,8 +336,7 @@ async function processarMensagem(
   let conversationId: string;
   let aiActive = false;
   const nowIso = new Date().toISOString();
-  const windowExpiry =
-    evento.rede === "whatsapp" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
+  const windowExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
   const isSticker = evento.anexo?.tipo === "sticker";
   const validMediaType: "text" | "image" | "video" | "audio" | "document" = isSticker
@@ -380,7 +378,8 @@ async function processarMensagem(
         last_message_preview: previewText,
         provider_thread_id: evento.threadId || activeConv.provider_thread_id,
         remote_id: contactIdOrPhone,
-        has_window: evento.rede === "whatsapp",
+        channel: redeFinal,
+        has_window: true,
         window_expires_at: windowExpiry,
       })
       .eq("id", conversationId);
@@ -404,14 +403,14 @@ async function processarMensagem(
         contact_id: contact.id,
         whatsapp_instance_id: instance.id,
         unit_id: unitId,
-        channel: evento.rede,
+        channel: redeFinal,
         status: isFromMe ? "resolved" : isAiDefault ? "active" : "waiting",
         started_at: nowIso,
         last_message_at: nowIso,
         last_message_preview: previewText,
         remote_id: contactIdOrPhone,
         provider_thread_id: evento.threadId || null,
-        has_window: evento.rede === "whatsapp",
+        has_window: true,
         window_expires_at: windowExpiry,
         ai_active: aiActive,
         ai_agent_id: aiActive ? defaultAgent?.id : null,
@@ -480,7 +479,7 @@ async function processarMensagem(
       messageId: insertedMsg.id,
       conversationId,
       mediaUrl: evento.anexo.url,
-      isWhatsApp: evento.rede === "whatsapp",
+      isWhatsApp: redeFinal === "whatsapp",
       apiKey: keyToUse,
       accountId: evento.accountId,
     }).catch((err) => {

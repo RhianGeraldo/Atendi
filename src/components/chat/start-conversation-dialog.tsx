@@ -58,7 +58,7 @@ export function StartConversationDialog({
       if (!activeCompanyId) return [];
       let query = supabase
         .from("whatsapp_instances")
-        .select("id, name, instance_name, provider, unit_id, units(id, name, color)")
+        .select("id, name, instance_name, provider, network, unit_id, units(id, name, color)")
         .eq("company_id", activeCompanyId)
         .order("name", { ascending: true });
       
@@ -68,7 +68,11 @@ export function StartConversationDialog({
 
       const { data, error } = await query;
       if (error) throw error;
-      return data ?? [];
+      // Iniciar conversa ativa por número de telefone é exclusivo para WhatsApp
+      const whatsAppOnly = (data ?? []).filter(
+        (inst: any) => (!inst.network || inst.network === "whatsapp") && inst.provider !== "instagram" && inst.provider !== "messenger"
+      );
+      return whatsAppOnly;
     },
     enabled: !!activeCompanyId && open,
   });
@@ -227,7 +231,7 @@ export function StartConversationDialog({
                           >
                             <div className="flex items-center justify-between w-full gap-2">
                               <div className="flex items-center gap-2 truncate">
-                                <ProviderIcon provider={inst.provider} />
+                                <ProviderIcon provider={inst.provider} network={inst.network} />
                                 <span className="font-medium truncate">{inst.name || inst.instance_name}</span>
                               </div>
                               <Badge variant="outline" className="text-[10px] shrink-0 font-normal px-1.5 py-0 h-4 bg-muted/40 text-muted-foreground">
@@ -254,7 +258,7 @@ export function StartConversationDialog({
                           >
                             <div className="flex items-center justify-between w-full gap-2">
                               <div className="flex items-center gap-2 truncate">
-                                <ProviderIcon provider={inst.provider} />
+                                <ProviderIcon provider={inst.provider} network={inst.network} />
                                 <span className="font-medium truncate">{inst.name || inst.instance_name}</span>
                               </div>
                               <Badge 

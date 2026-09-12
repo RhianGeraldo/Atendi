@@ -4,15 +4,16 @@ import { ChannelIcon } from "./channel-icon";
 
 interface Props {
   provider?: string | null;
+  network?: string | null;
   className?: string;
 }
 
-export function ProviderIcon({ provider, className }: Props) {
-  if (provider === "instagram") {
+export function ProviderIcon({ provider, network, className }: Props) {
+  if (provider === "instagram" || network === "instagram") {
     return <ChannelIcon channel="instagram" className={className} />;
   }
 
-  if (provider === "messenger") {
+  if (provider === "messenger" || network === "messenger") {
     return <ChannelIcon channel="messenger" className={className} />;
   }
 
@@ -20,7 +21,7 @@ export function ProviderIcon({ provider, className }: Props) {
     return <ChannelIcon channel="facebook" className={className} />;
   }
   
-  if (provider === "official") {
+  if (provider === "oficial" || provider === "official" || (provider === "zernio" && network === "whatsapp")) {
     return (
       <span className="relative inline-flex items-center justify-center shrink-0" title="WhatsApp Oficial">
         <ChannelIcon channel="whatsapp" className={className} />

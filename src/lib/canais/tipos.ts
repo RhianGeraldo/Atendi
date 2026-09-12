@@ -165,5 +165,5 @@ export interface Destinatario {
   /** Telefone só com dígitos no WhatsApp; IGSID no Instagram; PSID no Messenger. */
   identificador: string;
   /** De onde ele saiu — vai para o log quando o envio falha. */
-  origem: "telefone" | "remote_id" | "lid";
+  origem: "telefone" | "remote_id" | "lid" | "instagram_id" | "messenger_id";
 }

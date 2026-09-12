@@ -176,7 +176,7 @@ function ConversationsPage() {
       if (!activeCompanyId) return [];
       let query = supabase
         .from("whatsapp_instances")
-        .select("id, name, instance_name, provider, unit_id, units(id, name, color)")
+        .select("id, name, instance_name, provider, network, unit_id, units(id, name, color)")
         .eq("company_id", activeCompanyId);
       
       if (selectedUnitId && selectedUnitId !== "all") {
@@ -942,7 +942,7 @@ function ConversationsPage() {
                           return (
                             <DropdownMenuItem key={inst.id} onClick={() => setInstanceFilter(inst.id)} className="flex items-center justify-between gap-2 cursor-pointer">
                               <div className="flex items-center gap-2 truncate min-w-0">
-                                <ProviderIcon provider={inst.provider} className="h-4 w-4 shrink-0" />
+                                <ProviderIcon provider={inst.provider} network={inst.network} className="h-4 w-4 shrink-0" />
                                 <span className="truncate">{inst.name || inst.instance_name}</span>
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">

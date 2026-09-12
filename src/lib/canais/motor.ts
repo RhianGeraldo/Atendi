@@ -184,10 +184,10 @@ export async function abrirCanal(conv: ConversaDoCanal): Promise<CanalAberto> {
       .select(COLUNAS)
       .eq("unit_id", conv.unit_id)
       .in("provider", candidatos)
-      .order("created_at")
-      .limit(1)
-      .maybeSingle();
-    bruta = data as InstanciaBruta | null;
+      .order("created_at");
+
+    const lista = (data || []) as InstanciaBruta[];
+    bruta = lista.find((inst) => serve(inst.provider || "evogo", conv.channel, inst.network)) || null;
   }
 
   // 3. Na empresa. A unidade da conversa é o caminho para achá-la.
@@ -204,10 +204,10 @@ export async function abrirCanal(conv: ConversaDoCanal): Promise<CanalAberto> {
         .select(COLUNAS)
         .eq("company_id", unidade.company_id)
         .in("provider", candidatos)
-        .order("created_at")
-        .limit(1)
-        .maybeSingle();
-      bruta = data as InstanciaBruta | null;
+        .order("created_at");
+
+      const lista = (data || []) as InstanciaBruta[];
+      bruta = lista.find((inst) => serve(inst.provider || "evogo", conv.channel, inst.network)) || null;
     }
   }
 
@@ -246,18 +246,28 @@ export async function abrirCanal(conv: ConversaDoCanal): Promise<CanalAberto> {
 export function destinatarioDe(
   canal: CanalAberto,
   conv: { remote_id?: string | null },
-  contato: { phone?: string | null; whatsapp_lid?: string | null } | null | undefined,
+  contato: { phone?: string | null; whatsapp_lid?: string | null; instagram_id?: string | null; messenger_id?: string | null } | null | undefined,
 ): Destinatario {
-  if (canal.rede === "instagram" || canal.rede === "messenger") {
-    const id = conv.remote_id || contato?.whatsapp_lid || contato?.phone || "";
+  if (canal.rede === "instagram") {
+    const id = conv.remote_id || contato?.instagram_id || contato?.whatsapp_lid || contato?.phone || "";
     if (!id) {
-      throw new Error(
-        canal.rede === "instagram"
-          ? "O contato não tem o identificador do Instagram (IGSID)."
-          : "O contato não tem o identificador da Página (PSID).",
-      );
+      throw new Error("O contato não tem o identificador do Instagram (IGSID).");
     }
-    return { identificador: id, origem: conv.remote_id ? "remote_id" : "lid" };
+    return {
+      identificador: id,
+      origem: conv.remote_id ? "remote_id" : (contato?.instagram_id ? "instagram_id" : "lid"),
+    };
+  }
+
+  if (canal.rede === "messenger") {
+    const id = conv.remote_id || contato?.messenger_id || contato?.whatsapp_lid || contato?.phone || "";
+    if (!id) {
+      throw new Error("O contato não tem o identificador da Página (PSID).");
+    }
+    return {
+      identificador: id,
+      origem: conv.remote_id ? "remote_id" : (contato?.messenger_id ? "messenger_id" : "lid"),
+    };
   }
 
   const telefone = contato?.phone || conv.remote_id || contato?.whatsapp_lid || "";
