@@ -37,17 +37,26 @@ CREATE TABLE IF NOT EXISTS public.mcp_oauth_tokens (
   created_at timestamptz DEFAULT now()
 );
 
--- Inserir cliente padrão pré-configurado para Claude.ai caso o usuário configure manualmente
+-- Inserir clientes padrão pré-configurados (Universal e Claude.ai)
 INSERT INTO public.mcp_oauth_clients (client_id, client_secret, client_name, redirect_uris, client_type)
-VALUES (
-  'atendi-claude-mcp',
-  'atendi-secret-claude-mcp',
-  'Claude.ai Web Connector',
-  ARRAY['https://claude.ai/api/mcp/oauth/callback', 'https://claude.ai'],
-  'confidential'
-)
+VALUES 
+  (
+    'atendi-mcp-client',
+    'atendi-mcp-secret',
+    'Assistente de IA / Conector Universal MCP',
+    ARRAY['https://claude.ai/api/mcp/oauth/callback', 'https://chatgpt.com/api/mcp/oauth/callback', 'https://chat.openai.com/api/mcp/oauth/callback', 'http://localhost:3000/callback'],
+    'confidential'
+  ),
+  (
+    'atendi-claude-mcp',
+    'atendi-secret-claude-mcp',
+    'Claude.ai Web Connector',
+    ARRAY['https://claude.ai/api/mcp/oauth/callback', 'https://claude.ai'],
+    'confidential'
+  )
 ON CONFLICT (client_id) DO UPDATE SET
-  redirect_uris = EXCLUDED.redirect_uris;
+  redirect_uris = EXCLUDED.redirect_uris,
+  client_name = EXCLUDED.client_name;
 
 -- Habilitar RLS nas tabelas
 ALTER TABLE public.mcp_oauth_clients ENABLE ROW LEVEL SECURITY;

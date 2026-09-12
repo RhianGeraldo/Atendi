@@ -15,6 +15,8 @@ import {
   Terminal,
   Loader2,
   AlertTriangle,
+  Bot,
+  Workflow,
 } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,6 +62,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedClientId, setCopiedClientId] = useState(false);
   const [copiedClientSecret, setCopiedClientSecret] = useState(false);
+  const [platformGuide, setPlatformGuide] = useState<"web" | "ides" | "agents">("web");
 
   // Determinar URL base do endpoint MCP
   const mcpServerUrl = typeof window !== "undefined"
@@ -220,108 +223,248 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
         </CardContent>
       </Card>
 
-      {/* Card Especial: Conexão com Claude.ai (Web) via OAuth 2.1 */}
-      <Card className="border-violet-500/30 bg-gradient-to-br from-violet-500/5 via-transparent to-transparent shadow-xs">
+      {/* Card Especial: Conexão Universal MCP com Qualquer LLM / Plataforma */}
+      <Card className="border-primary/30 bg-gradient-to-br from-primary/5 via-transparent to-transparent shadow-xs">
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="space-y-1">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-violet-600 dark:text-violet-400">
-                <Sparkles className="h-4 w-4" />
-                Conexão com Claude.ai (Web) via OAuth 2.1
-              </CardTitle>
+              <div className="flex items-center gap-2 flex-wrap">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                  <Bot className="h-4 w-4 text-primary" />
+                  Conexão Universal com Qualquer Modelo de IA (LLM)
+                </CardTitle>
+                <Badge className="bg-emerald-600 text-white text-[10px]">
+                  Multi-LLM
+                </Badge>
+                <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                  Padrão Aberto MCP
+                </Badge>
+              </div>
               <CardDescription className="text-xs">
-                O Claude.ai utiliza o protocolo RFC 9728 com Descoberta Automática de OAuth e Dynamic Client Registration (RFC 7591).
+                O AtendiAI suporta qualquer modelo (OpenAI ChatGPT, Anthropic Claude, Google Gemini, DeepSeek, Llama), IDEs de código (Cursor, Windsurf, Antigravity) e orquestradores (N8N, Dify, LangChain).
               </CardDescription>
             </div>
-            <Badge className="bg-violet-600 hover:bg-violet-700 text-white text-[10px]">
-              OAuth 2.1 Ativo
-            </Badge>
+            
+            {/* Seletor de Tipo de Integração */}
+            <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg border border-border/80 self-start lg:self-center shrink-0">
+              <button
+                type="button"
+                onClick={() => setPlatformGuide("web")}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition cursor-pointer ${
+                  platformGuide === "web"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                ChatGPT & Claude (Web)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPlatformGuide("ides")}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition cursor-pointer ${
+                  platformGuide === "ides"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Cursor & IDEs
+              </button>
+              <button
+                type="button"
+                onClick={() => setPlatformGuide("agents")}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition cursor-pointer ${
+                  platformGuide === "agents"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                N8N & Agentes
+              </button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground">URL do Conector para o Claude.ai</label>
-            <div className="flex items-center gap-2 max-w-xl">
-              <Input
-                readOnly
-                value={typeof window !== "undefined" ? `${window.location.origin}/mcp` : "http://localhost:8080/mcp"}
-                className="font-mono text-xs bg-muted/50 select-all"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const url = typeof window !== "undefined" ? `${window.location.origin}/mcp` : "http://localhost:8080/mcp";
-                  navigator.clipboard.writeText(url);
-                  toast.success("URL do conector Claude copiada!");
-                }}
-                className="gap-1.5 shrink-0"
-              >
-                <Copy className="h-3.5 w-3.5" />
-                Copiar
-              </Button>
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              No Claude.ai, cole este endereço em <strong>Configurações &gt; Conectores &gt; Adicionar conector personalizado</strong>.
-            </p>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-muted/40 border border-border/80 space-y-3">
-            <div className="text-xs font-semibold flex items-center gap-2">
-              <Key className="h-3.5 w-3.5 text-amber-500" />
-              Credenciais Pré-Registradas (caso o conector do Claude solicite OAuth Client ID manual):
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div className="space-y-1">
-                <span className="text-[11px] text-muted-foreground font-medium">OAuth Client ID</span>
-                <div className="flex items-center gap-1.5">
+          {platformGuide === "web" && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-foreground">URL do Conector Remoto (MCP OAuth 2.1)</label>
+                <div className="flex items-center gap-2 max-w-xl">
                   <Input
                     readOnly
-                    value="atendi-claude-mcp"
-                    className="font-mono text-xs bg-background select-all h-8"
+                    value={typeof window !== "undefined" ? `${window.location.origin}/mcp` : "http://localhost:8080/mcp"}
+                    className="font-mono text-xs bg-muted/50 select-all"
                   />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const url = typeof window !== "undefined" ? `${window.location.origin}/mcp` : "http://localhost:8080/mcp";
+                      navigator.clipboard.writeText(url);
+                      toast.success("URL do conector MCP copiada!");
+                    }}
+                    className="gap-1.5 shrink-0"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Copiar
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Compatível com <strong>Claude.ai</strong>, <strong>ChatGPT (Custom Actions / MCP)</strong>, <strong>LibreChat</strong>, <strong>Open WebUI</strong> e qualquer cliente com suporte a OAuth 2.1 (RFC 9728) e Dynamic Client Registration (RFC 7591).
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-muted/40 border border-border/80 space-y-3">
+                <div className="text-xs font-semibold flex items-center gap-2">
+                  <Key className="h-3.5 w-3.5 text-amber-500" />
+                  Credenciais Pré-Registradas (caso o cliente solicite Client ID manual):
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="space-y-1">
+                    <span className="text-[11px] text-muted-foreground font-medium">OAuth Client ID Universal</span>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        readOnly
+                        value="atendi-mcp-client"
+                        className="font-mono text-xs bg-background select-all h-8"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText("atendi-mcp-client");
+                          setCopiedClientId(true);
+                          setTimeout(() => setCopiedClientId(false), 2000);
+                          toast.success("Client ID copiado!");
+                        }}
+                        className="h-8 px-2"
+                      >
+                        {copiedClientId ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-[11px] text-muted-foreground font-medium">OAuth Client Secret</span>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        readOnly
+                        value="atendi-mcp-secret"
+                        className="font-mono text-xs bg-background select-all h-8"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText("atendi-mcp-secret");
+                          setCopiedClientSecret(true);
+                          setTimeout(() => setCopiedClientSecret(false), 2000);
+                          toast.success("Client Secret copiado!");
+                        }}
+                        className="h-8 px-2"
+                      >
+                        {copiedClientSecret ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {platformGuide === "ides" && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Gere uma chave abaixo na tabela <strong>"Chaves de Acesso MCP"</strong> e configure seu editor favorito (Cursor, Windsurf, VS Code ou Claude Desktop):
+              </p>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold font-mono text-foreground">.cursor/mcp.json ou claude_desktop_config.json</span>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => {
-                      navigator.clipboard.writeText("atendi-claude-mcp");
-                      setCopiedClientId(true);
-                      setTimeout(() => setCopiedClientId(false), 2000);
-                      toast.success("Client ID copiado!");
+                      const snippet = JSON.stringify(
+                        {
+                          mcpServers: {
+                            atendi: {
+                              url: mcpServerUrl,
+                              headers: {
+                                Authorization: "Bearer atendi_mcp_live_SUA_CHAVE_AQUI",
+                              },
+                            },
+                          },
+                        },
+                        null,
+                        2
+                      );
+                      navigator.clipboard.writeText(snippet);
+                      toast.success("Snippet copiado!");
                     }}
-                    className="h-8 px-2"
+                    className="h-7 text-xs gap-1"
                   >
-                    {copiedClientId ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    <Copy className="h-3 w-3" />
+                    Copiar JSON
                   </Button>
                 </div>
+                <pre className="p-3 rounded-xl bg-muted/60 border border-border/80 text-[11px] font-mono overflow-x-auto text-foreground">
+{`{
+  "mcpServers": {
+    "atendi": {
+      "url": "${mcpServerUrl}",
+      "headers": {
+        "Authorization": "Bearer atendi_mcp_live_SUA_CHAVE_AQUI"
+      }
+    }
+  }
+}`}
+                </pre>
               </div>
+            </div>
+          )}
 
-              <div className="space-y-1">
-                <span className="text-[11px] text-muted-foreground font-medium">OAuth Client Secret</span>
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    readOnly
-                    value="atendi-secret-claude-mcp"
-                    className="font-mono text-xs bg-background select-all h-8"
-                  />
+          {platformGuide === "agents" && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Conecte fluxos do <strong>N8N</strong>, <strong>Dify</strong>, <strong>Flowise</strong>, scripts em <strong>Python</strong> ou qualquer agente autônomo enviando chamadas HTTP JSON-RPC 2.0 padrão:
+              </p>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold font-mono text-foreground">Exemplo de Requisição HTTP (cURL / N8N / Python)</span>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => {
-                      navigator.clipboard.writeText("atendi-secret-claude-mcp");
-                      setCopiedClientSecret(true);
-                      setTimeout(() => setCopiedClientSecret(false), 2000);
-                      toast.success("Client Secret copiado!");
+                      const curlText = `curl -X POST ${mcpServerUrl} \\
+  -H "Authorization: Bearer atendi_mcp_live_SUA_CHAVE" \\
+  -H "Content-Type: application/json" \\
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "listar_contatos", "arguments": {"limite": 10}}}'`;
+                      navigator.clipboard.writeText(curlText);
+                      toast.success("Comando cURL copiado!");
                     }}
-                    className="h-8 px-2"
+                    className="h-7 text-xs gap-1"
                   >
-                    {copiedClientSecret ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    <Copy className="h-3 w-3" />
+                    Copiar cURL
                   </Button>
                 </div>
+                <pre className="p-3 rounded-xl bg-muted/60 border border-border/80 text-[11px] font-mono overflow-x-auto text-foreground">
+{`curl -X POST ${mcpServerUrl} \\
+  -H "Authorization: Bearer atendi_mcp_live_SUA_CHAVE" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "listar_contatos",
+      "arguments": { "limite": 10 }
+    }
+  }'`}
+                </pre>
               </div>
             </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 

@@ -302,14 +302,29 @@ export async function handleOauthToken(request: Request): Promise<Response> {
 export async function handleOauthAuthorize(request: Request): Promise<Response> {
   const url = new URL(request.url);
 
-  // GET: Renderizar tela de login e consentimento da AtendiAI
+  // GET: Renderizar tela de login e consentimento da AtendiAI para qualquer IA / LLM
   if (request.method === "GET") {
-    const clientId = url.searchParams.get("client_id") || "atendi-claude-mcp";
-    const redirectUri = url.searchParams.get("redirect_uri") || "https://claude.ai/api/mcp/oauth/callback";
+    const clientId = url.searchParams.get("client_id") || "atendi-mcp-client";
+    const redirectUri = url.searchParams.get("redirect_uri") || "";
     const state = url.searchParams.get("state") || "";
     const codeChallenge = url.searchParams.get("code_challenge") || "";
     const codeChallengeMethod = url.searchParams.get("code_challenge_method") || "S256";
     const scope = url.searchParams.get("scope") || "openid mcp:all";
+
+    // Buscar nome amigável do cliente / IA solicitante no banco
+    let clientName = "Assistente de IA";
+    if (clientId) {
+      try {
+        const { data: clientRow } = await supabaseAdmin
+          .from("mcp_oauth_clients")
+          .select("client_name")
+          .eq("client_id", clientId)
+          .single();
+        if (clientRow?.client_name) {
+          clientName = clientRow.client_name;
+        }
+      } catch {}
+    }
 
     const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
     const supabaseAnonKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
@@ -319,7 +334,7 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Conectar Claude à AtendiAI</title>
+  <title>Conectar ${escapeHtml(clientName)} à AtendiAI</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
@@ -352,8 +367,8 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
     </div>
 
     <div class="text-center mb-6">
-      <h1 class="text-xl font-semibold text-white mb-1">Autorizar Claude.ai</h1>
-      <p class="text-xs text-slate-400">O assistente Claude.ai solicita permissão para conectar ao seu CRM multi-unidade.</p>
+      <h1 class="text-xl font-semibold text-white mb-1">Autorizar ${escapeHtml(clientName)}</h1>
+      <p class="text-xs text-slate-400">O ${escapeHtml(clientName)} solicita permissão para conectar à sua base de dados do CRM multi-unidade.</p>
     </div>
 
     <!-- Indicador de Carregamento de Sessão Ativa -->
@@ -384,7 +399,7 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
     <!-- Lista de Permissões -->
     <div class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3.5 my-4 text-xs text-slate-300 space-y-1.5">
       <div class="font-medium text-slate-200 mb-1 flex items-center gap-1.5">
-        <span class="w-2 h-2 rounded-full bg-emerald-500"></span> O Claude terá acesso a:
+        <span class="w-2 h-2 rounded-full bg-emerald-500"></span> A IA conectada terá acesso a:
       </div>
       <div class="flex items-center gap-2 text-slate-400">✓ Leads, contatos e conversas do WhatsApp</div>
       <div class="flex items-center gap-2 text-slate-400">✓ Oportunidades e etapas dos funis de vendas</div>
@@ -439,7 +454,7 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
         >
           <option value="">🏢 Matriz (Todas as Unidades / Visão Geral)</option>
         </select>
-        <p class="text-[10px] text-slate-500 mt-1">O Claude respeitará as filiais vinculadas à sua permissão.</p>
+        <p class="text-[10px] text-slate-500 mt-1">A IA respeitará as filiais vinculadas à sua permissão.</p>
       </div>
 
       <div class="pt-2 flex flex-col gap-2">
@@ -448,7 +463,7 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
           id="submit-btn"
           class="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-medium py-2.5 px-4 rounded-xl transition duration-150 flex items-center justify-center gap-2 shadow-lg shadow-violet-600/25 cursor-pointer text-sm"
         >
-          <span id="btn-text">⚡ Autorizar Claude com 1 Clique</span>
+          <span id="btn-text">⚡ Autorizar ${escapeHtml(clientName)} com 1 Clique</span>
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
         </button>
 
@@ -533,7 +548,7 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
         document.getElementById("user-display-name").innerText = metaName;
         document.getElementById("user-avatar").innerText = (metaName[0] || 'U').toUpperCase();
 
-        btnText.innerText = "⚡ Autorizar Claude com 1 Clique";
+        btnText.innerText = "⚡ Autorizar " + ${JSON.stringify(clientName)} + " com 1 Clique";
 
         // Tentar carregar unidades da empresa
         if (sbClient) {
@@ -582,7 +597,7 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
         credView.classList.remove("hidden");
         emailInput.required = true;
         passwordInput.required = true;
-        btnText.innerText = "Entrar e Autorizar Claude";
+        btnText.innerText = "Entrar e Autorizar " + ${JSON.stringify(clientName)};
       }
 
       // Alternar para outra conta
@@ -592,7 +607,7 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
         credView.classList.remove("hidden");
         emailInput.required = true;
         passwordInput.required = true;
-        btnText.innerText = "Entrar e Autorizar Claude";
+        btnText.innerText = "Entrar e Autorizar " + ${JSON.stringify(clientName)};
         switchBtn.classList.add("hidden");
       });
     })();
@@ -613,8 +628,8 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
       const sessionToken = (formData.get("session_token") as string)?.trim();
       const email = (formData.get("email") as string)?.trim();
       const password = (formData.get("password") as string)?.trim();
-      const clientId = (formData.get("client_id") as string) || "atendi-claude-mcp";
-      const redirectUri = (formData.get("redirect_uri") as string) || "https://claude.ai/api/mcp/oauth/callback";
+      const clientId = (formData.get("client_id") as string) || "atendi-mcp-client";
+      const redirectUri = (formData.get("redirect_uri") as string) || "";
       const state = (formData.get("state") as string) || "";
       const codeChallenge = (formData.get("code_challenge") as string) || "";
       const codeChallengeMethod = (formData.get("code_challenge_method") as string) || "S256";
@@ -687,13 +702,22 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
         expires_at: expiresAt,
       });
 
-      if (insertErr) {
-        console.error("[OAuth] Erro ao salvar code:", insertErr);
-        return renderAuthErrorPage("Falha interna ao gerar código de autorização.", redirectUri, state);
+      let finalRedirectUri = redirectUri;
+      if (!finalRedirectUri) {
+        const { data: clientRow } = await supabaseAdmin
+          .from("mcp_oauth_clients")
+          .select("redirect_uris")
+          .eq("client_id", clientId)
+          .single();
+        finalRedirectUri = clientRow?.redirect_uris?.[0] || "";
       }
 
-      // 5. Redirecionar para o callback do Claude.ai
-      const callbackUrl = new URL(redirectUri);
+      if (!finalRedirectUri) {
+        return renderAuthErrorPage("URI de redirecionamento não fornecida.", "", state);
+      }
+
+      // 5. Redirecionar para o callback do cliente OAuth
+      const callbackUrl = new URL(finalRedirectUri);
       callbackUrl.searchParams.set("code", code);
       if (state) callbackUrl.searchParams.set("state", state);
 
