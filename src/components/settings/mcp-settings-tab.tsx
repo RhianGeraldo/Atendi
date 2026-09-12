@@ -39,11 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
-import {
-  listMcpKeysAction,
-  createMcpKeyAction,
-  revokeMcpKeyAction,
-} from "@/lib/api/mcp.functions";
+import { listMcpKeysAction, createMcpKeyAction, revokeMcpKeyAction } from "@/lib/api/mcp.functions";
 
 interface McpSettingsTabProps {
   companyId: string;
@@ -65,9 +61,10 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
   const [platformGuide, setPlatformGuide] = useState<"web" | "ides" | "agents">("web");
 
   // Determinar URL base do endpoint MCP
-  const mcpServerUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/api/mcp`
-    : "http://localhost:8080/api/mcp";
+  const mcpServerUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/api/mcp`
+      : "http://localhost:8080/api/mcp";
 
   // 1. Buscar unidades da empresa
   const { data: units } = useQuery({
@@ -117,7 +114,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
       qc.invalidateQueries({ queryKey: ["mcp-api-keys", companyId] });
       toast.success("Chave MCP criada com sucesso!");
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || "Erro ao criar chave MCP.");
     },
   });
@@ -131,7 +128,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
       qc.invalidateQueries({ queryKey: ["mcp-api-keys", companyId] });
       toast.success("Chave MCP revogada com sucesso.");
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast.error(err.message || "Erro ao revogar chave.");
     },
   });
@@ -162,7 +159,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
           },
         },
         null,
-        2
+        2,
       )
     : "";
 
@@ -173,13 +170,20 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Cpu className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-            <h3 className="text-base font-bold tracking-tight">Servidor MCP (Model Context Protocol)</h3>
-            <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-xs">
+            <h3 className="text-base font-bold tracking-tight">
+              Servidor MCP (Model Context Protocol)
+            </h3>
+            <Badge
+              variant="outline"
+              className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-xs"
+            >
               Ativo
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground max-w-2xl leading-relaxed">
-            Conecte assistentes de inteligência artificial (Claude Desktop, Cursor IDE, Antigravity CLI ou agentes N8N) diretamente à sua base do Atendi para pesquisar contatos, enviar mensagens, movimentar funis e consultar o Playbook.
+            Conecte assistentes de inteligência artificial (Claude Desktop, Cursor IDE, Antigravity
+            CLI ou agentes N8N) diretamente à sua base do Atendi para pesquisar contatos, enviar
+            mensagens, movimentar funis e consultar o Playbook.
           </p>
         </div>
 
@@ -200,7 +204,8 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
             URL do Servidor MCP da Empresa
           </CardTitle>
           <CardDescription className="text-xs">
-            Esta é a URL que deve ser inserida nas configurações do seu cliente MCP (Cursor, Claude Desktop ou Antigravity).
+            Esta é a URL que deve ser inserida nas configurações do seu cliente MCP (Cursor, Claude
+            Desktop ou Antigravity).
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -216,7 +221,11 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               onClick={() => handleCopy(mcpServerUrl, true)}
               className="gap-1.5 shrink-0"
             >
-              {copiedUrl ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+              {copiedUrl ? (
+                <Check className="h-3.5 w-3.5 text-emerald-500" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
               {copiedUrl ? "Copiado" : "Copiar URL"}
             </Button>
           </div>
@@ -233,18 +242,18 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                   <Bot className="h-4 w-4 text-primary" />
                   Conexão Universal com Qualquer Modelo de IA (LLM)
                 </CardTitle>
-                <Badge className="bg-emerald-600 text-white text-[10px]">
-                  Multi-LLM
-                </Badge>
+                <Badge className="bg-emerald-600 text-white text-[10px]">Multi-LLM</Badge>
                 <Badge variant="outline" className="text-[10px] text-muted-foreground">
                   Padrão Aberto MCP
                 </Badge>
               </div>
               <CardDescription className="text-xs">
-                O AtendiAI suporta qualquer modelo (OpenAI ChatGPT, Anthropic Claude, Google Gemini, DeepSeek, Llama), IDEs de código (Cursor, Windsurf, Antigravity) e orquestradores (N8N, Dify, LangChain).
+                O AtendiAI suporta qualquer modelo (OpenAI ChatGPT, Anthropic Claude, Google Gemini,
+                DeepSeek, Llama), IDEs de código (Cursor, Windsurf, Antigravity) e orquestradores
+                (N8N, Dify, LangChain).
               </CardDescription>
             </div>
-            
+
             {/* Seletor de Tipo de Integração */}
             <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg border border-border/80 self-start lg:self-center shrink-0">
               <button
@@ -287,18 +296,27 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
           {platformGuide === "web" && (
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-foreground">URL do Conector Remoto (MCP OAuth 2.1)</label>
+                <label className="text-xs font-semibold text-foreground">
+                  URL do Conector Remoto (MCP OAuth 2.1)
+                </label>
                 <div className="flex items-center gap-2 max-w-xl">
                   <Input
                     readOnly
-                    value={typeof window !== "undefined" ? `${window.location.origin}/mcp` : "http://localhost:8080/mcp"}
+                    value={
+                      typeof window !== "undefined"
+                        ? `${window.location.origin}/mcp`
+                        : "http://localhost:8080/mcp"
+                    }
                     className="font-mono text-xs bg-muted/50 select-all"
                   />
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      const url = typeof window !== "undefined" ? `${window.location.origin}/mcp` : "http://localhost:8080/mcp";
+                      const url =
+                        typeof window !== "undefined"
+                          ? `${window.location.origin}/mcp`
+                          : "http://localhost:8080/mcp";
                       navigator.clipboard.writeText(url);
                       toast.success("URL do conector MCP copiada!");
                     }}
@@ -309,7 +327,10 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                   </Button>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Compatível com <strong>Claude.ai</strong>, <strong>ChatGPT (Custom Actions / MCP)</strong>, <strong>LibreChat</strong>, <strong>Open WebUI</strong> e qualquer cliente com suporte a OAuth 2.1 (RFC 9728) e Dynamic Client Registration (RFC 7591).
+                  Compatível com <strong>Claude.ai</strong>,{" "}
+                  <strong>ChatGPT (Custom Actions / MCP)</strong>, <strong>LibreChat</strong>,{" "}
+                  <strong>Open WebUI</strong> e qualquer cliente com suporte a OAuth 2.1 (RFC 9728)
+                  e Dynamic Client Registration (RFC 7591).
                 </p>
               </div>
 
@@ -321,7 +342,9 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div className="space-y-1">
-                    <span className="text-[11px] text-muted-foreground font-medium">OAuth Client ID Universal</span>
+                    <span className="text-[11px] text-muted-foreground font-medium">
+                      OAuth Client ID Universal
+                    </span>
                     <div className="flex items-center gap-1.5">
                       <Input
                         readOnly
@@ -339,13 +362,19 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                         }}
                         className="h-8 px-2"
                       >
-                        {copiedClientId ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                        {copiedClientId ? (
+                          <Check className="h-3.5 w-3.5 text-emerald-500" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
                       </Button>
                     </div>
                   </div>
 
                   <div className="space-y-1">
-                    <span className="text-[11px] text-muted-foreground font-medium">OAuth Client Secret</span>
+                    <span className="text-[11px] text-muted-foreground font-medium">
+                      OAuth Client Secret
+                    </span>
                     <div className="flex items-center gap-1.5">
                       <Input
                         readOnly
@@ -363,7 +392,11 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                         }}
                         className="h-8 px-2"
                       >
-                        {copiedClientSecret ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                        {copiedClientSecret ? (
+                          <Check className="h-3.5 w-3.5 text-emerald-500" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
                       </Button>
                     </div>
                   </div>
@@ -375,11 +408,14 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
           {platformGuide === "ides" && (
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Gere uma chave abaixo na tabela <strong>"Chaves de Acesso MCP"</strong> e configure seu editor favorito (Cursor, Windsurf, VS Code ou Claude Desktop):
+                Gere uma chave abaixo na tabela <strong>"Chaves de Acesso MCP"</strong> e configure
+                seu editor favorito (Cursor, Windsurf, VS Code ou Claude Desktop):
               </p>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold font-mono text-foreground">.cursor/mcp.json ou claude_desktop_config.json</span>
+                  <span className="text-xs font-semibold font-mono text-foreground">
+                    .cursor/mcp.json ou claude_desktop_config.json
+                  </span>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -396,7 +432,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                           },
                         },
                         null,
-                        2
+                        2,
                       );
                       navigator.clipboard.writeText(snippet);
                       toast.success("Snippet copiado!");
@@ -408,7 +444,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                   </Button>
                 </div>
                 <pre className="p-3 rounded-xl bg-muted/60 border border-border/80 text-[11px] font-mono overflow-x-auto text-foreground">
-{`{
+                  {`{
   "mcpServers": {
     "atendi": {
       "url": "${mcpServerUrl}",
@@ -426,11 +462,15 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
           {platformGuide === "agents" && (
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Conecte fluxos do <strong>N8N</strong>, <strong>Dify</strong>, <strong>Flowise</strong>, scripts em <strong>Python</strong> ou qualquer agente autônomo enviando chamadas HTTP JSON-RPC 2.0 padrão:
+                Conecte fluxos do <strong>N8N</strong>, <strong>Dify</strong>,{" "}
+                <strong>Flowise</strong>, scripts em <strong>Python</strong> ou qualquer agente
+                autônomo enviando chamadas HTTP JSON-RPC 2.0 padrão:
               </p>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold font-mono text-foreground">Exemplo de Requisição HTTP (cURL / N8N / Python)</span>
+                  <span className="text-xs font-semibold font-mono text-foreground">
+                    Exemplo de Requisição HTTP (cURL / N8N / Python)
+                  </span>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -449,7 +489,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                   </Button>
                 </div>
                 <pre className="p-3 rounded-xl bg-muted/60 border border-border/80 text-[11px] font-mono overflow-x-auto text-foreground">
-{`curl -X POST ${mcpServerUrl} \\
+                  {`curl -X POST ${mcpServerUrl} \\
   -H "Authorization: Bearer atendi_mcp_live_SUA_CHAVE" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -497,7 +537,8 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               <Key className="h-8 w-8 text-muted-foreground/40 mx-auto" />
               <p className="text-xs font-medium text-foreground">Nenhuma chave MCP ativa</p>
               <p className="text-xs text-muted-foreground max-w-md mx-auto">
-                Crie sua primeira chave para conectar o Cursor, Claude Desktop ou outro agente de IA ao Atendi.
+                Crie sua primeira chave para conectar o Cursor, Claude Desktop ou outro agente de IA
+                ao Atendi.
               </p>
               <Button
                 variant="outline"
@@ -511,20 +552,29 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
             </div>
           ) : (
             <div className="divide-y divide-border/60">
-              {keysData.map((k: any) => {
+              {keysData.map((k) => {
                 const isGlobal = !k.unit_id;
                 return (
-                  <div key={k.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div
+                    key={k.id}
+                    className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-sm text-foreground">{k.name}</span>
                         {isGlobal ? (
-                          <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/20 gap-1">
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] bg-primary/10 text-primary border-primary/20 gap-1"
+                          >
                             <Building2 className="h-3 w-3" />
                             Matriz (Todas as Unidades)
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 gap-1">
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20 gap-1"
+                          >
                             <Building2 className="h-3 w-3" />
                             Filial: {k.units?.name || "Unidade"}
                           </Badge>
@@ -540,7 +590,11 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                           <>
                             <span>•</span>
                             <span className="font-sans text-emerald-600 dark:text-emerald-400">
-                              Último uso: {new Date(k.last_used_at).toLocaleDateString("pt-BR")} {new Date(k.last_used_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                              Último uso: {new Date(k.last_used_at).toLocaleDateString("pt-BR")}{" "}
+                              {new Date(k.last_used_at).toLocaleTimeString("pt-BR", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
                             </span>
                           </>
                         )}
@@ -551,7 +605,11 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        if (confirm(`Tem certeza que deseja revogar a chave "${k.name}"? Qualquer IA usando este token perderá o acesso imediatamente.`)) {
+                        if (
+                          confirm(
+                            `Tem certeza que deseja revogar a chave "${k.name}"? Qualquer IA usando este token perderá o acesso imediatamente.`,
+                          )
+                        ) {
                           revokeMutation.mutate(k.id);
                         }
                       }}
@@ -584,27 +642,67 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
               <span className="font-semibold text-foreground">🏬 Unidades & Filiais</span>
-              <p className="text-muted-foreground text-[11px]">listar_unidades, consultar_unidade, listar_departamentos</p>
+              <p className="text-muted-foreground text-[11px]">
+                listar_unidades, consultar_unidade, listar_departamentos
+              </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
-              <span className="font-semibold text-foreground">👥 Contatos & Leads</span>
-              <p className="text-muted-foreground text-[11px]">listar_contatos, consultar_contato, criar_contato, atualizar_contato, adicionar_nota_contato</p>
+              <span className="font-semibold text-foreground">👥 Contatos, Tags & Bloqueio</span>
+              <p className="text-muted-foreground text-[11px]">
+                listar_contatos, consultar_contato, criar_contato, atualizar_contato,
+                adicionar_nota_contato, gerenciar_etiquetas_contato, bloquear_contato,
+                desbloquear_contato
+              </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
-              <span className="font-semibold text-foreground">💬 Mensageria & WhatsApp</span>
-              <p className="text-muted-foreground text-[11px]">listar_conversas, consultar_conversa, enviar_mensagem_whatsapp</p>
+              <span className="font-semibold text-foreground">💬 Atendimento, Fila & WhatsApp</span>
+              <p className="text-muted-foreground text-[11px]">
+                listar_conversas, consultar_conversa, enviar_mensagem_whatsapp, assumir_conversa,
+                transferir_conversa, adicionar_nota_interna, listar_motivos_encerramento,
+                encerrar_atendimento
+              </p>
+            </div>
+            <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
+              <span className="font-semibold text-foreground">📁 Mensagens Rápidas & Atalhos</span>
+              <p className="text-muted-foreground text-[11px]">
+                listar_mensagens_rapidas, consultar_mensagem_rapida, criar_mensagem_rapida
+              </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
               <span className="font-semibold text-foreground">🎯 Funis & Oportunidades</span>
-              <p className="text-muted-foreground text-[11px]">listar_funis, listar_etapas, listar_oportunidades, criar_oportunidade, mover_oportunidade, atualizar_oportunidade</p>
+              <p className="text-muted-foreground text-[11px]">
+                listar_funis, listar_etapas, listar_oportunidades, criar_oportunidade,
+                mover_oportunidade, atualizar_oportunidade
+              </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
               <span className="font-semibold text-foreground">📋 Tarefas & Follow-ups</span>
-              <p className="text-muted-foreground text-[11px]">listar_tarefas, criar_tarefa, concluir_tarefa</p>
+              <p className="text-muted-foreground text-[11px]">
+                listar_tarefas, criar_tarefa, concluir_tarefa
+              </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
-              <span className="font-semibold text-foreground">📖 Playbook Comercial & Métricas</span>
-              <p className="text-muted-foreground text-[11px]">consultar_playbook, listar_procedimentos, salvar_procedimento, consultar_metricas_dashboard</p>
+              <span className="font-semibold text-foreground">🧠 Sales Coach, Ads & Objeções</span>
+              <p className="text-muted-foreground text-[11px]">
+                consultar_analise_sales_coach, consultar_origem_anuncio_lead,
+                minerar_objecoes_empresa
+              </p>
+            </div>
+            <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
+              <span className="font-semibold text-foreground">
+                📞 Telefonia, Voz & Transcrições
+              </span>
+              <p className="text-muted-foreground text-[11px]">
+                listar_chamadas, consultar_transcricao_chamada
+              </p>
+            </div>
+            <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
+              <span className="font-semibold text-foreground">📖 Playbook, Métricas & Prompts</span>
+              <p className="text-muted-foreground text-[11px]">
+                consultar_playbook, listar_procedimentos, salvar_procedimento,
+                consultar_metricas_dashboard (Recursos: atendi://playbook, atendi://metricas-hoje |
+                Prompts: qualificar_lead, auditar_atendimento, resumo_handover)
+              </p>
             </div>
           </div>
         </CardContent>
@@ -644,7 +742,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                   <SelectItem value="matriz">
                     🏢 Matriz (Todas as Unidades / Visão Global)
                   </SelectItem>
-                  {(units || []).map((u: any) => (
+                  {(units || []).map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       🏬 Filial: {u.name}
                     </SelectItem>
@@ -652,7 +750,8 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground leading-tight">
-                Se escolher uma filial, a IA só terá acesso aos leads e atendimentos daquela filial específica.
+                Se escolher uma filial, a IA só terá acesso aos leads e atendimentos daquela filial
+                específica.
               </p>
             </div>
           </div>
@@ -672,7 +771,11 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               disabled={createMutation.isPending || !newKeyName.trim()}
               className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5"
             >
-              {createMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+              {createMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ShieldCheck className="h-3.5 w-3.5" />
+              )}
               Gerar Chave de Acesso
             </Button>
           </DialogFooter>
@@ -688,7 +791,8 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               Chave MCP Criada com Sucesso!
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Copie o token secreto agora. Por motivos de segurança, ele <strong>nunca mais será exibido</strong>.
+              Copie o token secreto agora. Por motivos de segurança, ele{" "}
+              <strong>nunca mais será exibido</strong>.
             </DialogDescription>
           </DialogHeader>
 
@@ -696,7 +800,8 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
             <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2.5">
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
               <span>
-                Guarde este token em local seguro. Qualquer aplicação com este token poderá interagir com os dados da empresa de acordo com o escopo configurado.
+                Guarde este token em local seguro. Qualquer aplicação com este token poderá
+                interagir com os dados da empresa de acordo com o escopo configurado.
               </span>
             </div>
 
@@ -713,7 +818,11 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                   onClick={() => handleCopy(generatedKey?.token || "")}
                   className="gap-1.5 shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white"
                 >
-                  {copiedToken ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedToken ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
                   {copiedToken ? "Copiado!" : "Copiar Token"}
                 </Button>
               </div>
@@ -722,7 +831,9 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
             <div className="space-y-1.5 pt-2">
               <div className="flex items-center gap-2">
                 <Code2 className="h-4 w-4 text-primary" />
-                <label className="text-xs font-semibold">Configuração Pronta para o Cursor IDE (.cursor/mcp.json)</label>
+                <label className="text-xs font-semibold">
+                  Configuração Pronta para o Cursor IDE (.cursor/mcp.json)
+                </label>
               </div>
               <pre className="p-3 rounded-xl bg-muted/60 border border-border/80 text-[11px] font-mono overflow-x-auto text-foreground">
                 {cursorSnippet}

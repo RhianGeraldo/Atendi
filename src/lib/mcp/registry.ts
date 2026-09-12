@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { McpContext, McpToolCallResult, McpToolDefinition } from "./types";
 import { unitsTools } from "./tools/units";
 import { contactsTools } from "./tools/contacts";
@@ -6,6 +7,9 @@ import { pipelineTools } from "./tools/pipeline";
 import { tasksTools } from "./tools/tasks";
 import { playbookTools } from "./tools/playbook";
 import { analyticsTools } from "./tools/analytics";
+import { quickMessagesTools } from "./tools/quick-messages";
+import { intelligenceTools } from "./tools/intelligence";
+import { callsTools } from "./tools/calls";
 
 export const allToolsList: McpToolDefinition[] = [
   ...unitsTools,
@@ -15,6 +19,9 @@ export const allToolsList: McpToolDefinition[] = [
   ...tasksTools,
   ...playbookTools,
   ...analyticsTools,
+  ...quickMessagesTools,
+  ...intelligenceTools,
+  ...callsTools,
 ];
 
 const toolsByName = new Map<string, McpToolDefinition>();
@@ -39,7 +46,7 @@ export function getAllMcpTools(context: McpContext) {
 export async function executeMcpTool(
   name: string,
   args: any,
-  context: McpContext
+  context: McpContext,
 ): Promise<McpToolCallResult> {
   const tool = toolsByName.get(name);
   if (!tool) {

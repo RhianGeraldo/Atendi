@@ -1,11 +1,14 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { validateMcpToken } from "./auth";
 import { getAllMcpTools, executeMcpTool } from "./registry";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { JsonRpcRequest, JsonRpcResponse, McpContext } from "./types";
 
 export const MCP_CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, mcp-session-id, X-Requested-With",
+  "Access-Control-Allow-Headers":
+    "Authorization, Content-Type, Accept, mcp-session-id, X-Requested-With",
 };
 
 export async function handleMcpRequest(request: Request): Promise<Response> {
@@ -33,7 +36,8 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         jsonrpc: "2.0",
         error: {
           code: -32000,
-          message: "Autenticação necessária. Conecte sua conta do AtendiAI ou forneça o header 'Authorization: Bearer <token>'",
+          message:
+            "Autenticação necessária. Conecte sua conta do AtendiAI ou forneça o header 'Authorization: Bearer <token>'",
         },
       }),
       {
@@ -43,7 +47,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
           "Content-Type": "application/json; charset=utf-8",
           "WWW-Authenticate": `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource/mcp"`,
         },
-      }
+      },
     );
   }
 
@@ -64,7 +68,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
           ...MCP_CORS_HEADERS,
           "Content-Type": "application/json; charset=utf-8",
         },
-      }
+      },
     );
   }
 
@@ -87,7 +91,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
         {
           status: 400,
           headers: { ...MCP_CORS_HEADERS, "Content-Type": "application/json" },
-        }
+        },
       );
     }
 
@@ -115,7 +119,7 @@ export async function handleMcpRequest(request: Request): Promise<Response> {
 // Processador individual de mensagem JSON-RPC 2.0
 async function processJsonRpc(
   req: JsonRpcRequest,
-  context: McpContext
+  context: McpContext,
 ): Promise<JsonRpcResponse | null> {
   const { id, method, params } = req;
 
@@ -135,8 +139,12 @@ async function processJsonRpc(
             tools: {
               listChanged: false,
             },
-            resources: {},
-            prompts: {},
+            resources: {
+              listChanged: false,
+            },
+            prompts: {
+              listChanged: false,
+            },
           },
           serverInfo: {
             name: "atendi-mcp-server",
@@ -197,7 +205,122 @@ Você tem acesso a contatos, conversas do WhatsApp/Instagram, funis de vendas, t
       return {
         jsonrpc: "2.0",
         id: id ?? null,
-        result: { resources: [] },
+        result: {
+          resources: [
+            {
+              uri: "atendi://playbook",
+              name: "Playbook Comercial & Procedimentos Padrão",
+              description:
+                "Diretrizes de vendas, objeções mapeadas e procedimentos operacionais da empresa.",
+              mimeType: "text/markdown",
+            },
+            {
+              uri: "atendi://metricas-hoje",
+              name: "Métricas Operacionais de Hoje",
+              description:
+                "Resumo em tempo real de atendimentos, conversas iniciadas e tarefas pendentes.",
+              mimeType: "application/json",
+            },
+          ],
+        },
+      };
+    }
+
+    case "resources/read": {
+      const uri = params?.uri;
+      if (!uri) {
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          error: { code: -32602, message: "Parâmetro 'uri' é obrigatório para resources/read." },
+        };
+      }
+
+      if (uri === "atendi://playbook") {
+        const { data: company } = await supabaseAdmin
+          .from("companies")
+          .select("name, sales_playbook")
+          .eq("id", context.companyId)
+          .single();
+
+        const { data: procedures } = await supabaseAdmin
+          .from("sales_playbook_procedures")
+          .select("category, title, content")
+          .eq("company_id", context.companyId)
+          .eq("active", true)
+          .order("category");
+
+        let text = `# Playbook Comercial - ${company?.name || context.companyName}\n\n`;
+        if (company?.sales_playbook) {
+          text += `## Diretrizes Gerais\n${company.sales_playbook}\n\n`;
+        }
+        if (procedures && procedures.length > 0) {
+          text += `## Procedimentos & Roteiros Homologados\n\n`;
+          for (const proc of procedures) {
+            text += `### [${proc.category}] ${proc.title}\n${proc.content}\n\n`;
+          }
+        }
+
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            contents: [
+              {
+                uri,
+                mimeType: "text/markdown",
+                text,
+              },
+            ],
+          },
+        };
+      }
+
+      if (uri === "atendi://metricas-hoje") {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todayIso = todayStart.toISOString();
+
+        const [convsRes, tasksRes] = await Promise.all([
+          supabaseAdmin
+            .from("conversations")
+            .select("id", { count: "exact" })
+            .eq("contacts.company_id", context.companyId)
+            .gte("created_at", todayIso),
+          supabaseAdmin
+            .from("tasks")
+            .select("id", { count: "exact" })
+            .eq("company_id", context.companyId)
+            .gte("created_at", todayIso),
+        ]);
+
+        const metrics = {
+          data: todayIso.split("T")[0],
+          empresa: context.companyName,
+          unidade: context.unitName || "Todas",
+          novas_conversas_hoje: convsRes.count || 0,
+          tarefas_hoje: tasksRes.count || 0,
+        };
+
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            contents: [
+              {
+                uri,
+                mimeType: "application/json",
+                text: JSON.stringify(metrics, null, 2),
+              },
+            ],
+          },
+        };
+      }
+
+      return {
+        jsonrpc: "2.0",
+        id: id ?? null,
+        error: { code: -32602, message: `Recurso "${uri}" não encontrado.` },
       };
     }
 
@@ -205,7 +328,114 @@ Você tem acesso a contatos, conversas do WhatsApp/Instagram, funis de vendas, t
       return {
         jsonrpc: "2.0",
         id: id ?? null,
-        result: { prompts: [] },
+        result: {
+          prompts: [
+            {
+              name: "qualificar_lead",
+              description:
+                "Gera um roteiro de perguntas estratégicas de qualificação (BANT / SPIN) para o lead com base nos dados do CRM.",
+              arguments: [
+                {
+                  name: "contato_id",
+                  description: "ID (UUID) do contato no Atendi.",
+                  required: true,
+                },
+              ],
+            },
+            {
+              name: "auditar_atendimento",
+              description:
+                "Audita a conformidade de uma conversa recente confrontando com o Playbook Comercial da empresa.",
+              arguments: [
+                {
+                  name: "conversa_id",
+                  description: "ID (UUID) da conversa a ser auditada.",
+                  required: true,
+                },
+              ],
+            },
+            {
+              name: "resumo_handover",
+              description:
+                "Elabora uma síntese executiva da conversa para repassar o cliente a um vendedor humano com contexto completo.",
+              arguments: [
+                {
+                  name: "conversa_id",
+                  description: "ID (UUID) da conversa.",
+                  required: true,
+                },
+              ],
+            },
+          ],
+        },
+      };
+    }
+
+    case "prompts/get": {
+      const promptName = params?.name;
+      const promptArgs = params?.arguments || {};
+
+      if (promptName === "qualificar_lead") {
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            description: "Roteiro de Qualificação BANT/SPIN",
+            messages: [
+              {
+                role: "user",
+                content: {
+                  type: "text",
+                  text: `Por favor, consulte os dados do contato "${promptArgs.contato_id}" usando a ferramenta 'consultar_contato' e as notas em 'consultar_origem_anuncio_lead'. Com base no Playbook Comercial ('atendi://playbook'), formule as 3 melhores perguntas de qualificação para enviar ao cliente agora.`,
+                },
+              },
+            ],
+          },
+        };
+      }
+
+      if (promptName === "auditar_atendimento") {
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            description: "Auditoria de Atendimento",
+            messages: [
+              {
+                role: "user",
+                content: {
+                  type: "text",
+                  text: `Analise a conversa "${promptArgs.conversa_id}" usando 'consultar_conversa' e 'consultar_analise_sales_coach'. Avalie: 1) Tempo de resposta, 2) Cordialidade, 3) Identificação de dor do cliente, 4) Objeções contornadas e 5) Próximo passo definido.`,
+                },
+              },
+            ],
+          },
+        };
+      }
+
+      if (promptName === "resumo_handover") {
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            description: "Resumo de Handover para Atendente Humano",
+            messages: [
+              {
+                role: "user",
+                content: {
+                  type: "text",
+                  text: `Recupere o histórico da conversa "${promptArgs.conversa_id}" com 'consultar_conversa' e gere um resumo compacto (em tópicos) contendo: Necessidade Principal do Cliente, Produto/Serviço de Interesse, Objeções Pendentes e Próxima Ação Imediata. Em seguida, salve como nota interna usando 'adicionar_nota_interna'.`,
+                },
+              },
+            ],
+          },
+        };
+      }
+
+      return {
+        jsonrpc: "2.0",
+        id: id ?? null,
+        error: { code: -32602, message: `Prompt "${promptName}" não encontrado.` },
       };
     }
 
