@@ -5,6 +5,16 @@ import { Plus, Trash2, Edit2, GripVertical, Settings2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
@@ -15,9 +25,12 @@ export function CrmTab() {
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
-  
+
   const [newPipelineName, setNewPipelineName] = useState("");
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
+  const [deletingPipeline, setDeletingPipeline] = useState<{ id: string; name: string } | null>(
+    null,
+  );
 
   // Fetch Pipelines
   const { data: pipelines, isLoading: isLoadingPipelines } = useQuery({
@@ -51,7 +64,7 @@ export function CrmTab() {
       qc.invalidateQueries({ queryKey: ["pipelines"] });
       setSelectedPipelineId(data.id);
     },
-    onError: (e) => toast.error("Erro ao criar funil", { description: (e as Error).message })
+    onError: (e) => toast.error("Erro ao criar funil", { description: (e as Error).message }),
   });
 
   const deletePipeline = useMutation({
@@ -64,7 +77,7 @@ export function CrmTab() {
       qc.invalidateQueries({ queryKey: ["pipelines"] });
       if (selectedPipelineId === id) setSelectedPipelineId(null);
     },
-    onError: (e) => toast.error("Erro ao excluir", { description: (e as Error).message })
+    onError: (e) => toast.error("Erro ao excluir", { description: (e as Error).message }),
   });
 
   // Ensure we have a pipeline selected if available
@@ -72,7 +85,7 @@ export function CrmTab() {
     setSelectedPipelineId(pipelines[0].id);
   }
 
-  const selectedPipeline = pipelines?.find(p => p.id === selectedPipelineId);
+  const selectedPipeline = pipelines?.find((p) => p.id === selectedPipelineId);
 
   return (
     <div className="space-y-6">
@@ -85,8 +98,8 @@ export function CrmTab() {
           <div className="flex items-end gap-3 mb-6">
             <div className="flex-1 space-y-1">
               <label className="text-sm font-medium">Novo Funil</label>
-              <Input 
-                placeholder="Ex: Vendas B2B, Pós-Venda..." 
+              <Input
+                placeholder="Ex: Vendas B2B, Pós-Venda..."
                 value={newPipelineName}
                 onChange={(e) => setNewPipelineName(e.target.value)}
                 onKeyDown={(e) => {
@@ -94,7 +107,10 @@ export function CrmTab() {
                 }}
               />
             </div>
-            <Button onClick={() => createPipeline.mutate(newPipelineName)} disabled={!newPipelineName || createPipeline.isPending}>
+            <Button
+              onClick={() => createPipeline.mutate(newPipelineName)}
+              disabled={!newPipelineName || createPipeline.isPending}
+            >
               <Plus className="mr-2 h-4 w-4" /> Criar
             </Button>
           </div>
@@ -102,40 +118,68 @@ export function CrmTab() {
           <div className="flex flex-wrap gap-2">
             {isLoadingPipelines ? (
               <span className="text-sm text-muted-foreground">Carregando funis...</span>
-            ) : pipelines?.map(p => (
-              <Button
-                key={p.id}
-                variant={selectedPipelineId === p.id ? "default" : "outline"}
-                className="group relative pr-10"
-                onClick={() => setSelectedPipelineId(p.id)}
-              >
-                {p.name}
-                <button
-                  className="absolute right-2 text-muted-foreground/50 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if(confirm("Tem certeza que deseja excluir este funil e todas as suas etapas?")) {
-                      deletePipeline.mutate(p.id);
-                    }
-                  }}
-                  title="Excluir funil"
+            ) : (
+              pipelines?.map((p) => (
+                <Button
+                  key={p.id}
+                  variant={selectedPipelineId === p.id ? "default" : "outline"}
+                  className="group relative pr-10"
+                  onClick={() => setSelectedPipelineId(p.id)}
                 >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </Button>
-            ))}
+                  {p.name}
+                  <button
+                    type="button"
+                    className="absolute right-2 text-muted-foreground/50 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeletingPipeline(p);
+                    }}
+                    title="Excluir funil"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </Button>
+              ))
+            )}
           </div>
         </CardContent>
       </Card>
 
-      {selectedPipeline && (
-        <PipelineStagesManager pipeline={selectedPipeline} />
-      )}
+      {selectedPipeline && <PipelineStagesManager pipeline={selectedPipeline} />}
+
+      <AlertDialog
+        open={!!deletingPipeline}
+        onOpenChange={(open) => !open && setDeletingPipeline(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Funil de Vendas?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir o funil <strong>{deletingPipeline?.name}</strong> e
+              todas as etapas vinculadas? Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deletingPipeline) {
+                  deletePipeline.mutate(deletingPipeline.id);
+                  setDeletingPipeline(null);
+                }
+              }}
+            >
+              Sim, Excluir Funil
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-function PipelineStagesManager({ pipeline }: { pipeline: any }) {
+function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: string } }) {
   const qc = useQueryClient();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
@@ -148,9 +192,14 @@ function PipelineStagesManager({ pipeline }: { pipeline: any }) {
     queryKey: ["first-unit", activeCompanyId],
     enabled: !selectedUnitId && !!activeCompanyId,
     queryFn: async () => {
-      const { data } = await supabase.from("units").select("id").eq("company_id", activeCompanyId!).limit(1).single();
+      const { data } = await supabase
+        .from("units")
+        .select("id")
+        .eq("company_id", activeCompanyId!)
+        .limit(1)
+        .single();
       return data;
-    }
+    },
   });
 
   const effectiveUnitId = selectedUnitId || fallbackUnit?.id;
@@ -171,16 +220,15 @@ function PipelineStagesManager({ pipeline }: { pipeline: any }) {
   const createStage = useMutation({
     mutationFn: async () => {
       if (!effectiveUnitId) throw new Error("Nenhuma unidade encontrada para vincular a etapa.");
-      const newOrder = stages && stages.length > 0 ? Math.max(...stages.map(s => s.order)) + 1 : 1;
-      const { error } = await supabase
-        .from("pipeline_stages")
-        .insert({
-          pipeline_id: pipeline.id,
-          unit_id: effectiveUnitId,
-          name: newStageName,
-          color: newStageColor,
-          order: newOrder
-        });
+      const newOrder =
+        stages && stages.length > 0 ? Math.max(...stages.map((s) => s.order)) + 1 : 1;
+      const { error } = await supabase.from("pipeline_stages").insert({
+        pipeline_id: pipeline.id,
+        unit_id: effectiveUnitId,
+        name: newStageName,
+        color: newStageColor,
+        order: newOrder,
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -188,7 +236,7 @@ function PipelineStagesManager({ pipeline }: { pipeline: any }) {
       setNewStageName("");
       qc.invalidateQueries({ queryKey: ["pipeline-stages", pipeline.id] });
     },
-    onError: (e) => toast.error("Erro", { description: (e as Error).message })
+    onError: (e) => toast.error("Erro", { description: (e as Error).message }),
   });
 
   const deleteStage = useMutation({
@@ -200,11 +248,11 @@ function PipelineStagesManager({ pipeline }: { pipeline: any }) {
       toast.success("Etapa excluída.");
       qc.invalidateQueries({ queryKey: ["pipeline-stages", pipeline.id] });
     },
-    onError: (e) => toast.error("Erro", { description: (e as Error).message })
+    onError: (e) => toast.error("Erro", { description: (e as Error).message }),
   });
 
   const updateStageColor = useMutation({
-    mutationFn: async ({ id, color }: { id: string, color: string }) => {
+    mutationFn: async ({ id, color }: { id: string; color: string }) => {
       const { error } = await supabase.from("pipeline_stages").update({ color }).eq("id", id);
       if (error) throw error;
     },
@@ -223,12 +271,11 @@ function PipelineStagesManager({ pipeline }: { pipeline: any }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        
         <div className="flex items-end gap-3">
           <div className="flex-1 space-y-1">
             <label className="text-sm font-medium">Nome da Etapa</label>
-            <Input 
-              placeholder="Ex: Prospecção, Negociação..." 
+            <Input
+              placeholder="Ex: Prospecção, Negociação..."
               value={newStageName}
               onChange={(e) => setNewStageName(e.target.value)}
               onKeyDown={(e) => {
@@ -239,53 +286,71 @@ function PipelineStagesManager({ pipeline }: { pipeline: any }) {
           <div className="space-y-1">
             <label className="text-sm font-medium">Cor</label>
             <div className="flex h-9 w-14 overflow-hidden rounded-md border border-input">
-              <input 
-                type="color" 
-                value={newStageColor} 
+              <input
+                type="color"
+                value={newStageColor}
                 onChange={(e) => setNewStageColor(e.target.value)}
                 className="h-full w-full cursor-pointer bg-transparent border-0 p-0"
               />
             </div>
           </div>
-          <Button onClick={() => createStage.mutate()} disabled={!newStageName || createStage.isPending || !effectiveUnitId}>
+          <Button
+            onClick={() => createStage.mutate()}
+            disabled={!newStageName || createStage.isPending || !effectiveUnitId}
+          >
             <Plus className="mr-2 h-4 w-4" /> Adicionar
           </Button>
         </div>
 
         {!effectiveUnitId && !fallbackUnit && (
-          <p className="text-sm text-destructive">Por favor, crie uma unidade primeiro para poder adicionar etapas.</p>
+          <p className="text-sm text-destructive">
+            Por favor, crie uma unidade primeiro para poder adicionar etapas.
+          </p>
         )}
 
         <div className="space-y-2">
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Carregando etapas...</p>
           ) : stages?.length === 0 ? (
-            <p className="text-sm text-muted-foreground border-dashed border-2 rounded-md p-6 text-center">Nenhuma etapa configurada neste funil.</p>
+            <p className="text-sm text-muted-foreground border-dashed border-2 rounded-md p-6 text-center">
+              Nenhuma etapa configurada neste funil.
+            </p>
           ) : (
             stages?.map((stage, index) => (
-              <div key={stage.id} className="flex items-center gap-3 p-3 bg-muted/30 border rounded-md">
+              <div
+                key={stage.id}
+                className="flex items-center gap-3 p-3 bg-muted/30 border rounded-md"
+              >
                 <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab opacity-50" />
                 <span className="text-xs font-mono text-muted-foreground w-4">{index + 1}</span>
-                
+
                 <div className="relative flex h-8 w-8 overflow-hidden rounded-md border border-input shrink-0">
-                  <input 
-                    type="color" 
-                    value={stage.color} 
-                    onChange={(e) => updateStageColor.mutate({ id: stage.id, color: e.target.value })}
+                  <input
+                    type="color"
+                    value={stage.color}
+                    onChange={(e) =>
+                      updateStageColor.mutate({ id: stage.id, color: e.target.value })
+                    }
                     className="h-full w-full cursor-pointer bg-transparent border-0 p-0"
                     title="Alterar cor"
                   />
                 </div>
-                
-                <div className="flex-1 font-medium text-sm">
-                  {stage.name}
-                </div>
 
-                <Button variant="ghost" size="icon" onClick={() => {
-                  if(confirm("Excluir esta etapa? Todas as oportunidades nela podem ficar sem etapa definida.")) {
-                    deleteStage.mutate(stage.id);
-                  }
-                }}>
+                <div className="flex-1 font-medium text-sm">{stage.name}</div>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    if (
+                      confirm(
+                        "Excluir esta etapa? Todas as oportunidades nela podem ficar sem etapa definida.",
+                      )
+                    ) {
+                      deleteStage.mutate(stage.id);
+                    }
+                  }}
+                >
                   <Trash2 className="h-4 w-4 text-destructive" />
                 </Button>
               </div>
