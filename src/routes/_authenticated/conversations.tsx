@@ -714,6 +714,10 @@ function ConversationsPage() {
               return [...old, newMsg];
             });
 
+            if (selectedIdRef.current === convId) {
+              qc.invalidateQueries({ queryKey: ["messages", convId] });
+            }
+
             // 2. Atualiza preview da conversa e move para o topo da lista
             let previewText = newMsg.content || "";
             if (newMsg.media_type === "image") previewText = "📷 Foto";
@@ -768,6 +772,10 @@ function ConversationsPage() {
               if (!old) return old;
               return old.map((m: any) => m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m);
             });
+
+            if (selectedIdRef.current === convId) {
+              qc.invalidateQueries({ queryKey: ["messages", convId] });
+            }
           } 
           
           else if (payload.eventType === "DELETE") {

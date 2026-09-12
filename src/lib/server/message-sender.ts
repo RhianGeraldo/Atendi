@@ -26,7 +26,7 @@ export async function sendPlatformMessage({
 }) {
   const { data: conv, error: convErr } = await supabaseAdmin
     .from("conversations")
-    .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid)")
+    .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid, instagram_id, messenger_id)")
     .eq("id", conversationId)
     .single();
 

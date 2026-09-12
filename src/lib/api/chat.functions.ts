@@ -27,7 +27,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     
     const { data: conv, error: convErr } = await supabase
       .from("conversations")
-      .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, assigned_agent_id, contacts(phone, whatsapp_lid, company_id)")
+      .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, assigned_agent_id, contacts(phone, whatsapp_lid, company_id, instagram_id, messenger_id)")
       .eq("id", data.conversationId)
       .single();
 
@@ -842,11 +842,11 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
     // 1. Get conversation and message
     const { data: conv } = await supabase
       .from("conversations")
-      .select("whatsapp_instance_id, unit_id, contact_id, channel, contacts(phone, whatsapp_lid)")
+      .select("whatsapp_instance_id, unit_id, contact_id, channel, remote_id, contacts(phone, whatsapp_lid, instagram_id, messenger_id)")
       .eq("id", data.conversationId)
       .single();
 
-    if (!conv || !conv.contacts?.phone) throw new Error("Conversation not found");
+    if (!conv) throw new Error("Conversation not found");
 
     const { data: msg } = await supabase
       .from("messages")
