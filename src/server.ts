@@ -94,6 +94,11 @@ export default {
         return await handleStevoWebhook(request);
       }
 
+      if (url.pathname.startsWith('/api/webhooks/zernio') && request.method === 'POST') {
+        const { handleZernioWebhook } = await import('./lib/server/zernio-webhook');
+        return await handleZernioWebhook(request);
+      }
+
       // Outros webhooks
       if (url.pathname === '/api/wavoip/webhook' && request.method === 'POST') {
         return await handleWavoipWebhook(request);

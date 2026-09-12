@@ -2,8 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe, Facebook, Shield, Target, Cpu } from "lucide-react";
+import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe, Facebook, Shield, Target, Cpu, RefreshCw } from "lucide-react";
 import { McpSettingsTab } from "@/components/settings/mcp-settings-tab";
+import { saveZernioConfigAction, listZernioAccountsAction, syncZernioWebhookAction } from "@/lib/api/zernio.functions";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -101,6 +102,17 @@ function SettingsPage() {
   const [companyBusinessHours, setCompanyBusinessHours] = useState("");
   const [companyMetaToken, setCompanyMetaToken] = useState("");
   const [companyCustomVars, setCompanyCustomVars] = useState<{key: string, value: string}[]>([]);
+  
+  // Zernio State
+  const [zernioApiKey, setZernioApiKey] = useState("");
+  const [zernioBaseUrl, setZernioBaseUrl] = useState("https://zernio.com/api");
+  const [isSavingZernio, setIsSavingZernio] = useState(false);
+  const [isSyncingZernio, setIsSyncingZernio] = useState(false);
+  const [zernioNetwork, setZernioNetwork] = useState<"whatsapp" | "instagram">("whatsapp");
+  const [zernioAccounts, setZernioAccounts] = useState<any[]>([]);
+  const [isLoadingZernioAccounts, setIsLoadingZernioAccounts] = useState(false);
+  const [selectedZernioAccountId, setSelectedZernioAccountId] = useState("");
+
   // QrCode Modal State
   const [selectedInstance, setSelectedInstance] = useState<any>(null);
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -115,8 +127,25 @@ function SettingsPage() {
       setOficialNumberId("");
       setOficialWabaId("");
       setOficialToken("");
+      setSelectedZernioAccountId("");
+      setZernioAccounts([]);
     }
   }, [createModalOpen]);
+
+  useEffect(() => {
+    if (createModalOpen && instanceProvider === 'zernio' && activeCompanyId && company?.zernio_api_key) {
+      setIsLoadingZernioAccounts(true);
+      listZernioAccountsAction({ data: { companyId: activeCompanyId, platform: zernioNetwork } })
+        .then((res) => {
+          setZernioAccounts(res.accounts || []);
+        })
+        .catch((err) => {
+          console.error("Erro ao listar contas Zernio:", err);
+          toast.error("Erro ao carregar contas Zernio: " + err.message);
+        })
+        .finally(() => setIsLoadingZernioAccounts(false));
+    }
+  }, [createModalOpen, instanceProvider, zernioNetwork, activeCompanyId, company?.zernio_api_key]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -212,6 +241,8 @@ function SettingsPage() {
       setStevoHost(company.stevo_host || "");
       setToken(company.evogo_global_token || "");
       setStevoToken(company.stevo_global_token || "");
+      setZernioApiKey(company.zernio_api_key || "");
+      setZernioBaseUrl(company.zernio_base_url || "https://zernio.com/api");
       setNewCompanyName(company.name || "");
       setCompanyDocument(company.document || "");
       setCompanyAddress(company.address || "");
@@ -356,9 +387,25 @@ function SettingsPage() {
   });
 
   const createInstance = useMutation({
-    mutationFn: async (payload: { name: string, provider: string, numberId?: string, wabaId?: string, accessToken?: string, verifyToken?: string, customHost?: string, customApiKey?: string, customInstanceId?: string }) => {
-      const { name, provider, numberId, wabaId, accessToken, verifyToken, customHost, customApiKey, customInstanceId } = payload;
+    mutationFn: async (payload: { 
+      name: string, 
+      provider: string, 
+      numberId?: string, 
+      wabaId?: string, 
+      accessToken?: string, 
+      verifyToken?: string, 
+      customHost?: string, 
+      customApiKey?: string, 
+      customInstanceId?: string,
+      zernioAccountId?: string,
+      zernioNetwork?: string,
+    }) => {
+      const { name, provider, numberId, wabaId, accessToken, verifyToken, customHost, customApiKey, customInstanceId, zernioAccountId, zernioNetwork } = payload;
       if (!activeCompanyId) throw new Error("Sem empresa");
+      if (provider === 'zernio') {
+        if (!zernioAccountId) throw new Error("Selecione uma conta conectada da Zernio.");
+        if (!company?.zernio_api_key) throw new Error("Configure a chave da Zernio na empresa antes de vincular.");
+      }
       if (provider === 'evogo' && (!company?.evogo_host || !company?.evogo_global_token) && !customHost) {
         throw new Error('Configure Host Global ou preencha o Host customizado da instância.');
       }
@@ -425,6 +472,8 @@ function SettingsPage() {
         defaultWebhookUrl = `${window.location.origin}/api/webhooks/instagram`;
       } else if (provider === 'messenger') {
         defaultWebhookUrl = `${window.location.origin}/api/webhooks/messenger`;
+      } else if (provider === 'zernio') {
+        defaultWebhookUrl = `${window.location.origin}/api/webhooks/zernio/${activeCompanyId}?k=${encodeURIComponent(company?.zernio_webhook_secret || '')}`;
       }
 
       // Salvar no banco
@@ -434,6 +483,9 @@ function SettingsPage() {
         name,
         instance_name: technicalName,
         provider,
+        network: provider === 'zernio' ? (zernioNetwork || 'whatsapp') : null,
+        zernio_account_id: provider === 'zernio' ? zernioAccountId : null,
+        status: provider === 'zernio' ? 'connected' : 'disconnected',
         oficial_phone_number_id: finalNumberId,
         oficial_waba_id: finalWabaId || null,
         oficial_access_token: finalAccessToken,
@@ -443,6 +495,14 @@ function SettingsPage() {
         ...(customApiKey && provider === "evogo" ? { evogo_api_key: customApiKey } : {}),
         ...(customApiKey && provider === "stevo" ? { stevo_api_key: customApiKey } : {}),
       }).select().single();
+      
+      if (error) throw error;
+
+      if (provider === 'zernio') {
+        syncZernioWebhookAction({
+          data: { companyId: activeCompanyId, appOrigin: window.location.origin }
+        }).catch((err) => console.warn("[zernio] Erro ao sincronizar webhook na criação:", err));
+      }
       
       if (error) throw error;
 
@@ -787,6 +847,123 @@ function SettingsPage() {
               <Save className="mr-2 h-4 w-4" />
               Salvar Credenciais
             </Button>
+          </CardContent>
+        </Card>
+
+        {/* Zernio API Settings Card */}
+        <Card className="col-span-full lg:col-span-1 mt-4">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Server className="h-5 w-5 text-indigo-500" />
+              API Zernio (WhatsApp & Instagram Oficial)
+            </CardTitle>
+            <CardDescription>
+              Conector oficial para WhatsApp Cloud API e Instagram Direct sob a mesma chave.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">API Key (Bearer Token)</label>
+              <div className="relative">
+                <Key className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input 
+                  type="password"
+                  placeholder="Sua chave Bearer da Zernio (ex: zrk_...)" 
+                  value={zernioApiKey}
+                  onChange={(e) => setZernioApiKey(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Gere sua chave na aba API Keys do painel da Zernio com permissão de Inbox ativa.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Base URL (Opcional)</label>
+              <div className="relative">
+                <Server className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input 
+                  placeholder="https://zernio.com/api" 
+                  value={zernioBaseUrl}
+                  onChange={(e) => setZernioBaseUrl(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            </div>
+
+            {company?.zernio_webhook_secret && (
+              <div className="p-3 bg-muted/60 rounded-lg border text-xs space-y-1.5">
+                <div className="font-medium flex items-center justify-between">
+                  <span>URL do Webhook da Empresa</span>
+                  <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-50">Sincronizado</Badge>
+                </div>
+                <code className="text-[10px] font-mono break-all block bg-background p-1.5 rounded border">
+                  {typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/zernio/${activeCompanyId}?k=${encodeURIComponent(company.zernio_webhook_secret)}` : ''}
+                </code>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <Button 
+                className="flex-1" 
+                onClick={async () => {
+                  if (!activeCompanyId || !zernioApiKey.trim()) {
+                    toast.error("Informe a chave de API da Zernio.");
+                    return;
+                  }
+                  setIsSavingZernio(true);
+                  try {
+                    await saveZernioConfigAction({
+                      data: {
+                        companyId: activeCompanyId,
+                        apiKey: zernioApiKey.trim(),
+                        baseUrl: zernioBaseUrl.trim() || undefined,
+                      }
+                    });
+                    toast.success("Credenciais Zernio validadas e salvas com sucesso!");
+                    qc.invalidateQueries({ queryKey: ["company", activeCompanyId] });
+                  } catch (err: any) {
+                    toast.error("Erro ao salvar Zernio: " + err.message);
+                  } finally {
+                    setIsSavingZernio(false);
+                  }
+                }}
+                disabled={isSavingZernio || !zernioApiKey}
+              >
+                {isSavingZernio ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                Salvar Chave Zernio
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  if (!activeCompanyId || !company?.zernio_api_key) {
+                    toast.error("Salve a chave de API antes de sincronizar o webhook.");
+                    return;
+                  }
+                  setIsSyncingZernio(true);
+                  try {
+                    await syncZernioWebhookAction({
+                      data: {
+                        companyId: activeCompanyId,
+                        appOrigin: window.location.origin,
+                      }
+                    });
+                    toast.success("Webhook configurado na Zernio com sucesso!");
+                  } catch (err: any) {
+                    toast.error("Erro ao sincronizar webhook: " + err.message);
+                  } finally {
+                    setIsSyncingZernio(false);
+                  }
+                }}
+                disabled={isSyncingZernio || !company?.zernio_api_key}
+                title="Registrar / Atualizar Webhook na Zernio"
+              >
+                {isSyncingZernio ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Sync Webhook
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -1295,12 +1472,80 @@ function SettingsPage() {
                 <SelectContent>
                   <SelectItem value="evogo">EvoGo API (WhatsApp)</SelectItem>
                   <SelectItem value="oficial">API Oficial (WhatsApp Cloud API)</SelectItem>
+                  <SelectItem value="zernio">Zernio (WhatsApp & Instagram Oficial)</SelectItem>
                   <SelectItem value="instagram">Instagram</SelectItem>
                   <SelectItem value="messenger">Messenger (Meta)</SelectItem>
                   <SelectItem value="stevo">StevoChat</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {instanceProvider === 'zernio' && (
+              <div className="space-y-4 mt-4 border-t pt-4">
+                {!company?.zernio_api_key ? (
+                  <div className="p-3 border rounded-lg bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs">
+                    Configure sua chave de API Zernio em <strong>Configurações &gt; Empresa Mãe &gt; API Zernio</strong> antes de criar este canal.
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Rede Social da Conexão</label>
+                      <Select 
+                        value={zernioNetwork} 
+                        onValueChange={(val: any) => {
+                          setZernioNetwork(val);
+                          setSelectedZernioAccountId("");
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a rede" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="whatsapp">WhatsApp Oficial (Cloud API)</SelectItem>
+                          <SelectItem value="instagram">Instagram Direct</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium flex items-center justify-between">
+                        <span>Conta Social Conectada</span>
+                        {isLoadingZernioAccounts && <Loader2 className="h-3 w-3 animate-spin" />}
+                      </label>
+                      <Select 
+                        value={selectedZernioAccountId} 
+                        onValueChange={(val) => {
+                          setSelectedZernioAccountId(val);
+                          const acc = zernioAccounts.find(a => a.id === val);
+                          if (acc) {
+                            const suggestedName = acc.displayName || (acc.platform === 'instagram' ? `@${acc.username}` : (acc.metadata?.displayPhoneNumber || 'Canal Zernio'));
+                            setInstanceName(suggestedName);
+                          }
+                        }}
+                        disabled={isLoadingZernioAccounts || zernioAccounts.length === 0}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={isLoadingZernioAccounts ? "Carregando contas da Zernio..." : zernioAccounts.length === 0 ? "Nenhuma conta desta rede na Zernio" : "Selecione uma conta"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {zernioAccounts.map((acc) => (
+                            <SelectItem key={acc.id} value={acc.id}>
+                              {acc.displayName || (acc.platform === 'instagram' ? `@${acc.username}` : acc.metadata?.displayPhoneNumber || acc.id)}
+                              {acc.metadata?.qualityRating ? ` (${acc.metadata.qualityRating})` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground">
+                        {zernioNetwork === 'instagram' 
+                          ? "Perfis de Instagram conectados via OAuth no seu painel da Zernio."
+                          : "Números de WhatsApp Cloud conectados no seu painel da Zernio."}
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {(instanceProvider === 'evogo' || instanceProvider === 'stevo') && (
               <>
@@ -1520,16 +1765,23 @@ function SettingsPage() {
               onClick={() => createInstance.mutate({
                 name: instanceName,
                 provider: instanceProvider,
-                company_id: activeCompanyId,
                 numberId: oficialNumberId,
                 wabaId: oficialWabaId,
                 accessToken: oficialToken,
                 verifyToken: oficialVerifyToken,
                 customHost,
                 customApiKey,
-                customInstanceId
+                customInstanceId,
+                zernioAccountId: selectedZernioAccountId,
+                zernioNetwork,
               })}
-              disabled={!instanceName || createInstance.isPending || (instanceProvider === 'evogo' && !company?.evogo_host && !customHost) || (instanceProvider === 'stevo' && !company?.stevo_host && !customHost)}
+              disabled={
+                !instanceName || 
+                createInstance.isPending || 
+                (instanceProvider === 'evogo' && !company?.evogo_host && !customHost) || 
+                (instanceProvider === 'stevo' && !company?.stevo_host && !customHost) ||
+                (instanceProvider === 'zernio' && (!selectedZernioAccountId || !company?.zernio_api_key))
+              }
             >
               {createInstance.isPending ? "Criando..." : "Criar Instância"}
             </Button>
@@ -1598,7 +1850,7 @@ function InstanceRow({ instance, company, onConnect, onSettings }: { instance: a
       <div className="space-y-1">
         <p className="font-medium leading-none">{instance.name}</p>
         <p className="text-xs text-muted-foreground font-mono">{instance.instance_name}</p>
-        {!['oficial', 'instagram', 'messenger', 'facebook'].includes(instance.provider) && (
+        {!['oficial', 'instagram', 'messenger', 'facebook', 'zernio'].includes(instance.provider) && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
             <span>Status:</span>
             <Badge variant={instance.status === 'connected' ? 'default' : 'secondary'} className="text-[10px] py-0">
@@ -1608,7 +1860,19 @@ function InstanceRow({ instance, company, onConnect, onSettings }: { instance: a
         )}
       </div>
       <div className="flex gap-2">
-        {instance.provider === 'oficial' ? (
+        {instance.provider === 'zernio' ? (
+          <Badge 
+            variant="outline" 
+            className={`h-9 px-3 flex items-center gap-1.5 ${
+              instance.network === 'instagram' 
+                ? 'border-pink-200 text-pink-700 bg-pink-50 dark:bg-pink-950/20' 
+                : 'border-emerald-200 text-emerald-700 bg-emerald-50 dark:bg-emerald-950/20'
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${instance.network === 'instagram' ? 'bg-pink-500' : 'bg-emerald-500'}`}></span>
+            Zernio ({instance.network === 'instagram' ? 'Instagram Direct' : 'WhatsApp Oficial'})
+          </Badge>
+        ) : instance.provider === 'oficial' ? (
           <Badge variant="outline" className="h-9 px-3 border-emerald-200 text-emerald-700 bg-emerald-50 flex items-center gap-1">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21"/><path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1"/></svg>
             API Oficial Ativa

@@ -43,13 +43,15 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     const isOficial = instance.provider === 'oficial';
     const isInstagram = instance.provider === 'instagram';
     const isMessenger = instance.provider === 'messenger';
-    const isCloudAPI = isOficial || isInstagram || isMessenger;
+    const isZernio = instance.provider === 'zernio';
+    const isCloudAPI = isOficial || isInstagram || isMessenger || isZernio;
 
     let providerWebhookPath = 'evogo';
     if (instance.provider === 'stevo') providerWebhookPath = 'stevo';
     else if (isOficial) providerWebhookPath = 'whatsapp';
     else if (isInstagram) providerWebhookPath = 'instagram';
     else if (isMessenger) providerWebhookPath = 'messenger';
+    else if (isZernio) providerWebhookPath = `zernio/${instance.company_id || ''}?k=${company?.zernio_webhook_secret || ''}`;
 
     let defaultWebhook = instance.webhook_url;
     const currentDomainWebhook = `${window.location.origin}/api/webhooks/${providerWebhookPath}`;
@@ -202,6 +204,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                     isOficial={isOficial}
                     isInstagram={isInstagram}
                     isMessenger={isMessenger}
+                    instance={instance}
                   />
                   <Button 
                     className="w-full mt-4" 
@@ -231,6 +234,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                   isOficial={isOficial}
                   isInstagram={isInstagram}
                   isMessenger={isMessenger}
+                  instance={instance}
                 />
                 <Button 
                   className="w-full mt-4" 
@@ -259,9 +263,10 @@ function SettingsFormContent({
   customHost, setCustomHost,
   customApiKey, setCustomApiKey,
   advSettings, setAdvSettings, 
-  isOficial, isInstagram, isMessenger
+  isOficial, isInstagram, isMessenger, instance
 }: any) {
-  const isCloudAPI = isOficial || isInstagram || isMessenger;
+  const isZernio = instance?.provider === 'zernio';
+  const isCloudAPI = isOficial || isInstagram || isMessenger || isZernio;
   
   return (
     <>
@@ -295,7 +300,9 @@ function SettingsFormContent({
           </div>
           {isCloudAPI && (
             <p className="text-[10px] text-muted-foreground mt-1">
-              Copie esta URL e cole no painel de desenvolvedores da Meta.
+              {isZernio 
+                ? "URL de webhook sincronizada com o provedor Zernio."
+                : "Copie esta URL e cole no painel de desenvolvedores da Meta."}
             </p>
           )}
         </div>
@@ -329,7 +336,25 @@ function SettingsFormContent({
         )}
       </div>
 
-      {isCloudAPI ? (
+      {isZernio ? (
+        <div className="space-y-3 mt-4 p-3 bg-slate-50 dark:bg-slate-900/50 border rounded-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-foreground">Conexão Zernio Omnichannel</span>
+            <Badge variant="outline" className="text-[10px] capitalize">
+              Rede: {instance?.network || 'whatsapp'}
+            </Badge>
+          </div>
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <p>ID da Conta Social (Zernio Account ID):</p>
+            <code className="text-xs font-mono bg-muted p-1.5 rounded block text-foreground">
+              {instance?.zernio_account_id || 'Não configurado'}
+            </code>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Esta conexão envia e recebe mensagens diretamente via API oficial Zernio ({instance?.network === 'instagram' ? 'Instagram Direct' : 'WhatsApp'}).
+          </p>
+        </div>
+      ) : isCloudAPI ? (
         <div className="space-y-4 mt-4">
           <h4 className="text-sm font-medium border-b pb-1">Credenciais Meta / Cloud API</h4>
           <div className="space-y-1">

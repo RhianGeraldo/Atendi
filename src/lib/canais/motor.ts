@@ -33,7 +33,8 @@ import {
 const COLUNAS =
   "id, name, instance_name, provider, company_id, unit_id, custom_host, " +
   "evogo_api_key, stevo_api_key, oficial_phone_number_id, oficial_access_token, " +
-  "oficial_waba_id, companies(evogo_host, stevo_host)";
+  "oficial_waba_id, network, zernio_account_id, webhook_base, " +
+  "companies(evogo_host, stevo_host, zernio_api_key, zernio_base_url, zernio_webhook_secret, zernio_signature_secret)";
 
 /** A rede que um provedor atende. */
 function redeDo(provedor: string, canalDaConversa: string): Rede {
@@ -49,8 +50,7 @@ function redeDo(provedor: string, canalDaConversa: string): Rede {
       return "whatsapp";
     /**
      * O Zernio atende WhatsApp **e** Instagram sob a mesma credencial, e é por
-     * isso que a rede não pode sair do tipo do provedor. Enquanto a coluna
-     * `network` não existe, a conversa responde por ela.
+     * isso que a rede não pode sair do tipo do provedor.
      */
     case "zernio":
       return canalDaConversa === "instagram" ? "instagram" : "whatsapp";
@@ -67,7 +67,10 @@ function redeDo(provedor: string, canalDaConversa: string): Rede {
  * por ela seria falar Instagram com um telefone. Quando não serve, o motor cai
  * para a busca por unidade — que é a autorreparação que já existia.
  */
-function serve(provedor: string, canalDaConversa: string): boolean {
+function serve(provedor: string, canalDaConversa: string, networkGravada?: string | null): boolean {
+  if (networkGravada) {
+    return networkGravada === redeEsperada(canalDaConversa);
+  }
   return redeDo(provedor, canalDaConversa) === redeEsperada(canalDaConversa);
 }
 
@@ -94,6 +97,9 @@ type InstanciaBruta = {
   name: string | null;
   instance_name: string | null;
   provider: string | null;
+  network?: string | null;
+  zernio_account_id?: string | null;
+  webhook_base?: string | null;
   company_id: string | null;
   unit_id: string | null;
   custom_host: string | null;
@@ -102,7 +108,14 @@ type InstanciaBruta = {
   oficial_phone_number_id: string | null;
   oficial_access_token: string | null;
   oficial_waba_id: string | null;
-  companies?: { evogo_host?: string | null; stevo_host?: string | null } | null;
+  companies?: {
+    evogo_host?: string | null;
+    stevo_host?: string | null;
+    zernio_api_key?: string | null;
+    zernio_base_url?: string | null;
+    zernio_webhook_secret?: string | null;
+    zernio_signature_secret?: string | null;
+  } | null;
 };
 
 function montar(bruta: InstanciaBruta, canalDaConversa: string): CanalAberto {
@@ -111,11 +124,12 @@ function montar(bruta: InstanciaBruta, canalDaConversa: string): CanalAberto {
 
   // O host da instância vence o global da empresa: é para isso que ele existe.
   const hostGlobal = provedor === "stevo" ? empresa?.stevo_host : empresa?.evogo_host;
+  const redeFinal = (bruta.network as Rede) || redeDo(provedor, canalDaConversa);
 
   return {
     id: bruta.id,
     provedor,
-    rede: redeDo(provedor, canalDaConversa),
+    rede: redeFinal,
     nome: bruta.name,
     companyId: bruta.company_id,
     unitId: bruta.unit_id,
@@ -125,6 +139,10 @@ function montar(bruta: InstanciaBruta, canalDaConversa: string): CanalAberto {
     contaId: bruta.oficial_phone_number_id,
     contaToken: bruta.oficial_access_token,
     contaPaiId: bruta.oficial_waba_id,
+    zernioAccountId: bruta.zernio_account_id || null,
+    zernioApiKey: empresa?.zernio_api_key || null,
+    zernioBaseUrl: bruta.webhook_base || empresa?.zernio_base_url || "https://zernio.com/api",
+    zernioWebhookSecret: empresa?.zernio_webhook_secret || null,
     capacidades: capacidadesDe(provedor),
   };
 }
@@ -154,7 +172,7 @@ export async function abrirCanal(conv: ConversaDoCanal): Promise<CanalAberto> {
       .maybeSingle();
 
     const achada = data as InstanciaBruta | null;
-    if (achada && serve(achada.provider || "evogo", conv.channel)) {
+    if (achada && serve(achada.provider || "evogo", conv.channel, achada.network)) {
       bruta = achada;
     }
   }

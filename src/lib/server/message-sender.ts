@@ -59,7 +59,51 @@ export async function sendPlatformMessage({
   let participantJid = null;
   let mediaUrlToSend = mediaBase64;
 
-  if (canal.rede === 'whatsapp') {
+  if (provider === 'zernio') {
+    const { enviarMensagemZernio } = await import('../canais/zernio/adaptador');
+
+    let mediaBuffer: Buffer | undefined;
+    let mimeType: string | undefined;
+    let fileName: string | undefined;
+
+    if (mediaBase64 && mediaType !== 'text') {
+      if (mediaBase64.startsWith('data:')) {
+        const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+        if (match) {
+          mimeType = match[1];
+          mediaBuffer = Buffer.from(match[2], 'base64');
+          const ext = mimeType.split('/')[1] || 'bin';
+          fileName = `${conversationId}_${Date.now()}.${ext}`;
+        }
+      }
+    }
+
+    const { data: convThread } = await supabaseAdmin
+      .from('conversations')
+      .select('provider_thread_id')
+      .eq('id', conversationId)
+      .single();
+
+    const resZernio = await enviarMensagemZernio({
+      canal,
+      destinatario: destino,
+      threadId: convThread?.provider_thread_id || null,
+      texto: text || '',
+      mediaType: (mediaType as any) || 'text',
+      mediaBuffer,
+      fileName,
+      mimeType,
+    });
+
+    remoteMsgId = resZernio.messageId || null;
+
+    if (resZernio.threadId && resZernio.threadId !== convThread?.provider_thread_id) {
+      await supabaseAdmin
+        .from('conversations')
+        .update({ provider_thread_id: resZernio.threadId })
+        .eq('id', conversationId);
+    }
+  } else if (canal.rede === 'whatsapp') {
     let evogoResponse;
 
     if (provider === 'oficial') {

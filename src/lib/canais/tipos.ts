@@ -142,6 +142,12 @@ export interface CanalAberto {
   /** WABA na Cloud API; id da Página quando a rede é Instagram. */
   contaPaiId: string | null;
 
+  /** Zernio específico */
+  zernioAccountId?: string | null;
+  zernioApiKey?: string | null;
+  zernioBaseUrl?: string | null;
+  zernioWebhookSecret?: string | null;
+
   capacidades: Capacidades;
 }
 
@@ -151,6 +157,7 @@ export interface ConversaDoCanal {
   channel: string;
   unit_id: string | null;
   whatsapp_instance_id: string | null;
+  provider_thread_id?: string | null;
 }
 
 /** A quem a mensagem é endereçada, já no formato que o provedor espera. */

@@ -160,7 +160,52 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         }
       }
 
-      if (provider === 'oficial') {
+      if (provider === 'zernio') {
+        const { enviarMensagemZernio } = await import('@/lib/canais/zernio/adaptador');
+
+        let mediaBuffer: Buffer | undefined;
+        let mimeType: string | undefined;
+        let fileName: string | undefined;
+
+        if (data.mediaBase64 && data.mediaType !== 'text') {
+          if (data.mediaBase64.startsWith('data:')) {
+            const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+            if (match) {
+              mimeType = match[1];
+              mediaBuffer = Buffer.from(match[2], 'base64');
+              const ext = mimeType.split('/')[1] || 'bin';
+              fileName = `${targetConversationId}_${Date.now()}.${ext}`;
+            }
+          }
+        }
+
+        const { data: convThread } = await supabaseAdmin
+          .from('conversations')
+          .select('provider_thread_id')
+          .eq('id', targetConversationId)
+          .single();
+
+        const resZernio = await enviarMensagemZernio({
+          canal: canal!,
+          destinatario: destino!,
+          threadId: convThread?.provider_thread_id || null,
+          texto: textToSend || '',
+          mediaType: (data.mediaType as any) || 'text',
+          mediaBuffer,
+          fileName,
+          mimeType,
+          quotedMessageId: finalMessageId,
+        });
+
+        evogoResponse = { id: resZernio.messageId };
+
+        if (resZernio.threadId && resZernio.threadId !== convThread?.provider_thread_id) {
+          await supabaseAdmin
+            .from('conversations')
+            .update({ provider_thread_id: resZernio.threadId })
+            .eq('id', targetConversationId);
+        }
+      } else if (provider === 'oficial') {
         const { sendCloudApiMessage } = await import('../server/whatsapp-cloud-api');
         try {
           const msgId = await sendCloudApiMessage(
