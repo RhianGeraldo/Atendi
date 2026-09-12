@@ -10,6 +10,7 @@ import { EvoGoClient } from "@/integrations/evogo/client";
 import { StevoClient } from "@/integrations/stevo/client";
 import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { WhatsappTemplatesTab } from "./whatsapp-templates-tab";
 
 interface InstanceSettingsModalProps {
