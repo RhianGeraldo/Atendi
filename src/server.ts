@@ -102,6 +102,12 @@ export default {
         return await handleCronFollowUps(request);
       }
 
+      // Endpoint oficial do Model Context Protocol (MCP)
+      if (url.pathname === '/api/mcp' || url.pathname === '/mcp') {
+        const { handleMcpRequest } = await import('./lib/mcp/handler');
+        return await handleMcpRequest(request);
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);

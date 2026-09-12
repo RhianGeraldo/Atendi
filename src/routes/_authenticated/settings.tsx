@@ -2,7 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe, Facebook, Shield, Target } from "lucide-react";
+import { Plus, QrCode, Smartphone, Settings, Save, Server, Key, Building, User, Sparkles, Mic, MessageCircle, Zap, Tags, CheckCircle2, Bot, Users, Building2, Loader2, Globe, Facebook, Shield, Target, Cpu } from "lucide-react";
+import { McpSettingsTab } from "@/components/settings/mcp-settings-tab";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -980,6 +981,10 @@ function SettingsPage() {
           <Bot className="mr-2 h-4 w-4" />
           Agentes de IA
         </TabsTrigger>
+        <TabsTrigger value="mcp" className="w-full justify-start data-[state=active]:bg-muted">
+          <Cpu className="mr-2 h-4 w-4" />
+          Servidor MCP & Conexões
+        </TabsTrigger>
       </TabsList>
 
       <div className="flex-1 w-full min-w-0">
@@ -1235,6 +1240,10 @@ function SettingsPage() {
 
         <TabsContent value="agents" className="mt-0 border-none p-0">
           <AiAgentsTab />
+        </TabsContent>
+
+        <TabsContent value="mcp" className="mt-0 border-none p-0">
+          <McpSettingsTab companyId={activeCompanyId} />
         </TabsContent>
       </div>
     </Tabs>
