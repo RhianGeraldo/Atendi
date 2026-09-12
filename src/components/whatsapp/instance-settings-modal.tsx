@@ -58,7 +58,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     const currentDomainWebhook = `${window.location.origin}/api/webhooks/${providerWebhookPath}`;
     
     // Se estiver vazio, for do supabase antigo, for de um domínio antigo, ou for de outro provedor, corrige
-    if (!defaultWebhook || defaultWebhook.includes('supabase.co') || !defaultWebhook.startsWith(window.location.origin) || !defaultWebhook.includes(providerWebhookPath)) {
+    const webhookKeyword = isZernio ? 'zernio' : providerWebhookPath;
+    if (!defaultWebhook || defaultWebhook.includes('supabase.co') || !defaultWebhook.startsWith(window.location.origin) || !defaultWebhook.includes(webhookKeyword)) {
       defaultWebhook = currentDomainWebhook;
     }
 
@@ -116,12 +117,22 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     
     const isOficial = instance.provider === 'oficial';
     const isInstagram = instance.provider === 'instagram';
-    const isCloudAPI = isOficial || isInstagram;
+    const isMessenger = instance.provider === 'messenger';
+    const isZernio = instance.provider === 'zernio';
+    const isCloudAPI = isOficial || isInstagram || isMessenger;
 
     setSaving(true);
 
     try {
-      if (isCloudAPI) {
+      if (isZernio) {
+        await supabase
+          .from("whatsapp_instances")
+          .update({ 
+            webhook_url: webhookUrl,
+            wavoip_token: wavoipToken || null,
+          })
+          .eq("id", instance.id);
+      } else if (isCloudAPI) {
         await supabase
           .from("whatsapp_instances")
           .update({ 
@@ -164,6 +175,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const isOficial = instance?.provider === 'oficial';
   const isInstagram = instance?.provider === 'instagram';
   const isMessenger = instance?.provider === 'messenger';
+  const isZernio = instance?.provider === 'zernio';
+  const isCloudAPI = isOficial || isInstagram || isMessenger;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

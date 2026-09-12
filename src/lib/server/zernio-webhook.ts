@@ -157,7 +157,7 @@ async function processarReacao(evento: Extract<EventoZernioTraduzido, { tipo: "r
 
     if (!msg) return;
 
-    let reactions: Record<string, number> = msg.reactions || {};
+    const reactions: Record<string, number> = msg.reactions || {};
     if (evento.emoji) {
       reactions[evento.emoji] = (reactions[evento.emoji] || 0) + 1;
     }
