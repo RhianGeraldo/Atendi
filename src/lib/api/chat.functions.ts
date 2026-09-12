@@ -8,6 +8,8 @@ import { sendEvogoText, sendEvogoLink, sendEvogoMedia, sendEvogoReaction, editEv
 import { sendStevoText, sendStevoLink, sendStevoMedia, sendStevoReaction, editStevoMessage, deleteStevoMessage } from "../stevo";
 import { getPhoneVariants } from "@/lib/utils";
 import { getCompanyPlaybookSummary } from "./training.functions";
+import { ZernioClient } from "../canais/zernio/client";
+import { persistirAvatarContatoNoStorage } from "../avatar-storage";
 
 export const sendMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -1302,67 +1304,207 @@ export const transferConversationAction = createServerFn({ method: "POST" })
 export async function syncContactProfile(contactId: string, whatsappInstanceId?: string | null) {
   try {
     let instanceId = whatsappInstanceId;
-    if (!instanceId) {
-      const { data: convData } = await supabaseAdmin.from('conversations').select('whatsapp_instance_id').eq('contact_id', contactId).order('last_message_at', { ascending: false }).limit(1).maybeSingle();
-      if (convData?.whatsapp_instance_id) instanceId = convData.whatsapp_instance_id;
-    }
-    
-    const { data: contact, error: contactErr } = await supabaseAdmin.from('contacts').select('phone, company_id').eq('id', contactId).maybeSingle();
-    if (contactErr || !contact) return { success: false, message: "Contato não encontrado (talvez tenha sido excluído)." };
-    if (!contact.phone) return { success: false, message: "Contato sem telefone." };
+    let convData: any = null;
 
-    let host, token, instanceName;
     if (instanceId) {
-      const { data: instance } = await supabaseAdmin
-        .from("whatsapp_instances")
-        .select("instance_name, evogo_api_key, companies(evogo_host)")
-        .eq("id", instanceId)
-        .single();
-
-      if (instance) {
-        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
-        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
-        instanceName = instance.instance_name;
-      }
+      const { data: conv } = await supabaseAdmin
+        .from("conversations")
+        .select("id, whatsapp_instance_id, provider_thread_id, channel")
+        .eq("contact_id", contactId)
+        .eq("whatsapp_instance_id", instanceId)
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      convData = conv;
     } else {
-      // Fallback for old conversations
-      if (contact?.company_id) {
-        const { data: compInstance } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("instance_name, evogo_api_key, companies(evogo_host)")
-          .eq("company_id", contact.company_id)
-          .limit(1)
-          .maybeSingle();
-        if (compInstance) {
-          host = compInstance.companies?.evogo_host;
-          token = compInstance.evogo_api_key;
-          instanceName = compInstance.instance_name;
-        }
-      }
+      const { data: conv } = await supabaseAdmin
+        .from("conversations")
+        .select("id, whatsapp_instance_id, provider_thread_id, channel")
+        .eq("contact_id", contactId)
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      convData = conv;
+      if (conv?.whatsapp_instance_id) instanceId = conv.whatsapp_instance_id;
     }
+
+    const { data: contact, error: contactErr } = await supabaseAdmin
+      .from("contacts")
+      .select("id, name, phone, instagram_id, instagram_username, company_id, profile_picture_url")
+      .eq("id", contactId)
+      .maybeSingle();
+
+    if (contactErr || !contact) {
+      return { success: false, message: "Contato não encontrado (talvez tenha sido excluído)." };
+    }
+
+    let instance: any = null;
+    if (instanceId) {
+      const { data } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select(
+          "id, instance_name, provider, network, zernio_account_id, evogo_api_key, stevo_api_key, custom_host, companies(id, zernio_api_key, zernio_base_url, evogo_host, stevo_host)"
+        )
+        .eq("id", instanceId)
+        .maybeSingle();
+      instance = data;
+    } else if (contact.company_id) {
+      const { data } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select(
+          "id, instance_name, provider, network, zernio_account_id, evogo_api_key, stevo_api_key, custom_host, companies(id, zernio_api_key, zernio_base_url, evogo_host, stevo_host)"
+        )
+        .eq("company_id", contact.company_id)
+        .limit(1)
+        .maybeSingle();
+      instance = data;
+    }
+
+    // Caso A: Instância conectada via Zernio (WhatsApp ou Instagram)
+    if (instance && instance.provider === "zernio") {
+      const apiKey = instance.companies?.zernio_api_key;
+      const baseUrl = instance.companies?.zernio_base_url;
+
+      if (!apiKey) {
+        return { success: false, message: "Chave da Zernio não configurada na empresa." };
+      }
+
+      const zClient = new ZernioClient({ apiKey, baseUrl });
+      const isInstagram =
+        instance.network === "instagram" ||
+        convData?.channel === "instagram" ||
+        Boolean(contact.instagram_id || contact.instagram_username);
+
+      if (isInstagram) {
+        let cData: any = null;
+
+        if (convData?.provider_thread_id) {
+          cData = await zClient.getConversation(convData.provider_thread_id, instance.zernio_account_id);
+        }
+
+        if (!cData) {
+          const list = await zClient.listConversations({
+            accountId: instance.zernio_account_id,
+            limit: 50,
+          });
+          cData = list.find((c: any) => {
+            const pid = String(c.participantId || c.id || "");
+            const puser = String(c.participantUsername || "").toLowerCase();
+            return (
+              (contact.instagram_id && pid === String(contact.instagram_id)) ||
+              (contact.instagram_username && puser === contact.instagram_username.toLowerCase())
+            );
+          });
+        }
+
+        if (cData) {
+          const pic = cData.participantPicture || cData.participantProfilePicture;
+          let permanentUrl: string | null = null;
+          if (pic) {
+            permanentUrl = await persistirAvatarContatoNoStorage(contactId, pic);
+          }
+
+          const updatePayload: Record<string, any> = {};
+          if (permanentUrl || pic) {
+            updatePayload.profile_picture_url = permanentUrl || pic;
+          }
+          if (
+            cData.participantName &&
+            (!contact.name ||
+              contact.name.startsWith("Usuário Instagram") ||
+              contact.name.startsWith("Instagram User") ||
+              contact.name === `@${contact.instagram_username}`)
+          ) {
+            updatePayload.name = cData.participantName;
+          }
+          if (cData.participantUsername && !contact.instagram_username) {
+            updatePayload.instagram_username = cData.participantUsername;
+          }
+
+          if (Object.keys(updatePayload).length > 0) {
+            await supabaseAdmin.from("contacts").update(updatePayload).eq("id", contactId);
+          }
+
+          return {
+            success: true,
+            updatedName: updatePayload.name || contact.name || "Foto Encontrada",
+            avatarFound: Boolean(permanentUrl || pic),
+            message:
+              permanentUrl || pic
+                ? "Foto e perfil do Instagram sincronizados com sucesso!"
+                : "Perfil do Instagram sincronizado.",
+          };
+        }
+
+        return {
+          success: false,
+          message: "Nenhuma conversa do Instagram encontrada na Zernio para este perfil.",
+        };
+      }
+
+      // WhatsApp na Zernio (Meta Cloud API)
+      let cData: any = null;
+      if (convData?.provider_thread_id) {
+        cData = await zClient.getConversation(convData.provider_thread_id, instance.zernio_account_id);
+      }
+
+      const pic = cData?.participantPicture || cData?.participantProfilePicture;
+      if (pic) {
+        const permanentUrl = await persistirAvatarContatoNoStorage(contactId, pic);
+        await supabaseAdmin
+          .from("contacts")
+          .update({ profile_picture_url: permanentUrl || pic })
+          .eq("id", contactId);
+
+        return {
+          success: true,
+          updatedName: cData.participantName || "Foto Encontrada",
+          avatarFound: true,
+          message: "Foto de perfil do WhatsApp atualizada!",
+        };
+      }
+
+      return {
+        success: false,
+        message:
+          "A API Oficial do WhatsApp (Meta Cloud API) não disponibiliza foto de perfil de clientes por motivos de privacidade da Meta.",
+      };
+    }
+
+    // Caso B: Instâncias WhatsApp via EvoGo ou Stevo
+    if (!contact.phone) {
+      return { success: false, message: "Contato sem número de telefone para consulta no WhatsApp." };
+    }
+
+    let host =
+      instance?.custom_host ||
+      (instance?.provider === "stevo"
+        ? instance?.companies?.stevo_host
+        : instance?.companies?.evogo_host);
+    let token = instance?.provider === "stevo" ? instance?.stevo_api_key : instance?.evogo_api_key;
+    let instanceName = instance?.instance_name;
 
     if (!host || !token || !instanceName) {
-      return { success: false, message: "EvoGo não configurado para esta unidade/empresa." };
+      return { success: false, message: "Provedor WhatsApp não configurado para esta unidade/empresa." };
     }
-    
+
     let pushName = null;
     let avatarUrl = null;
-    const jid = contact.phone.includes('@') ? contact.phone : `${contact.phone}@s.whatsapp.net`;
+    const jid = contact.phone.includes("@") ? contact.phone : `${contact.phone}@s.whatsapp.net`;
 
     try {
       console.log(`[syncContactProfile] Fetching info for ${jid} on ${host} (Instance: ${instanceName})`);
       const resInfo = await fetch(`${host}/user/info`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
-          'apikey': token,
-          'Authorization': `Bearer ${token}` 
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: token,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ number: [jid] }),
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(5000),
       });
-      
-      console.log(`[syncContactProfile] resInfo status: ${resInfo.status}`);
+
       if (resInfo.ok) {
         const jsonInfo = await resInfo.json();
         pushName = jsonInfo.name || jsonInfo.pushName || jsonInfo.pushname || jsonInfo.contactName || null;
@@ -1374,48 +1516,64 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
     try {
       console.log(`[syncContactProfile] Fetching avatar for ${jid} (Instance: ${instanceName})`);
       const resAvatar = await fetch(`${host}/user/avatar`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json', 
-          'apikey': token,
-          'Authorization': `Bearer ${token}`
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: token,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ number: jid, preview: true }),
-        signal: AbortSignal.timeout(10000)
+        signal: AbortSignal.timeout(10000),
       });
-      console.log(`[syncContactProfile] resAvatar status: ${resAvatar.status}`);
+
       if (resAvatar.ok) {
         const jsonAvatar = await resAvatar.json();
-        
-        let finalUrl = jsonAvatar?.data?.url || jsonAvatar.url || jsonAvatar.profilePictureUrl || jsonAvatar.picture || null;
-        
+        let finalUrl =
+          jsonAvatar?.data?.url ||
+          jsonAvatar.url ||
+          jsonAvatar.profilePictureUrl ||
+          jsonAvatar.picture ||
+          null;
+
         let base64str = jsonAvatar.avatar;
         if (base64str && !finalUrl) {
-          if (!base64str.startsWith('data:')) {
-            const mimeType = base64str.startsWith('iVBORw0KGgo') ? 'image/png' : 'image/jpeg';
+          if (!base64str.startsWith("data:")) {
+            const mimeType = base64str.startsWith("iVBORw0KGgo") ? "image/png" : "image/jpeg";
             base64str = `data:${mimeType};base64,${base64str}`;
           }
           finalUrl = base64str;
         }
-        
+
         avatarUrl = finalUrl;
       }
     } catch (e) {
       console.warn("[syncContactProfile] Failed to fetch avatar via /user/avatar:", e);
     }
 
+    let permanentAvatarUrl: string | null = null;
+    if (avatarUrl) {
+      permanentAvatarUrl = await persistirAvatarContatoNoStorage(contactId, avatarUrl);
+    }
+
     const updatePayload: any = {};
     if (pushName) updatePayload.name = pushName;
-    if (avatarUrl) updatePayload.profile_picture_url = avatarUrl;
+    if (permanentAvatarUrl || avatarUrl) {
+      updatePayload.profile_picture_url = permanentAvatarUrl || avatarUrl;
+    }
 
     if (Object.keys(updatePayload).length > 0) {
-      await supabaseAdmin.from('contacts').update(updatePayload).eq('id', contactId);
+      await supabaseAdmin.from("contacts").update(updatePayload).eq("id", contactId);
     }
 
     if (pushName) {
-      return { success: true, updatedName: pushName, avatarFound: !!avatarUrl };
-    } else if (avatarUrl) {
-      return { success: true, updatedName: "Foto Encontrada", avatarFound: true, message: "Foto de perfil atualizada!" };
+      return { success: true, updatedName: pushName, avatarFound: !!(permanentAvatarUrl || avatarUrl) };
+    } else if (permanentAvatarUrl || avatarUrl) {
+      return {
+        success: true,
+        updatedName: "Foto Encontrada",
+        avatarFound: true,
+        message: "Foto de perfil atualizada e salva permanentemente!",
+      };
     } else {
       return { success: false, message: "Nenhum nome público ou foto encontrados no WhatsApp." };
     }

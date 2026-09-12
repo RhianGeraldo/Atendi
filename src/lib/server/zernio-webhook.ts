@@ -16,9 +16,10 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { conferirPorta } from "./webhook-auth";
 import { interpretarEventoZernio, type EventoZernioTraduzido } from "../canais/zernio/interpretar";
-import { downloadZernioMedia } from "../canais/zernio/client";
+import { downloadZernioMedia, ZernioClient } from "../canais/zernio/client";
 import { enqueueAiMessage } from "./ai-queue";
 import { getPhoneVariants } from "@/lib/utils";
+import { persistirAvatarContatoNoStorage } from "../avatar-storage";
 
 export async function handleZernioWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -256,12 +257,32 @@ async function processarMensagem(
         return;
       }
       contact = newContact;
-    } else if (evento.remetente.username && !contact.instagram_username) {
-      // Atualizar username se faltava
-      await supabaseAdmin
-        .from("contacts")
-        .update({ instagram_username: evento.remetente.username })
-        .eq("id", contact.id);
+    } else {
+      const updates: Record<string, any> = {};
+      if (evento.remetente.username && !contact.instagram_username) {
+        updates.instagram_username = evento.remetente.username;
+      }
+      if (
+        evento.remetente.nome &&
+        (!contact.name ||
+          contact.name.startsWith("Usuário Instagram") ||
+          contact.name.startsWith("Instagram User") ||
+          contact.name === `@${contact.instagram_username}`)
+      ) {
+        updates.name = evento.remetente.nome;
+      }
+      if (
+        evento.remetente.fotoPerfil &&
+        (!contact.profile_picture_url ||
+          contact.profile_picture_url.includes("cdninstagram.com") ||
+          contact.profile_picture_url.includes("fbcdn.net"))
+      ) {
+        updates.profile_picture_url = evento.remetente.fotoPerfil;
+      }
+      if (Object.keys(updates).length > 0) {
+        await supabaseAdmin.from("contacts").update(updates).eq("id", contact.id);
+        contact = { ...contact, ...updates };
+      }
     }
   } else {
     // WhatsApp: busca por variantes de telefone
@@ -286,6 +307,7 @@ async function processarMensagem(
           whatsapp_lid: evento.remetente.bsuid || null,
           source: "whatsapp",
           source_details: "zernio",
+          profile_picture_url: evento.remetente.fotoPerfil || null,
         })
         .select()
         .single();
@@ -295,11 +317,59 @@ async function processarMensagem(
         return;
       }
       contact = newContact;
+    } else {
+      const updates: Record<string, any> = {};
+      if (evento.remetente.bsuid && !contact.whatsapp_lid) {
+        updates.whatsapp_lid = evento.remetente.bsuid;
+      }
+      if (evento.remetente.nome && (!contact.name || contact.name === contactIdOrPhone)) {
+        updates.name = evento.remetente.nome;
+      }
+      if (
+        evento.remetente.fotoPerfil &&
+        (!contact.profile_picture_url ||
+          contact.profile_picture_url.includes("whatsapp.net") ||
+          contact.profile_picture_url.includes("fbcdn.net"))
+      ) {
+        updates.profile_picture_url = evento.remetente.fotoPerfil;
+      }
+      if (Object.keys(updates).length > 0) {
+        await supabaseAdmin.from("contacts").update(updates).eq("id", contact.id);
+        contact = { ...contact, ...updates };
+      }
     }
   }
 
   if (contact.merged_into_id) {
     contact.id = contact.merged_into_id;
+  }
+
+  // Persistência assíncrona do avatar em storage permanente (sem travar o webhook)
+  const targetPhoto = evento.remetente.fotoPerfil || contact.profile_picture_url;
+  if (targetPhoto && !targetPhoto.includes("supabase.co/storage")) {
+    persistirAvatarContatoNoStorage(contact.id, targetPhoto).catch((err) => {
+      console.warn("[zernio:webhook] Falha ao persistir avatar no storage:", err);
+    });
+  } else if (
+    !contact.profile_picture_url &&
+    redeFinal === "instagram" &&
+    company?.zernio_api_key &&
+    evento.threadId
+  ) {
+    // Se o contato do Instagram não possui foto, tenta buscar na conversa da Zernio em background
+    const zClient = new ZernioClient({
+      apiKey: company.zernio_api_key,
+      baseUrl: company.zernio_base_url,
+    });
+    zClient
+      .getConversation(evento.threadId, evento.accountId)
+      .then(async (cData) => {
+        const pic = cData?.participantPicture || cData?.participantProfilePicture;
+        if (pic) {
+          await persistirAvatarContatoNoStorage(contact.id, pic);
+        }
+      })
+      .catch(() => {});
   }
 
   // 3. Localizar conversa ativa ou criar nova

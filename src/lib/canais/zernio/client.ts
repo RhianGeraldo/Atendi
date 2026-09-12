@@ -228,6 +228,51 @@ export class ZernioClient {
   }
 
   /**
+   * Obtém detalhes de uma conversa (incluindo participantPicture) (§6.8).
+   */
+  async getConversation(threadId: string, accountId: string): Promise<any> {
+    try {
+      const res = await this.request(
+        `/v1/inbox/conversations/${encodeURIComponent(threadId)}`,
+        {
+          query: { accountId },
+        }
+      );
+      return res?.data || res?.conversation || res || null;
+    } catch (err) {
+      console.warn(`[zernio] Falha ao consultar conversa ${threadId}:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Lista conversas da caixa de entrada (§6.8).
+   */
+  async listConversations(params?: {
+    accountId?: string;
+    limit?: number;
+    page?: number;
+    platform?: "whatsapp" | "instagram";
+  }): Promise<any[]> {
+    try {
+      const query: Record<string, any> = {};
+      if (params?.accountId) query.accountId = params.accountId;
+      if (params?.limit) query.limit = params.limit;
+      if (params?.page) query.page = params.page;
+      if (params?.platform) query.platform = params.platform;
+
+      const res = await this.request<{ conversations?: any[]; data?: any[] }>(
+        "/v1/inbox/conversations",
+        { query }
+      );
+      return res?.conversations || res?.data || (Array.isArray(res) ? res : []);
+    } catch (err) {
+      console.warn("[zernio] Falha ao listar conversas:", err);
+      return [];
+    }
+  }
+
+  /**
    * Envia mensagem de texto para a thread (§6.2).
    */
   async sendTextMessage(params: {

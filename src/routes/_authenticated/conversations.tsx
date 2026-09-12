@@ -1287,7 +1287,7 @@ function ContactSidebar({ conv, onClose }: { conv: ConvRow, onClose?: () => void
               variant="secondary" 
               size="icon" 
               className="absolute bottom-0 right-0 h-8 w-8 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
-              title="Sincronizar foto do WhatsApp"
+              title={conv.channel === 'instagram' ? "Sincronizar perfil e foto do Instagram" : "Sincronizar foto do WhatsApp"}
               onClick={() => updateContact.mutate()}
               disabled={updateContact.isPending}
             >

@@ -85,7 +85,8 @@ export function interpretarEventoZernio(payload: any): EventoZernioTraduzido {
   const account = payload.account || {};
   const accountId = String(account.accountId || account.id || "");
   const conversation = payload.conversation || {};
-  const threadId = String(conversation.id || "");
+  const msgRaw = payload.message || {};
+  const threadId = String(conversation.id || msgRaw.conversationId || payload.conversationId || "");
 
   // 1. Ordem importa: template status não tem bloco message (§8.3, §8.6)
   if (eventName === "whatsapp.template.status_updated" || payload.template) {
@@ -190,15 +191,36 @@ export function interpretarEventoZernio(payload: any): EventoZernioTraduzido {
     let nome = "";
     let username: string | undefined;
     let bsuid: string | undefined;
+    let fotoPerfil: string | undefined;
 
     if (saindo) {
       identificador = conversation.participantId || "";
       nome = conversation.participantName || "";
       username = conversation.participantUsername;
+      fotoPerfil =
+        conversation.participantPicture ||
+        conversation.participantProfilePicture ||
+        conversation.avatarUrl ||
+        undefined;
     } else {
       const sender = msg.sender || {};
       nome = sender.name || conversation.participantName || "";
       username = conversation.participantUsername || sender.username || sender.whatsappUsername;
+
+      fotoPerfil =
+        conversation.participantPicture ||
+        conversation.participantProfilePicture ||
+        conversation.avatarUrl ||
+        sender.picture ||
+        sender.profilePicture ||
+        sender.profilePic ||
+        sender.avatarUrl ||
+        sender.avatar ||
+        sender.instagramProfile?.profilePic ||
+        sender.instagramProfile?.profile_pic ||
+        payload.contact?.avatarUrl ||
+        payload.contact?.profilePicture ||
+        undefined;
 
       if (rede === "instagram") {
         identificador = sender.id || conversation.participantId || "";
@@ -291,6 +313,7 @@ export function interpretarEventoZernio(payload: any): EventoZernioTraduzido {
         nome,
         username,
         bsuid,
+        fotoPerfil,
       },
       texto,
       anexo,

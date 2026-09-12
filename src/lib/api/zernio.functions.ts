@@ -8,6 +8,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { ZernioClient, ZernioError, traduzirErroZernio } from "../canais/zernio/client";
 import { novoSegredo } from "../server/webhook-auth";
+import { persistirAvatarContatoNoStorage } from "../avatar-storage";
 
 /**
  * Salva as credenciais da Zernio na empresa.
@@ -158,6 +159,31 @@ export const syncZernioWebhookAction = createServerFn({ method: "POST" })
         secret: signatureSecret,
       });
 
+      // Disparar sincronização de avatares em background
+      void (async () => {
+        try {
+          const conversations = await client.listConversations({ limit: 100 });
+          for (const c of conversations) {
+            const pic = c.participantPicture || c.participantProfilePicture;
+            if (!pic) continue;
+            const pid = String(c.participantId || "");
+            const puser = String(c.participantUsername || "");
+            let q = supabaseAdmin.from("contacts").select("id, profile_picture_url").eq("company_id", companyId);
+            if (puser) q = q.or(`instagram_id.eq.${pid},instagram_username.eq.${puser},phone.eq.${pid}`);
+            else q = q.or(`instagram_id.eq.${pid},phone.eq.${pid}`);
+            const { data: contacts } = await q;
+            if (!contacts) continue;
+            for (const ct of contacts) {
+              if (!ct.profile_picture_url || !ct.profile_picture_url.includes("supabase.co/storage")) {
+                await persistirAvatarContatoNoStorage(ct.id, pic);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[zernio] Erro na sincronização em background de avatares:", e);
+        }
+      })();
+
       return {
         success: true,
         webhookUrl,
@@ -171,3 +197,75 @@ export const syncZernioWebhookAction = createServerFn({ method: "POST" })
       throw new Error(err.message || "Falha ao registrar webhook na Zernio.");
     }
   });
+
+/**
+ * Sincroniza em massa os avatares das conversas do Zernio para o Supabase Storage permanente.
+ */
+export const syncZernioAvatarsAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    z.object({
+      companyId: z.string().uuid(),
+    })
+  )
+  .handler(async ({ data }) => {
+    const { companyId } = data;
+
+    const { data: comp, error: compErr } = await supabaseAdmin
+      .from("companies")
+      .select("zernio_api_key, zernio_base_url")
+      .eq("id", companyId)
+      .single();
+
+    if (compErr || !comp?.zernio_api_key) {
+      throw new Error("Chave da Zernio não configurada nesta empresa.");
+    }
+
+    const client = new ZernioClient({
+      apiKey: comp.zernio_api_key,
+      baseUrl: comp.zernio_base_url,
+    });
+
+    const conversations = await client.listConversations({ limit: 100 });
+    let updatedCount = 0;
+
+    for (const c of conversations) {
+      const pic = c.participantPicture || c.participantProfilePicture;
+      if (!pic) continue;
+
+      const pid = String(c.participantId || "");
+      const puser = String(c.participantUsername || "");
+
+      let query = supabaseAdmin
+        .from("contacts")
+        .select("id, name, profile_picture_url")
+        .eq("company_id", companyId);
+
+      if (puser) {
+        query = query.or(`instagram_id.eq.${pid},instagram_username.eq.${puser},phone.eq.${pid}`);
+      } else {
+        query = query.or(`instagram_id.eq.${pid},phone.eq.${pid}`);
+      }
+
+      const { data: matchedContacts } = await query;
+      if (!matchedContacts || matchedContacts.length === 0) continue;
+
+      for (const ct of matchedContacts) {
+        // Se ainda não tem foto ou se a foto atual é um link assinado que pode expirar
+        if (
+          !ct.profile_picture_url ||
+          ct.profile_picture_url.includes("cdninstagram.com") ||
+          ct.profile_picture_url.includes("fbcdn.net") ||
+          ct.profile_picture_url.includes("whatsapp.net")
+        ) {
+          const permUrl = await persistirAvatarContatoNoStorage(ct.id, pic);
+          if (permUrl) {
+            updatedCount++;
+          }
+        }
+      }
+    }
+
+    return { success: true, updatedCount };
+  });
+
