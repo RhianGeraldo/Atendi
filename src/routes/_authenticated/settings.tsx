@@ -133,21 +133,6 @@ function SettingsPage() {
   }, [createModalOpen]);
 
   useEffect(() => {
-    if (createModalOpen && instanceProvider === 'zernio' && activeCompanyId && company?.zernio_api_key) {
-      setIsLoadingZernioAccounts(true);
-      listZernioAccountsAction({ data: { companyId: activeCompanyId, platform: zernioNetwork } })
-        .then((res) => {
-          setZernioAccounts(res.accounts || []);
-        })
-        .catch((err) => {
-          console.error("Erro ao listar contas Zernio:", err);
-          toast.error("Erro ao carregar contas Zernio: " + err.message);
-        })
-        .finally(() => setIsLoadingZernioAccounts(false));
-    }
-  }, [createModalOpen, instanceProvider, zernioNetwork, activeCompanyId, company?.zernio_api_key]);
-
-  useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       // Se for a nossa própria janela de login (callback)
       if (event.origin === window.location.origin) {
@@ -177,20 +162,34 @@ function SettingsPage() {
     return () => window.removeEventListener('message', handleMessage);
   }, [activeCompanyId]);
 
-
   const { data: company, isLoading: isLoadingCompany } = useQuery({
     queryKey: ["company", activeCompanyId],
     enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("id, name, evogo_host, evogo_global_token, stevo_host, stevo_global_token, meta_system_user_token, ai_settings, document, address, business_hours, custom_variables")
+        .select("id, name, evogo_host, evogo_global_token, stevo_host, stevo_global_token, meta_system_user_token, ai_settings, document, address, business_hours, custom_variables, zernio_api_key, zernio_base_url, zernio_webhook_secret")
         .eq("id", activeCompanyId!)
         .single();
       if (error) throw error;
       return data;
     },
   });
+
+  useEffect(() => {
+    if (createModalOpen && instanceProvider === 'zernio' && activeCompanyId && company?.zernio_api_key) {
+      setIsLoadingZernioAccounts(true);
+      listZernioAccountsAction({ data: { companyId: activeCompanyId, platform: zernioNetwork } })
+        .then((res) => {
+          setZernioAccounts(res.accounts || []);
+        })
+        .catch((err) => {
+          console.error("Erro ao listar contas Zernio:", err);
+          toast.error("Erro ao carregar contas Zernio: " + err.message);
+        })
+        .finally(() => setIsLoadingZernioAccounts(false));
+    }
+  }, [createModalOpen, instanceProvider, zernioNetwork, activeCompanyId, company?.zernio_api_key]);
 
   useEffect(() => {
     if (createModalOpen && company?.meta_system_user_token && (instanceProvider === 'instagram' || instanceProvider === 'messenger')) {
