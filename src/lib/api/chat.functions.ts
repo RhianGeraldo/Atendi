@@ -4,8 +4,22 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { abrirCanal, destinatarioDe } from "@/lib/canais/motor";
 import type { CanalAberto, Destinatario } from "@/lib/canais/tipos";
-import { sendEvogoText, sendEvogoLink, sendEvogoMedia, sendEvogoReaction, editEvogoMessage, deleteEvogoMessage } from "../evogo";
-import { sendStevoText, sendStevoLink, sendStevoMedia, sendStevoReaction, editStevoMessage, deleteStevoMessage } from "../stevo";
+import {
+  sendEvogoText,
+  sendEvogoLink,
+  sendEvogoMedia,
+  sendEvogoReaction,
+  editEvogoMessage,
+  deleteEvogoMessage,
+} from "../evogo";
+import {
+  sendStevoText,
+  sendStevoLink,
+  sendStevoMedia,
+  sendStevoReaction,
+  editStevoMessage,
+  deleteStevoMessage,
+} from "../stevo";
 import { getPhoneVariants } from "@/lib/utils";
 import { getCompanyPlaybookSummary } from "./training.functions";
 import { ZernioClient } from "../canais/zernio/client";
@@ -13,23 +27,27 @@ import { persistirAvatarContatoNoStorage } from "../avatar-storage";
 
 export const sendMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    conversationId: z.string().uuid(),
-    text: z.string().optional(),
-    mediaType: z.enum(["text", "image", "video", "audio", "document"]).optional().default("text"),
-    mediaBase64: z.string().optional(),
-    quotedMessageId: z.string().optional(),
-    quotedParticipant: z.string().optional(),
-    quotedInternalId: z.string().optional(),
-    quotedContent: z.string().optional(),
-    isInternal: z.boolean().optional().default(false)
-  }))
+  .inputValidator(
+    z.object({
+      conversationId: z.string().uuid(),
+      text: z.string().optional(),
+      mediaType: z.enum(["text", "image", "video", "audio", "document"]).optional().default("text"),
+      mediaBase64: z.string().optional(),
+      quotedMessageId: z.string().optional(),
+      quotedParticipant: z.string().optional(),
+      quotedInternalId: z.string().optional(),
+      quotedContent: z.string().optional(),
+      isInternal: z.boolean().optional().default(false),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    
+
     const { data: conv, error: convErr } = await supabase
       .from("conversations")
-      .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, assigned_agent_id, contacts(phone, whatsapp_lid, company_id, instagram_id, messenger_id)")
+      .select(
+        "status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, assigned_agent_id, contacts(phone, whatsapp_lid, company_id, instagram_id, messenger_id)",
+      )
       .eq("id", data.conversationId)
       .single();
 
@@ -37,8 +55,15 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       throw new Error("Conversation not found or access denied.");
     }
 
-    if (!data.isInternal && conv.status === 'active' && conv.assigned_agent_id && conv.assigned_agent_id !== userId) {
-      throw new Error("Esta conversa está em atendimento por outro atendente. Assuma o atendimento antes de enviar mensagens.");
+    if (
+      !data.isInternal &&
+      conv.status === "active" &&
+      conv.assigned_agent_id &&
+      conv.assigned_agent_id !== userId
+    ) {
+      throw new Error(
+        "Esta conversa está em atendimento por outro atendente. Assuma o atendimento antes de enviar mensagens.",
+      );
     }
 
     const targetConversationId = data.conversationId;
@@ -69,7 +94,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       destino = destinatarioDe(canal, conv, conv.contacts);
     }
 
-    const provider = canal?.provedor ?? 'evogo';
+    const provider = canal?.provedor ?? "evogo";
     const host = canal?.host ?? null;
     const token = canal?.token ?? null;
     const instanceName = canal?.instanceName ?? null;
@@ -77,13 +102,16 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     const phone = destino?.identificador ?? "";
 
     // Os provedores de sessão precisam dos três; os da Meta, de nenhum deles.
-    if (canal && (canal.provedor === 'evogo' || canal.provedor === 'stevo') && (!host || !token || !instanceName)) {
+    if (
+      canal &&
+      (canal.provedor === "evogo" || canal.provedor === "stevo") &&
+      (!host || !token || !instanceName)
+    ) {
       throw new Error(
-        `A conexão ${canal.provedor === 'stevo' ? 'Stevo' : 'EvoGo'} desta conversa está incompleta: ` +
-        "falta host, token ou o nome da instância.",
+        `A conexão ${canal.provedor === "stevo" ? "Stevo" : "EvoGo"} desta conversa está incompleta: ` +
+          "falta host, token ou o nome da instância.",
       );
     }
-
 
     // 3. Get user profile for signature
     const { data: userProfile } = await supabase
@@ -92,9 +120,11 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       .eq("id", userId)
       .single();
 
-    let textToSend = data.text || '';
+    let textToSend = data.text || "";
     if (!data.isInternal && userProfile?.use_signature && userProfile?.name) {
-      textToSend = textToSend.trim() ? `*${userProfile.name}*:\n${textToSend}` : `*${userProfile.name}*:`;
+      textToSend = textToSend.trim()
+        ? `*${userProfile.name}*:\n${textToSend}`
+        : `*${userProfile.name}*:`;
     }
 
     // 4. Send message via EvoGo
@@ -102,16 +132,16 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     let mediaUrlToSend = data.mediaBase64;
     let finalParticipant = data.quotedParticipant;
     let finalMessageId = data.quotedMessageId;
-    
+
     // Fallback: If UI forgot to send the remote_msg_id, but sent the internal ID, fetch it from the DB!
     let quotedSenderType = "contact";
     if (data.quotedInternalId) {
       const { data: qMsg } = await supabaseAdmin
-        .from('messages')
-        .select('remote_msg_id, sender_type')
-        .eq('id', data.quotedInternalId)
+        .from("messages")
+        .select("remote_msg_id, sender_type")
+        .eq("id", data.quotedInternalId)
         .single();
-        
+
       if (!finalMessageId && qMsg?.remote_msg_id) {
         finalMessageId = qMsg.remote_msg_id;
       }
@@ -121,78 +151,90 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     }
 
     // Injetar o JID do contato SOMENTE se a mensagem original foi enviada pelo contato
-    if (!finalParticipant && quotedSenderType === "contact" && conv.contacts?.phone && !conv.contacts.phone.includes('-')) {
+    if (
+      !finalParticipant &&
+      quotedSenderType === "contact" &&
+      conv.contacts?.phone &&
+      !conv.contacts.phone.includes("-")
+    ) {
       finalParticipant = `${conv.contacts.phone}@s.whatsapp.net`;
     }
 
-    const quoted = finalMessageId ? {
-      messageId: finalMessageId,
-      ...(finalParticipant && { participant: finalParticipant })
-    } : undefined;
+    const quoted = finalMessageId
+      ? {
+          messageId: finalMessageId,
+          ...(finalParticipant && { participant: finalParticipant }),
+        }
+      : undefined;
 
     if (!data.isInternal) {
-      if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
+      if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
         try {
-          if (data.mediaBase64.startsWith('data:')) {
-            const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+          if (data.mediaBase64.startsWith("data:")) {
+            const match = data.mediaBase64.match(
+              /^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/,
+            );
             if (match) {
               const mimeType = match[1];
               const base64Data = match[2];
-              const buffer = Buffer.from(base64Data, 'base64');
-              const ext = mimeType.split('/')[1] || 'bin';
+              const buffer = Buffer.from(base64Data, "base64");
+              const ext = mimeType.split("/")[1] || "bin";
               const fileName = `${targetConversationId}/${Date.now()}.${ext}`;
-              
-              const { data: uploadData, error: uploadError } = await supabaseAdmin
-                .storage
-                .from('media')
+
+              const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+                .from("media")
                 .upload(fileName, buffer, {
                   contentType: mimeType,
                   upsert: false,
-                  cacheControl: '31536000, must-revalidate'
+                  cacheControl: "31536000, must-revalidate",
                 });
-                
+
               if (!uploadError && uploadData) {
-                const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
+                const { data: publicUrlData } = supabaseAdmin.storage
+                  .from("media")
+                  .getPublicUrl(uploadData.path);
                 mediaUrlToSend = publicUrlData.publicUrl;
               }
             }
           }
         } catch (e) {
-          console.error('Failed to parse or upload base64 to Supabase', e);
+          console.error("Failed to parse or upload base64 to Supabase", e);
         }
       }
 
-      if (provider === 'zernio') {
-        const { enviarMensagemZernio } = await import('@/lib/canais/zernio/adaptador');
+      if (provider === "zernio") {
+        const { enviarMensagemZernio } = await import("@/lib/canais/zernio/adaptador");
 
         let mediaBuffer: Buffer | undefined;
         let mimeType: string | undefined;
         let fileName: string | undefined;
 
-        if (data.mediaBase64 && data.mediaType !== 'text') {
-          if (data.mediaBase64.startsWith('data:')) {
-            const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+        if (data.mediaBase64 && data.mediaType !== "text") {
+          if (data.mediaBase64.startsWith("data:")) {
+            const match = data.mediaBase64.match(
+              /^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/,
+            );
             if (match) {
               mimeType = match[1];
-              mediaBuffer = Buffer.from(match[2], 'base64');
-              const ext = mimeType.split('/')[1] || 'bin';
+              mediaBuffer = Buffer.from(match[2], "base64");
+              const ext = mimeType.split("/")[1] || "bin";
               fileName = `${targetConversationId}_${Date.now()}.${ext}`;
             }
           }
         }
 
         const { data: convThread } = await supabaseAdmin
-          .from('conversations')
-          .select('provider_thread_id')
-          .eq('id', targetConversationId)
+          .from("conversations")
+          .select("provider_thread_id")
+          .eq("id", targetConversationId)
           .single();
 
         const resZernio = await enviarMensagemZernio({
           canal: canal!,
           destinatario: destino!,
           threadId: convThread?.provider_thread_id || null,
-          texto: textToSend || '',
-          mediaType: (data.mediaType as any) || 'text',
+          texto: textToSend || "",
+          mediaType: (data.mediaType as any) || "text",
           mediaBuffer,
           fileName,
           mimeType,
@@ -203,27 +245,27 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
         if (resZernio.threadId && resZernio.threadId !== convThread?.provider_thread_id) {
           await supabaseAdmin
-            .from('conversations')
+            .from("conversations")
             .update({ provider_thread_id: resZernio.threadId })
-            .eq('id', targetConversationId);
+            .eq("id", targetConversationId);
         }
-      } else if (provider === 'oficial') {
-        const { sendCloudApiMessage } = await import('../server/whatsapp-cloud-api');
+      } else if (provider === "oficial") {
+        const { sendCloudApiMessage } = await import("../server/whatsapp-cloud-api");
         try {
           const msgId = await sendCloudApiMessage(
             resolvedInstanceId!,
             phone,
-            textToSend || '',
+            textToSend || "",
             data.mediaType,
             mediaUrlToSend,
-            finalMessageId
+            finalMessageId,
           );
           evogoResponse = { id: msgId };
         } catch (cloudErr: any) {
-          console.error('[chat.functions] sendCloudApiMessage failed:', cloudErr);
-          throw new Error(`Falha API Oficial: ${cloudErr.message || 'Erro desconhecido'}`);
+          console.error("[chat.functions] sendCloudApiMessage failed:", cloudErr);
+          throw new Error(`Falha API Oficial: ${cloudErr.message || "Erro desconhecido"}`);
         }
-      } else if (provider === 'instagram') {
+      } else if (provider === "instagram") {
         // As credenciais vieram com o canal; esta consulta repetia a de `abrirCanal`.
         if (!canal?.contaId || !canal?.contaToken) {
           throw new Error("Instagram Account ID ou Token faltando");
@@ -237,96 +279,104 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         const payload: any = {
           recipient: { id: phone },
           messaging_type: "RESPONSE",
-          message: {}
+          message: {},
         };
 
-        if (data.mediaBase64 && data.mediaType !== 'text' && mediaUrlToSend) {
-          let igMediaType = 'image';
-          if (data.mediaType === 'video') igMediaType = 'video';
-          else if (data.mediaType === 'audio') igMediaType = 'audio';
-          else if (data.mediaType === 'document') igMediaType = 'file';
+        if (data.mediaBase64 && data.mediaType !== "text" && mediaUrlToSend) {
+          let igMediaType = "image";
+          if (data.mediaType === "video") igMediaType = "video";
+          else if (data.mediaType === "audio") igMediaType = "audio";
+          else if (data.mediaType === "document") igMediaType = "file";
 
           payload.message = {
             attachment: {
               type: igMediaType,
               payload: {
                 url: mediaUrlToSend,
-                is_reusable: false
-              }
-            }
+                is_reusable: false,
+              },
+            },
           };
         } else {
-          payload.message = { text: textToSend || '' };
+          payload.message = { text: textToSend || "" };
         }
 
         if (finalMessageId) {
           payload.reply_to = { mid: finalMessageId };
         }
 
-        const isDirectToken = instance.oficial_access_token.startsWith('IGA');
-        const pageId = instance.oficial_waba_id || 'me';
-        const endpoint = isDirectToken 
+        const isDirectToken = instance.oficial_access_token.startsWith("IGA");
+        const pageId = instance.oficial_waba_id || "me";
+        const endpoint = isDirectToken
           ? `https://graph.instagram.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`
           : `https://graph.facebook.com/v20.0/${pageId}/messages?access_token=${instance.oficial_access_token}`;
 
         let igRes = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
         });
 
         let result = await igRes.json();
-        
+
         // Se a API da Meta recusar o reply_to (ex: respondendo a menções de story, mensagens expiradas, etc), refaz sem o reply_to
         if (!igRes.ok && result.error?.code === 100 && payload.reply_to) {
-          console.warn("[chat.functions] Instagram rejected reply_to (possibly story mention or unsupported). Retrying without reply_to...");
+          console.warn(
+            "[chat.functions] Instagram rejected reply_to (possibly story mention or unsupported). Retrying without reply_to...",
+          );
           delete payload.reply_to;
-          
+
           igRes = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
           });
           result = await igRes.json();
         }
 
         if (!igRes.ok) {
           console.error("[chat.functions] Instagram sending error:", result);
-          throw new Error(`Instagram Error: ${result.error?.message || 'Unknown error'}`);
+          throw new Error(`Instagram Error: ${result.error?.message || "Unknown error"}`);
         }
 
-        evogoResponse = { id: result.message_id, isInstagram: true, participant: instance.oficial_phone_number_id };
-
-      } else if (provider === 'messenger') {
+        evogoResponse = {
+          id: result.message_id,
+          isInstagram: true,
+          participant: instance.oficial_phone_number_id,
+        };
+      } else if (provider === "messenger") {
         // `contaId` guarda o Page ID quando a rede é Messenger.
         if (!canal?.contaId || !canal?.contaToken) {
           throw new Error("Facebook Page ID ou Token faltando");
         }
-        const instance = { oficial_phone_number_id: canal.contaId, oficial_access_token: canal.contaToken };
+        const instance = {
+          oficial_phone_number_id: canal.contaId,
+          oficial_access_token: canal.contaToken,
+        };
 
         const payload: any = {
           recipient: { id: phone },
           messaging_type: "RESPONSE",
-          message: {}
+          message: {},
         };
 
-        if (data.mediaBase64 && data.mediaType !== 'text' && mediaUrlToSend) {
-          let fbMediaType = 'image';
-          if (data.mediaType === 'video') fbMediaType = 'video';
-          else if (data.mediaType === 'audio') fbMediaType = 'audio';
-          else if (data.mediaType === 'document') fbMediaType = 'file';
+        if (data.mediaBase64 && data.mediaType !== "text" && mediaUrlToSend) {
+          let fbMediaType = "image";
+          if (data.mediaType === "video") fbMediaType = "video";
+          else if (data.mediaType === "audio") fbMediaType = "audio";
+          else if (data.mediaType === "document") fbMediaType = "file";
 
           payload.message = {
             attachment: {
               type: fbMediaType,
               payload: {
                 url: mediaUrlToSend,
-                is_reusable: false
-              }
-            }
+                is_reusable: false,
+              },
+            },
           };
         } else {
-          payload.message = { text: textToSend || '' };
+          payload.message = { text: textToSend || "" };
         }
 
         if (finalMessageId) {
@@ -334,37 +384,47 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         }
 
         // Messenger utiliza o Page ID diretamente (oficial_phone_number_id armazena o Page ID)
-        let fbRes = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        let fbRes = await fetch(
+          `https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          },
+        );
 
         let result = await fbRes.json();
 
         // Se a API da Meta recusar o reply_to (ex: respondendo a mensagens expiradas), refaz sem o reply_to
         if (!fbRes.ok && result.error?.code === 100 && payload.reply_to) {
-          console.warn("[chat.functions] Messenger rejected reply_to. Retrying without reply_to...");
+          console.warn(
+            "[chat.functions] Messenger rejected reply_to. Retrying without reply_to...",
+          );
           delete payload.reply_to;
-          
-          fbRes = await fetch(`https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
+
+          fbRes = await fetch(
+            `https://graph.facebook.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            },
+          );
           result = await fbRes.json();
         }
 
         if (!fbRes.ok) {
           console.error("[chat.functions] Messenger sending error:", result);
-          throw new Error(`Messenger Error: ${result.error?.message || 'Unknown error'}`);
+          throw new Error(`Messenger Error: ${result.error?.message || "Unknown error"}`);
         }
 
-        evogoResponse = { id: result.message_id, isMessenger: true, participant: instance.oficial_phone_number_id };
-
+        evogoResponse = {
+          id: result.message_id,
+          isMessenger: true,
+          participant: instance.oficial_phone_number_id,
+        };
       } else {
-        if (data.mediaBase64 && data.mediaType && data.mediaType !== 'text') {
-
+        if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
           evogoResponse = await sendEvogoMedia({
             host: host!,
             token: token!,
@@ -398,7 +458,8 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     }
 
     // Extract remote message id if available
-    const remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
+    const remoteMsgId =
+      evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
 
     // 4. Save message in DB
     const insertPayload: any = {
@@ -414,8 +475,10 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     if (remoteMsgId && !data.isInternal) insertPayload.remote_msg_id = remoteMsgId;
     if (data.quotedInternalId) insertPayload.quoted_message_id = data.quotedInternalId;
     if (data.quotedContent) insertPayload.quoted_content = data.quotedContent;
-    if (evogoResponse?.data?.Info?.Sender) insertPayload.participant_jid = evogoResponse.data.Info.Sender;
-    if (evogoResponse?.isInstagram && evogoResponse?.participant) insertPayload.participant_jid = evogoResponse.participant;
+    if (evogoResponse?.data?.Info?.Sender)
+      insertPayload.participant_jid = evogoResponse.data.Info.Sender;
+    if (evogoResponse?.isInstagram && evogoResponse?.participant)
+      insertPayload.participant_jid = evogoResponse.participant;
 
     const { data: msg, error: msgErr } = await supabase
       .from("messages")
@@ -430,30 +493,29 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
     // 5. Update conversation last_message_at and reopen if resolved
     const convUpdate: any = { last_message_at: new Date().toISOString() };
-    if (conv.status === 'resolved') {
-      convUpdate.status = 'active';
+    if (conv.status === "resolved") {
+      convUpdate.status = "active";
       convUpdate.assigned_agent_id = userId;
       convUpdate.resolved_at = null;
-    } else if (conv.status === 'waiting') {
-      convUpdate.status = 'active';
+    } else if (conv.status === "waiting") {
+      convUpdate.status = "active";
       convUpdate.assigned_agent_id = userId;
     }
-    await supabaseAdmin
-      .from("conversations")
-      .update(convUpdate)
-      .eq("id", targetConversationId);
+    await supabaseAdmin.from("conversations").update(convUpdate).eq("id", targetConversationId);
 
     return { success: true, message: msg };
   });
 
 export const sendProactiveMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    phone: z.string().min(10),
-    text: z.string().optional(),
-    instanceName: z.string().min(1),
-    companyId: z.string().uuid(),
-  }))
+  .inputValidator(
+    z.object({
+      phone: z.string().min(10),
+      text: z.string().optional(),
+      instanceName: z.string().min(1),
+      companyId: z.string().uuid(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
@@ -490,27 +552,32 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       .single();
 
     const isOpeningOnly = !data.text || data.text.trim() === "";
-    const isAdminOrManager = userProfile?.role === "admin_company" || userProfile?.role === "super_admin" || userProfile?.role === "manager";
+    const isAdminOrManager =
+      userProfile?.role === "admin_company" ||
+      userProfile?.role === "super_admin" ||
+      userProfile?.role === "manager";
 
     let textToSend = data.text;
     if (textToSend && userProfile?.use_signature && userProfile?.name) {
-      textToSend = textToSend?.trim() ? `*${userProfile.name}*:\n${textToSend}` : `*${userProfile.name}*:`;
+      textToSend = textToSend?.trim()
+        ? `*${userProfile.name}*:\n${textToSend}`
+        : `*${userProfile.name}*:`;
     }
 
     // 4. Find or create Contact
     let contactIds: string[] = [];
     const phoneVariants = getPhoneVariants(rawPhone);
     const { data: existingContacts } = await supabaseAdmin
-      .from('contacts')
-      .select('id, merged_into_id')
-      .eq('company_id', data.companyId)
-      .in('phone', phoneVariants);
+      .from("contacts")
+      .select("id, merged_into_id")
+      .eq("company_id", data.companyId)
+      .in("phone", phoneVariants);
 
     if (existingContacts && existingContacts.length > 0) {
-      contactIds = existingContacts.map(c => c.merged_into_id || c.id);
+      contactIds = existingContacts.map((c) => c.merged_into_id || c.id);
     } else {
       const { data: newContact, error: contactErr } = await supabaseAdmin
-        .from('contacts')
+        .from("contacts")
         .insert({
           company_id: data.companyId,
           name: rawPhone, // They can edit later
@@ -520,12 +587,12 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
         .single();
       if (contactErr) throw new Error("Failed to create contact.");
       contactIds = [newContact.id];
-      
+
       // Auto-sync profile picture (MUST await in Vercel)
       try {
         await syncContactProfile(newContact.id, instance.id);
       } catch (err) {
-        console.error('[sendProactiveMessage] syncContactProfile failed:', err);
+        console.error("[sendProactiveMessage] syncContactProfile failed:", err);
       }
     }
 
@@ -534,98 +601,123 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     // 5. Find or create Conversation
     let conversationId;
     const { data: latestConvs } = await supabaseAdmin
-      .from('conversations')
-      .select('id, status, assigned_agent_id, assigned_agent:profiles!conversations_assigned_agent_id_fkey(name)')
-      .in('contact_id', contactIds)
-      .eq('whatsapp_instance_id', instance.id)
-      .order('started_at', { ascending: false })
+      .from("conversations")
+      .select(
+        "id, status, assigned_agent_id, assigned_agent:profiles!conversations_assigned_agent_id_fkey(name)",
+      )
+      .in("contact_id", contactIds)
+      .eq("whatsapp_instance_id", instance.id)
+      .order("started_at", { ascending: false })
       .limit(1);
 
     if (latestConvs && latestConvs.length > 0) {
       const conv = latestConvs[0];
       conversationId = conv.id;
-      
-      if (conv.status === 'active') {
-        const isWithAnotherAgent = Boolean(conv.assigned_agent_id && conv.assigned_agent_id !== userId);
+
+      if (conv.status === "active") {
+        const isWithAnotherAgent = Boolean(
+          conv.assigned_agent_id && conv.assigned_agent_id !== userId,
+        );
 
         if (isWithAnotherAgent && !isAdminOrManager) {
           if (isOpeningOnly) {
-            throw new Error(`Este contato já está em andamento com o(a) atendente ${(conv as any).assigned_agent?.name || 'outro(a) atendente'} nesta instância. Apenas administradores podem abrir atendimentos de outros atendentes.`);
+            throw new Error(
+              `Este contato já está em andamento com o(a) atendente ${(conv as any).assigned_agent?.name || "outro(a) atendente"} nesta instância. Apenas administradores podem abrir atendimentos de outros atendentes.`,
+            );
           } else {
-            throw new Error(`Este contato já está em andamento com o(a) atendente ${(conv as any).assigned_agent?.name || 'outro(a) atendente'} nesta instância. Peça a ele(a) para te transferir.`);
+            throw new Error(
+              `Este contato já está em andamento com o(a) atendente ${(conv as any).assigned_agent?.name || "outro(a) atendente"} nesta instância. Peça a ele(a) para te transferir.`,
+            );
           }
         }
 
         if (!isOpeningOnly) {
-          const updatePayload: any = { 
+          const updatePayload: any = {
             last_message_at: new Date().toISOString(),
           };
           if (!conv.assigned_agent_id) {
             updatePayload.assigned_agent_id = userId;
             updatePayload.department_id = userProfile?.department_id || null;
           }
-          await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
+          await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
         }
         // Se isOpeningOnly e for admin, apenas retorna o conversationId para abrir
       } else {
         // waiting or resolved
-        const isWithAnotherAgent = Boolean(conv.assigned_agent_id && conv.assigned_agent_id !== userId);
+        const isWithAnotherAgent = Boolean(
+          conv.assigned_agent_id && conv.assigned_agent_id !== userId,
+        );
         if (isWithAnotherAgent && !isAdminOrManager) {
-          throw new Error(`Este contato já está atribuído ao(à) atendente ${(conv as any).assigned_agent?.name || 'outro(a) atendente'}. Apenas administradores podem acessar.`);
+          throw new Error(
+            `Este contato já está atribuído ao(à) atendente ${(conv as any).assigned_agent?.name || "outro(a) atendente"}. Apenas administradores podem acessar.`,
+          );
         }
 
         if (!isOpeningOnly) {
           // Se enviou mensagem e não tem ninguém com ela (ou é admin), reabre e atribui para o remetente
-          const updatePayload: any = { 
+          const updatePayload: any = {
             last_message_at: new Date().toISOString(),
-            status: 'active',
+            status: "active",
             assigned_agent_id: userId,
             department_id: userProfile?.department_id || null,
-            resolved_at: null 
+            resolved_at: null,
           };
 
-          const { data: convData } = await supabaseAdmin.from('conversations').select('current_session_id').eq('id', conversationId).single();
+          const { data: convData } = await supabaseAdmin
+            .from("conversations")
+            .select("current_session_id")
+            .eq("id", conversationId)
+            .single();
           let currentSessionId = convData?.current_session_id;
-          
+
           // Force new session if resolved, or if missing session
-          if (conv.status === 'resolved' || !currentSessionId) {
-            const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
-              conversation_id: conversationId,
-              contact_id: contactId,
-              whatsapp_instance_id: instance.id,
-              assigned_agent_id: userId,
-              department_id: userProfile?.department_id || null,
-              started_at: new Date().toISOString()
-            }).select().single();
+          if (conv.status === "resolved" || !currentSessionId) {
+            const { data: newSession } = await supabaseAdmin
+              .from("conversation_sessions")
+              .insert({
+                conversation_id: conversationId,
+                contact_id: contactId,
+                whatsapp_instance_id: instance.id,
+                assigned_agent_id: userId,
+                department_id: userProfile?.department_id || null,
+                started_at: new Date().toISOString(),
+              })
+              .select()
+              .single();
 
             if (newSession) {
               updatePayload.current_session_id = newSession.id;
-              await supabaseAdmin.from('session_events').insert([
-                { session_id: newSession.id, event_type: 'started', actor_id: userId },
-                { session_id: newSession.id, event_type: 'assigned', actor_id: userId, metadata: { assigned_to: userId } }
+              await supabaseAdmin.from("session_events").insert([
+                { session_id: newSession.id, event_type: "started", actor_id: userId },
+                {
+                  session_id: newSession.id,
+                  event_type: "assigned",
+                  actor_id: userId,
+                  metadata: { assigned_to: userId },
+                },
               ]);
             }
-          } else if (currentSessionId && conv.status === 'waiting') {
+          } else if (currentSessionId && conv.status === "waiting") {
             // Record assignment event for existing waiting session
-            await supabaseAdmin.from('session_events').insert({
-               session_id: currentSessionId,
-               event_type: 'assigned',
-               actor_id: userId,
-               metadata: { assigned_to: userId }
+            await supabaseAdmin.from("session_events").insert({
+              session_id: currentSessionId,
+              event_type: "assigned",
+              actor_id: userId,
+              metadata: { assigned_to: userId },
             });
           }
-          
-          await supabaseAdmin.from('conversations').update(updatePayload).eq('id', conversationId);
+
+          await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
         }
       }
     } else {
       const { data: newConv, error: convErr } = await supabaseAdmin
-        .from('conversations')
+        .from("conversations")
         .insert({
           unit_id: unitId,
           contact_id: contactId,
-          channel: 'whatsapp',
-          status: 'active',
+          channel: "whatsapp",
+          status: "active",
           whatsapp_instance_id: instance.id,
           last_message_at: new Date().toISOString(),
           assigned_agent_id: userId,
@@ -635,22 +727,40 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
         .single();
       if (convErr) throw new Error("Failed to create conversation.");
       conversationId = newConv.id;
-      
+
       let sessionId = null;
-      const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+      const { data: existingSession } = await supabaseAdmin
+        .from("conversation_sessions")
+        .select("id")
+        .eq("conversation_id", conversationId)
+        .is("resolved_at", null)
+        .maybeSingle();
       if (existingSession) {
-         sessionId = existingSession.id;
+        sessionId = existingSession.id;
       } else {
-         const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
-            conversation_id: conversationId, contact_id: contactId, whatsapp_instance_id: instance.id,
-            assigned_agent_id: userId, department_id: userProfile?.department_id || null, started_at: new Date().toISOString()
-         }).select().single();
-         if (newSession) sessionId = newSession.id;
+        const { data: newSession } = await supabaseAdmin
+          .from("conversation_sessions")
+          .insert({
+            conversation_id: conversationId,
+            contact_id: contactId,
+            whatsapp_instance_id: instance.id,
+            assigned_agent_id: userId,
+            department_id: userProfile?.department_id || null,
+            started_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+        if (newSession) sessionId = newSession.id;
       }
-      
+
       if (sessionId) {
-         await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', conversationId);
-         await supabaseAdmin.from('session_events').insert({ session_id: sessionId, event_type: 'started', actor_id: userId });
+        await supabaseAdmin
+          .from("conversations")
+          .update({ current_session_id: sessionId })
+          .eq("id", conversationId);
+        await supabaseAdmin
+          .from("session_events")
+          .insert({ session_id: sessionId, event_type: "started", actor_id: userId });
       }
     }
 
@@ -664,22 +774,20 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
         text: textToSend,
       });
 
-      const { error: msgErr } = await supabase
-        .from("messages")
-        .insert({
-          conversation_id: conversationId,
-          sender_type: "agent",
-          sender_id: userId,
-          content: textToSend,
-          media_type: "text"
-        });
+      const { error: msgErr } = await supabase.from("messages").insert({
+        conversation_id: conversationId,
+        sender_type: "agent",
+        sender_id: userId,
+        content: textToSend,
+        media_type: "text",
+      });
 
       if (msgErr) {
         console.error("Failed to save message in DB:", msgErr);
       } else {
         await supabaseAdmin
           .from("conversations")
-          .update({ last_message_at: new Date().toISOString(), status: 'active' })
+          .update({ last_message_at: new Date().toISOString(), status: "active" })
           .eq("id", conversationId);
       }
     }
@@ -689,22 +797,34 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
 
 export const fetchContactInfoAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    contactId: z.string().uuid(),
-    unitId: z.string().uuid().optional().nullable(),
-    whatsappInstanceId: z.string().uuid().optional().nullable()
-  }))
+  .inputValidator(
+    z.object({
+      contactId: z.string().uuid(),
+      unitId: z.string().uuid().optional().nullable(),
+      whatsappInstanceId: z.string().uuid().optional().nullable(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
-    
+
     let whatsappInstanceId = data.whatsappInstanceId;
     if (!whatsappInstanceId) {
-      const { data: convData } = await supabaseAdmin.from('conversations').select('whatsapp_instance_id').eq('contact_id', data.contactId).order('last_message_at', { ascending: false }).limit(1).maybeSingle();
+      const { data: convData } = await supabaseAdmin
+        .from("conversations")
+        .select("whatsapp_instance_id")
+        .eq("contact_id", data.contactId)
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
       if (convData?.whatsapp_instance_id) whatsappInstanceId = convData.whatsapp_instance_id;
     }
 
     // Get contact phone
-    const { data: contact } = await supabase.from('contacts').select('phone').eq('id', data.contactId).single();
+    const { data: contact } = await supabase
+      .from("contacts")
+      .select("phone")
+      .eq("id", data.contactId)
+      .single();
     if (!contact?.phone) return null;
 
     let host, token, instanceName;
@@ -716,13 +836,21 @@ export const fetchContactInfoAction = createServerFn({ method: "POST" })
         .single();
 
       if (instance) {
-        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
-        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
+        host =
+          instance.custom_host ||
+          (instance.provider === "stevo"
+            ? instance.companies?.stevo_host
+            : instance.companies?.evogo_host);
+        token = instance.provider === "stevo" ? instance.stevo_api_key : instance.evogo_api_key;
         instanceName = instance.instance_name;
       }
     } else {
       // Fallback for old conversations
-      const { data: contactFull } = await supabase.from('contacts').select('company_id').eq('id', data.contactId).single();
+      const { data: contactFull } = await supabase
+        .from("contacts")
+        .select("company_id")
+        .eq("id", data.contactId)
+        .single();
       if (contactFull?.company_id) {
         const { data: compInstance } = await supabaseAdmin
           .from("whatsapp_instances")
@@ -743,12 +871,12 @@ export const fetchContactInfoAction = createServerFn({ method: "POST" })
     try {
       const url = `${host}/user/avatar`;
       const response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'apikey': token
+          "Content-Type": "application/json",
+          apikey: token,
         },
-        body: JSON.stringify({ number: contact.phone, preview: false })
+        body: JSON.stringify({ number: contact.phone, preview: false }),
       });
       if (response.ok) {
         const json = await response.json();
@@ -770,11 +898,13 @@ export const syncLabelsAction = createServerFn({ method: "POST" })
 
 export const createLabelAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    unitId: z.string().uuid(),
-    name: z.string().min(1),
-    color: z.string().optional()
-  }))
+  .inputValidator(
+    z.object({
+      unitId: z.string().uuid(),
+      name: z.string().min(1),
+      color: z.string().optional(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
 
@@ -787,15 +917,21 @@ export const createLabelAction = createServerFn({ method: "POST" })
 
     if (!instance?.company_id) return { success: false, error: "Empresa não encontrada" };
 
-    const randomColor = `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+    const randomColor = `#${Math.floor(Math.random() * 16777215)
+      .toString(16)
+      .padStart(6, "0")}`;
     const newLabel = {
       company_id: instance.company_id,
       name: data.name,
       color: data.color || randomColor,
-      external_id: crypto.randomUUID() // using local UUID as external_id for consistency
+      external_id: crypto.randomUUID(), // using local UUID as external_id for consistency
     };
 
-    const { data: label, error } = await supabaseAdmin.from('labels').insert(newLabel).select().single();
+    const { data: label, error } = await supabaseAdmin
+      .from("labels")
+      .insert(newLabel)
+      .select()
+      .single();
     if (error) {
       console.error("Failed to create label:", error);
       return { success: false, error: "Falha ao criar etiqueta" };
@@ -806,22 +942,33 @@ export const createLabelAction = createServerFn({ method: "POST" })
 
 export const toggleContactLabelAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    unitId: z.string().uuid(),
-    contactId: z.string().uuid(),
-    labelId: z.string().uuid(),
-    action: z.enum(["add", "remove"])
-  }))
+  .inputValidator(
+    z.object({
+      unitId: z.string().uuid(),
+      contactId: z.string().uuid(),
+      labelId: z.string().uuid(),
+      action: z.enum(["add", "remove"]),
+    }),
+  )
   .handler(async ({ data, context }) => {
     // Local system labels management
-    if (data.action === 'add') {
-      const { error } = await supabaseAdmin.from('contact_labels').upsert({ contact_id: data.contactId, label_id: data.labelId }, { onConflict: 'contact_id, label_id' });
+    if (data.action === "add") {
+      const { error } = await supabaseAdmin
+        .from("contact_labels")
+        .upsert(
+          { contact_id: data.contactId, label_id: data.labelId },
+          { onConflict: "contact_id, label_id" },
+        );
       if (error) {
         console.error("Failed to insert contact_label locally:", error);
         return { success: false };
       }
     } else {
-      const { error } = await supabaseAdmin.from('contact_labels').delete().eq('contact_id', data.contactId).eq('label_id', data.labelId);
+      const { error } = await supabaseAdmin
+        .from("contact_labels")
+        .delete()
+        .eq("contact_id", data.contactId)
+        .eq("label_id", data.labelId);
       if (error) {
         console.error("Failed to delete contact_label locally:", error);
         return { success: false };
@@ -833,18 +980,22 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
 
 export const reactToMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    conversationId: z.string().uuid(),
-    messageId: z.string().uuid(),
-    emoji: z.string()
-  }))
+  .inputValidator(
+    z.object({
+      conversationId: z.string().uuid(),
+      messageId: z.string().uuid(),
+      emoji: z.string(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
     // 1. Get conversation and message
     const { data: conv } = await supabase
       .from("conversations")
-      .select("whatsapp_instance_id, unit_id, contact_id, channel, remote_id, contacts(phone, whatsapp_lid, instagram_id, messenger_id)")
+      .select(
+        "whatsapp_instance_id, unit_id, contact_id, channel, remote_id, contacts(phone, whatsapp_lid, instagram_id, messenger_id)",
+      )
       .eq("id", data.conversationId)
       .single();
 
@@ -860,7 +1011,7 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
     if (!msg.remote_msg_id) throw new Error("Cannot react to a message without a remote ID");
 
     // 2. Obter instância
-    let provider: string = 'coex';
+    let provider: string = "coex";
     let host: string | null = null;
     let token: string | null = null;
     let instanceName: string | null = null;
@@ -868,8 +1019,8 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
     let oficialPhoneId: string | null = null;
     let resolvedInstanceId = conv.whatsapp_instance_id;
 
-    if ((conv.channel as string) === 'instagram') {
-      provider = 'instagram';
+    if ((conv.channel as string) === "instagram") {
+      provider = "instagram";
       let instance = null;
 
       if (resolvedInstanceId) {
@@ -894,7 +1045,11 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       }
 
       if (!instance && conv.unit_id) {
-        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+        const { data: unitData } = await supabaseAdmin
+          .from("units")
+          .select("company_id")
+          .eq("id", conv.unit_id)
+          .single();
         if (unitData) {
           const { data } = await supabaseAdmin
             .from("whatsapp_instances")
@@ -912,8 +1067,8 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
         oficialToken = instance.oficial_access_token;
         oficialPhoneId = instance.oficial_phone_number_id;
       }
-    } else if ((conv.channel as string) === 'messenger') {
-      provider = 'messenger';
+    } else if ((conv.channel as string) === "messenger") {
+      provider = "messenger";
       let instance = null;
 
       if (resolvedInstanceId) {
@@ -938,7 +1093,11 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       }
 
       if (!instance && conv.unit_id) {
-        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+        const { data: unitData } = await supabaseAdmin
+          .from("units")
+          .select("company_id")
+          .eq("id", conv.unit_id)
+          .single();
         if (unitData) {
           const { data } = await supabaseAdmin
             .from("whatsapp_instances")
@@ -963,7 +1122,9 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       if (resolvedInstanceId) {
         const { data } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)")
+          .select(
+            "id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)",
+          )
           .eq("id", resolvedInstanceId)
           .in("provider", ["evogo", "oficial", "stevo"])
           .maybeSingle();
@@ -973,7 +1134,9 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       if (!instance && conv.unit_id) {
         const { data } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)")
+          .select(
+            "id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)",
+          )
           .eq("unit_id", conv.unit_id)
           .in("provider", ["evogo", "oficial", "stevo"])
           .limit(1)
@@ -982,11 +1145,17 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       }
 
       if (!instance && conv.unit_id) {
-        const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+        const { data: unitData } = await supabaseAdmin
+          .from("units")
+          .select("company_id")
+          .eq("id", conv.unit_id)
+          .single();
         if (unitData) {
           const { data } = await supabaseAdmin
             .from("whatsapp_instances")
-            .select("id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)")
+            .select(
+              "id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)",
+            )
             .eq("company_id", unitData.company_id)
             .in("provider", ["evogo", "oficial", "stevo"])
             .limit(1)
@@ -997,9 +1166,13 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
 
       if (instance) {
         resolvedInstanceId = instance.id;
-        provider = instance.provider || 'coex';
-        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
-        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
+        provider = instance.provider || "coex";
+        host =
+          instance.custom_host ||
+          (instance.provider === "stevo"
+            ? instance.companies?.stevo_host
+            : instance.companies?.evogo_host);
+        token = instance.provider === "stevo" ? instance.stevo_api_key : instance.evogo_api_key;
         instanceName = instance.instance_name;
         oficialToken = instance.oficial_access_token;
         oficialPhoneId = instance.oficial_phone_number_id;
@@ -1008,51 +1181,65 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
 
     // Auto-repair conversation whatsapp_instance_id
     if (resolvedInstanceId && conv.whatsapp_instance_id !== resolvedInstanceId) {
-      await supabaseAdmin.from("conversations").update({ whatsapp_instance_id: resolvedInstanceId }).eq("id", data.conversationId);
+      await supabaseAdmin
+        .from("conversations")
+        .update({ whatsapp_instance_id: resolvedInstanceId })
+        .eq("id", data.conversationId);
     }
 
     // 3. Enviar Reação conforme o provedor
     try {
-      if (provider === 'instagram' || provider === 'messenger') {
+      if (provider === "instagram" || provider === "messenger") {
         if (!oficialToken || !oficialPhoneId) throw new Error("Missing Meta tokens");
         const igsid = conv.contacts.whatsapp_lid;
         if (!igsid) throw new Error("Missing recipient scoped ID");
 
-        const isDirectToken = oficialToken.startsWith('IGA');
-        const endpoint = (provider === 'instagram' && isDirectToken)
-          ? `https://graph.instagram.com/v20.0/${oficialPhoneId}/messages?access_token=${oficialToken}`
-          : `https://graph.facebook.com/v20.0/me/messages?access_token=${oficialToken}`;
+        const isDirectToken = oficialToken.startsWith("IGA");
+        const endpoint =
+          provider === "instagram" && isDirectToken
+            ? `https://graph.instagram.com/v20.0/${oficialPhoneId}/messages?access_token=${oficialToken}`
+            : `https://graph.facebook.com/v20.0/me/messages?access_token=${oficialToken}`;
 
         const emojiMap: Record<string, string> = {
-          '❤️': 'love', '👍': 'like', '😢': 'sad', '😠': 'angry', '😡': 'angry',
-          '😮': 'wow', '😲': 'wow', '😂': 'laugh', '😆': 'laugh',
-          '👍🏻': 'like', '👍🏼': 'like', '👍🏽': 'like', '👍🏾': 'like', '👍🏿': 'like'
+          "❤️": "love",
+          "👍": "like",
+          "😢": "sad",
+          "😠": "angry",
+          "😡": "angry",
+          "😮": "wow",
+          "😲": "wow",
+          "😂": "laugh",
+          "😆": "laugh",
+          "👍🏻": "like",
+          "👍🏼": "like",
+          "👍🏽": "like",
+          "👍🏾": "like",
+          "👍🏿": "like",
         };
 
         const payload: any = {
           recipient: { id: igsid },
           sender_action: "react",
-          payload: { message_id: msg.remote_msg_id }
+          payload: { message_id: msg.remote_msg_id },
         };
 
         if (data.emoji) {
-          if (provider === 'messenger') {
-            payload.payload.reaction = emojiMap[data.emoji] || 'like';
+          if (provider === "messenger") {
+            payload.payload.reaction = emojiMap[data.emoji] || "like";
           } else {
             payload.payload.reaction = data.emoji; // Instagram exige o caractere do emoji exato
           }
         }
 
         const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
         });
         if (!res.ok) {
           console.error(`Meta API Reaction Error:`, await res.text());
         }
-
-      } else if (provider === 'oficial') {
+      } else if (provider === "oficial") {
         if (!oficialToken || !oficialPhoneId) throw new Error("Missing Meta tokens");
         const endpoint = `https://graph.facebook.com/v20.0/${oficialPhoneId}/messages`;
         const payload = {
@@ -1062,25 +1249,28 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
           type: "reaction",
           reaction: {
             message_id: msg.remote_msg_id,
-            emoji: data.emoji || ""
-          }
+            emoji: data.emoji || "",
+          },
         };
 
         const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${oficialToken}` },
-          body: JSON.stringify(payload)
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${oficialToken}` },
+          body: JSON.stringify(payload),
         });
         if (!res.ok) {
           console.error(`Cloud API Reaction Error:`, await res.text());
         }
-
       } else {
         // Evogo / Coex
         if (!host || !token || !instanceName) throw new Error("EvoGo is not configured");
-        if (provider === 'stevo') {
+        if (provider === "stevo") {
           await sendStevoReaction({
-            host, token, number: conv.contacts.phone, remoteMsgId: msg.remote_msg_id, emoji: data.emoji
+            host,
+            token,
+            number: conv.contacts.phone,
+            remoteMsgId: msg.remote_msg_id,
+            emoji: data.emoji,
           });
         } else {
           await sendEvogoReaction({
@@ -1089,7 +1279,7 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
             number: conv.contacts.phone,
             remoteMsgId: msg.remote_msg_id,
             emoji: data.emoji,
-            fromMe: msg.sender_type === 'agent',
+            fromMe: msg.sender_type === "agent",
           });
         }
       }
@@ -1110,9 +1300,11 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
 
 export const assignConversationAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    conversationId: z.string().uuid(),
-  }))
+  .inputValidator(
+    z.object({
+      conversationId: z.string().uuid(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
@@ -1143,33 +1335,61 @@ export const assignConversationAction = createServerFn({ method: "POST" })
       console.error("Failed to assign conversation:", error);
       throw new Error("Falha ao puxar atendimento.");
     }
-    
+
     // Atualiza a sessão e gera evento na jornada
-    const { data: conv } = await supabaseAdmin.from('conversations').select('current_session_id, contact_id, whatsapp_instance_id').eq('id', data.conversationId).single();
+    const { data: conv } = await supabaseAdmin
+      .from("conversations")
+      .select("current_session_id, contact_id, whatsapp_instance_id")
+      .eq("id", data.conversationId)
+      .single();
     if (conv?.current_session_id) {
-       await supabaseAdmin.from('conversation_sessions').update({
-          assigned_agent_id: userId, department_id: userProfile?.department_id || null
-       }).eq('id', conv.current_session_id);
-       await supabaseAdmin.from('session_events').insert({
-          session_id: conv.current_session_id, event_type: 'assigned', actor_id: userId
-       });
+      await supabaseAdmin
+        .from("conversation_sessions")
+        .update({
+          assigned_agent_id: userId,
+          department_id: userProfile?.department_id || null,
+        })
+        .eq("id", conv.current_session_id);
+      await supabaseAdmin.from("session_events").insert({
+        session_id: conv.current_session_id,
+        event_type: "assigned",
+        actor_id: userId,
+      });
     } else if (conv) {
-       // fallback caso a sessão não exista (retrocompatibilidade)
-       let sessionId = null;
-       const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', data.conversationId).is('resolved_at', null).maybeSingle();
-       if (existingSession) {
-          sessionId = existingSession.id;
-       } else {
-          const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
-             conversation_id: data.conversationId, contact_id: conv.contact_id, whatsapp_instance_id: conv.whatsapp_instance_id,
-             assigned_agent_id: userId, department_id: userProfile?.department_id || null, started_at: new Date().toISOString()
-          }).select().single();
-          if (newSession) sessionId = newSession.id;
-       }
-       if (sessionId) {
-          await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', data.conversationId);
-          await supabaseAdmin.from('session_events').insert({ session_id: sessionId, event_type: 'assigned', actor_id: userId });
-       }
+      // fallback caso a sessão não exista (retrocompatibilidade)
+      let sessionId = null;
+      const { data: existingSession } = await supabaseAdmin
+        .from("conversation_sessions")
+        .select("id")
+        .eq("conversation_id", data.conversationId)
+        .is("resolved_at", null)
+        .maybeSingle();
+      if (existingSession) {
+        sessionId = existingSession.id;
+      } else {
+        const { data: newSession } = await supabaseAdmin
+          .from("conversation_sessions")
+          .insert({
+            conversation_id: data.conversationId,
+            contact_id: conv.contact_id,
+            whatsapp_instance_id: conv.whatsapp_instance_id,
+            assigned_agent_id: userId,
+            department_id: userProfile?.department_id || null,
+            started_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+        if (newSession) sessionId = newSession.id;
+      }
+      if (sessionId) {
+        await supabaseAdmin
+          .from("conversations")
+          .update({ current_session_id: sessionId })
+          .eq("id", data.conversationId);
+        await supabaseAdmin
+          .from("session_events")
+          .insert({ session_id: sessionId, event_type: "assigned", actor_id: userId });
+      }
     }
 
     return { success: true };
@@ -1177,11 +1397,13 @@ export const assignConversationAction = createServerFn({ method: "POST" })
 
 export const transferConversationAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    conversationId: z.string().uuid(),
-    targetType: z.enum(["department", "agent"]),
-    targetId: z.string().uuid(),
-  }))
+  .inputValidator(
+    z.object({
+      conversationId: z.string().uuid(),
+      targetType: z.enum(["department", "agent"]),
+      targetId: z.string().uuid(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { userId } = context;
 
@@ -1189,7 +1411,7 @@ export const transferConversationAction = createServerFn({ method: "POST" })
 
     if (data.targetType === "department") {
       updateData.department_id = data.targetId;
-      updateData.status = "waiting"; 
+      updateData.status = "waiting";
       updateData.assigned_agent_id = null; // default to queue
 
       // Fetch company and unit info to check Round Robin
@@ -1203,8 +1425,12 @@ export const transferConversationAction = createServerFn({ method: "POST" })
       if (convInfo?.company_id) {
         const unitId = convInfo.whatsapp_instances?.[0]?.unit_id || null;
         const { assignDepartmentRoundRobin } = await import("../server/routing");
-        const roundRobinAgent = await assignDepartmentRoundRobin(convInfo.company_id, data.targetId, unitId);
-        
+        const roundRobinAgent = await assignDepartmentRoundRobin(
+          convInfo.company_id,
+          data.targetId,
+          unitId,
+        );
+
         if (roundRobinAgent) {
           updateData.assigned_agent_id = roundRobinAgent;
         }
@@ -1235,63 +1461,103 @@ export const transferConversationAction = createServerFn({ method: "POST" })
       console.error("Failed to transfer conversation:", error);
       throw new Error("Falha ao transferir atendimento.");
     }
-    
+
     // Atualiza a sessão e gera evento na jornada
-    const { data: conv } = await supabaseAdmin.from('conversations').select('current_session_id').eq('id', data.conversationId).single();
+    const { data: conv } = await supabaseAdmin
+      .from("conversations")
+      .select("current_session_id")
+      .eq("id", data.conversationId)
+      .single();
     let targetName = null;
     if (data.targetType === "agent") {
-       const { data: agent } = await supabaseAdmin.from('profiles').select('name').eq('id', data.targetId).single();
-       if (agent) targetName = agent.name;
+      const { data: agent } = await supabaseAdmin
+        .from("profiles")
+        .select("name")
+        .eq("id", data.targetId)
+        .single();
+      if (agent) targetName = agent.name;
     } else if (data.targetType === "department") {
-       const { data: dept } = await supabaseAdmin.from('departments').select('name').eq('id', data.targetId).single();
-       if (dept) targetName = dept.name;
+      const { data: dept } = await supabaseAdmin
+        .from("departments")
+        .select("name")
+        .eq("id", data.targetId)
+        .single();
+      if (dept) targetName = dept.name;
     }
 
     if (conv?.current_session_id) {
-       await supabaseAdmin.from('conversation_sessions').update({
-          assigned_agent_id: updateData.assigned_agent_id || null, department_id: updateData.department_id || null
-       }).eq('id', conv.current_session_id);
-       await supabaseAdmin.from('session_events').insert({
-          session_id: conv.current_session_id, event_type: 'transferred',
-          actor_id: userId,
-          metadata: { targetType: data.targetType, targetId: data.targetId, targetName }
-       });
+      await supabaseAdmin
+        .from("conversation_sessions")
+        .update({
+          assigned_agent_id: updateData.assigned_agent_id || null,
+          department_id: updateData.department_id || null,
+        })
+        .eq("id", conv.current_session_id);
+      await supabaseAdmin.from("session_events").insert({
+        session_id: conv.current_session_id,
+        event_type: "transferred",
+        actor_id: userId,
+        metadata: { targetType: data.targetType, targetId: data.targetId, targetName },
+      });
     } else if (conv) {
-       let sessionId = null;
-       const { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', data.conversationId).is('resolved_at', null).maybeSingle();
-       if (existingSession) {
-          sessionId = existingSession.id;
-       } else {
-          const { data: newSession } = await supabaseAdmin.from('conversation_sessions').insert({
-             conversation_id: data.conversationId, contact_id: conv.contact_id, whatsapp_instance_id: conv.whatsapp_instance_id,
-             assigned_agent_id: updateData.assigned_agent_id || null, department_id: updateData.department_id || null, started_at: new Date().toISOString()
-          }).select().single();
-          if (newSession) sessionId = newSession.id;
-       }
-       if (sessionId) {
-          await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', data.conversationId);
-          await supabaseAdmin.from('session_events').insert({
-             session_id: sessionId, event_type: 'transferred', actor_id: userId, metadata: { targetType: data.targetType, targetId: data.targetId, targetName }
-          });
-       }
+      let sessionId = null;
+      const { data: existingSession } = await supabaseAdmin
+        .from("conversation_sessions")
+        .select("id")
+        .eq("conversation_id", data.conversationId)
+        .is("resolved_at", null)
+        .maybeSingle();
+      if (existingSession) {
+        sessionId = existingSession.id;
+      } else {
+        const { data: newSession } = await supabaseAdmin
+          .from("conversation_sessions")
+          .insert({
+            conversation_id: data.conversationId,
+            contact_id: conv.contact_id,
+            whatsapp_instance_id: conv.whatsapp_instance_id,
+            assigned_agent_id: updateData.assigned_agent_id || null,
+            department_id: updateData.department_id || null,
+            started_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+        if (newSession) sessionId = newSession.id;
+      }
+      if (sessionId) {
+        await supabaseAdmin
+          .from("conversations")
+          .update({ current_session_id: sessionId })
+          .eq("id", data.conversationId);
+        await supabaseAdmin.from("session_events").insert({
+          session_id: sessionId,
+          event_type: "transferred",
+          actor_id: userId,
+          metadata: { targetType: data.targetType, targetId: data.targetId, targetName },
+        });
+      }
     }
 
     // Criar notificação para o atendente recebendo
     if (data.targetType === "agent") {
-      const { data: actorProfile } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).single();
-      const { data: convData } = await supabaseAdmin
-        .from('conversations')
-        .select('channel, contacts(company_id, name, phone)')
-        .eq('id', data.conversationId)
+      const { data: actorProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("name")
+        .eq("id", userId)
         .single();
-        
+      const { data: convData } = await supabaseAdmin
+        .from("conversations")
+        .select("channel, contacts(company_id, name, phone)")
+        .eq("id", data.conversationId)
+        .single();
+
       if (convData && actorProfile && convData.contacts?.company_id) {
-        const contactName = convData.contacts?.name || convData.contacts?.phone || 'um contato';
-        await supabaseAdmin.from('notifications' as any).insert({
+        const contactName = convData.contacts?.name || convData.contacts?.phone || "um contato";
+        await supabaseAdmin.from("notifications" as any).insert({
           company_id: convData.contacts.company_id,
           user_id: data.targetId,
-          type: `transfer_${convData.channel || 'whatsapp'}`,
-          title: 'Novo Atendimento',
+          type: `transfer_${convData.channel || "whatsapp"}`,
+          title: "Novo Atendimento",
           message: `${actorProfile.name} transferiu o contato ${contactName} para você.`,
           link: `/conversations?c=${data.conversationId}`,
         });
@@ -1343,7 +1609,7 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
       const { data } = await supabaseAdmin
         .from("whatsapp_instances")
         .select(
-          "id, instance_name, provider, network, zernio_account_id, evogo_api_key, stevo_api_key, custom_host, companies(id, zernio_api_key, zernio_base_url, evogo_host, stevo_host)"
+          "id, instance_name, provider, network, zernio_account_id, evogo_api_key, stevo_api_key, custom_host, companies(id, zernio_api_key, zernio_base_url, evogo_host, stevo_host)",
         )
         .eq("id", instanceId)
         .maybeSingle();
@@ -1352,7 +1618,7 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
       const { data } = await supabaseAdmin
         .from("whatsapp_instances")
         .select(
-          "id, instance_name, provider, network, zernio_account_id, evogo_api_key, stevo_api_key, custom_host, companies(id, zernio_api_key, zernio_base_url, evogo_host, stevo_host)"
+          "id, instance_name, provider, network, zernio_account_id, evogo_api_key, stevo_api_key, custom_host, companies(id, zernio_api_key, zernio_base_url, evogo_host, stevo_host)",
         )
         .eq("company_id", contact.company_id)
         .limit(1)
@@ -1379,7 +1645,10 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
         let cData: any = null;
 
         if (convData?.provider_thread_id) {
-          cData = await zClient.getConversation(convData.provider_thread_id, instance.zernio_account_id);
+          cData = await zClient.getConversation(
+            convData.provider_thread_id,
+            instance.zernio_account_id,
+          );
         }
 
         if (!cData) {
@@ -1445,7 +1714,10 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
       // WhatsApp na Zernio (Meta Cloud API)
       let cData: any = null;
       if (convData?.provider_thread_id) {
-        cData = await zClient.getConversation(convData.provider_thread_id, instance.zernio_account_id);
+        cData = await zClient.getConversation(
+          convData.provider_thread_id,
+          instance.zernio_account_id,
+        );
       }
 
       const pic = cData?.participantPicture || cData?.participantProfilePicture;
@@ -1473,7 +1745,10 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
 
     // Caso B: Instâncias WhatsApp via EvoGo ou Stevo
     if (!contact.phone) {
-      return { success: false, message: "Contato sem número de telefone para consulta no WhatsApp." };
+      return {
+        success: false,
+        message: "Contato sem número de telefone para consulta no WhatsApp.",
+      };
     }
 
     let host =
@@ -1485,7 +1760,10 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
     let instanceName = instance?.instance_name;
 
     if (!host || !token || !instanceName) {
-      return { success: false, message: "Provedor WhatsApp não configurado para esta unidade/empresa." };
+      return {
+        success: false,
+        message: "Provedor WhatsApp não configurado para esta unidade/empresa.",
+      };
     }
 
     let pushName = null;
@@ -1493,7 +1771,9 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
     const jid = contact.phone.includes("@") ? contact.phone : `${contact.phone}@s.whatsapp.net`;
 
     try {
-      console.log(`[syncContactProfile] Fetching info for ${jid} on ${host} (Instance: ${instanceName})`);
+      console.log(
+        `[syncContactProfile] Fetching info for ${jid} on ${host} (Instance: ${instanceName})`,
+      );
       const resInfo = await fetch(`${host}/user/info`, {
         method: "POST",
         headers: {
@@ -1507,7 +1787,8 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
 
       if (resInfo.ok) {
         const jsonInfo = await resInfo.json();
-        pushName = jsonInfo.name || jsonInfo.pushName || jsonInfo.pushname || jsonInfo.contactName || null;
+        pushName =
+          jsonInfo.name || jsonInfo.pushName || jsonInfo.pushname || jsonInfo.contactName || null;
       }
     } catch (e) {
       console.warn("[syncContactProfile] Failed to fetch user info:", e);
@@ -1566,7 +1847,11 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
     }
 
     if (pushName) {
-      return { success: true, updatedName: pushName, avatarFound: !!(permanentAvatarUrl || avatarUrl) };
+      return {
+        success: true,
+        updatedName: pushName,
+        avatarFound: !!(permanentAvatarUrl || avatarUrl),
+      };
     } else if (permanentAvatarUrl || avatarUrl) {
       return {
         success: true,
@@ -1585,11 +1870,13 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
 
 export const updateContactFromWhatsappAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    contactId: z.string().uuid(),
-    unitId: z.string().uuid().optional().nullable(),
-    whatsappInstanceId: z.string().uuid().optional().nullable()
-  }))
+  .inputValidator(
+    z.object({
+      contactId: z.string().uuid(),
+      unitId: z.string().uuid().optional().nullable(),
+      whatsappInstanceId: z.string().uuid().optional().nullable(),
+    }),
+  )
   .handler(async ({ data }) => {
     const res = await syncContactProfile(data.contactId, data.whatsappInstanceId);
     if (!res.success) {
@@ -1600,11 +1887,13 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
 
 export const editMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    conversationId: z.string().uuid(),
-    messageId: z.string().uuid(),
-    newContent: z.string().min(1)
-  }))
+  .inputValidator(
+    z.object({
+      conversationId: z.string().uuid(),
+      messageId: z.string().uuid(),
+      newContent: z.string().min(1),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
@@ -1626,7 +1915,8 @@ export const editMessageAction = createServerFn({ method: "POST" })
     if (!msg) throw new Error("Message not found");
     if (!msg.remote_msg_id) throw new Error("Cannot edit a message without a remote ID");
     if (msg.sender_type !== "agent") throw new Error("You can only edit messages sent by an agent");
-    if (msg.media_type && msg.media_type !== "text") throw new Error("Only text messages can be edited");
+    if (msg.media_type && msg.media_type !== "text")
+      throw new Error("Only text messages can be edited");
 
     // 2. Format content with signature if enabled
     let textToSend = data.newContent;
@@ -1637,7 +1927,9 @@ export const editMessageAction = createServerFn({ method: "POST" })
       .single();
 
     if (userProfile?.use_signature && userProfile?.name) {
-      textToSend = textToSend.trim() ? `*${userProfile.name}*:\n${textToSend}` : `*${userProfile.name}*:`;
+      textToSend = textToSend.trim()
+        ? `*${userProfile.name}*:\n${textToSend}`
+        : `*${userProfile.name}*:`;
     }
 
     // 3. Get evogo configuration
@@ -1646,31 +1938,50 @@ export const editMessageAction = createServerFn({ method: "POST" })
     if (conv.whatsapp_instance_id) {
       const { data: instance } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
+        .select(
+          "instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)",
+        )
         .eq("id", conv.whatsapp_instance_id)
         .single();
 
       if (instance) {
-        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
-        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
+        host =
+          instance.custom_host ||
+          (instance.provider === "stevo"
+            ? instance.companies?.stevo_host
+            : instance.companies?.evogo_host);
+        token = instance.provider === "stevo" ? instance.stevo_api_key : instance.evogo_api_key;
         instanceName = instance.instance_name;
       }
     }
 
     if (!host && conv.unit_id) {
-      const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+      const { data: unitData } = await supabaseAdmin
+        .from("units")
+        .select("company_id")
+        .eq("id", conv.unit_id)
+        .single();
       if (unitData) {
         const { data: companyInstance } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
+          .select(
+            "instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)",
+          )
           .eq("company_id", unitData.company_id)
           .limit(1)
           .maybeSingle();
         if (companyInstance) {
-          host = companyInstance.custom_host || (companyInstance.provider === 'stevo' ? companyInstance.companies?.stevo_host : companyInstance.companies?.evogo_host);
-          token = companyInstance.provider === 'stevo' ? companyInstance.stevo_api_key : companyInstance.evogo_api_key;
+          host =
+            companyInstance.custom_host ||
+            (companyInstance.provider === "stevo"
+              ? companyInstance.companies?.stevo_host
+              : companyInstance.companies?.evogo_host);
+          token =
+            companyInstance.provider === "stevo"
+              ? companyInstance.stevo_api_key
+              : companyInstance.evogo_api_key;
           instanceName = companyInstance.instance_name;
-          provider = companyInstance.provider || 'evogo';
+          provider = companyInstance.provider || "evogo";
         }
       }
     }
@@ -1679,7 +1990,7 @@ export const editMessageAction = createServerFn({ method: "POST" })
 
     // 4. Send Edit Request via EvoGo API
     try {
-      if (provider === 'stevo') {
+      if (provider === "stevo") {
         await editStevoMessage({
           host,
           token,
@@ -1706,7 +2017,7 @@ export const editMessageAction = createServerFn({ method: "POST" })
       .from("messages")
       .update({
         content: textToSend,
-        is_edited: true
+        is_edited: true,
       })
       .eq("id", data.messageId);
 
@@ -1719,9 +2030,11 @@ export const editMessageAction = createServerFn({ method: "POST" })
 
 export const deleteMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    messageId: z.string().uuid(),
-  }))
+  .inputValidator(
+    z.object({
+      messageId: z.string().uuid(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { userId } = context;
 
@@ -1749,31 +2062,50 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
     if (conv.whatsapp_instance_id) {
       const { data: instance } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
+        .select(
+          "instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)",
+        )
         .eq("id", conv.whatsapp_instance_id)
         .single();
 
       if (instance) {
-        host = instance.custom_host || (instance.provider === 'stevo' ? instance.companies?.stevo_host : instance.companies?.evogo_host);
-        token = instance.provider === 'stevo' ? instance.stevo_api_key : instance.evogo_api_key;
+        host =
+          instance.custom_host ||
+          (instance.provider === "stevo"
+            ? instance.companies?.stevo_host
+            : instance.companies?.evogo_host);
+        token = instance.provider === "stevo" ? instance.stevo_api_key : instance.evogo_api_key;
         instanceName = instance.instance_name;
       }
     }
 
     if (!host && conv.unit_id) {
-      const { data: unitData } = await supabaseAdmin.from("units").select("company_id").eq("id", conv.unit_id).single();
+      const { data: unitData } = await supabaseAdmin
+        .from("units")
+        .select("company_id")
+        .eq("id", conv.unit_id)
+        .single();
       if (unitData) {
         const { data: companyInstance } = await supabaseAdmin
           .from("whatsapp_instances")
-          .select("instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)")
+          .select(
+            "instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)",
+          )
           .eq("company_id", unitData.company_id)
           .limit(1)
           .maybeSingle();
         if (companyInstance) {
-          host = companyInstance.custom_host || (companyInstance.provider === 'stevo' ? companyInstance.companies?.stevo_host : companyInstance.companies?.evogo_host);
-          token = companyInstance.provider === 'stevo' ? companyInstance.stevo_api_key : companyInstance.evogo_api_key;
+          host =
+            companyInstance.custom_host ||
+            (companyInstance.provider === "stevo"
+              ? companyInstance.companies?.stevo_host
+              : companyInstance.companies?.evogo_host);
+          token =
+            companyInstance.provider === "stevo"
+              ? companyInstance.stevo_api_key
+              : companyInstance.evogo_api_key;
           instanceName = companyInstance.instance_name;
-          provider = companyInstance.provider || 'evogo';
+          provider = companyInstance.provider || "evogo";
         }
       }
     }
@@ -1782,7 +2114,7 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
 
     // 3. Send Delete Request via EvoGo API
     try {
-      if (provider === 'stevo') {
+      if (provider === "stevo") {
         await deleteStevoMessage({
           host,
           token,
@@ -1806,7 +2138,7 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
     const { error: updateErr } = await supabaseAdmin
       .from("messages")
       .update({
-        is_deleted: true
+        is_deleted: true,
       })
       .eq("id", data.messageId);
 
@@ -1819,9 +2151,11 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
 
 export const transcribeAudioAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    messageId: z.string().uuid(),
-  }))
+  .inputValidator(
+    z.object({
+      messageId: z.string().uuid(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
@@ -1839,12 +2173,15 @@ export const transcribeAudioAction = createServerFn({ method: "POST" })
     if (!companyId) throw new Error("ID da empresa não encontrado.");
 
     const { data: company } = await supabaseAdmin
-      .from('companies')
-      .select('ai_settings')
-      .eq('id', companyId)
+      .from("companies")
+      .select("ai_settings")
+      .eq("id", companyId)
       .single();
 
-    if (!company?.ai_settings?.engines?.transcription || company.ai_settings.engines.transcription === 'none') {
+    if (
+      !company?.ai_settings?.engines?.transcription ||
+      company.ai_settings.engines.transcription === "none"
+    ) {
       throw new Error("Transcrição de IA não está habilitada.");
     }
 
@@ -1857,81 +2194,88 @@ export const transcribeAudioAction = createServerFn({ method: "POST" })
 
     // Detectar se é URL HTTP (gravação Wavoip) ou base64 inline (áudio WhatsApp)
     let base64Audio: string;
-    let audioFormat = 'ogg'; // padrão para WhatsApp
+    let audioFormat = "ogg"; // padrão para WhatsApp
 
-    if (msg.media_url.startsWith('http://') || msg.media_url.startsWith('https://')) {
+    if (msg.media_url.startsWith("http://") || msg.media_url.startsWith("https://")) {
       // URL HTTP direta — precisa fazer download (gravações Wavoip)
       const urlPath = new URL(msg.media_url).pathname.toLowerCase();
-      audioFormat = urlPath.endsWith('.mp3') ? 'mp3'
-        : urlPath.endsWith('.wav') ? 'wav'
-        : urlPath.endsWith('.m4a') ? 'm4a'
-        : 'mp3'; // fallback para Wavoip
+      audioFormat = urlPath.endsWith(".mp3")
+        ? "mp3"
+        : urlPath.endsWith(".wav")
+          ? "wav"
+          : urlPath.endsWith(".m4a")
+            ? "m4a"
+            : "mp3"; // fallback para Wavoip
 
       const audioRes = await fetch(msg.media_url);
       if (!audioRes.ok) throw new Error(`Falha ao baixar áudio: ${audioRes.status}`);
       const arrayBuffer = await audioRes.arrayBuffer();
-      base64Audio = Buffer.from(arrayBuffer).toString('base64');
+      base64Audio = Buffer.from(arrayBuffer).toString("base64");
     } else {
       // Base64 inline — áudio do WhatsApp (data:audio/ogg;base64,...)
-      const extracted = msg.media_url.split(',')[1];
+      const extracted = msg.media_url.split(",")[1];
       if (!extracted) throw new Error("Áudio não possui formato base64 válido.");
       base64Audio = extracted;
-      audioFormat = 'ogg';
+      audioFormat = "ogg";
     }
 
-    const mimeType = audioFormat === 'mp3' ? 'audio/mpeg'
-      : audioFormat === 'wav' ? 'audio/wav'
-      : audioFormat === 'm4a' ? 'audio/mp4'
-      : 'audio/ogg';
+    const mimeType =
+      audioFormat === "mp3"
+        ? "audio/mpeg"
+        : audioFormat === "wav"
+          ? "audio/wav"
+          : audioFormat === "m4a"
+            ? "audio/mp4"
+            : "audio/ogg";
     const fileName = `audio.${audioFormat}`;
 
     let response;
 
-    if (provider === 'openrouter') {
-      response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
-        method: 'POST',
+    if (provider === "openrouter") {
+      response = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", {
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: 'openai/whisper-1',
+          model: "openai/whisper-1",
           input_audio: {
             data: base64Audio,
-            format: audioFormat
-          }
-        })
+            format: audioFormat,
+          },
+        }),
       });
     } else {
-      const buffer = Buffer.from(base64Audio, 'base64');
+      const buffer = Buffer.from(base64Audio, "base64");
       const blob = new Blob([buffer], { type: mimeType });
       const formData = new FormData();
-      formData.append('file', blob, fileName);
-      
-      let baseUrl = '';
-      if (provider === 'groq') {
-        baseUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
-        formData.append('model', 'whisper-large-v3-turbo');
+      formData.append("file", blob, fileName);
+
+      let baseUrl = "";
+      if (provider === "groq") {
+        baseUrl = "https://api.groq.com/openai/v1/audio/transcriptions";
+        formData.append("model", "whisper-large-v3-turbo");
       } else {
-        baseUrl = 'https://api.openai.com/v1/audio/transcriptions';
-        formData.append('model', 'whisper-1');
+        baseUrl = "https://api.openai.com/v1/audio/transcriptions";
+        formData.append("model", "whisper-1");
       }
 
-      formData.append('language', 'pt');
-      formData.append('response_format', 'json');
+      formData.append("language", "pt");
+      formData.append("response_format", "json");
 
       response = await fetch(baseUrl, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${apiKey}`
+          Authorization: `Bearer ${apiKey}`,
         },
-        body: formData as any
+        body: formData as any,
       });
     }
 
     if (!response.ok) {
       const err = await response.text();
-      console.error('[transcribeAudioAction] API Error:', response.status, err);
+      console.error("[transcribeAudioAction] API Error:", response.status, err);
       throw new Error(`Falha na API de transcrição: ${response.status}`);
     }
 
@@ -1941,19 +2285,21 @@ export const transcribeAudioAction = createServerFn({ method: "POST" })
     }
 
     await supabaseAdmin
-      .from('messages')
+      .from("messages")
       .update({ transcription: apiData.text })
-      .eq('id', data.messageId);
+      .eq("id", data.messageId);
 
     return { success: true, text: apiData.text };
   });
 
 export const fixMessageTextAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    conversationId: z.string().uuid(),
-    text: z.string().min(1),
-  }))
+  .inputValidator(
+    z.object({
+      conversationId: z.string().uuid(),
+      text: z.string().min(1),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { userId } = context;
 
@@ -1967,109 +2313,176 @@ export const fixMessageTextAction = createServerFn({ method: "POST" })
     if (!companyId) throw new Error("ID da empresa não encontrado.");
 
     const { data: company } = await supabaseAdmin
-      .from('companies')
-      .select('ai_settings')
-      .eq('id', companyId)
+      .from("companies")
+      .select("ai_settings")
+      .eq("id", companyId)
       .single();
 
-    const aiSettings = company?.ai_settings as any || {};
-    let provider = aiSettings.engines?.text;
+    const aiSettings = (company?.ai_settings as any) || {};
 
-    if (!provider || provider === 'none') {
-      if (aiSettings.keys?.openai) provider = 'openai';
-      else if (aiSettings.keys?.openrouter) provider = 'openrouter';
-      else if (aiSettings.keys?.groq) provider = 'groq';
+    // 1. Resolver o modelo desejado (personalizado > sales coach > chatbot ativo > fallback gpt-4o-mini)
+    let resolvedModel = (
+      aiSettings.text_correction_model ||
+      aiSettings.sales_coach_model ||
+      aiSettings.active_chatbot_model ||
+      "openai/gpt-4o-mini"
+    ).trim();
+
+    // 2. Determinar o provedor configurado
+    let configuredEngine = aiSettings.engines?.text;
+    if (!configuredEngine || configuredEngine === "same_as_sales_coach") {
+      // Usa o mesmo motor do chatbot/sales coach se configurado
+      configuredEngine = aiSettings.engines?.chatbot;
     }
 
-    if (!provider || provider === 'none') {
-      throw new Error("Geração de IA não está habilitada.");
+    // Lista ordenada de provedores a tentar com fallback automático
+    const providerCandidates: ("openrouter" | "openai" | "groq")[] = [];
+
+    if (
+      configuredEngine &&
+      configuredEngine !== "none" &&
+      configuredEngine !== "same_as_sales_coach"
+    ) {
+      if (configuredEngine === "openrouter" && aiSettings.keys?.openrouter)
+        providerCandidates.push("openrouter");
+      if (configuredEngine === "openai" && aiSettings.keys?.openai)
+        providerCandidates.push("openai");
+      if (configuredEngine === "groq" && aiSettings.keys?.groq) providerCandidates.push("groq");
     }
 
-    const apiKey = aiSettings.keys?.[provider];
-
-    if (!apiKey) {
-      throw new Error(`Nenhuma chave de API configurada para o provedor: ${provider}`);
+    // Se o modelo especifica prefixo comum do OpenRouter ou se temos chave OpenRouter, colocar OpenRouter na lista
+    if (aiSettings.keys?.openrouter && !providerCandidates.includes("openrouter")) {
+      providerCandidates.push("openrouter");
+    }
+    if (aiSettings.keys?.openai && !providerCandidates.includes("openai")) {
+      providerCandidates.push("openai");
+    }
+    if (aiSettings.keys?.groq && !providerCandidates.includes("groq")) {
+      providerCandidates.push("groq");
     }
 
-    const systemPrompt = "Você é um revisor de texto de atendimento ao cliente. Reescreva o texto a seguir corrigindo erros gramaticais, de ortografia e de pontuação. Mantenha o texto amigável, profissional e com a mesma intenção original. Não adicione novas informações nem responda à mensagem, APENAS retorne o texto corrigido. Não coloque aspas no inicio e fim.";
-    
-    let correctedText = data.text;
-
-    if (provider === 'openai') {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: data.text }
-          ],
-          temperature: 0.3
-        })
-      });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json.error?.message || "Failed to fix text");
-      correctedText = json.choices[0]?.message?.content || data.text;
-    } else if (provider === 'openrouter') {
-      const model = company.ai_settings.models?.text || 'openai/gpt-4o';
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: data.text }
-          ],
-          temperature: 0.3
-        })
-      });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json.error?.message || "Failed to fix text");
-      correctedText = json.choices[0]?.message?.content || data.text;
-    } else if (provider === 'groq') {
-      const model = aiSettings.models?.text || 'llama3-70b-8192';
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: data.text }
-          ],
-          temperature: 0.3
-        })
-      });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json.error?.message || "Failed to fix text");
-      correctedText = json.choices[0]?.message?.content || data.text;
+    if (providerCandidates.length === 0) {
+      throw new Error("Nenhum provedor de IA com chave configurada para correção de texto.");
     }
 
-    return { text: correctedText.trim() };
+    const systemPrompt =
+      "Você é um revisor de texto de atendimento ao cliente. Reescreva o texto a seguir corrigindo erros gramaticais, de ortografia e de pontuação. Mantenha o texto amigável, profissional e com a mesma intenção original. Não adicione novas informações nem responda à mensagem, APENAS retorne o texto corrigido. Não coloque aspas no inicio e fim.";
+
+    let correctedText = "";
+    let lastError: any = null;
+
+    for (const provider of providerCandidates) {
+      try {
+        const apiKey = aiSettings.keys?.[provider];
+        if (!apiKey) continue;
+
+        if (provider === "openrouter") {
+          const modelName = resolvedModel.includes("/") ? resolvedModel : `openai/${resolvedModel}`;
+          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": "https://atendi.app",
+              "X-Title": "Atendi Chat",
+            },
+            body: JSON.stringify({
+              model: modelName,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: data.text },
+              ],
+              temperature: 0.2,
+            }),
+          });
+
+          const json = await response.json();
+          if (!response.ok) {
+            throw new Error(json.error?.message || `OpenRouter erro HTTP ${response.status}`);
+          }
+          correctedText = json.choices?.[0]?.message?.content || "";
+          if (correctedText) break;
+        } else if (provider === "openai") {
+          const directModel = resolvedModel.replace(/^openai\//, "");
+          const response = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: directModel || "gpt-4o-mini",
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: data.text },
+              ],
+              temperature: 0.2,
+            }),
+          });
+
+          const json = await response.json();
+          if (!response.ok) {
+            throw new Error(json.error?.message || `OpenAI erro HTTP ${response.status}`);
+          }
+          correctedText = json.choices?.[0]?.message?.content || "";
+          if (correctedText) break;
+        } else if (provider === "groq") {
+          const groqModel = resolvedModel.includes("llama") ? resolvedModel : "llama3-70b-8192";
+          const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: groqModel,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: data.text },
+              ],
+              temperature: 0.2,
+            }),
+          });
+
+          const json = await response.json();
+          if (!response.ok) {
+            throw new Error(json.error?.message || `Groq erro HTTP ${response.status}`);
+          }
+          correctedText = json.choices?.[0]?.message?.content || "";
+          if (correctedText) break;
+        }
+      } catch (err: any) {
+        console.warn(`[fixMessageTextAction] Falha com provedor ${provider}:`, err.message);
+        lastError = err;
+      }
+    }
+
+    if (!correctedText) {
+      throw new Error(
+        lastError?.message ||
+          "Não foi possível corrigir o texto com os provedores de IA configurados.",
+      );
+    }
+
+    let clean = correctedText.trim();
+    clean = clean.replace(/^["'«»“](.*)["'«»”]$/s, "$1").trim();
+
+    return { text: clean || data.text };
   });
 
 export const transcribeCallAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    callId: z.string().uuid(),
-  }))
+  .inputValidator(
+    z.object({
+      callId: z.string().uuid(),
+    }),
+  )
   .handler(async ({ data }) => {
     // 1. Buscar o call_log com a recording_url e company_id
     const { data: callLog } = await supabaseAdmin
-      .from('call_logs')
-      .select('id, recording_url, company_id')
-      .eq('id', data.callId)
+      .from("call_logs")
+      .select("id, recording_url, company_id")
+      .eq("id", data.callId)
       .single();
 
     if (!callLog?.recording_url) {
@@ -2078,12 +2491,15 @@ export const transcribeCallAction = createServerFn({ method: "POST" })
 
     // 2. Buscar configurações de IA da empresa
     const { data: company } = await supabaseAdmin
-      .from('companies')
-      .select('ai_settings')
-      .eq('id', callLog.company_id)
+      .from("companies")
+      .select("ai_settings")
+      .eq("id", callLog.company_id)
       .single();
 
-    if (!company?.ai_settings?.engines?.transcription || company.ai_settings.engines.transcription === 'none') {
+    if (
+      !company?.ai_settings?.engines?.transcription ||
+      company.ai_settings.engines.transcription === "none"
+    ) {
       throw new Error("Transcrição de IA não está habilitada. Configure nas Configurações > IA.");
     }
 
@@ -2096,63 +2512,70 @@ export const transcribeCallAction = createServerFn({ method: "POST" })
 
     // 3. Detectar formato e fazer download
     const urlPath = new URL(callLog.recording_url).pathname.toLowerCase();
-    const audioFormat = urlPath.endsWith('.mp3') ? 'mp3'
-      : urlPath.endsWith('.wav') ? 'wav'
-      : urlPath.endsWith('.m4a') ? 'm4a'
-      : 'mp3';
+    const audioFormat = urlPath.endsWith(".mp3")
+      ? "mp3"
+      : urlPath.endsWith(".wav")
+        ? "wav"
+        : urlPath.endsWith(".m4a")
+          ? "m4a"
+          : "mp3";
 
     const audioRes = await fetch(callLog.recording_url);
     if (!audioRes.ok) throw new Error(`Falha ao baixar gravação: ${audioRes.status}`);
     const arrayBuffer = await audioRes.arrayBuffer();
-    const base64Audio = Buffer.from(arrayBuffer).toString('base64');
+    const base64Audio = Buffer.from(arrayBuffer).toString("base64");
 
-    const mimeType = audioFormat === 'mp3' ? 'audio/mpeg'
-      : audioFormat === 'wav' ? 'audio/wav'
-      : audioFormat === 'm4a' ? 'audio/mp4'
-      : 'audio/ogg';
+    const mimeType =
+      audioFormat === "mp3"
+        ? "audio/mpeg"
+        : audioFormat === "wav"
+          ? "audio/wav"
+          : audioFormat === "m4a"
+            ? "audio/mp4"
+            : "audio/ogg";
     const fileName = `audio.${audioFormat}`;
 
     // 4. Enviar para o Whisper
     let response;
-    if (provider === 'openrouter') {
-      response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
-        method: 'POST',
+    if (provider === "openrouter") {
+      response = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", {
+        method: "POST",
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: 'openai/whisper-1',
-          input_audio: { data: base64Audio, format: audioFormat }
-        })
+          model: "openai/whisper-1",
+          input_audio: { data: base64Audio, format: audioFormat },
+        }),
       });
     } else {
-      const buffer = Buffer.from(base64Audio, 'base64');
+      const buffer = Buffer.from(base64Audio, "base64");
       const blob = new Blob([buffer], { type: mimeType });
       const formData = new FormData();
-      formData.append('file', blob, fileName);
+      formData.append("file", blob, fileName);
 
-      let baseUrl = '';
-      if (provider === 'groq') {
-        baseUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
-        formData.append('model', 'whisper-large-v3-turbo');
+      let baseUrl = "";
+      if (provider === "groq") {
+        baseUrl = "https://api.groq.com/openai/v1/audio/transcriptions";
+        formData.append("model", "whisper-large-v3-turbo");
       } else {
-        baseUrl = 'https://api.openai.com/v1/audio/transcriptions';
-        formData.append('model', 'whisper-1');
+        baseUrl = "https://api.openai.com/v1/audio/transcriptions";
+        formData.append("model", "whisper-1");
       }
-      formData.append('language', 'pt');
-      formData.append('response_format', 'json');
+      formData.append("language", "pt");
+      formData.append("response_format", "json");
 
       response = await fetch(baseUrl, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-        body: formData as any
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: formData as any,
       });
     }
 
     if (!response.ok) {
       const err = await response.text();
-      console.error('[transcribeCallAction] API Error:', response.status, err);
+      console.error("[transcribeCallAction] API Error:", response.status, err);
       throw new Error(`Falha na API de transcrição: ${response.status}`);
     }
 
@@ -2161,18 +2584,20 @@ export const transcribeCallAction = createServerFn({ method: "POST" })
 
     // 5. Salvar no call_log
     await supabaseAdmin
-      .from('call_logs')
+      .from("call_logs")
       .update({ transcription: apiData.text })
-      .eq('id', data.callId);
+      .eq("id", data.callId);
 
     return { success: true, text: apiData.text };
   });
 
 export const salesCoachAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    conversationId: z.string().uuid(),
-  }))
+  .inputValidator(
+    z.object({
+      conversationId: z.string().uuid(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { userId } = context;
 
@@ -2189,21 +2614,21 @@ export const salesCoachAction = createServerFn({ method: "POST" })
 
     // 2. Obter configurações de IA
     const { data: company } = await supabaseAdmin
-      .from('companies')
-      .select('ai_settings')
-      .eq('id', companyId)
+      .from("companies")
+      .select("ai_settings")
+      .eq("id", companyId)
       .single();
 
-    const aiSettings = company?.ai_settings as any || {};
+    const aiSettings = (company?.ai_settings as any) || {};
     let provider = aiSettings.engines?.chatbot || aiSettings.engines?.text;
 
-    if (!provider || provider === 'none') {
-      if (aiSettings.keys?.openai) provider = 'openai';
-      else if (aiSettings.keys?.openrouter) provider = 'openrouter';
-      else if (aiSettings.keys?.groq) provider = 'groq';
+    if (!provider || provider === "none") {
+      if (aiSettings.keys?.openai) provider = "openai";
+      else if (aiSettings.keys?.openrouter) provider = "openrouter";
+      else if (aiSettings.keys?.groq) provider = "groq";
     }
 
-    if (!provider || provider === 'none') {
+    if (!provider || provider === "none") {
       throw new Error("Geração de IA não está habilitada.");
     }
 
@@ -2215,21 +2640,24 @@ export const salesCoachAction = createServerFn({ method: "POST" })
 
     // 3. Obter últimas mensagens
     const { data: messages } = await supabaseAdmin
-      .from('messages')
-      .select('content, sender_type, media_type')
-      .eq('conversation_id', data.conversationId)
-      .order('created_at', { ascending: false })
+      .from("messages")
+      .select("content, sender_type, media_type")
+      .eq("conversation_id", data.conversationId)
+      .order("created_at", { ascending: false })
       .limit(15);
 
     if (!messages || messages.length === 0) {
       throw new Error("Nenhuma mensagem para analisar.");
     }
 
-    const formattedHistory = messages.reverse().map(m => {
-      const role = m.sender_type === 'contact' ? contactName : 'Vendedor';
-      const text = m.media_type === 'text' ? m.content : `[Mídia: ${m.media_type}]`;
-      return `${role}: ${text}`;
-    }).join('\n');
+    const formattedHistory = messages
+      .reverse()
+      .map((m) => {
+        const role = m.sender_type === "contact" ? contactName : "Vendedor";
+        const text = m.media_type === "text" ? m.content : `[Mídia: ${m.media_type}]`;
+        return `${role}: ${text}`;
+      })
+      .join("\n");
 
     const playbookSummary = await getCompanyPlaybookSummary(companyId);
 
@@ -2251,48 +2679,48 @@ Responda APENAS com o texto da tabela em markdown e nada mais.`;
 
     try {
       const customModel = aiSettings.sales_coach_model;
-      if (provider === 'openai') {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
+      if (provider === "openai") {
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
           headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: customModel || 'gpt-4o-mini',
-            messages: [{ role: 'system', content: systemPrompt }]
-          })
+            model: customModel || "gpt-4o-mini",
+            messages: [{ role: "system", content: systemPrompt }],
+          }),
         });
         if (!response.ok) throw new Error(`OpenAI Erro: ${response.status}`);
         const json = await response.json();
         suggestion = json.choices[0].message.content;
-      } else if (provider === 'groq') {
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
+      } else if (provider === "groq") {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
           headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: customModel || 'llama3-70b-8192',
-            messages: [{ role: 'system', content: systemPrompt }]
-          })
+            model: customModel || "llama3-70b-8192",
+            messages: [{ role: "system", content: systemPrompt }],
+          }),
         });
         if (!response.ok) throw new Error(`Groq Erro: ${response.status}`);
         const json = await response.json();
         suggestion = json.choices[0].message.content;
-      } else if (provider === 'openrouter') {
-        const model = customModel || aiSettings.active_chatbot_model || 'openai/gpt-oss-120b:free';
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
+      } else if (provider === "openrouter") {
+        const model = customModel || aiSettings.active_chatbot_model || "openai/gpt-oss-120b:free";
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
           headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             model: model,
-            messages: [{ role: 'system', content: systemPrompt }]
-          })
+            messages: [{ role: "system", content: systemPrompt }],
+          }),
         });
         if (!response.ok) {
           const errText = await response.text();
@@ -2302,20 +2730,18 @@ Responda APENAS com o texto da tabela em markdown e nada mais.`;
         suggestion = json.choices[0].message.content;
       }
     } catch (e: any) {
-      console.error('[salesCoachAction] Error:', e);
+      console.error("[salesCoachAction] Error:", e);
       throw new Error(`Falha ao gerar análise: ${e.message}`);
     }
 
     // 4. Salvar Análise no Banco
-    const { error: insertError } = await supabaseAdmin
-      .from('sales_coach_analyses')
-      .insert({
-        conversation_id: data.conversationId,
-        company_id: companyId,
-        analysis_markdown: suggestion,
-        created_by: userId
-      });
-      
+    const { error: insertError } = await supabaseAdmin.from("sales_coach_analyses").insert({
+      conversation_id: data.conversationId,
+      company_id: companyId,
+      analysis_markdown: suggestion,
+      created_by: userId,
+    });
+
     if (insertError) {
       console.error("Erro ao salvar análise:", insertError);
     }
@@ -2325,9 +2751,11 @@ Responda APENAS com o texto da tabela em markdown e nada mais.`;
 
 export const salesCoachSuggestAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    conversationId: z.string().uuid(),
-  }))
+  .inputValidator(
+    z.object({
+      conversationId: z.string().uuid(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { userId } = context;
 
@@ -2343,10 +2771,10 @@ export const salesCoachSuggestAction = createServerFn({ method: "POST" })
     const contactName = conv?.contacts?.name || "Cliente";
 
     const { data: latestAnalysis } = await supabaseAdmin
-      .from('sales_coach_analyses')
-      .select('analysis_markdown')
-      .eq('conversation_id', data.conversationId)
-      .order('created_at', { ascending: false })
+      .from("sales_coach_analyses")
+      .select("analysis_markdown")
+      .eq("conversation_id", data.conversationId)
+      .order("created_at", { ascending: false })
       .limit(1)
       .single();
 
@@ -2356,21 +2784,21 @@ export const salesCoachSuggestAction = createServerFn({ method: "POST" })
 
     // 2. Obter configurações de IA
     const { data: company } = await supabaseAdmin
-      .from('companies')
-      .select('ai_settings')
-      .eq('id', companyId)
+      .from("companies")
+      .select("ai_settings")
+      .eq("id", companyId)
       .single();
 
-    const aiSettings = company?.ai_settings as any || {};
+    const aiSettings = (company?.ai_settings as any) || {};
     let provider = aiSettings.engines?.chatbot || aiSettings.engines?.text;
 
-    if (!provider || provider === 'none') {
-      if (aiSettings.keys?.openai) provider = 'openai';
-      else if (aiSettings.keys?.openrouter) provider = 'openrouter';
-      else if (aiSettings.keys?.groq) provider = 'groq';
+    if (!provider || provider === "none") {
+      if (aiSettings.keys?.openai) provider = "openai";
+      else if (aiSettings.keys?.openrouter) provider = "openrouter";
+      else if (aiSettings.keys?.groq) provider = "groq";
     }
 
-    if (!provider || provider === 'none') {
+    if (!provider || provider === "none") {
       throw new Error("Geração de IA não está habilitada.");
     }
 
@@ -2379,25 +2807,30 @@ export const salesCoachSuggestAction = createServerFn({ method: "POST" })
 
     // 3. Obter últimas mensagens
     const { data: messages } = await supabaseAdmin
-      .from('messages')
-      .select('content, sender_type, media_type')
-      .eq('conversation_id', data.conversationId)
-      .order('created_at', { ascending: false })
+      .from("messages")
+      .select("content, sender_type, media_type")
+      .eq("conversation_id", data.conversationId)
+      .order("created_at", { ascending: false })
       .limit(5);
 
-    const formattedHistory = (messages || []).reverse().map(m => {
-      const role = m.sender_type === 'contact' ? contactName : 'Vendedor';
-      const text = m.media_type === 'text' ? m.content : `[Mídia: ${m.media_type}]`;
-      return `${role}: ${text}`;
-    }).join('\n');
+    const formattedHistory = (messages || [])
+      .reverse()
+      .map((m) => {
+        const role = m.sender_type === "contact" ? contactName : "Vendedor";
+        const text = m.media_type === "text" ? m.content : `[Mídia: ${m.media_type}]`;
+        return `${role}: ${text}`;
+      })
+      .join("\n");
 
     const playbookSummary = await getCompanyPlaybookSummary(companyId);
 
-    let systemPrompt = "Você é um treinador de vendas tático. Baseado na análise do atendimento e nas últimas mensagens abaixo, dê uma instrução RÁPIDA, TÁTICA e DIRETA para o vendedor sobre o que ele deve fazer agora.\n\n";
+    let systemPrompt =
+      "Você é um treinador de vendas tático. Baseado na análise do atendimento e nas últimas mensagens abaixo, dê uma instrução RÁPIDA, TÁTICA e DIRETA para o vendedor sobre o que ele deve fazer agora.\n\n";
     if (playbookSummary) {
       systemPrompt += `${playbookSummary}\n\nDIRETRIZ OBRIGATÓRIA: Em "💬 Sugestão de fala", utilize EXATAMENTE os nomes dos procedimentos, diferenciais, formas de pagamento e argumentos oficiais da empresa listados no Playbook acima.\n\n`;
     }
-    systemPrompt += "Sua resposta deve obrigatoriamente seguir este formato em Markdown:\n**🎯 Objetivo:** [Qual o objetivo da próxima mensagem]\n**💡 Estratégia:** [Qual técnica de vendas usar]\n**💬 Sugestão de fala:** \"[Uma ou duas frases bem curtas e naturais para o vendedor enviar]\"\n\nNão escreva NADA fora desse formato.\n\n";
+    systemPrompt +=
+      'Sua resposta deve obrigatoriamente seguir este formato em Markdown:\n**🎯 Objetivo:** [Qual o objetivo da próxima mensagem]\n**💡 Estratégia:** [Qual técnica de vendas usar]\n**💬 Sugestão de fala:** "[Uma ou duas frases bem curtas e naturais para o vendedor enviar]"\n\nNão escreva NADA fora desse formato.\n\n';
     systemPrompt += `=== ANÁLISE ===\n${latestAnalysis.analysis_markdown}\n\n`;
     systemPrompt += `=== ÚLTIMAS MENSAGENS ===\n${formattedHistory}`;
 
@@ -2405,30 +2838,39 @@ export const salesCoachSuggestAction = createServerFn({ method: "POST" })
 
     try {
       const customModel = aiSettings.sales_coach_model;
-      if (provider === 'openai') {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: customModel || 'gpt-4o-mini', messages: [{ role: 'system', content: systemPrompt }] })
+      if (provider === "openai") {
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: customModel || "gpt-4o-mini",
+            messages: [{ role: "system", content: systemPrompt }],
+          }),
         });
         if (!response.ok) throw new Error(`OpenAI Erro: ${response.status}`);
         const json = await response.json();
         suggestion = json.choices[0].message.content;
-      } else if (provider === 'groq') {
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: customModel || 'llama3-70b-8192', messages: [{ role: 'system', content: systemPrompt }] })
+      } else if (provider === "groq") {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: customModel || "llama3-70b-8192",
+            messages: [{ role: "system", content: systemPrompt }],
+          }),
         });
         if (!response.ok) throw new Error(`Groq Erro: ${response.status}`);
         const json = await response.json();
         suggestion = json.choices[0].message.content;
-      } else if (provider === 'openrouter') {
-        const model = customModel || aiSettings.active_chatbot_model || 'openai/gpt-oss-120b:free';
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: model, messages: [{ role: 'system', content: systemPrompt }] })
+      } else if (provider === "openrouter") {
+        const model = customModel || aiSettings.active_chatbot_model || "openai/gpt-oss-120b:free";
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: "system", content: systemPrompt }],
+          }),
         });
         if (!response.ok) {
           const errText = await response.text();
@@ -2438,7 +2880,7 @@ export const salesCoachSuggestAction = createServerFn({ method: "POST" })
         suggestion = json.choices[0].message.content;
       }
     } catch (e: any) {
-      console.error('[salesCoachSuggestAction] Error:', e);
+      console.error("[salesCoachSuggestAction] Error:", e);
       throw new Error(`Falha ao gerar sugestão: ${e.message}`);
     }
 
@@ -2447,10 +2889,10 @@ export const salesCoachSuggestAction = createServerFn({ method: "POST" })
 
 // --- Shared Resolve Logic ---
 export async function internalResolveConversation(
-  conversationId: string, 
-  userId: string, 
-  reasonId?: string | null, 
-  observation?: string | null
+  conversationId: string,
+  userId: string,
+  reasonId?: string | null,
+  observation?: string | null,
 ) {
   const resolvedAt = new Date().toISOString();
 
@@ -2470,10 +2912,10 @@ export async function internalResolveConversation(
       status: "resolved",
       resolved_at: resolvedAt,
       current_session_id: null,
-      assigned_agent_id: null
+      assigned_agent_id: null,
     } as any)
     .eq("id", conversationId);
-    
+
   if (convErr) throw convErr;
 
   // 3. Atualiza sessões em andamento
@@ -2485,16 +2927,19 @@ export async function internalResolveConversation(
 
   if (openSessions && openSessions.length > 0) {
     for (const session of openSessions) {
-      await supabaseAdmin.from("conversation_sessions").update({
-        resolved_at: resolvedAt,
-        resolution_reason_id: reasonId || null,
-        resolution_observation: observation?.trim() || null,
-      }).eq("id", session.id);
-      
+      await supabaseAdmin
+        .from("conversation_sessions")
+        .update({
+          resolved_at: resolvedAt,
+          resolution_reason_id: reasonId || null,
+          resolution_observation: observation?.trim() || null,
+        })
+        .eq("id", session.id);
+
       await supabaseAdmin.from("session_events").insert({
         session_id: session.id,
         event_type: "resolved",
-        actor_id: userId
+        actor_id: userId,
       });
     }
   } else {
@@ -2502,22 +2947,24 @@ export async function internalResolveConversation(
     const { data: newSession, error: err } = await supabaseAdmin
       .from("conversation_sessions")
       .insert({
-        conversation_id: conv.id, 
-        contact_id: conv.contact_id, 
+        conversation_id: conv.id,
+        contact_id: conv.contact_id,
         whatsapp_instance_id: conv.whatsapp_instance_id,
-        started_at: conv.started_at || new Date().toISOString(), 
+        started_at: conv.started_at || new Date().toISOString(),
         resolved_at: resolvedAt,
-        assigned_agent_id: conv.assigned_agent_id, 
+        assigned_agent_id: conv.assigned_agent_id,
         department_id: conv.department_id,
-        resolution_reason_id: reasonId || null, 
+        resolution_reason_id: reasonId || null,
         resolution_observation: observation?.trim() || null,
-      }).select().single();
-      
+      })
+      .select()
+      .single();
+
     if (newSession && !err) {
-      await supabaseAdmin.from("session_events").insert({ 
-        session_id: newSession.id, 
-        event_type: "resolved", 
-        actor_id: userId 
+      await supabaseAdmin.from("session_events").insert({
+        session_id: newSession.id,
+        event_type: "resolved",
+        actor_id: userId,
       });
     }
   }
@@ -2527,14 +2974,21 @@ export async function internalResolveConversation(
 
 export const resolveConversationAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    conversationId: z.string().uuid(),
-    reasonId: z.string().optional().nullable(),
-    observation: z.string().optional().nullable(),
-  }))
+  .inputValidator(
+    z.object({
+      conversationId: z.string().uuid(),
+      reasonId: z.string().optional().nullable(),
+      observation: z.string().optional().nullable(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     try {
-      await internalResolveConversation(data.conversationId, context.userId, data.reasonId, data.observation);
+      await internalResolveConversation(
+        data.conversationId,
+        context.userId,
+        data.reasonId,
+        data.observation,
+      );
       return { success: true };
     } catch (e: any) {
       console.error("[resolveConversationAction] Error:", e);
@@ -2544,19 +2998,21 @@ export const resolveConversationAction = createServerFn({ method: "POST" })
 
 export const blockContactAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    contactId: z.string().uuid(),
-    reason: z.string().min(1, "O motivo é obrigatório"),
-  }))
+  .inputValidator(
+    z.object({
+      contactId: z.string().uuid(),
+      reason: z.string().min(1, "O motivo é obrigatório"),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    
+
     // Atualiza o contato marcando como bloqueado
     const { error } = await supabase
       .from("contacts")
       .update({ is_blocked: true, block_reason: data.reason })
       .eq("id", data.contactId);
-      
+
     if (error) {
       console.error("Failed to block contact:", error);
       throw new Error("Não foi possível bloquear o contato.");
@@ -2575,27 +3031,29 @@ export const blockContactAction = createServerFn({ method: "POST" })
         await internalResolveConversation(conv.id, userId, null, data.reason);
       }
     }
-    
+
     return { success: true };
   });
 
 export const unblockContactAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({
-    contactId: z.string().uuid(),
-  }))
+  .inputValidator(
+    z.object({
+      contactId: z.string().uuid(),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
-    
+
     const { error } = await supabase
       .from("contacts")
       .update({ is_blocked: false, block_reason: null })
       .eq("id", data.contactId);
-      
+
     if (error) {
       console.error("Failed to unblock contact:", error);
       throw new Error("Não foi possível desbloquear o contato.");
     }
-    
+
     return { success: true };
   });

@@ -6,6 +6,7 @@ import { getPhoneVariants } from '@/lib/utils';
 import { assignTrafficLeadRoundRobin } from './routing';
 import { conferirPorta } from './webhook-auth';
 import { dispatchAutomationEvent } from './automation-engine';
+import { sendMetaCapiEvent } from './meta-capi';
 
 export async function handleWhatsappCloudWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -785,6 +786,18 @@ async function processIncomingMessage(params: any) {
               referral: messageReferral,
             },
           }).catch((err) => console.error('[Whatsapp Cloud] automation event error:', err));
+
+          // Dispara evento CAPI da Meta para lead de anúncio (CTWA)
+          if (messageReferral.ctwa_clid) {
+            sendMetaCapiEvent({
+              companyId,
+              contactId: contact.id,
+              eventName: 'Lead',
+              ctwaClid: messageReferral.ctwa_clid,
+              actionSource: 'chat',
+              contentName: messageReferral.headline || 'Click to WhatsApp Ad Lead',
+            }).catch((capiErr) => console.error('[Whatsapp Cloud] Meta CAPI error:', capiErr));
+          }
         }
       } catch (e) {
         console.error('[Whatsapp Cloud] Failed to register ad lead:', e);

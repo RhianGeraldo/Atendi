@@ -4,6 +4,7 @@ import { getPhoneVariants } from '@/lib/utils';
 import { enqueueAiMessage } from './ai-queue';
 import { extractExternalAdReply, processAndCacheAdPreview } from './ad-preview-cache';
 import { dispatchAutomationEvent } from './automation-engine';
+import { sendMetaCapiEvent } from './meta-capi';
 
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
@@ -1119,6 +1120,18 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
                   ad: metadata.externalAdReply,
                 },
               }).catch((err) => console.error('[stevo-webhook] automation event error:', err));
+
+              // Dispara evento CAPI da Meta para lead de anúncio (CTWA)
+              if (metadata.externalAdReply.ctwaClid) {
+                sendMetaCapiEvent({
+                  companyId: company_id,
+                  contactId: contactId,
+                  eventName: 'Lead',
+                  ctwaClid: metadata.externalAdReply.ctwaClid,
+                  actionSource: 'chat',
+                  contentName: metadata.externalAdReply.title || 'Click to WhatsApp Ad Lead',
+                }).catch((capiErr) => console.error('[stevo-webhook] Meta CAPI error:', capiErr));
+              }
             }
           }
         } catch (e) {

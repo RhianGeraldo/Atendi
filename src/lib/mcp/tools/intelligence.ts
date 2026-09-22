@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { sendMetaCapiEvent } from "@/lib/server/meta-capi";
 import type { McpContext, McpToolDefinition } from "../types";
 
 export const intelligenceTools: McpToolDefinition[] = [
@@ -140,6 +141,88 @@ export const intelligenceTools: McpToolDefinition[] = [
         conversas_analisadas: insight.conversations_analyzed,
         principais_objecoes: insight.objections_json,
         analise_estrategica: insight.insights_markdown,
+      };
+    },
+  },
+  {
+    name: "enviar_evento_conversao_meta",
+    description:
+      "Envia um evento de conversão server-side para a Meta Conversions API (CAPI v21.0), associando o contato, ctwa_clid de anúncio e/ou oportunidade ao Pixel da Meta da empresa.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        nome_evento: {
+          type: "string",
+          description:
+            "Nome do evento de conversão da Meta. Exemplos comuns: 'Lead', 'Schedule', 'Contact', 'SubmitApplication', 'QualifiedLead', 'Purchase'.",
+        },
+        contato_id: {
+          type: "string",
+          description: "ID (UUID) do contato que gerou a conversão.",
+        },
+        oportunidade_id: {
+          type: "string",
+          description: "ID (UUID) da oportunidade associada no CRM (opcional).",
+        },
+        valor: {
+          type: "number",
+          description: "Valor financeiro da conversão (ex: valor da venda ou proposta). Opcional.",
+        },
+        moeda: {
+          type: "string",
+          description: "Código da moeda (ISO 4217). Padrão: 'BRL'.",
+        },
+      },
+      required: ["nome_evento"],
+    },
+    handler: async (args: any, context: McpContext) => {
+      const eventName = args.nome_evento;
+      const contactId = args.contato_id;
+      const opportunityId = args.oportunidade_id;
+      const value = args.valor !== undefined ? Number(args.valor) : undefined;
+      const currency = args.moeda || "BRL";
+
+      // 1. Validar acesso do contato se informado
+      if (contactId) {
+        const { data: contact, error: cErr } = await supabaseAdmin
+          .from("contacts")
+          .select("id, name, phone, company_id")
+          .eq("id", contactId)
+          .eq("company_id", context.companyId)
+          .single();
+
+        if (cErr || !contact) {
+          throw new Error("Contato não encontrado ou acesso negado.");
+        }
+      }
+
+      // 2. Enviar evento CAPI
+      const result = await sendMetaCapiEvent({
+        companyId: context.companyId,
+        contactId,
+        opportunityId,
+        eventName,
+        value,
+        currency,
+        actionSource: "chat",
+      });
+
+      if (!result.success) {
+        if (result.skipped) {
+          return {
+            status: "ignorado",
+            motivo: result.reason,
+          };
+        }
+        throw new Error(`Falha ao despachar evento Meta CAPI: ${result.error}`);
+      }
+
+      return {
+        status: "sucesso",
+        evento: eventName,
+        event_id: result.eventId,
+        fbtrace_id: result.fbtraceId,
+        mensagem: "Evento de conversão enviado com sucesso para a Meta Conversions API.",
       };
     },
   },

@@ -20,6 +20,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
+import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { useNavigate } from "@tanstack/react-router";
 import { initials } from "@/lib/format";
 
@@ -161,6 +162,18 @@ function PipelinePage() {
         });
       if (histError && histError.code !== '42P01') {
         console.warn("Could not record stage history:", histError);
+      }
+
+      // Dispara evento CAPI da Meta para avanço de etapa no funil (se configurado)
+      if (activeCompanyId) {
+        triggerOpportunityCapiAction({
+          data: {
+            companyId: activeCompanyId,
+            opportunityId: oppId,
+            triggerType: "stage_change",
+            stageId: newStageId,
+          }
+        }).catch(err => console.warn("[CAPI] Falha ao disparar evento de etapa:", err));
       }
     },
     onMutate: async ({ oppId, newStageId }) => {

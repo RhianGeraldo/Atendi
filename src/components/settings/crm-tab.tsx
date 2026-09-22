@@ -6,6 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -259,6 +266,25 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pipeline-stages", pipeline.id] }),
   });
 
+  const updateStageMetaEvent = useMutation({
+    mutationFn: async ({ id, metaEvent }: { id: string; metaEvent: string }) => {
+      const val = metaEvent === "none" ? null : metaEvent;
+      try {
+        const { error } = await (supabase.from("pipeline_stages") as any)
+          .update({ meta_event_name: val })
+          .eq("id", id);
+        if (error && error.code !== "42703") throw error;
+      } catch (e: any) {
+        if (e?.code !== "42703") throw e;
+      }
+    },
+    onSuccess: () => {
+      toast.success("Evento Meta CAPI da etapa atualizado!");
+      qc.invalidateQueries({ queryKey: ["pipeline-stages", pipeline.id] });
+    },
+    onError: (e) => toast.error("Erro ao atualizar evento", { description: (e as Error).message }),
+  });
+
   return (
     <Card>
       <CardHeader>
@@ -337,6 +363,28 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
                 </div>
 
                 <div className="flex-1 font-medium text-sm">{stage.name}</div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[11px] text-muted-foreground hidden sm:inline">Meta CAPI:</span>
+                  <Select
+                    value={(stage as any).meta_event_name || "none"}
+                    onValueChange={(val) => updateStageMetaEvent.mutate({ id: stage.id, metaEvent: val })}
+                  >
+                    <SelectTrigger className="h-8 w-[140px] text-xs">
+                      <SelectValue placeholder="Sem evento" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Nenhum (Sem envio)</SelectItem>
+                      <SelectItem value="Lead">Lead</SelectItem>
+                      <SelectItem value="Contact">Contact</SelectItem>
+                      <SelectItem value="Schedule">Schedule (Agendamento)</SelectItem>
+                      <SelectItem value="SubmitApplication">Submit Application</SelectItem>
+                      <SelectItem value="QualifiedLead">Qualified Lead</SelectItem>
+                      <SelectItem value="InitiateCheckout">Initiate Checkout</SelectItem>
+                      <SelectItem value="Purchase">Purchase (Compra)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 <Button
                   variant="ghost"

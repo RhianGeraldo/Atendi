@@ -15,6 +15,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
+import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { toast } from "sonner";
 import { useUnit } from "@/lib/unit-context";
 import { format } from "date-fns";
@@ -265,6 +267,7 @@ export function OpportunityDialog({
   const [open, setOpen] = useState(false);
   const qc = useQueryClient();
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
 
   const [title, setTitle] = useState("");
@@ -435,6 +438,17 @@ export function OpportunityDialog({
         });
       if (histError && histError.code !== '42P01') {
         console.warn("Could not record status history:", histError);
+      }
+
+      // Se a oportunidade foi marcada como GANHA, dispara evento CAPI de Purchase para a Meta
+      if (newStatus === "won" && (activeCompanyId || profile?.company_id)) {
+        triggerOpportunityCapiAction({
+          data: {
+            companyId: (activeCompanyId || profile?.company_id)!,
+            opportunityId: opportunity.id,
+            triggerType: "won",
+          }
+        }).catch(err => console.warn("[CAPI] Falha ao disparar evento de Purchase:", err));
       }
 
       return newStatus;

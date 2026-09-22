@@ -40,6 +40,7 @@ import {
   MapPin,
   Mail,
   CircleDot,
+  Share2,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -103,6 +104,7 @@ import { CrmTab } from "@/components/settings/crm-tab";
 import { AiAgentsTab } from "@/components/settings/ai-agents-tab";
 import { LeadRoutingSettings } from "@/components/settings/lead-routing-settings";
 import { AutomationsTab } from "@/components/settings/automations-tab";
+import { MetaCapiSettingsTab } from "@/components/settings/meta-capi-settings";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
@@ -121,9 +123,10 @@ function SettingsPage() {
 
   const [aiSettings, setAiSettings] = useState({
     keys: { openai: "", groq: "", openrouter: "" },
-    engines: { transcription: "none", chatbot: "none" },
+    engines: { transcription: "none", chatbot: "none", text: "same_as_sales_coach" },
     chatbot_models: ["meta-llama/llama-3-8b-instruct:free", "google/gemma-7b-it:free"],
     active_chatbot_model: "",
+    text_correction_model: "",
     sales_coach_prompt: "",
     sales_coach_evaluation_prompt: "",
     sales_coach_model: "",
@@ -275,12 +278,14 @@ function SettingsPage() {
           engines: {
             transcription: company.ai_settings.engines?.transcription || "none",
             chatbot: company.ai_settings.engines?.chatbot || "none",
+            text: company.ai_settings.engines?.text || "same_as_sales_coach",
           },
           chatbot_models: company.ai_settings.chatbot_models || [
             "meta-llama/llama-3-8b-instruct:free",
             "google/gemma-7b-it:free",
           ],
           active_chatbot_model: company.ai_settings.active_chatbot_model || "",
+          text_correction_model: company.ai_settings.text_correction_model || "",
           sales_coach_prompt: company.ai_settings.sales_coach_prompt || "",
           sales_coach_evaluation_prompt: company.ai_settings.sales_coach_evaluation_prompt || "",
           sales_coach_model: company.ai_settings.sales_coach_model || "",
@@ -741,6 +746,13 @@ function SettingsPage() {
               >
                 <Users className="mr-2 h-4 w-4" />
                 Distribuição (Roleta)
+              </TabsTrigger>
+              <TabsTrigger
+                value="meta-capi"
+                className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
+              >
+                <Share2 className="mr-2 h-4 w-4 text-blue-500" />
+                Meta Conversions (CAPI)
               </TabsTrigger>
             </TabsList>
 
@@ -1556,6 +1568,10 @@ function SettingsPage() {
               <TabsContent value="routing" className="mt-0 border-none p-0">
                 <LeadRoutingSettings />
               </TabsContent>
+
+              <TabsContent value="meta-capi" className="mt-0 border-none p-0">
+                {activeCompanyId && <MetaCapiSettingsTab companyId={activeCompanyId} />}
+              </TabsContent>
             </div>
           </Tabs>
         </TabsContent>
@@ -1795,6 +1811,95 @@ function SettingsPage() {
                             </div>
                           </div>
                         )}
+                      </div>
+
+                      {/* Motor de Correção de Texto com IA */}
+                      <div className="space-y-3 p-4 border rounded-xl bg-muted/20">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 text-sky-500" />
+                          <h4 className="font-semibold text-sm">
+                            Motor de Correção de Texto com IA (Revisão no Chat)
+                          </h4>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Define o provedor e o modelo utilizados quando os consultores clicam em
+                          &quot;Corrigir texto com IA&quot; na caixa de mensagens do atendimento.
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-semibold">Provedor / Motor</label>
+                            <Select
+                              value={aiSettings.engines.text || "same_as_sales_coach"}
+                              onValueChange={(val) =>
+                                setAiSettings({
+                                  ...aiSettings,
+                                  engines: { ...aiSettings.engines, text: val },
+                                })
+                              }
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Selecione o provedor" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="same_as_sales_coach">
+                                  Mesmo do Sales Coach / Chatbot
+                                </SelectItem>
+                                <SelectItem value="openrouter">OpenRouter</SelectItem>
+                                <SelectItem value="openai">OpenAI</SelectItem>
+                                <SelectItem value="groq">Groq</SelectItem>
+                                <SelectItem value="none">Nenhum (Desativado)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-semibold">Modelo de Correção</label>
+                            <Select
+                              value={aiSettings.text_correction_model || "same_as_sales_coach"}
+                              onValueChange={(val) =>
+                                setAiSettings({
+                                  ...aiSettings,
+                                  text_correction_model: val === "same_as_sales_coach" ? "" : val,
+                                })
+                              }
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Mesmo do Sales Coach" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="same_as_sales_coach">
+                                  {aiSettings.sales_coach_model
+                                    ? `Mesmo do Sales Coach (${aiSettings.sales_coach_model})`
+                                    : "Mesmo do Sales Coach (Padrão)"}
+                                </SelectItem>
+                                <SelectItem value="openai/gpt-4o-mini">
+                                  gpt-4o-mini (Recomendado - Rápido e Econômico)
+                                </SelectItem>
+                                <SelectItem value="openai/gpt-4o">gpt-4o (Avançado)</SelectItem>
+                                <SelectItem value="llama3-70b-8192">
+                                  llama3-70b-8192 (Groq)
+                                </SelectItem>
+                                <SelectItem value="google/gemma-7b-it:free">
+                                  gemma-7b-it:free (Gratuito)
+                                </SelectItem>
+                                {aiSettings.chatbot_models.map(
+                                  (mod) =>
+                                    ![
+                                      "openai/gpt-4o-mini",
+                                      "openai/gpt-4o",
+                                      "llama3-70b-8192",
+                                      "google/gemma-7b-it:free",
+                                    ].includes(mod) && (
+                                      <SelectItem key={mod} value={mod}>
+                                        {mod}
+                                      </SelectItem>
+                                    ),
+                                )}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
                       </div>
 
                       <div className="pt-2">
