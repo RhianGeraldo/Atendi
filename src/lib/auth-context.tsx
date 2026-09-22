@@ -39,6 +39,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
+    const timeoutId = setTimeout(() => {
+      if (isMounted) {
+        setLoading(false);
+      }
+    }, 8000);
+
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       if (s?.user) {
@@ -49,25 +56,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      if (data.session?.user) {
-        loadProfile(data.session.user.id).finally(() => setLoading(false));
-      } else {
-        setLoading(false);
-      }
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        setSession(data.session);
+        if (data.session?.user) {
+          loadProfile(data.session.user.id).finally(() => {
+            clearTimeout(timeoutId);
+            if (isMounted) setLoading(false);
+          });
+        } else {
+          clearTimeout(timeoutId);
+          if (isMounted) setLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.warn("[Auth] Erro ao obter sessão:", err);
+        clearTimeout(timeoutId);
+        if (isMounted) setLoading(false);
+      });
 
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   async function loadProfile(userId: string) {
-    const { data } = await supabase
-      .from("profiles")
-      .select("id,name,email,avatar_url,role,company_id,department_id,custom_role_id,allowed_menus,custom_role:company_roles(id,name,allowed_menus,base_role)")
-      .eq("id", userId)
-      .maybeSingle();
-    if (data) setProfile(data as unknown as Profile);
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select(
+          "id,name,email,avatar_url,role,company_id,department_id,custom_role_id,allowed_menus,custom_role:company_roles(id,name,allowed_menus,base_role)",
+        )
+        .eq("id", userId)
+        .maybeSingle();
+      if (error) {
+        console.warn("[Auth] Erro ao carregar perfil:", error.message);
+      }
+      if (data) setProfile(data as unknown as Profile);
+    } catch (err: any) {
+      console.warn("[Auth] Exceção ao carregar perfil:", err?.message);
+    }
   }
 
   const value: AuthContextValue = {
