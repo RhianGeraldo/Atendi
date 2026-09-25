@@ -232,7 +232,16 @@ function ConversationsPage() {
             query = query.or(`assigned_agent_id.eq.${profile.id},department_id.is.null`);
           }
         } else if (profile?.role !== "admin_company" && profile?.role !== "super_admin") {
-          query = query.eq("assigned_agent_id", profile?.id ?? "");
+          if (tab === "active") {
+            // Em andamento: atendente vê conversas atribuídas a ele OU sem atendente (ex: disparos/outbound)
+            if (profile?.department_id) {
+              query = query.or(`assigned_agent_id.eq.${profile.id},and(assigned_agent_id.is.null,or(department_id.eq.${profile.department_id},department_id.is.null))`);
+            } else {
+              query = query.or(`assigned_agent_id.eq.${profile?.id},assigned_agent_id.is.null`);
+            }
+          } else {
+            query = query.eq("assigned_agent_id", profile?.id ?? "");
+          }
         }
       }
 
@@ -278,11 +287,16 @@ function ConversationsPage() {
     [conversationsData]
   );
 
+  const handleTabChange = useCallback((newTab: TabType) => {
+    setTab(newTab);
+    navigate({ search: (prev: any) => ({ ...prev, tab: newTab }) });
+  }, [navigate]);
+
   useEffect(() => {
-    if (searchTab && searchTab !== tab) {
+    if (searchTab && searchTab !== tab && searchTab !== "groups") {
       setTab(searchTab as TabType);
     }
-  }, [searchTab, tab]);
+  }, [searchTab]);
 
   useEffect(() => {
     if (searchConvId && searchConvId !== selectedId) {
@@ -317,12 +331,12 @@ function ConversationsPage() {
     staleTime: 30 * 1000,
   });
 
-  // Se a conversa aberta estiver em outra aba ou instância/departamento filtrado, sincroniza automaticamente
+  // Se a conversa aberta estiver em outra aba ou instância/departamento filtrado, sincroniza automaticamente ao abrir
   useEffect(() => {
     if (directSelectedConv && selectedId === directSelectedConv.id) {
       const isGroup = !!(directSelectedConv.contact?.phone && (directSelectedConv.contact.phone.startsWith("120363") || (directSelectedConv.contact.phone.includes("-") && directSelectedConv.contact.phone.length > 18)));
       const convTab = isGroup ? "groups" : (directSelectedConv.status as TabType);
-      if (convTab && tab !== convTab && !searchTab) {
+      if (convTab && !searchTab) {
         setTab(convTab);
       }
       if (instanceFilter && instanceFilter !== "all" && directSelectedConv.whatsapp_instance_id !== instanceFilter) {
@@ -339,7 +353,7 @@ function ConversationsPage() {
         }
       }
     }
-  }, [directSelectedConv, selectedId, tab, searchTab, instanceFilter, departmentFilter, agentFilter]);
+  }, [directSelectedConv?.id, selectedId]);
 
   const { data: unreadCounts } = useQuery({
     queryKey: ["unread-counts", activeCompanyId, selectedUnitId, profile?.id, profile?.department_id, instanceFilter, debouncedSearch, departmentFilter, agentFilter],
@@ -428,7 +442,7 @@ function ConversationsPage() {
             }
           }
           if (c.status === "active") {
-            const canSeeActive = isAdmin || (isManager && isMyDept) || isAssignedToMe;
+            const canSeeActive = isAdmin || (isManager && isMyDept) || isAssignedToMe || !c.assigned_agent_id;
             if (canSeeActive) {
               if (!seenActive.has(key)) {
                 seenActive.add(key);
@@ -1018,7 +1032,7 @@ function ConversationsPage() {
             </Button>
             <WavoipDialer open={dialerOpen} onOpenChange={setDialerOpen} />
           </div>
-          <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)} className="mt-3">
+          <Tabs value={tab} onValueChange={(v) => handleTabChange(v as TabType)} className="mt-3">
             <TabsList className="grid w-full grid-cols-3 h-auto py-1">
               <TabsTrigger value="waiting" className="group px-1 py-1.5 text-xs relative flex items-center justify-center gap-1.5">
                 <span>Aguardando</span>

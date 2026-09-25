@@ -27,7 +27,8 @@ import {
   Loader2,
   AlertCircle,
   Clock,
-  AlertTriangle 
+  AlertTriangle,
+  Check 
 } from "lucide-react";
 import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
@@ -869,6 +870,25 @@ export function ChatPanel({
     }
   });
 
+  const returnToQueue = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from("conversations")
+        .update({ status: "waiting", assigned_agent_id: null })
+        .eq("id", conv.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Atendimento retornado para Aguardando");
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["direct-conversation", conv.id] });
+      qc.invalidateQueries({ queryKey: ["unread-counts"] });
+    },
+    onError: (e: any) => {
+      toast.error("Erro ao retornar atendimento para a fila", { description: e.message });
+    }
+  });
+
   const toggleAi = useMutation({
     mutationFn: async (active: boolean) => {
       const { error } = await supabase.from("conversations").update({ ai_active: active }).eq("id", conv.id);
@@ -1018,6 +1038,52 @@ export function ChatPanel({
                     <span className="text-xs">{conv.unit.name}</span>
                   </>
                 )}
+                <span>•</span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className={cn(
+                      "inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-all cursor-pointer shadow-2xs select-none",
+                      conv.status === "waiting" && "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20",
+                      conv.status === "active" && "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20",
+                      conv.status === "resolved" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                    )}>
+                      <span className={cn(
+                        "h-1.5 w-1.5 rounded-full shrink-0",
+                        conv.status === "waiting" && "bg-amber-500 animate-pulse",
+                        conv.status === "active" && "bg-primary",
+                        conv.status === "resolved" && "bg-emerald-500"
+                      )} />
+                      <span>{conv.status === "waiting" ? "Aguardando" : conv.status === "active" ? "Andamento" : "Resolvido"}</span>
+                      <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56">
+                    <DropdownMenuItem 
+                      disabled={conv.status === "waiting" || returnToQueue.isPending}
+                      onClick={() => returnToQueue.mutate()}
+                      className="cursor-pointer flex items-center justify-between"
+                    >
+                      <span>Mover para Aguardando</span>
+                      {conv.status === "waiting" && <Check className="h-4 w-4 text-primary" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      disabled={(conv.status === "active" && conv.assigned_agent_id === profile?.id) || assignConv.isPending}
+                      onClick={() => assignConv.mutate()}
+                      className="cursor-pointer flex items-center justify-between"
+                    >
+                      <span>Mover para Andamento</span>
+                      {conv.status === "active" && <Check className="h-4 w-4 text-primary" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      disabled={conv.status === "resolved" || resolve.isPending}
+                      onClick={() => setResolveDialogOpen(true)}
+                      className="cursor-pointer flex items-center justify-between"
+                    >
+                      <span>Encerrar (Resolvido)</span>
+                      {conv.status === "resolved" && <Check className="h-4 w-4 text-primary" />}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           </div>
@@ -1277,13 +1343,15 @@ export function ChatPanel({
 
         {/* Input / Composer */}
         <div className="border-t border-border bg-card p-3 flex flex-col gap-2 relative">
-          {(conv.status === "waiting" || (conv.status === "active" && ((conv.assigned_agent_id && conv.assigned_agent_id !== profile?.id) || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && (
+          {(conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card gap-2">
               {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager") ? (
                 <>
                   <p className="text-sm font-medium text-muted-foreground text-center px-4">
-                    {(!conv.assigned_agent_id && !conv.ai_active)
-                      ? "Esta conversa está na fila e aguardando um agente." 
+                    {!conv.assigned_agent_id
+                      ? (conv.status === "waiting" 
+                          ? "Esta conversa está na fila e aguardando um agente." 
+                          : "Esta conversa está em andamento sem atendente atribuído.")
                       : conv.assigned_agent_id === profile?.id 
                         ? "Esta conversa foi transferida para você." 
                         : conv.status === "active"
@@ -1292,7 +1360,7 @@ export function ChatPanel({
                   </p>
                   <Button onClick={() => assignConv.mutate()} disabled={assignConv.isPending}>
                     {assignConv.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {(!conv.assigned_agent_id && !conv.ai_active) ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
+                    {!conv.assigned_agent_id ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
                   </Button>
                 </>
               ) : (
