@@ -25,10 +25,7 @@ import {
   Video, 
   Headphones, 
   Loader2,
-  AlertCircle,
-  Clock,
-  AlertTriangle,
-  Check 
+  AlertCircle 
 } from "lucide-react";
 import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
@@ -64,7 +61,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
@@ -73,8 +69,6 @@ import { PlaybookSheet } from "@/components/training/playbook-sheet";
 import { WhatsappTemplateSender } from "@/components/whatsapp/whatsapp-template-sender";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { ConvRow, MessageRow, fetchConversationMessages } from "@/components/chat/conversation-types";
-import { useSlaSettings } from "@/lib/use-sla";
-import { calculateConversationSla } from "@/lib/sla";
 
 let ffmpegInstance: FFmpeg | null = null;
 const getFFmpeg = async () => {
@@ -125,7 +119,6 @@ export function ChatPanel({
   const qc = useQueryClient();
   const { startCall, instances } = useWavoip();
   const { selectedUnitId } = useUnit();
-  const { slaSettings } = useSlaSettings();
   const [text, setText] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
   const [selectedFile, setSelectedFile] = useState<{ file: File | null; base64: string; type: string } | null>(null);
@@ -216,19 +209,6 @@ export function ChatPanel({
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 30,
   });
-
-  // Obtém a última mensagem externa para o cálculo de SLA em tempo real
-  const lastExternalMessage = useMemo(() => {
-    if (!messages || messages.length === 0) return undefined;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (!messages[i].is_internal) return messages[i];
-    }
-    return null;
-  }, [messages]);
-
-  const slaInfo = useMemo(() => {
-    return calculateConversationSla(conv, slaSettings, lastExternalMessage);
-  }, [conv, slaSettings, lastExternalMessage]);
 
   // Função para buscar mensagens mais antigas (paginação infinita para cima)
   const loadOlderMessages = async () => {
@@ -870,55 +850,6 @@ export function ChatPanel({
     }
   });
 
-  const returnToQueue = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
-        .from("conversations")
-        .update({ status: "waiting", assigned_agent_id: null })
-        .eq("id", conv.id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Atendimento retornado para Aguardando");
-      qc.invalidateQueries({ queryKey: ["conversations"] });
-      qc.invalidateQueries({ queryKey: ["direct-conversation", conv.id] });
-      qc.invalidateQueries({ queryKey: ["unread-counts"] });
-    },
-    onError: (e: any) => {
-      toast.error("Erro ao retornar atendimento para a fila", { description: e.message });
-    }
-  });
-
-  const toggleAi = useMutation({
-    mutationFn: async (active: boolean) => {
-      const { error } = await supabase.from("conversations").update({ ai_active: active }).eq("id", conv.id);
-      if (error) throw error;
-    },
-    onMutate: async (active) => {
-      await qc.cancelQueries({ queryKey: ["conversations"] });
-      qc.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
-        if (!oldData) return oldData;
-        if (oldData.pages) {
-          return {
-            ...oldData,
-            pages: oldData.pages.map((page: any) => {
-              if (!page || !page.rows) return page;
-              return {
-                ...page,
-                rows: page.rows.map((c: any) => (c.id === conv.id ? { ...c, ai_active: active } : c)),
-              };
-            }),
-          };
-        }
-        return oldData;
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["conversations"] });
-    },
-    onError: (e) => toast.error("Erro ao alterar IA", { description: (e as Error).message }),
-  });
-
   const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith("120363") || (conv.contact.phone.includes("-") && conv.contact.phone.length > 18)));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
@@ -979,7 +910,7 @@ export function ChatPanel({
 
   return (
     <div className="flex h-full min-w-0">
-      <div className="flex min-w-0 flex-1 flex-col h-full overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
         <header className="flex items-center justify-between border-b border-border bg-card px-3 md:px-5 py-3 shadow-sm z-10 min-w-0 w-full">
           <div 
@@ -1008,115 +939,16 @@ export function ChatPanel({
               <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-success" />
             </div>
             <div>
-              <div className="flex items-center gap-2 text-[15px] font-semibold text-foreground">
-                <span className="truncate">{contactName}</span>
-                {slaInfo.isWaiting && (
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border shrink-0 transition-colors shadow-xs",
-                      slaInfo.status === "breached" && "bg-destructive/15 text-destructive border-destructive/30 animate-pulse font-bold",
-                      slaInfo.status === "warning" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
-                      slaInfo.status === "ok" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-                    )}
-                    title={slaInfo.tooltipText}
-                  >
-                    {slaInfo.status === "breached" ? (
-                      <AlertTriangle className="h-3 w-3 shrink-0" />
-                    ) : (
-                      <Clock className="h-3 w-3 shrink-0" />
-                    )}
-                    <span>SLA: {slaInfo.badgeLabel}</span>
-                  </span>
-                )}
+              <div className="flex items-center gap-1.5 text-[15px] font-semibold text-foreground">
+                {contactName}
               </div>
               <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground mt-0.5">
                 <ChannelIcon channel={conv.channel} className="h-3.5 w-3.5" />
                 {conv.department?.name && <span>{conv.department.name}</span>}
-                {conv.unit?.name && (
-                  <>
-                    <span>•</span>
-                    <span className="text-xs">{conv.unit.name}</span>
-                  </>
-                )}
-                <span>•</span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className={cn(
-                      "inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border transition-all cursor-pointer shadow-2xs select-none",
-                      conv.status === "waiting" && "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20",
-                      conv.status === "active" && "bg-primary/10 text-primary border-primary/30 hover:bg-primary/20",
-                      conv.status === "resolved" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
-                    )}>
-                      <span className={cn(
-                        "h-1.5 w-1.5 rounded-full shrink-0",
-                        conv.status === "waiting" && "bg-amber-500 animate-pulse",
-                        conv.status === "active" && "bg-primary",
-                        conv.status === "resolved" && "bg-emerald-500"
-                      )} />
-                      <span>{conv.status === "waiting" ? "Aguardando" : conv.status === "active" ? "Andamento" : "Resolvido"}</span>
-                      <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56">
-                    <DropdownMenuItem 
-                      disabled={conv.status === "waiting" || returnToQueue.isPending}
-                      onClick={() => returnToQueue.mutate()}
-                      className="cursor-pointer flex items-center justify-between"
-                    >
-                      <span>Mover para Aguardando</span>
-                      {conv.status === "waiting" && <Check className="h-4 w-4 text-primary" />}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      disabled={(conv.status === "active" && conv.assigned_agent_id === profile?.id) || assignConv.isPending}
-                      onClick={() => assignConv.mutate()}
-                      className="cursor-pointer flex items-center justify-between"
-                    >
-                      <span>Mover para Andamento</span>
-                      {conv.status === "active" && <Check className="h-4 w-4 text-primary" />}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      disabled={conv.status === "resolved" || resolve.isPending}
-                      onClick={() => setResolveDialogOpen(true)}
-                      className="cursor-pointer flex items-center justify-between"
-                    >
-                      <span>Encerrar (Resolvido)</span>
-                      {conv.status === "resolved" && <Check className="h-4 w-4 text-primary" />}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1 sm:gap-1.5">
-            {!isGroup && (
-              <div 
-                className={cn(
-                  "flex items-center gap-1.5 sm:gap-2 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border transition-all select-none mr-0.5",
-                  conv.ai_active 
-                    ? "bg-primary/10 border-primary/20 text-primary shadow-xs" 
-                    : "bg-muted/40 border-border/60 text-muted-foreground hover:bg-muted/60"
-                )}
-                title={conv.ai_active ? "A IA está respondendo neste ticket" : "IA pausada neste ticket"}
-              >
-                <div className={cn("p-1 rounded-md shrink-0", conv.ai_active ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground")}>
-                  <Bot className={cn("h-3.5 w-3.5", conv.ai_active && "text-primary animate-pulse")} />
-                </div>
-                <div className="hidden sm:flex flex-col text-left">
-                  <span className="text-[11px] font-semibold leading-tight">
-                    {conv.ai_active ? "IA Ativa" : "IA Pausada"}
-                  </span>
-                  <span className="text-[9px] text-muted-foreground leading-tight">
-                    {conv.ai_active ? "Respondendo" : "Pausada"}
-                  </span>
-                </div>
-                <Switch 
-                  checked={conv.ai_active || false} 
-                  onCheckedChange={(v) => toggleAi.mutate(v)} 
-                  disabled={toggleAi.isPending}
-                  className="scale-75 origin-right cursor-pointer"
-                />
-              </div>
-            )}
+          <div className="flex items-center gap-1">
             {conv.status === "active" && !isGroup && (
               <>
                 <Button 
@@ -1265,7 +1097,7 @@ export function ChatPanel({
             </div>
           </div>
         ) : (
-          <div className="relative flex-1 flex flex-col min-h-0 overflow-hidden">
+          <div className="relative flex-1 flex flex-col min-h-0">
             <div
               ref={scrollRef}
               onScroll={handleScroll}
@@ -1313,9 +1145,9 @@ export function ChatPanel({
               ))}
             </div>
 
-            {/* Botão flutuante para rolar para as mensagens mais recentes (canto inferior direito) */}
+            {/* Botão flutuante para rolar para as mensagens mais recentes */}
             {showScrollBottomBtn && (
-              <div className="absolute bottom-4 right-6 z-30 animate-in fade-in zoom-in-95 duration-200">
+              <div className="absolute bottom-4 right-6 z-20 animate-in fade-in zoom-in-95 duration-200">
                 <Button
                   type="button"
                   variant={newMessagesBelow > 0 ? "default" : "outline"}
@@ -1324,14 +1156,14 @@ export function ChatPanel({
                   className={cn(
                     "shadow-lg border gap-1.5 transition-all cursor-pointer",
                     newMessagesBelow > 0
-                      ? "bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-3.5 py-1.5 h-9 font-medium border-primary/20 shadow-primary/20"
-                      : "bg-background hover:bg-accent text-foreground rounded-full h-9 w-9 p-0 shadow-md border-border/80"
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-3.5 py-1.5 h-8 font-medium border-primary/20 shadow-primary/20"
+                      : "bg-background/90 hover:bg-background text-muted-foreground hover:text-foreground rounded-full h-8 w-8 p-0 backdrop-blur-sm border-border/80"
                   )}
                   title="Rolar para as mensagens mais recentes"
                 >
-                  <ChevronDown className="h-4.5 w-4.5" />
+                  <ChevronDown className="h-4 w-4" />
                   {newMessagesBelow > 0 && (
-                    <span className="text-xs font-medium">
+                    <span className="text-xs">
                       {newMessagesBelow === 1 ? "Nova mensagem" : `${newMessagesBelow} novas`}
                     </span>
                   )}
@@ -1343,15 +1175,13 @@ export function ChatPanel({
 
         {/* Input / Composer */}
         <div className="border-t border-border bg-card p-3 flex flex-col gap-2 relative">
-          {(conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && (
+          {(conv.status === "waiting" || (conv.status === "active" && ((conv.assigned_agent_id && conv.assigned_agent_id !== profile?.id) || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card gap-2">
               {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager") ? (
                 <>
                   <p className="text-sm font-medium text-muted-foreground text-center px-4">
-                    {!conv.assigned_agent_id
-                      ? (conv.status === "waiting" 
-                          ? "Esta conversa está na fila e aguardando um agente." 
-                          : "Esta conversa está em andamento sem atendente atribuído.")
+                    {(!conv.assigned_agent_id && !conv.ai_active)
+                      ? "Esta conversa está na fila e aguardando um agente." 
                       : conv.assigned_agent_id === profile?.id 
                         ? "Esta conversa foi transferida para você." 
                         : conv.status === "active"
@@ -1360,7 +1190,7 @@ export function ChatPanel({
                   </p>
                   <Button onClick={() => assignConv.mutate()} disabled={assignConv.isPending}>
                     {assignConv.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {!conv.assigned_agent_id ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
+                    {(!conv.assigned_agent_id && !conv.ai_active) ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
                   </Button>
                 </>
               ) : (

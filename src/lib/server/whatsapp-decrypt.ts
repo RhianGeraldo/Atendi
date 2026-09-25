@@ -1,32 +1,13 @@
 import crypto from 'crypto';
 
-export async function decryptWhatsAppMedia(
-  url: string, 
-  mediaKeyInput: string | Buffer | number[] | { type?: string; data?: number[] } | any, 
-  type: 'video' | 'image' | 'audio' | 'document' | 'ptv'
-): Promise<Buffer> {
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'WhatsApp/2.24.6.77 C',
-    },
-  });
+export async function decryptWhatsAppMedia(url: string, mediaKeyBase64: string, type: 'video' | 'image' | 'audio' | 'document' | 'ptv'): Promise<Buffer> {
+  const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Failed to fetch media from WhatsApp: ${response.status} ${response.statusText}`);
+    throw new Error(`Failed to fetch media from WhatsApp: ${response.statusText}`);
   }
   const buffer = Buffer.from(await response.arrayBuffer());
 
-  let mediaKey: Buffer;
-  if (Buffer.isBuffer(mediaKeyInput)) {
-    mediaKey = mediaKeyInput;
-  } else if (Array.isArray(mediaKeyInput)) {
-    mediaKey = Buffer.from(mediaKeyInput);
-  } else if (typeof mediaKeyInput === 'object' && mediaKeyInput && Array.isArray((mediaKeyInput as any).data)) {
-    mediaKey = Buffer.from((mediaKeyInput as any).data);
-  } else if (typeof mediaKeyInput === 'string') {
-    mediaKey = Buffer.from(mediaKeyInput, 'base64');
-  } else {
-    throw new Error(`Invalid mediaKey format: ${typeof mediaKeyInput}`);
-  }
+  const mediaKey = Buffer.from(mediaKeyBase64, 'base64');
   
   let infoStr = '';
   switch (type) {

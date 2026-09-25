@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
-import { Filter, Search, Phone, CheckCircle2, Loader2 } from "lucide-react";
+import { Filter, Search, Phone, CheckCircle2 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { Input } from "@/components/ui/input";
@@ -41,8 +41,6 @@ import { ConversationItem } from "@/components/chat/conversation-item";
 import { ContactSidebar } from "@/components/chat/contact-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { EmptyChat } from "@/components/chat/empty-chat";
-import { useSlaSettings } from "@/lib/use-sla";
-import { calculateConversationSla } from "@/lib/sla";
 
 export type { ConvRow, MessageRow, Status, TabType };
 
@@ -89,8 +87,6 @@ function ConversationsPage() {
   const [dialerOpen, setDialerOpen] = useState(false);
   const [departmentFilter, setDepartmentFilter] = useState<string | null>(null);
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
-  const [slaFilter, setSlaFilter] = useState<"all" | "breached" | "warning" | "ok">("all");
-  const { slaSettings } = useSlaSettings();
   
   const { data: instances } = useQuery({
     queryKey: ["whatsapp_instances_filter", activeCompanyId, selectedUnitId],
@@ -170,14 +166,12 @@ function ConversationsPage() {
       const from = pageParam as number;
       const to = from + PAGE_SIZE - 1;
 
-      const selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name), last_message:messages(sender_type, created_at, is_internal)";
+      const selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
 
       let query = supabase
         .from("conversations")
         .select(selectString)
         .order("last_message_at", { ascending: false })
-        .order("created_at", { foreignTable: "messages", ascending: false })
-        .limit(1, { foreignTable: "messages" })
         .range(from, to);
 
       if (activeCompanyId) {
@@ -232,16 +226,7 @@ function ConversationsPage() {
             query = query.or(`assigned_agent_id.eq.${profile.id},department_id.is.null`);
           }
         } else if (profile?.role !== "admin_company" && profile?.role !== "super_admin") {
-          if (tab === "active") {
-            // Em andamento: atendente vê conversas atribuídas a ele OU sem atendente (ex: disparos/outbound)
-            if (profile?.department_id) {
-              query = query.or(`assigned_agent_id.eq.${profile.id},and(assigned_agent_id.is.null,or(department_id.eq.${profile.department_id},department_id.is.null))`);
-            } else {
-              query = query.or(`assigned_agent_id.eq.${profile?.id},assigned_agent_id.is.null`);
-            }
-          } else {
-            query = query.eq("assigned_agent_id", profile?.id ?? "");
-          }
+          query = query.eq("assigned_agent_id", profile?.id ?? "");
         }
       }
 
@@ -262,15 +247,16 @@ function ConversationsPage() {
         );
       }
 
-      // Deduplicate by contact (phone or id) + instance to ensure no duplicate cards appear
-      const seen = new Set<string>();
-      rows = rows.filter(c => {
-        const contactIdentifier = c.contact?.phone || c.contact?.id || "no-contact";
-        const key = `${contactIdentifier}__${c.whatsapp_instance_id ?? "no-instance"}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      // Resolved: deduplicate by contact+instance (keep most recent — already ordered DESC)
+      if (tab === "resolved") {
+        const seen = new Set<string>();
+        rows = rows.filter(c => {
+          const key = `${c.contact?.id ?? "no-contact"}__${c.whatsapp_instance_id ?? "no-instance"}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
 
       return { rows, rawCount: (data ?? []).length };
     },
@@ -287,16 +273,11 @@ function ConversationsPage() {
     [conversationsData]
   );
 
-  const handleTabChange = useCallback((newTab: TabType) => {
-    setTab(newTab);
-    navigate({ search: (prev: any) => ({ ...prev, tab: newTab }) });
-  }, [navigate]);
-
   useEffect(() => {
-    if (searchTab && searchTab !== tab && searchTab !== "groups") {
+    if (searchTab && searchTab !== tab) {
       setTab(searchTab as TabType);
     }
-  }, [searchTab]);
+  }, [searchTab, tab]);
 
   useEffect(() => {
     if (searchConvId && searchConvId !== selectedId) {
@@ -309,51 +290,6 @@ function ConversationsPage() {
         .then(() => {});
     }
   }, [searchConvId, selectedId]);
-
-  // Consulta direta da conversa selecionada caso ela não esteja na primeira página ou aba atual da lista
-  const { data: directSelectedConv, isLoading: isLoadingDirectConv } = useQuery({
-    queryKey: ["direct-conversation", selectedId],
-    enabled: !!selectedId,
-    queryFn: async () => {
-      if (!selectedId) return null;
-      const selectString = "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name), last_message:messages(sender_type, created_at, is_internal)";
-      const { data, error } = await supabase
-        .from("conversations")
-        .select(selectString)
-        .eq("id", selectedId)
-        .order("created_at", { foreignTable: "messages", ascending: false })
-        .limit(1, { foreignTable: "messages" })
-        .maybeSingle();
-
-      if (error || !data) return null;
-      return data as unknown as ConvRow;
-    },
-    staleTime: 30 * 1000,
-  });
-
-  // Se a conversa aberta estiver em outra aba ou instância/departamento filtrado, sincroniza automaticamente ao abrir
-  useEffect(() => {
-    if (directSelectedConv && selectedId === directSelectedConv.id) {
-      const isGroup = !!(directSelectedConv.contact?.phone && (directSelectedConv.contact.phone.startsWith("120363") || (directSelectedConv.contact.phone.includes("-") && directSelectedConv.contact.phone.length > 18)));
-      const convTab = isGroup ? "groups" : (directSelectedConv.status as TabType);
-      if (convTab && !searchTab) {
-        setTab(convTab);
-      }
-      if (instanceFilter && instanceFilter !== "all" && directSelectedConv.whatsapp_instance_id !== instanceFilter) {
-        setInstanceFilter("all");
-      }
-      if (departmentFilter && departmentFilter !== "all" && directSelectedConv.department_id !== departmentFilter) {
-        setDepartmentFilter("all");
-      }
-      if (agentFilter && agentFilter !== "all") {
-        if (agentFilter === "unassigned" && directSelectedConv.assigned_agent_id) {
-          setAgentFilter("all");
-        } else if (agentFilter !== directSelectedConv.assigned_agent_id) {
-          setAgentFilter("all");
-        }
-      }
-    }
-  }, [directSelectedConv?.id, selectedId]);
 
   const { data: unreadCounts } = useQuery({
     queryKey: ["unread-counts", activeCompanyId, selectedUnitId, profile?.id, profile?.department_id, instanceFilter, debouncedSearch, departmentFilter, agentFilter],
@@ -407,9 +343,7 @@ function ConversationsPage() {
         groups: { total: 0, unread: 0 } 
       };
 
-      const seenWaiting = new Set<string>();
-      const seenActive = new Set<string>();
-      const seenResolved = new Set<string>();
+      const resolvedSeen = new Set<string>();
       
       data.forEach(c => {
         if (instanceFilter && instanceFilter !== "all" && c.whatsapp_instance_id !== instanceFilter) {
@@ -426,36 +360,29 @@ function ConversationsPage() {
           const isMyDept = c.department_id === profile?.department_id;
           const isGeneral = !c.department_id;
           const isAssignedToMe = c.assigned_agent_id === profile?.id;
-          const contactIdentifier = c.contact?.phone || (c.contact as any)?.id || "no-contact";
-          const key = `${contactIdentifier}__${c.whatsapp_instance_id ?? "no-instance"}`;
 
           if (c.status === "waiting") {
             const canSeeWaiting = isAdmin || isGeneral || isMyDept || isAssignedToMe;
             if (canSeeWaiting) {
               if (isAdmin || isManager || !c.assigned_agent_id || c.assigned_agent_id === profile?.id) {
-                if (!seenWaiting.has(key)) {
-                  seenWaiting.add(key);
-                  counts.waiting.total++;
-                  counts.waiting.unread += c.unread_count || 0;
-                }
+                counts.waiting.total++;
+                counts.waiting.unread += c.unread_count || 0;
               }
             }
           }
           if (c.status === "active") {
-            const canSeeActive = isAdmin || (isManager && isMyDept) || isAssignedToMe || !c.assigned_agent_id;
+            const canSeeActive = isAdmin || (isManager && isMyDept) || isAssignedToMe;
             if (canSeeActive) {
-              if (!seenActive.has(key)) {
-                seenActive.add(key);
-                counts.active.total++;
-                counts.active.unread += c.unread_count || 0;
-              }
+              counts.active.total++;
+              counts.active.unread += c.unread_count || 0;
             }
           }
           if (c.status === "resolved") {
             const canSeeResolved = isAdmin || (isManager && isMyDept) || isAssignedToMe;
             if (canSeeResolved) {
-              if (!seenResolved.has(key)) {
-                seenResolved.add(key);
+              const key = `${(c.contact as any)?.id ?? "no-contact"}__${c.whatsapp_instance_id ?? "no-instance"}`;
+              if (!resolvedSeen.has(key)) {
+                resolvedSeen.add(key);
                 counts.resolved.total++;
                 counts.resolved.unread += c.unread_count || 0;
               }
@@ -702,24 +629,13 @@ function ConversationsPage() {
             if (existingConv) {
               const nextUnread = ((existingConv as ConvRow).unread_count || 0) + unreadIncrement;
               const isGroup = !!((existingConv as ConvRow).contact?.phone && ((existingConv as ConvRow).contact.phone!.startsWith("120363") || ((existingConv as ConvRow).contact.phone!.includes("-") && (existingConv as ConvRow).contact.phone!.length > 18)));
-              const becameActive = !isFromContact && (existingConv as ConvRow).status === "waiting";
-              const targetStatus = isGroup ? "groups" : (becameActive ? "active" : ((existingConv as ConvRow).status || "active"));
+              const targetStatus = isGroup ? "groups" : ((existingConv as ConvRow).status || "active");
 
               updateConversationInCache(convId, {
-                status: targetStatus === "groups" ? (existingConv as ConvRow).status : targetStatus,
                 last_message_preview: previewText,
                 last_message_at: newMsg.created_at,
-                unread_count: nextUnread,
-                last_message: [{
-                  sender_type: newMsg.sender_type,
-                  created_at: newMsg.created_at,
-                  is_internal: newMsg.is_internal || false
-                }]
+                unread_count: nextUnread
               }, { moveToTop: true, status: targetStatus });
-
-              if (becameActive) {
-                handleConversationStatusChangeInCache(existingConv as ConvRow, "waiting", "active");
-              }
 
               if (unreadIncrement > 0) {
                 const tabKey = isGroup ? "groups" : ((existingConv as ConvRow).status || "active");
@@ -814,33 +730,24 @@ function ConversationsPage() {
     };
   }, [qc, activeCompanyId, updateConversationInCache, updateUnreadCountsInCache, handleConversationStatusChangeInCache]);
 
-  const filtered = useMemo(() => {
-    let list = conversations.filter(c => !!c?.id);
-    if (slaFilter !== "all") {
-      list = list.filter(c => {
-        const sla = calculateConversationSla(c, slaSettings);
-        return sla.status === slaFilter;
-      });
-    }
-    return list;
-  }, [conversations, slaFilter, slaSettings]);
+  const filtered = conversations.filter(c => !!c?.id);
 
   useEffect(() => {
-    const current = filtered.find((c) => c.id === selectedId) || (directSelectedConv?.id === selectedId ? directSelectedConv : null);
+    const current = filtered.find((c) => c.id === selectedId);
     if (current) setLastSelectedConv(current);
-  }, [filtered, selectedId, directSelectedConv]);
+  }, [filtered, selectedId]);
 
   const selected = useMemo(() => {
-    const current = filtered.find((c) => c.id === selectedId);
+    const current = filtered.find((c) => c.id === selectedId) ?? null;
     if (current) return current;
-    if (directSelectedConv && directSelectedConv.id === selectedId) {
-      return directSelectedConv;
-    }
     if (selectedId && lastSelectedConv?.id === selectedId) {
-      return lastSelectedConv;
+      if (lastSelectedConv.status === "resolved" && tab !== "resolved") {
+        return null;
+      }
+      return { ...lastSelectedConv, status: tab === "active" ? "active" : lastSelectedConv.status } as ConvRow;
     }
     return null;
-  }, [filtered, directSelectedConv, selectedId, lastSelectedConv]);
+  }, [filtered, selectedId, lastSelectedConv, tab]);
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -880,12 +787,12 @@ function ConversationsPage() {
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="icon" variant={(instanceFilter && instanceFilter !== "all") || (departmentFilter && departmentFilter !== "all") || (agentFilter && agentFilter !== "all") || (slaFilter !== "all") ? "default" : "outline"} className="h-9 w-9 shrink-0">
+                <Button size="icon" variant={(instanceFilter && instanceFilter !== "all") || (departmentFilter && departmentFilter !== "all") || (agentFilter && agentFilter !== "all") ? "default" : "outline"} className="h-9 w-9 shrink-0">
                   <Filter className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                {((instanceFilter && instanceFilter !== "all") || (departmentFilter && departmentFilter !== "all") || (agentFilter && agentFilter !== "all") || (slaFilter !== "all")) && (
+              <DropdownMenuContent align="end" className="w-48">
+                {((instanceFilter && instanceFilter !== "all") || (departmentFilter && departmentFilter !== "all") || (agentFilter && agentFilter !== "all")) && (
                   <>
                     <DropdownMenuItem 
                       className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer font-medium"
@@ -893,7 +800,6 @@ function ConversationsPage() {
                         setInstanceFilter("all");
                         setDepartmentFilter("all");
                         setAgentFilter("all");
-                        setSlaFilter("all");
                       }}
                     >
                       Limpar Filtros
@@ -901,33 +807,6 @@ function ConversationsPage() {
                     <DropdownMenuSeparator />
                   </>
                 )}
-                
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    Status do SLA
-                    {slaFilter !== "all" && <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuPortal>
-                    <DropdownMenuSubContent className="w-56">
-                      <DropdownMenuItem onClick={() => setSlaFilter("all")} className="cursor-pointer">
-                        Todos os status
-                        {slaFilter === "all" && <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setSlaFilter("breached")} className="cursor-pointer text-destructive font-medium">
-                        Estourados (Crítico)
-                        {slaFilter === "breached" && <CheckCircle2 className="ml-auto h-4 w-4 text-destructive" />}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setSlaFilter("warning")} className="cursor-pointer text-amber-600 dark:text-amber-400 font-medium">
-                        Atenção (Alerta)
-                        {slaFilter === "warning" && <CheckCircle2 className="ml-auto h-4 w-4 text-amber-600" />}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setSlaFilter("ok")} className="cursor-pointer text-emerald-600 dark:text-emerald-400 font-medium">
-                        No Prazo
-                        {slaFilter === "ok" && <CheckCircle2 className="ml-auto h-4 w-4 text-emerald-600" />}
-                      </DropdownMenuItem>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuPortal>
-                </DropdownMenuSub>
                 
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
@@ -1019,7 +898,6 @@ function ConversationsPage() {
             <StartConversationDialog onCreated={(id) => {
               setTab("active");
               setSelectedId(id);
-              navigate({ search: (prev: any) => ({ ...prev, c: id, tab: "active" }) });
             }} />
             <Button 
               size="icon" 
@@ -1032,7 +910,7 @@ function ConversationsPage() {
             </Button>
             <WavoipDialer open={dialerOpen} onOpenChange={setDialerOpen} />
           </div>
-          <Tabs value={tab} onValueChange={(v) => handleTabChange(v as TabType)} className="mt-3">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)} className="mt-3">
             <TabsList className="grid w-full grid-cols-3 h-auto py-1">
               <TabsTrigger value="waiting" className="group px-1 py-1.5 text-xs relative flex items-center justify-center gap-1.5">
                 <span>Aguardando</span>
@@ -1076,11 +954,7 @@ function ConversationsPage() {
               key={c.id}
               conv={c}
               selected={selectedId === c.id}
-              onClick={() => {
-                setSelectedId(c.id);
-                setLastSelectedConv(c);
-                navigate({ search: (prev: any) => ({ ...prev, c: c.id, tab }) });
-              }}
+              onClick={() => setSelectedId(c.id)}
               onPrefetch={() => {
                 qc.prefetchQuery({
                   queryKey: ["messages", c.id],
@@ -1090,7 +964,6 @@ function ConversationsPage() {
               }}
               currentUserId={profile?.id}
               showUnitInfo={!selectedUnitId}
-              slaSettings={slaSettings}
             />
           ))}
           {!filtered.length && !isConvFetching && (
@@ -1135,7 +1008,7 @@ function ConversationsPage() {
 
       {/* Chat */}
       <section className={cn(
-        "flex min-w-0 flex-1 flex-col bg-background h-full min-h-0 overflow-hidden",
+        "flex min-w-0 flex-1 flex-col bg-background",
         !selectedId ? "hidden md:flex" : "flex"
       )}>
         {selected ? (
@@ -1148,11 +1021,6 @@ function ConversationsPage() {
             onBack={handleCloseChat}
             onClose={handleCloseChat}
           />
-        ) : selectedId && isLoadingDirectConv ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm font-medium">Carregando conversa...</p>
-          </div>
         ) : (
           <EmptyChat />
         )}

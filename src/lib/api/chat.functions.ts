@@ -841,78 +841,75 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
             updatePayload.department_id = userProfile?.department_id || null;
           }
           await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
-        } else if (!conv.assigned_agent_id) {
-          await supabaseAdmin.from("conversations").update({
-            assigned_agent_id: userId,
-            department_id: userProfile?.department_id || null,
-          }).eq("id", conversationId);
         }
+        // Se isOpeningOnly e for admin, apenas retorna o conversationId para abrir
       } else {
         // waiting or resolved
         const isWithAnotherAgent = Boolean(
           conv.assigned_agent_id && conv.assigned_agent_id !== userId,
         );
-
         if (isWithAnotherAgent && !isAdminOrManager) {
           throw new Error(
             `Este contato já está atribuído ao(à) atendente ${(conv as any).assigned_agent?.name || "outro(a) atendente"}. Apenas administradores podem acessar.`,
           );
         }
 
-        // Reabre e atribui para o remetente tanto ao abrir chat quanto ao enviar mensagem
-        const updatePayload: any = {
-          last_message_at: new Date().toISOString(),
-          status: "active",
-          assigned_agent_id: userId,
-          department_id: userProfile?.department_id || null,
-          resolved_at: null,
-        };
+        if (!isOpeningOnly) {
+          // Se enviou mensagem e não tem ninguém com ela (ou é admin), reabre e atribui para o remetente
+          const updatePayload: any = {
+            last_message_at: new Date().toISOString(),
+            status: "active",
+            assigned_agent_id: userId,
+            department_id: userProfile?.department_id || null,
+            resolved_at: null,
+          };
 
-        const { data: convData } = await supabaseAdmin
-          .from("conversations")
-          .select("current_session_id")
-          .eq("id", conversationId)
-          .single();
-        const currentSessionId = convData?.current_session_id;
-
-        // Force new session if resolved, or if missing session
-        if (conv.status === "resolved" || !currentSessionId) {
-          const { data: newSession } = await supabaseAdmin
-            .from("conversation_sessions")
-            .insert({
-              conversation_id: conversationId,
-              contact_id: contactId,
-              whatsapp_instance_id: instance.id,
-              assigned_agent_id: userId,
-              department_id: userProfile?.department_id || null,
-              started_at: new Date().toISOString(),
-            })
-            .select()
+          const { data: convData } = await supabaseAdmin
+            .from("conversations")
+            .select("current_session_id")
+            .eq("id", conversationId)
             .single();
+          const currentSessionId = convData?.current_session_id;
 
-          if (newSession) {
-            updatePayload.current_session_id = newSession.id;
-            await supabaseAdmin.from("session_events").insert([
-              { session_id: newSession.id, event_type: "started", actor_id: userId },
-              {
-                session_id: newSession.id,
-                event_type: "assigned",
-                actor_id: userId,
-                metadata: { assigned_to: userId },
-              },
-            ]);
+          // Force new session if resolved, or if missing session
+          if (conv.status === "resolved" || !currentSessionId) {
+            const { data: newSession } = await supabaseAdmin
+              .from("conversation_sessions")
+              .insert({
+                conversation_id: conversationId,
+                contact_id: contactId,
+                whatsapp_instance_id: instance.id,
+                assigned_agent_id: userId,
+                department_id: userProfile?.department_id || null,
+                started_at: new Date().toISOString(),
+              })
+              .select()
+              .single();
+
+            if (newSession) {
+              updatePayload.current_session_id = newSession.id;
+              await supabaseAdmin.from("session_events").insert([
+                { session_id: newSession.id, event_type: "started", actor_id: userId },
+                {
+                  session_id: newSession.id,
+                  event_type: "assigned",
+                  actor_id: userId,
+                  metadata: { assigned_to: userId },
+                },
+              ]);
+            }
+          } else if (currentSessionId && conv.status === "waiting") {
+            // Record assignment event for existing waiting session
+            await supabaseAdmin.from("session_events").insert({
+              session_id: currentSessionId,
+              event_type: "assigned",
+              actor_id: userId,
+              metadata: { assigned_to: userId },
+            });
           }
-        } else if (currentSessionId && conv.status === "waiting") {
-          // Record assignment event for existing waiting session
-          await supabaseAdmin.from("session_events").insert({
-            session_id: currentSessionId,
-            event_type: "assigned",
-            actor_id: userId,
-            metadata: { assigned_to: userId },
-          });
-        }
 
-        await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
+          await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
+        }
       }
     } else {
       const { data: newConv, error: convErr } = await supabaseAdmin

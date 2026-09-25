@@ -460,7 +460,6 @@ async function processIncomingMessage(params: any) {
       sourceDetails = messageReferral.headline || messageReferral.body || messageReferral.source_id;
     }
 
-    let isBrandNewContact = true;
     const { data: newContact, error: contactError } = await supabaseAdmin
       .from('contacts')
       .insert({
@@ -657,21 +656,6 @@ async function processIncomingMessage(params: any) {
       events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true, ai_agent_name: 'IA' } });
     }
     await supabaseAdmin.from('session_events').insert(events);
-  }
-
-  // Dispara automação de novo contato criado se for o primeiro contato
-  if ((typeof isBrandNewContact !== 'undefined' && isBrandNewContact) && contact?.id) {
-    dispatchAutomationEvent({
-      companyId: companyId,
-      unitId: unitId || null,
-      contactId: contact.id,
-      conversationId: conversationId || null,
-      triggerType: 'contact_created',
-      metadata: {
-        name: contactName,
-        phone: contactPhone,
-      },
-    }).catch((err) => console.error('[Whatsapp Cloud] contact_created automation error:', err));
   }
 
   // 3. Verifica se a mensagem já existe

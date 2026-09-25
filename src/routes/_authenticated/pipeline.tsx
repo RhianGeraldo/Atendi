@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { toast } from "sonner";
-import { Plus, GripVertical, Settings2, Calendar, DollarSign, User, UserCheck, MessageCircle, CheckSquare, FileText, Building, Search, X, RefreshCw, TrendingUp, Target, Award, Trash2, Loader2 } from "lucide-react";
+import { Plus, GripVertical, Settings2, Calendar, DollarSign, User, UserCheck, MessageCircle, CheckSquare, FileText, Building, Search, X, RefreshCw, TrendingUp, Target, Award } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -22,62 +22,21 @@ import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { useNavigate } from "@tanstack/react-router";
-import { initials, formatDateOnly } from "@/lib/format";
+import { initials } from "@/lib/format";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   component: PipelinePage,
-  validateSearch: (search: Record<string, unknown>) => {
-    return {
-      pipelineId: (search.pipelineId as string) || undefined,
-      opportunityId: (search.opportunityId as string) || undefined,
-    };
-  },
 });
 
 function PipelinePage() {
   const navigate = useNavigate();
-  const searchParams = Route.useSearch();
-  const searchPipelineId = searchParams.pipelineId;
-  const searchOpportunityId = searchParams.opportunityId;
-
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
-
-  const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(searchPipelineId || null);
-  const [statusFilter, setStatusFilter] = useState<string>(searchOpportunityId ? "all" : "open");
+  const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("open");
   const [searchTerm, setSearchTerm] = useState("");
-  const [highlightedOppId, setHighlightedOppId] = useState<string | null>(searchOpportunityId || null);
-
-  // Se opportunityId foi fornecido sem pipelineId, descobre qual o pipeline da oportunidade
-  const { data: targetOppData } = useQuery({
-    queryKey: ["target-opp-pipeline", searchOpportunityId],
-    enabled: !!searchOpportunityId && !searchPipelineId,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("opportunities")
-        .select("id, stage_id, pipeline_stages(pipeline_id)")
-        .eq("id", searchOpportunityId!)
-        .single();
-      return data;
-    },
-  });
-
-  useEffect(() => {
-    if (searchPipelineId) {
-      setSelectedPipelineId(searchPipelineId);
-    } else if (targetOppData?.pipeline_stages?.pipeline_id) {
-      setSelectedPipelineId(targetOppData.pipeline_stages.pipeline_id);
-    }
-  }, [searchPipelineId, targetOppData]);
-
-  useEffect(() => {
-    if (searchOpportunityId) {
-      setHighlightedOppId(searchOpportunityId);
-      setStatusFilter("all");
-    }
-  }, [searchOpportunityId]);
 
   // Fetch Pipelines
   const { data: pipelines, isLoading: isLoadingPipelines } = useQuery({
@@ -95,11 +54,9 @@ function PipelinePage() {
   });
 
   // Set default pipeline
-  useEffect(() => {
-    if (!selectedPipelineId && pipelines && pipelines.length > 0) {
-      setSelectedPipelineId(pipelines[0].id);
-    }
-  }, [selectedPipelineId, pipelines]);
+  if (!selectedPipelineId && pipelines && pipelines.length > 0) {
+    setSelectedPipelineId(pipelines[0].id);
+  }
 
   // Fetch Stages
   const { data: stages, isLoading: isLoadingStages } = useQuery({
@@ -181,34 +138,6 @@ function PipelinePage() {
     });
     return cols;
   }, [stages, filteredOpportunities]);
-
-  // Auto-scroll e sinalização da oportunidade selecionada
-  useEffect(() => {
-    if (!highlightedOppId || isLoadingOpps || !opportunities) return;
-
-    const opp = opportunities.find((o: any) => o.id === highlightedOppId);
-    if (opp) {
-      const timer = setTimeout(() => {
-        const el = document.getElementById(`opp-card-${highlightedOppId}`);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-          toast.info(`Oportunidade "${opp.title}" localizada no funil`, {
-            description: `Etapa atual: ${stages?.find(s => s.id === opp.stage_id)?.name || "—"}`,
-            duration: 6000,
-          });
-        }
-      }, 500);
-
-      const unhighlightTimer = setTimeout(() => {
-        setHighlightedOppId(null);
-      }, 12000);
-
-      return () => {
-        clearTimeout(timer);
-        clearTimeout(unhighlightTimer);
-      };
-    }
-  }, [highlightedOppId, opportunities, isLoadingOpps, stages]);
 
   const moveOpportunity = useMutation({
     mutationFn: async ({ oppId, newStageId }: { oppId: string, newStageId: string }) => {
@@ -410,13 +339,12 @@ function PipelinePage() {
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {stageTotal > 0 && (
-                          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mr-0.5">
+                          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                             {formatCurrency(stageTotal)}
                           </span>
                         )}
-
                         <OpportunityDialog defaultPipelineId={selectedPipelineId || ""} defaultStageId={stage.id}>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer" title="Adicionar nesta etapa">
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-muted" title="Adicionar nesta etapa">
                             <Plus className="h-3.5 w-3.5" />
                           </Button>
                         </OpportunityDialog>
@@ -451,44 +379,18 @@ function PipelinePage() {
                                     (Array.isArray(opp.opportunity_notes) ? opp.opportunity_notes.length : 0);
                                   const hasNotes = notesCount > 0;
 
-                                  const isHighlighted = highlightedOppId === opp.id;
-
                                   return (
                                     <div
-                                      id={`opp-card-${opp.id}`}
                                       ref={provided.innerRef}
                                       {...provided.draggableProps}
                                       {...provided.dragHandleProps}
                                       style={provided.draggableProps.style}
-                                      className={`group relative rounded-xl border bg-card p-4 shadow-sm hover:shadow-md transition-all duration-200 ${
-                                        isHighlighted
-                                          ? 'ring-2 ring-primary ring-offset-2 ring-offset-background border-primary bg-primary/5 shadow-xl scale-[1.02] z-20'
-                                          : 'border-border/80 hover:border-primary/40'
-                                      } ${
+                                      className={`group relative rounded-xl border border-border/80 bg-card p-4 shadow-sm hover:shadow-md hover:border-primary/40 ${
                                         snapshot.isDragging 
                                           ? 'shadow-2xl ring-2 ring-primary/60 transition-none z-50 opacity-95' 
-                                          : ''
+                                          : 'transition-all duration-200'
                                       }`}
                                     >
-                                      {isHighlighted && (
-                                        <div className="flex items-center justify-between bg-primary/10 text-primary border border-primary/25 rounded-md px-2 py-1 mb-2.5 text-xs font-semibold animate-pulse">
-                                          <div className="flex items-center gap-1.5">
-                                            <Target className="h-3.5 w-3.5" />
-                                            <span>Oportunidade Selecionada</span>
-                                          </div>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setHighlightedOppId(null);
-                                            }}
-                                            className="text-primary hover:text-primary/70 cursor-pointer p-0.5"
-                                            title="Fechar destaque"
-                                          >
-                                            <X className="h-3 w-3" />
-                                          </button>
-                                        </div>
-                                      )}
                                       <OpportunityDialog opportunity={opp} defaultPipelineId={selectedPipelineId || ""}>
                                         <div className="cursor-pointer space-y-3">
                                           
@@ -618,7 +520,7 @@ function PipelinePage() {
                                                 title="Data Prevista de Fechamento"
                                               >
                                                 <Calendar className="h-3 w-3" />
-                                                {formatDateOnly(opp.expected_close_date, "dd/MMM")}
+                                                {format(new Date(opp.expected_close_date), "dd/MMM", { locale: ptBR })}
                                               </div>
                                             )}
                                           </div>
@@ -627,13 +529,13 @@ function PipelinePage() {
                                       </OpportunityDialog>
 
                                       {/* Quick Actions (Hover) */}
-                                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <TooltipProvider>
                                           <Tooltip>
                                             <StartConversationDialog 
                                               contactName={opp.contacts?.name || ""}
                                               initialPhone={opp.contacts?.phone || ""}
-                                              onCreated={(id) => navigate({ to: "/conversations", search: { c: id, tab: "active" } as any })}
+                                              onCreated={(id) => navigate({ to: "/conversations", search: { c: id } as any })}
                                               trigger={
                                                 <TooltipTrigger asChild>
                                                   <Button 
@@ -671,8 +573,6 @@ function PipelinePage() {
           </DragDropContext>
         )}
       </div>
-
     </div>
   );
 }
-

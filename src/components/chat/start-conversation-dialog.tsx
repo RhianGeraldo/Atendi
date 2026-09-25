@@ -168,22 +168,14 @@ export function StartConversationDialog({
       return { res, isOpening: overrideText === "" };
     },
     onSuccess: ({ res, isOpening }) => {
-      const convId = res.conversationId;
-      if (convId) {
-        if (onCreated) {
-          onCreated(convId);
-        } else {
-          window.location.href = `/conversations?c=${convId}&tab=active`;
-        }
+      if (res.conversationId && onCreated) {
+        onCreated(res.conversationId);
       }
       setOpen(false);
       setPhone(initialPhone || "");
       setText("");
       setInstanceName("");
       qc.invalidateQueries({ queryKey: ["conversations"] });
-      if (convId) {
-        qc.invalidateQueries({ queryKey: ["direct-conversation", convId] });
-      }
       toast.success(isOpening ? "Chat aberto com sucesso!" : "Mensagem enviada com sucesso!");
     },
     onError: (e) => {

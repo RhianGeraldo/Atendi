@@ -394,44 +394,6 @@ export async function sendPlatformMessage({
   if (conv.status === 'resolved') {
     convUpdate.status = 'active';
     convUpdate.resolved_at = null;
-
-    // Abre um novo ticket (sessão) se não houver um aberto
-    let sessionId = null;
-    const { data: existingSession } = await supabaseAdmin
-      .from("conversation_sessions")
-      .select("id")
-      .eq("conversation_id", conversationId)
-      .is("resolved_at", null)
-      .maybeSingle();
-
-    if (existingSession) {
-      sessionId = existingSession.id;
-    } else {
-      const { data: newSession } = await supabaseAdmin
-        .from("conversation_sessions")
-        .insert({
-          conversation_id: conversationId,
-          contact_id: conv.contact_id,
-          whatsapp_instance_id: conv.whatsapp_instance_id,
-          assigned_agent_id: senderId || null,
-          started_at: new Date().toISOString(),
-        })
-        .select()
-        .maybeSingle();
-
-      if (newSession) {
-        sessionId = newSession.id;
-        await supabaseAdmin.from("session_events").insert({
-          session_id: newSession.id,
-          event_type: "started",
-          actor_id: senderId || null,
-        });
-      }
-    }
-
-    if (sessionId) {
-      convUpdate.current_session_id = sessionId;
-    }
   } else if (conv.status === 'waiting') {
     convUpdate.status = 'active';
   }

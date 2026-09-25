@@ -41,7 +41,6 @@ import {
   Mail,
   CircleDot,
   Share2,
-  Compass,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -106,17 +105,9 @@ import { AiAgentsTab } from "@/components/settings/ai-agents-tab";
 import { LeadRoutingSettings } from "@/components/settings/lead-routing-settings";
 import { AutomationsTab } from "@/components/settings/automations-tab";
 import { MetaCapiSettingsTab } from "@/components/settings/meta-capi-settings";
-import { SlaSettingsTab } from "@/components/settings/sla-settings";
-import { ContactSourcesTab } from "@/components/settings/contact-sources-tab";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
-  validateSearch: (search: Record<string, unknown>) => {
-    return {
-      tab: search.tab as string | undefined,
-      subtab: search.subtab as string | undefined,
-    };
-  },
 });
 
 function SettingsPage() {
@@ -163,15 +154,8 @@ function SettingsPage() {
   const [isSyncingZernio, setIsSyncingZernio] = useState(false);
   const [isSyncingAvatars, setIsSyncingAvatars] = useState(false);
 
-  const search = Route.useSearch() as any;
-  const [mainTab, setMainTab] = useState(search?.tab || "general");
-  const [channelSubTab, setChannelSubTab] = useState(search?.subtab || "whatsapp");
-
-  useEffect(() => {
-    if (search?.tab) setMainTab(search.tab);
-    if (search?.subtab) setChannelSubTab(search.subtab);
-  }, [search?.tab, search?.subtab]);
-
+  // QrCode & Channels Modal State
+  const [channelSubTab, setChannelSubTab] = useState("whatsapp");
   const [selectedInstance, setSelectedInstance] = useState<any>(null);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
@@ -414,8 +398,6 @@ function SettingsPage() {
         {} as Record<string, string>,
       );
 
-      const currentCustom = (company?.custom_variables && typeof company.custom_variables === "object") ? company.custom_variables : {};
-
       const { error } = await supabase
         .from("companies")
         .update({
@@ -423,7 +405,7 @@ function SettingsPage() {
           document: companyDocument.trim() || null,
           address: companyAddress.trim() || null,
           business_hours: companyBusinessHours.trim() || null,
-          custom_variables: { ...currentCustom, ...customVarsObj },
+          custom_variables: customVarsObj,
         })
         .eq("id", activeCompanyId);
       if (error) throw error;
@@ -508,7 +490,7 @@ function SettingsPage() {
 
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 max-w-7xl mx-auto w-full">
-      <Tabs value={mainTab} onValueChange={setMainTab} className="space-y-6">
+      <Tabs defaultValue="general" className="space-y-6">
         <TabsList className="w-full justify-start overflow-x-auto h-auto p-1 bg-muted/60 rounded-xl gap-1 border">
           <TabsTrigger
             value="general"
@@ -752,13 +734,6 @@ function SettingsPage() {
                 Etiquetas
               </TabsTrigger>
               <TabsTrigger
-                value="contact-sources"
-                className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
-              >
-                <Compass className="mr-2 h-4 w-4 text-sky-500" />
-                Origens de Contatos
-              </TabsTrigger>
-              <TabsTrigger
                 value="automations"
                 className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
               >
@@ -785,13 +760,6 @@ function SettingsPage() {
               >
                 <Share2 className="mr-2 h-4 w-4 text-blue-500" />
                 Meta Conversions (CAPI)
-              </TabsTrigger>
-              <TabsTrigger
-                value="sla"
-                className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
-              >
-                <Clock className="mr-2 h-4 w-4 text-emerald-500" />
-                SLA de Atendimento
               </TabsTrigger>
             </TabsList>
 
@@ -1600,10 +1568,6 @@ function SettingsPage() {
                 <LabelsTab />
               </TabsContent>
 
-              <TabsContent value="contact-sources" className="mt-0 border-none p-0">
-                <ContactSourcesTab />
-              </TabsContent>
-
               <TabsContent value="automations" className="mt-0 border-none p-0">
                 <AutomationsTab />
               </TabsContent>
@@ -1614,10 +1578,6 @@ function SettingsPage() {
 
               <TabsContent value="meta-capi" className="mt-0 border-none p-0">
                 {activeCompanyId && <MetaCapiSettingsTab companyId={activeCompanyId} />}
-              </TabsContent>
-
-              <TabsContent value="sla" className="mt-0 border-none p-0">
-                <SlaSettingsTab />
               </TabsContent>
             </div>
           </Tabs>
