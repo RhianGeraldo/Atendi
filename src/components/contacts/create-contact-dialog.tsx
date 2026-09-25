@@ -1,25 +1,21 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, Plus, UserPlus } from "lucide-react";
+import { Loader2, UserPlus, Building2 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
+import { useUnit } from "@/lib/unit-context";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
+import { triggerAutomationAction } from "@/lib/api/automation.functions";
 
 interface CreateContactForm {
   name: string;
@@ -27,20 +23,48 @@ interface CreateContactForm {
   email: string;
   source: string;
   source_details: string;
+  unit_id?: string;
 }
-
-const SOURCES = [
-  "Instagram",
-  "Facebook",
-  "Indicação",
-  "Prospecção Ativa",
-  "Outros"
-];
 
 export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
+  const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
+  const { allSources } = useContactSources();
+
+  const companyId = activeCompanyId || profile?.company_id;
+
+  // Busca unidades da empresa
+  const { data: units } = useQuery({
+    queryKey: ["units", companyId],
+    enabled: !!companyId && open,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("units")
+        .select("id, name, color")
+        .eq("company_id", companyId!)
+        .order("name");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Busca unidade padrão do usuário logado (ex: caso seja atendente de uma unidade específica)
+  const { data: userUnitId } = useQuery({
+    queryKey: ["user_unit_default", profile?.id],
+    enabled: !!profile?.id && open,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("user_units")
+        .select("unit_id")
+        .eq("user_id", profile!.id)
+        .limit(1)
+        .maybeSingle();
+      return data?.unit_id || null;
+    },
+  });
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<CreateContactForm>({
     defaultValues: {
@@ -48,15 +72,27 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
       phone: "",
       email: "",
       source: "",
-      source_details: ""
+      source_details: "",
+      unit_id: ""
     }
   });
 
   const source = watch("source");
+  const formUnitId = watch("unit_id");
+
+  // Preenche a unidade inicial ao abrir o diálogo
+  useEffect(() => {
+    if (open) {
+      const defaultUnit = (selectedUnitId && selectedUnitId !== "all") ? selectedUnitId : (userUnitId || "");
+      if (defaultUnit) {
+        setValue("unit_id", defaultUnit);
+      }
+    }
+  }, [open, selectedUnitId, userUnitId, setValue]);
 
   const createContact = useMutation({
     mutationFn: async (data: CreateContactForm) => {
-      if (!profile?.company_id) throw new Error("Empresa não encontrada");
+      if (!companyId) throw new Error("Empresa não selecionada");
       
       // Clean phone number (remove non-digits, and if starts with 0 or has +55, normalize)
       let cleanPhone = data.phone.replace(/\D/g, "");
@@ -65,14 +101,19 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
       }
       if (!cleanPhone) cleanPhone = null as any;
 
+      const effectiveUnitId = data.unit_id && data.unit_id !== "none"
+        ? data.unit_id
+        : ((selectedUnitId && selectedUnitId !== "all") ? selectedUnitId : (userUnitId || null));
+
       const { data: result, error } = await supabase
         .from("contacts")
         .insert({
-          company_id: profile.company_id,
+          company_id: companyId,
+          unit_id: effectiveUnitId || null,
           name: data.name,
           phone: cleanPhone,
           email: data.email || null,
-          created_by: profile.id,
+          created_by: profile?.id || null,
           source: data.source || null,
           source_details: data.source_details || null
         })
@@ -82,11 +123,25 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
       if (error) throw error;
       return result;
     },
-    onSuccess: () => {
+    onSuccess: (createdContact) => {
       toast.success("Contato criado com sucesso!");
       qc.invalidateQueries({ queryKey: ["contacts"] });
       setOpen(false);
       reset();
+
+      if (createdContact?.id && companyId) {
+        triggerAutomationAction({
+          data: {
+            companyId: companyId,
+            contactId: createdContact.id,
+            triggerType: "contact_created",
+            metadata: {
+              name: createdContact.name,
+              phone: createdContact.phone,
+            },
+          },
+        }).catch((err) => console.warn("[create-contact] automation trigger error:", err));
+      }
     },
     onError: (error) => {
       toast.error("Erro ao criar contato", { description: error.message });
@@ -145,6 +200,36 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
             />
           </div>
 
+          {units && units.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="unit_id">Unidade</Label>
+              <Select 
+                value={formUnitId || "none"} 
+                onValueChange={(val) => setValue("unit_id", val === "none" ? "" : val)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione a unidade" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">Sem unidade específica (Geral)</span>
+                  </SelectItem>
+                  {units.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      <div className="flex items-center gap-2">
+                        <span 
+                          className="h-2 w-2 rounded-full inline-block shrink-0" 
+                          style={{ backgroundColor: u.color || "#3b82f6" }} 
+                        />
+                        <span>{u.name}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="source">Origem</Label>
             <Select onValueChange={(val) => setValue("source", val)}>
@@ -152,8 +237,13 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
                 <SelectValue placeholder="Selecione a origem" />
               </SelectTrigger>
               <SelectContent>
-                {SOURCES.map(src => (
-                  <SelectItem key={src} value={src}>{src}</SelectItem>
+                {allSources.map(src => (
+                  <SelectItem key={src} value={src}>
+                    <div className="flex items-center gap-2">
+                      {getSourceIcon(src)}
+                      <span>{src}</span>
+                    </div>
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>

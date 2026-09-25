@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
 import { conferirPorta } from './webhook-auth';
-
 import { enqueueAiMessage } from './ai-queue';
+import { dispatchAutomationEvent } from './automation-engine';
 
 export async function handleMessengerWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -163,6 +163,7 @@ async function processIncomingMessage(params: any) {
       console.error('[Messenger Webhook] Erro ao buscar perfil:', e);
     }
 
+    let isBrandNewContact = true;
     const { data: newContact, error: contactError } = await supabaseAdmin
       .from('contacts')
       .insert({
@@ -262,22 +263,22 @@ async function processIncomingMessage(params: any) {
       aiActive = isActiveByDefault || (resolvedConv.ai_active ?? false);
       
       const updatePayload: any = {
-        status: isFromMe ? 'resolved' : (isActiveByDefault ? 'active' : 'waiting'),
+        status: isFromMe ? 'active' : (isActiveByDefault ? 'active' : 'waiting'),
         last_message_at: new Date(timestamp).toISOString(),
         last_message_preview: textContent?.substring(0, 50),
         remote_id: contactPsid,
-        resolved_at: isFromMe ? new Date(timestamp).toISOString() : null,
-        ai_active: aiActive,
+        resolved_at: null,
+        ai_active: isFromMe ? false : aiActive,
         ai_followup_count: 0
       };
-      if (aiActive && defaultAgentId) updatePayload.ai_agent_id = defaultAgentId;
+      if (aiActive && defaultAgentId && !isFromMe) updatePayload.ai_agent_id = defaultAgentId;
 
       await supabaseAdmin.from('conversations')
         .update(updatePayload)
         .eq('id', conversationId);
     } else {
-      if (isActiveByDefault) aiActive = true;
-      // Cria nova conversa
+      if (isActiveByDefault && !isFromMe) aiActive = true;
+      // Cria nova conversa (sempre active ou waiting, nunca pre-resolved)
       const { data: newConv, error: convError } = await supabaseAdmin
         .from('conversations')
         .insert({
@@ -285,13 +286,13 @@ async function processIncomingMessage(params: any) {
           remote_id: contactPsid,
           whatsapp_instance_id: instanceId,
           unit_id: unitId,
-          status: isFromMe ? 'resolved' : (isActiveByDefault ? 'active' : 'waiting'),
+          status: isFromMe ? 'active' : (isActiveByDefault ? 'active' : 'waiting'),
           started_at: new Date(timestamp).toISOString(),
           last_message_at: new Date(timestamp).toISOString(),
           last_message_preview: textContent?.substring(0, 50),
           channel: 'messenger',
-          ai_active: isActiveByDefault,
-          ai_agent_id: defaultAgentId
+          ai_active: isFromMe ? false : isActiveByDefault,
+          ai_agent_id: isFromMe ? null : defaultAgentId
         })
         .select('id')
         .single();
@@ -304,8 +305,8 @@ async function processIncomingMessage(params: any) {
     }
   }
 
-  // Abre um novo ticket (sessão) se não for resolvido já na criação
-  if (!isFromMe) {
+  // Abre um novo ticket (sessão)
+  if (conversationId) {
     let sessionId = null;
     let { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
     
@@ -339,6 +340,21 @@ async function processIncomingMessage(params: any) {
         events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true, ai_agent_name: 'IA' } });
       }
       await supabaseAdmin.from('session_events').insert(events);
+    }
+
+    // Dispara automação de novo contato criado se for o primeiro contato
+    if ((typeof isBrandNewContact !== 'undefined' && isBrandNewContact) && contact?.id) {
+      dispatchAutomationEvent({
+        companyId: companyId,
+        unitId: unitId || null,
+        contactId: contact.id,
+        conversationId: conversationId || null,
+        triggerType: 'contact_created',
+        metadata: {
+          name: profileName,
+          messenger_id: contactPsid,
+        },
+      }).catch((err) => console.error('[Messenger Webhook] contact_created automation error:', err));
     }
   }
 

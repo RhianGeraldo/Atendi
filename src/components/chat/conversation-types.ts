@@ -22,6 +22,8 @@ export interface ConvRow {
     instagram_id?: string | null;
     company_id?: string | null;
     is_blocked?: boolean;
+    source?: string | null;
+    source_details?: string | null;
     contact_labels?: { labels: { id: string; name: string; color: string | null } }[];
   };
   department: { name: string } | null;
@@ -35,6 +37,7 @@ export interface ConvRow {
   whatsapp_instance_id: string | null;
   unit?: { name: string; color?: string | null; custom_variables?: any } | null;
   whatsapp_instance?: { name: string } | null;
+  last_message?: { sender_type: "agent" | "contact" | "system"; created_at: string; is_internal?: boolean }[];
 }
 
 export interface MessageRow {

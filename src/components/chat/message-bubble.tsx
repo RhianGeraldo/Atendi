@@ -446,33 +446,52 @@ export function MessageBubble({
             )}
             {displayContent && displayContent !== "🎵 Áudio" && <div className="text-xs"><FormattedText text={displayContent} mine={mine} /></div>}
           </div>
-        ) : m.media_type === "video" && m.media_url ? (
+        ) : m.media_type === "video" ? (
           <div className="mb-2 flex flex-col gap-1">
-            {(m.metadata as any)?.is_ptv ? (
-              <div className="relative w-56 h-56 mx-auto overflow-hidden rounded-full border-4 border-primary/20 shadow-md">
-                {m.media_url.startsWith("data:image/") ? (
-                  <img src={m.media_url} className="absolute inset-0 w-full h-full object-cover" />
-                ) : (
-                  <video 
-                    controls 
-                    src={m.media_url} 
-                    className="absolute inset-0 w-full h-full object-cover" 
-                  />
-                )}
-              </div>
-            ) : (
-              m.media_url.startsWith("data:image/") ? (
-                <div className="relative max-w-[200px]">
-                  <img src={m.media_url} className="rounded-lg w-full h-auto" />
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-lg">
-                    <Video className="w-8 h-8 text-white opacity-80" />
-                  </div>
+            {m.media_url ? (
+              (m.metadata as any)?.is_ptv ? (
+                <div className="relative w-56 h-56 mx-auto overflow-hidden rounded-full border-4 border-primary/20 shadow-md">
+                  {m.media_url.startsWith("data:image/") ? (
+                    <img src={m.media_url} className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <video 
+                      controls 
+                      src={m.media_url} 
+                      className="absolute inset-0 w-full h-full object-cover" 
+                    />
+                  )}
                 </div>
               ) : (
-                <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
+                m.media_url.startsWith("data:image/") ? (
+                  <div className="relative max-w-[200px]">
+                    <img src={m.media_url} className="rounded-lg w-full h-auto" />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-lg">
+                      <Video className="w-8 h-8 text-white opacity-80" />
+                    </div>
+                  </div>
+                ) : (
+                  <video controls src={m.media_url} className="max-w-[200px] rounded-lg" />
+                )
               )
+            ) : (
+              <div 
+                className={cn(
+                  "flex items-center gap-3 p-3 rounded-lg border max-w-[260px]",
+                  mine ? "bg-black/10 dark:bg-white/10 border-transparent" : "bg-muted/80 border-border"
+                )}
+              >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-purple-600 text-white shadow-sm">
+                  <Video className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <p className="truncate text-sm font-semibold leading-tight">{displayContent && displayContent !== "🎥 Vídeo" ? displayContent : "Vídeo"}</p>
+                  <p className={cn("mt-1 truncate text-[10px] font-medium uppercase opacity-70")}>
+                    Vídeo (enviado pelo celular)
+                  </p>
+                </div>
+              </div>
             )}
-            {displayContent && displayContent !== "🎥 Vídeo" && displayContent !== "🎥 Vídeo Instantâneo" && (
+            {displayContent && displayContent !== "🎥 Vídeo" && displayContent !== "🎥 Vídeo Instantâneo" && m.media_url && (
               <div className="text-xs"><FormattedText text={displayContent} mine={mine} /></div>
             )}
           </div>
@@ -671,6 +690,7 @@ export function MessageBubble({
                       <StartConversationDialog 
                         initialPhone={contact.waid || (contact.phone || '').replace(/\D/g, '')}
                         contactName={contact.name || ""}
+                        onCreated={(id) => { window.location.href = `/conversations?c=${id}&tab=active`; }}
                         trigger={
                           <Button size="sm" variant="secondary" className={cn("h-6 text-[10px] px-2 w-fit", mine ? "bg-white/20 text-white hover:bg-white/30" : "bg-primary/10 text-primary hover:bg-primary/20")}>
                             <MessageSquarePlus className="h-3 w-3 mr-1.5" />

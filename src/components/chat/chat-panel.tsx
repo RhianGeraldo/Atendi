@@ -25,7 +25,9 @@ import {
   Video, 
   Headphones, 
   Loader2,
-  AlertCircle 
+  AlertCircle,
+  Clock,
+  AlertTriangle 
 } from "lucide-react";
 import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
@@ -61,6 +63,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
@@ -69,6 +72,8 @@ import { PlaybookSheet } from "@/components/training/playbook-sheet";
 import { WhatsappTemplateSender } from "@/components/whatsapp/whatsapp-template-sender";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { ConvRow, MessageRow, fetchConversationMessages } from "@/components/chat/conversation-types";
+import { useSlaSettings } from "@/lib/use-sla";
+import { calculateConversationSla } from "@/lib/sla";
 
 let ffmpegInstance: FFmpeg | null = null;
 const getFFmpeg = async () => {
@@ -119,6 +124,7 @@ export function ChatPanel({
   const qc = useQueryClient();
   const { startCall, instances } = useWavoip();
   const { selectedUnitId } = useUnit();
+  const { slaSettings } = useSlaSettings();
   const [text, setText] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
   const [selectedFile, setSelectedFile] = useState<{ file: File | null; base64: string; type: string } | null>(null);
@@ -209,6 +215,19 @@ export function ChatPanel({
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 30,
   });
+
+  // Obtém a última mensagem externa para o cálculo de SLA em tempo real
+  const lastExternalMessage = useMemo(() => {
+    if (!messages || messages.length === 0) return undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (!messages[i].is_internal) return messages[i];
+    }
+    return null;
+  }, [messages]);
+
+  const slaInfo = useMemo(() => {
+    return calculateConversationSla(conv, slaSettings, lastExternalMessage);
+  }, [conv, slaSettings, lastExternalMessage]);
 
   // Função para buscar mensagens mais antigas (paginação infinita para cima)
   const loadOlderMessages = async () => {
@@ -850,6 +869,36 @@ export function ChatPanel({
     }
   });
 
+  const toggleAi = useMutation({
+    mutationFn: async (active: boolean) => {
+      const { error } = await supabase.from("conversations").update({ ai_active: active }).eq("id", conv.id);
+      if (error) throw error;
+    },
+    onMutate: async (active) => {
+      await qc.cancelQueries({ queryKey: ["conversations"] });
+      qc.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+        if (!oldData) return oldData;
+        if (oldData.pages) {
+          return {
+            ...oldData,
+            pages: oldData.pages.map((page: any) => {
+              if (!page || !page.rows) return page;
+              return {
+                ...page,
+                rows: page.rows.map((c: any) => (c.id === conv.id ? { ...c, ai_active: active } : c)),
+              };
+            }),
+          };
+        }
+        return oldData;
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (e) => toast.error("Erro ao alterar IA", { description: (e as Error).message }),
+  });
+
   const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith("120363") || (conv.contact.phone.includes("-") && conv.contact.phone.length > 18)));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
@@ -910,7 +959,7 @@ export function ChatPanel({
 
   return (
     <div className="flex h-full min-w-0">
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col h-full overflow-hidden">
         {/* Header */}
         <header className="flex items-center justify-between border-b border-border bg-card px-3 md:px-5 py-3 shadow-sm z-10 min-w-0 w-full">
           <div 
@@ -939,16 +988,69 @@ export function ChatPanel({
               <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-success" />
             </div>
             <div>
-              <div className="flex items-center gap-1.5 text-[15px] font-semibold text-foreground">
-                {contactName}
+              <div className="flex items-center gap-2 text-[15px] font-semibold text-foreground">
+                <span className="truncate">{contactName}</span>
+                {slaInfo.isWaiting && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border shrink-0 transition-colors shadow-xs",
+                      slaInfo.status === "breached" && "bg-destructive/15 text-destructive border-destructive/30 animate-pulse font-bold",
+                      slaInfo.status === "warning" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
+                      slaInfo.status === "ok" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                    )}
+                    title={slaInfo.tooltipText}
+                  >
+                    {slaInfo.status === "breached" ? (
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                    ) : (
+                      <Clock className="h-3 w-3 shrink-0" />
+                    )}
+                    <span>SLA: {slaInfo.badgeLabel}</span>
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground mt-0.5">
                 <ChannelIcon channel={conv.channel} className="h-3.5 w-3.5" />
                 {conv.department?.name && <span>{conv.department.name}</span>}
+                {conv.unit?.name && (
+                  <>
+                    <span>•</span>
+                    <span className="text-xs">{conv.unit.name}</span>
+                  </>
+                )}
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 sm:gap-1.5">
+            {!isGroup && (
+              <div 
+                className={cn(
+                  "flex items-center gap-1.5 sm:gap-2 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border transition-all select-none mr-0.5",
+                  conv.ai_active 
+                    ? "bg-primary/10 border-primary/20 text-primary shadow-xs" 
+                    : "bg-muted/40 border-border/60 text-muted-foreground hover:bg-muted/60"
+                )}
+                title={conv.ai_active ? "A IA está respondendo neste ticket" : "IA pausada neste ticket"}
+              >
+                <div className={cn("p-1 rounded-md shrink-0", conv.ai_active ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground")}>
+                  <Bot className={cn("h-3.5 w-3.5", conv.ai_active && "text-primary animate-pulse")} />
+                </div>
+                <div className="hidden sm:flex flex-col text-left">
+                  <span className="text-[11px] font-semibold leading-tight">
+                    {conv.ai_active ? "IA Ativa" : "IA Pausada"}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground leading-tight">
+                    {conv.ai_active ? "Respondendo" : "Pausada"}
+                  </span>
+                </div>
+                <Switch 
+                  checked={conv.ai_active || false} 
+                  onCheckedChange={(v) => toggleAi.mutate(v)} 
+                  disabled={toggleAi.isPending}
+                  className="scale-75 origin-right cursor-pointer"
+                />
+              </div>
+            )}
             {conv.status === "active" && !isGroup && (
               <>
                 <Button 
@@ -1097,7 +1199,7 @@ export function ChatPanel({
             </div>
           </div>
         ) : (
-          <div className="relative flex-1 flex flex-col min-h-0">
+          <div className="relative flex-1 flex flex-col min-h-0 overflow-hidden">
             <div
               ref={scrollRef}
               onScroll={handleScroll}
@@ -1145,9 +1247,9 @@ export function ChatPanel({
               ))}
             </div>
 
-            {/* Botão flutuante para rolar para as mensagens mais recentes */}
+            {/* Botão flutuante para rolar para as mensagens mais recentes (canto inferior direito) */}
             {showScrollBottomBtn && (
-              <div className="absolute bottom-4 right-6 z-20 animate-in fade-in zoom-in-95 duration-200">
+              <div className="absolute bottom-4 right-6 z-30 animate-in fade-in zoom-in-95 duration-200">
                 <Button
                   type="button"
                   variant={newMessagesBelow > 0 ? "default" : "outline"}
@@ -1156,14 +1258,14 @@ export function ChatPanel({
                   className={cn(
                     "shadow-lg border gap-1.5 transition-all cursor-pointer",
                     newMessagesBelow > 0
-                      ? "bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-3.5 py-1.5 h-8 font-medium border-primary/20 shadow-primary/20"
-                      : "bg-background/90 hover:bg-background text-muted-foreground hover:text-foreground rounded-full h-8 w-8 p-0 backdrop-blur-sm border-border/80"
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-3.5 py-1.5 h-9 font-medium border-primary/20 shadow-primary/20"
+                      : "bg-background hover:bg-accent text-foreground rounded-full h-9 w-9 p-0 shadow-md border-border/80"
                   )}
                   title="Rolar para as mensagens mais recentes"
                 >
-                  <ChevronDown className="h-4 w-4" />
+                  <ChevronDown className="h-4.5 w-4.5" />
                   {newMessagesBelow > 0 && (
-                    <span className="text-xs">
+                    <span className="text-xs font-medium">
                       {newMessagesBelow === 1 ? "Nova mensagem" : `${newMessagesBelow} novas`}
                     </span>
                   )}

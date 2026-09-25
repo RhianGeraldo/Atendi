@@ -190,7 +190,7 @@ Para encerrar, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] n
       systemPromptParts.push(applyVars(agent.prompt_opportunities) || `INSTRUÇÃO PARA CRIAR OPORTUNIDADE:\nVocê pode criar e gerenciar oportunidades de negócio. Use a tag [CRIAR_OPORTUNIDADE: Título da Venda | Valor Numérico | id_da_etapa]. Para atualizar use [ATUALIZAR_OPORTUNIDADE: id_oportunidade | id_nova_etapa].`);
 
       if (agent.pipeline_id) {
-        const { data: stages } = await supabaseAdmin.from("pipeline_stages").select("id, name").eq("pipeline_id", agent.pipeline_id).order("order_index");
+        const { data: stages } = await supabaseAdmin.from("pipeline_stages").select("id, name").eq("pipeline_id", agent.pipeline_id).order("order");
         if (stages && stages.length > 0) {
           const stagesList = stages.map(s => `- ${s.name} (ID: ${s.id})`).join('\n');
           systemPromptParts.push(`CONTEXTO DO SEU FUNIL:\nVocê opera no funil atual. As etapas disponíveis são:\n${stagesList}`);
@@ -483,7 +483,7 @@ Para encerrar, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] n
               .from('pipeline_stages')
               .select('id')
               .eq('pipeline_id', agent.pipeline_id)
-              .order('order_index', { ascending: true })
+              .order('order', { ascending: true })
               .limit(1)
               .single();
              stageId = firstStage?.id;
@@ -605,20 +605,31 @@ Para encerrar, inclua EXATAMENTE a tag [ENCERRAR: resumo do que foi resolvido] n
         })
         .eq('id', conversationId);
 
-      if (sessionId) {
-        await supabaseAdmin.from('conversation_sessions').update({
-          resolved_at: new Date().toISOString(),
-          resolution_reason_id: isInactivityClose
-            ? (agent.followup_resolution_reason_id || agent.resolution_reason_id || null)
-            : (agent.resolution_reason_id || null),
-          resolution_observation: resolveNote
-        }).eq('id', sessionId);
+      // Close all open sessions for this conversation
+      const { data: openSessions } = await supabaseAdmin
+        .from('conversation_sessions')
+        .select('id')
+        .eq('conversation_id', conversationId)
+        .is('resolved_at', null);
 
-        await supabaseAdmin.from('session_events').insert({
-          session_id: sessionId, 
-          event_type: 'resolved',
-          metadata: { by_ai: true, observation: resolveNote }
-        });
+      if (openSessions && openSessions.length > 0) {
+        const targetReasonId = isInactivityClose
+          ? (agent.followup_resolution_reason_id || agent.resolution_reason_id || null)
+          : (agent.resolution_reason_id || null);
+
+        for (const s of openSessions) {
+          await supabaseAdmin.from('conversation_sessions').update({
+            resolved_at: new Date().toISOString(),
+            resolution_reason_id: targetReasonId,
+            resolution_observation: resolveNote
+          }).eq('id', s.id);
+
+          await supabaseAdmin.from('session_events').insert({
+            session_id: s.id, 
+            event_type: 'resolved',
+            metadata: { by_ai: true, observation: resolveNote }
+          });
+        }
       }
     }
 

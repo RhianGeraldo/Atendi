@@ -5,6 +5,8 @@ import { enqueueAiMessage } from "./ai-queue";
 import { extractExternalAdReply, processAndCacheAdPreview } from "./ad-preview-cache";
 import { dispatchAutomationEvent } from "./automation-engine";
 import { sendMetaCapiEvent } from "./meta-capi";
+import { withWebhookLock } from "./webhook-lock";
+import { syncContactProfile } from "@/lib/api/chat.functions";
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
 export async function handleStevoWebhook(request: Request): Promise<Response> {
@@ -820,428 +822,547 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
       // Se não tem unit_id, significa que é da Empresa Mãe (Matriz), o que é perfeitamente válido.
       // Mantemos unit_id como null ou undefined.
 
-      // 2. Find or create Contact
-      let contactId;
-      let activeConv = null;
+      const lockKey = `${instance_id}:${phoneNumber}`;
 
-      const phoneVariants = getPhoneVariants(phoneNumber || "");
-      const { data: existingContacts } = await supabaseAdmin
-        .from("contacts")
-        .select("id, name, whatsapp_lid, merged_into_id")
-        .eq("company_id", company_id)
-        .or(
-          `phone.in.(${phoneVariants.join(",")})${extractedLid ? `,whatsapp_lid.eq.${extractedLid}` : ""}`,
-        );
-
-      if (existingContacts && existingContacts.length > 0) {
-        // Find if ANY of these contacts has an active conversation
-        const contactIds = existingContacts.map((c) => c.merged_into_id || c.id);
-        const { data: convs } = await supabaseAdmin
-          .from("conversations")
-          .select("id, status, ai_active, ai_agent_id, contact_id")
-          .in("contact_id", contactIds)
-          .eq("whatsapp_instance_id", instance_id)
-          .in("status", ["waiting", "active"])
-          .order("started_at", { ascending: false })
-          .limit(1);
-
-        let targetContact = existingContacts[0];
-        if (convs && convs.length > 0) {
-          activeConv = convs[0];
-          targetContact =
-            existingContacts.find((c) => (c.merged_into_id || c.id) === activeConv.contact_id) ||
-            existingContacts[0];
-        }
-
-        contactId = targetContact.id;
-
-        const updates: any = {};
-
-        // Update contact name
-        if (remoteJid.includes("@g.us")) {
-          // If it's a group and we got the actual name, update it if it differs
-          if (
-            actualGroupName &&
-            targetContact.name !== actualGroupName &&
-            targetContact.name === "Grupo do WhatsApp"
-          ) {
-            updates.name = actualGroupName;
-          }
-        } else {
-          // It's a direct contact
-          if (!isFromMe && pushName && pushName !== "Desconhecido") {
-            const currentName = targetContact.name;
-            if (currentName === phoneNumber || currentName === "Desconhecido") {
-              updates.name = pushName;
-            }
-          }
-        }
-
-        // Lock in the LID if we discovered it
-        if (extractedLid && targetContact.whatsapp_lid !== extractedLid) {
-          updates.whatsapp_lid = extractedLid;
-        }
-
-        if (Object.keys(updates).length > 0) {
-          await supabaseAdmin.from("contacts").update(updates).eq("id", contactId);
-        }
-
-        if (targetContact.merged_into_id) {
-          contactId = targetContact.merged_into_id;
-        }
-      } else {
-        // Create new contact
-        const groupDefaultName = actualGroupName || "Grupo do WhatsApp";
-        let newContactName = pushName;
-        if (remoteJid.includes("@g.us")) {
-          newContactName = groupDefaultName;
-        } else if (isFromMe || !pushName || pushName === "Desconhecido") {
-          newContactName = phoneNumber || "Desconhecido";
-        }
-
-        const { data: newContact, error: contactErr } = await supabaseAdmin
-          .from("contacts")
-          .insert({
-            company_id: company_id,
-            unit_id: unit_id,
-            name: newContactName,
-            phone: phoneNumber,
-            whatsapp_lid: extractedLid || null,
-          })
-          .select()
-          .single();
-
-        if (contactErr) throw contactErr;
-        contactId = newContact.id;
-      }
-
-      // 3. Find latest conversation for this contact in THIS EXACT INSTANCE
-      let conversationId;
-      let convsData = activeConv ? [activeConv] : null;
-
-      if (!activeConv) {
-        const convQuery = supabaseAdmin
-          .from("conversations")
-          .select("id, status, ai_active, ai_agent_id")
-          .eq("contact_id", contactId)
-          .eq("whatsapp_instance_id", instance_id)
-          .order("started_at", { ascending: false })
-          .limit(1);
-
-        const { data } = await convQuery;
-        convsData = data;
-      }
-
-      const latestConvs = convsData;
-
-      console.log(
-        `[stevo-webhook] Lookup conversation: instance_id=${instance_id}, contact_id=${contactId}, result=${JSON.stringify(latestConvs)}`,
-      );
-
+      let conversationId: string | undefined;
+      let newMessage: any = null;
       let aiActive = false;
+      let contactId: string = "";
 
-      if (latestConvs && latestConvs.length > 0) {
-        const conv = latestConvs[0];
-        conversationId = conv.id;
-        if (conv.ai_active) {
-          if (conv.ai_agent_id) {
-            aiActive = true;
-          } else {
-            // Find agent mapped to this instance, or any active agent
-            const { data: fallbackAgents } = await supabaseAdmin
-              .from("ai_agents")
-              .select("id")
-              .eq("company_id", company_id)
-              .eq("is_active", true)
-              .order("instance_id", { ascending: false })
-              .limit(1);
+      await withWebhookLock(lockKey, async () => {
+        // 2. Find or create Contact
+        let activeConv: any = null;
 
-            if (fallbackAgents && fallbackAgents.length > 0) {
-              aiActive = true;
-              await supabaseAdmin
-                .from("conversations")
-                .update({ ai_agent_id: fallbackAgents[0].id })
-                .eq("id", conversationId);
-            }
-          }
-        }
-
-        // 3.5 Dedup: skip if we already have this remote_msg_id in the DB
-        // This MUST happen before we process 'resolved' status, otherwise echoes will reopen tickets
-        if (remoteMsgId && conversationId) {
-          const { data: existingMsg } = await supabaseAdmin
-            .from("messages")
-            .select("id, metadata")
-            .eq("remote_msg_id", remoteMsgId)
-            .eq("conversation_id", conversationId)
-            .maybeSingle();
-
-          if (existingMsg) {
-            // Already saved - just update conversation timestamp
-            await supabaseAdmin
-              .from("conversations")
-              .update({ last_message_at: new Date().toISOString(), ai_followup_count: 0 })
-              .eq("id", conversationId);
-
-            // Update metadata if the new payload has metadata that might have been missing initially
-            if (Object.keys(metadata).length > 0) {
-              const currentMeta =
-                typeof existingMsg.metadata === "object" && existingMsg.metadata !== null
-                  ? existingMsg.metadata
-                  : {};
-              const newMetadata = { ...currentMeta, ...metadata };
-              await supabaseAdmin
-                .from("messages")
-                .update({ metadata: newMetadata })
-                .eq("id", existingMsg.id);
-            }
-            return;
-          }
-        }
-
-        const updatePayload: any = {
-          last_message_at: new Date().toISOString(),
-          ai_followup_count: 0,
-          remote_id: extractedLid || phoneNumber,
-        };
-
-        // Se a conversa estava resolvida, reabre ela como 'waiting' (ou 'active' se a IA for atender)
-        if (conv.status === "resolved") {
-          console.log(`[stevo-webhook] Reopening resolved conversation: ${conversationId}`);
-
-          // ✅ FIX: Preserve the ai_active and ai_agent_id from before resolution.
-          // The user may have manually enabled/disabled AI — that preference must survive ticket close/reopen.
-          const previouslyAiActive = conv.ai_active ?? false;
-          let resolvedAgentId = conv.ai_agent_id ?? null;
-
-          // Only look up default agent if there was no agent previously assigned
-          if (!resolvedAgentId) {
-            const { data: defaultAgents } = await supabaseAdmin
-              .from("ai_agents")
-              .select("id, active_by_default")
-              .eq("company_id", company_id)
-              .eq("is_active", true)
-              .or("is_main_agent.eq.true,active_by_default.eq.true")
-              .order("is_main_agent", { ascending: false })
-              .limit(1);
-            resolvedAgentId = defaultAgents?.[0]?.id ?? null;
-          }
-
-          updatePayload.status = previouslyAiActive ? "active" : "waiting";
-          updatePayload.ai_active = previouslyAiActive;
-          updatePayload.ai_agent_id = resolvedAgentId;
-          updatePayload.assigned_agent_id = null;
-          updatePayload.resolved_at = null;
-
-          aiActive = previouslyAiActive;
-
-          // Abre um novo ticket (sessão)
-          let sessionId = null;
-          let { data: existingSession } = await supabaseAdmin
-            .from("conversation_sessions")
-            .select("id")
-            .eq("conversation_id", conversationId)
-            .is("resolved_at", null)
-            .maybeSingle();
-
-          if (existingSession) {
-            sessionId = existingSession.id;
-          } else {
-            const { data: newSession, error: sessionErr } = await supabaseAdmin
-              .from("conversation_sessions")
-              .insert({
-                conversation_id: conversationId,
-                contact_id: contactId,
-                whatsapp_instance_id: instance_id,
-                started_at: new Date().toISOString(),
-              })
-              .select()
-              .single();
-            if (sessionErr) {
-              if (sessionErr.code === "23505") {
-                const { data: concSession } = await supabaseAdmin
-                  .from("conversation_sessions")
-                  .select("id")
-                  .eq("conversation_id", conversationId)
-                  .is("resolved_at", null)
-                  .maybeSingle();
-                if (concSession) sessionId = concSession.id;
-                existingSession = concSession; // Mark as existing so we don't duplicate events
-              } else {
-                console.error("[stevo-webhook] Error creating session:", sessionErr);
-              }
-            } else if (newSession) {
-              sessionId = newSession.id;
-            }
-          }
-
-          if (sessionId) {
-            updatePayload.current_session_id = sessionId;
-            if (!existingSession) {
-              const events: any[] = [{ session_id: sessionId, event_type: "started" }];
-              if (aiActive && resolvedAgentId) {
-                const { data: agentData } = await supabaseAdmin
-                  .from("ai_agents")
-                  .select("name")
-                  .eq("id", resolvedAgentId)
-                  .single();
-                events.push({
-                  session_id: sessionId,
-                  event_type: "assigned",
-                  metadata: {
-                    by_ai: true,
-                    ai_agent_id: resolvedAgentId,
-                    ai_agent_name: agentData?.name || "IA",
-                  },
-                });
-              }
-              await supabaseAdmin.from("session_events").insert(events);
-            }
-          }
-        } else {
-          console.log(`[stevo-webhook] Found active/waiting conversation: ${conversationId}`);
-        }
-
-        await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
-      } else {
-        console.log(`[stevo-webhook] No existing conversation found. Creating new one.`);
-        // Check for default AI agent (prefer agent mapped to this instance)
-        const { data: defaultAgents } = await supabaseAdmin
-          .from("ai_agents")
-          .select("id, is_main_agent, active_by_default")
+        const phoneVariants = getPhoneVariants(phoneNumber || "");
+        const { data: existingContacts } = await supabaseAdmin
+          .from("contacts")
+          .select("id, name, whatsapp_lid, merged_into_id, profile_picture_url, created_at")
           .eq("company_id", company_id)
-          .eq("is_active", true)
-          .eq("is_main_agent", true)
-          .limit(1);
-        const defaultAgentId =
-          defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
-        const isActiveByDefault =
-          defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
-        if (isActiveByDefault) aiActive = true;
+          .or(
+            `phone.in.(${phoneVariants.join(",")})${extractedLid ? `,whatsapp_lid.eq.${extractedLid}` : ""}`,
+          )
+          .order("created_at", { ascending: true });
 
-        // Create new conversation
-        const { data: newConv, error: convErr } = await supabaseAdmin
-          .from("conversations")
-          .insert({
-            unit_id: unit_id,
-            whatsapp_instance_id: instance_id,
-            contact_id: contactId,
-            channel: "whatsapp",
-            remote_id: extractedLid || phoneNumber,
-            status: isFromMe ? "resolved" : isActiveByDefault ? "active" : "waiting",
-            last_message_at: new Date().toISOString(),
-            resolved_at: isFromMe ? new Date().toISOString() : null,
-            ai_active: isActiveByDefault,
-            ai_agent_id: defaultAgentId,
-          })
-          .select()
-          .single();
-
-        if (convErr) {
-          // Race condition: another webhook call may have created the conversation in parallel.
-          // Re-query for an open conversation before giving up.
-          console.warn(
-            "[stevo-webhook] Conversation insert failed, checking for race condition:",
-            convErr.message,
+        if (existingContacts && existingContacts.length > 0) {
+          // Collect all known contact IDs for this person
+          const allContactIds = Array.from(
+            new Set([
+              ...existingContacts.map((c) => c.id),
+              ...(existingContacts.map((c) => c.merged_into_id).filter(Boolean) as string[]),
+            ]),
           );
-          const { data: racedConv } = await supabaseAdmin
+
+          // Find if ANY of these contacts has an active or waiting conversation on this instance
+          const { data: convs } = await supabaseAdmin
             .from("conversations")
-            .select("id, status, ai_active, ai_agent_id")
-            .eq("contact_id", contactId)
+            .select("id, status, ai_active, ai_agent_id, contact_id")
+            .in("contact_id", allContactIds)
             .eq("whatsapp_instance_id", instance_id)
             .in("status", ["waiting", "active"])
             .order("started_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
+            .limit(1);
 
-          if (racedConv) {
-            console.log(
-              "[stevo-webhook] Found conversation created by parallel call:",
-              racedConv.id,
-            );
-            conversationId = racedConv.id;
-            aiActive = racedConv.ai_active ?? false;
-            // Update last_message_at on the raced conversation
-            await supabaseAdmin
-              .from("conversations")
-              .update({ last_message_at: new Date().toISOString(), ai_followup_count: 0 })
-              .eq("id", conversationId);
+          // Pick canonical contact: prefer one with profile picture and real name, or first created
+          const canonicalContact =
+            existingContacts.find(
+              (c) =>
+                c.profile_picture_url &&
+                c.name &&
+                c.name !== phoneNumber &&
+                c.name !== "Desconhecido",
+            ) ||
+            existingContacts.find((c) => c.profile_picture_url) ||
+            existingContacts[0];
+
+          if (convs && convs.length > 0) {
+            activeConv = convs[0];
+          }
+
+          contactId = canonicalContact.merged_into_id || canonicalContact.id;
+
+          // Auto-heal duplicate contacts in background: mark merged_into_id to canonical
+          const duplicateContacts = existingContacts.filter(
+            (c) => c.id !== contactId && c.merged_into_id !== contactId,
+          );
+          if (duplicateContacts.length > 0) {
+            const dupeIds = duplicateContacts.map((c) => c.id);
+            supabaseAdmin
+              .from("contacts")
+              .update({ merged_into_id: contactId })
+              .in("id", dupeIds)
+              .then();
+          }
+
+          const updates: any = {};
+
+          // Update contact name
+          if (remoteJid.includes("@g.us")) {
+            if (
+              actualGroupName &&
+              canonicalContact.name !== actualGroupName &&
+              canonicalContact.name === "Grupo do WhatsApp"
+            ) {
+              updates.name = actualGroupName;
+            }
           } else {
-            throw convErr;
+            if (!isFromMe && pushName && pushName !== "Desconhecido") {
+              const currentName = canonicalContact.name;
+              if (currentName === phoneNumber || currentName === "Desconhecido") {
+                updates.name = pushName;
+              }
+            }
+          }
+
+          // Lock in the LID if we discovered it
+          if (extractedLid && canonicalContact.whatsapp_lid !== extractedLid) {
+            updates.whatsapp_lid = extractedLid;
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await supabaseAdmin.from("contacts").update(updates).eq("id", contactId);
           }
         } else {
-          conversationId = newConv.id;
-        }
+          // Double check before creating to prevent race condition
+          const { data: secondCheck } = await supabaseAdmin
+            .from("contacts")
+            .select("id, name, whatsapp_lid, merged_into_id")
+            .eq("company_id", company_id)
+            .or(
+              `phone.in.(${phoneVariants.join(",")})${extractedLid ? `,whatsapp_lid.eq.${extractedLid}` : ""}`,
+            )
+            .order("created_at", { ascending: true })
+            .limit(1);
 
-        // Abre um novo ticket (sessão) se não for resolvido já na criação
-        if (!isFromMe) {
-          let sessionId = null;
-          let { data: existingSession } = await supabaseAdmin
-            .from("conversation_sessions")
-            .select("id")
-            .eq("conversation_id", conversationId)
-            .is("resolved_at", null)
-            .maybeSingle();
+        let isBrandNewContact = false;
+        let brandNewContactName = pushName;
+        if (secondCheck && secondCheck.length > 0) {
+          contactId = secondCheck[0].merged_into_id || secondCheck[0].id;
+        } else {
+          // Create new contact
+          isBrandNewContact = true;
+          const groupDefaultName = actualGroupName || "Grupo do WhatsApp";
+          let newContactName = pushName;
+          if (remoteJid.includes("@g.us")) {
+            newContactName = groupDefaultName;
+          } else if (isFromMe || !pushName || pushName === "Desconhecido") {
+            newContactName = phoneNumber || "Desconhecido";
+          }
+          brandNewContactName = newContactName;
 
-          if (existingSession) {
-            sessionId = existingSession.id;
-          } else {
-            const { data: newSession, error: sessionErr } = await supabaseAdmin
-              .from("conversation_sessions")
+            const { data: newContact, error: contactErr } = await supabaseAdmin
+              .from("contacts")
               .insert({
-                conversation_id: conversationId,
-                contact_id: contactId,
-                whatsapp_instance_id: instance_id,
-                started_at: new Date().toISOString(),
+                company_id: company_id,
+                unit_id: unit_id,
+                name: newContactName,
+                phone: phoneNumber,
+                whatsapp_lid: extractedLid || null,
               })
               .select()
               .single();
-            if (sessionErr) {
-              if (sessionErr.code === "23505") {
-                const { data: concSession } = await supabaseAdmin
-                  .from("conversation_sessions")
-                  .select("id")
-                  .eq("conversation_id", conversationId)
-                  .is("resolved_at", null)
-                  .maybeSingle();
-                if (concSession) sessionId = concSession.id;
-                existingSession = concSession;
-              } else {
-                console.error("[stevo-webhook] Error creating session:", sessionErr);
-              }
-            } else if (newSession) {
-              sessionId = newSession.id;
-            }
-          }
 
-          if (sessionId) {
-            await supabaseAdmin
-              .from("conversations")
-              .update({ current_session_id: sessionId })
-              .eq("id", conversationId);
-            if (!existingSession) {
-              const events: any[] = [{ session_id: sessionId, event_type: "started" }];
-              if (isActiveByDefault && defaultAgentId) {
-                const { data: defaultAgentData } = await supabaseAdmin
-                  .from("ai_agents")
-                  .select("name")
-                  .eq("id", defaultAgentId)
-                  .single();
-                events.push({
-                  session_id: sessionId,
-                  event_type: "assigned",
-                  metadata: {
-                    by_ai: true,
-                    ai_agent_id: defaultAgentId,
-                    ai_agent_name: defaultAgentData?.name || "IA",
-                  },
-                });
+            if (contactErr) throw contactErr;
+            contactId = newContact.id;
+
+            // Auto-sync profile picture
+            if (!remoteJid.includes("@g.us")) {
+              try {
+                await syncContactProfile(contactId, instance_id);
+              } catch (err) {
+                console.error("[stevo-webhook] syncContactProfile failed:", err);
               }
-              await supabaseAdmin.from("session_events").insert(events);
             }
           }
         }
-      }
+
+
+        // 3. Find latest conversation for this contact in THIS EXACT INSTANCE
+        let convsData = activeConv ? [activeConv] : null;
+
+        const searchContactIds = Array.from(
+          new Set([
+            ...(existingContacts?.map((c) => c.id) || []),
+            ...(existingContacts?.map((c) => c.merged_into_id).filter(Boolean) as string[]),
+            contactId,
+          ]),
+        );
+
+        if (!activeConv) {
+          // 3a. First check for active or waiting conversation across ANY known contact ID
+          const { data: openConvs } = await supabaseAdmin
+            .from("conversations")
+            .select("id, status, ai_active, ai_agent_id, contact_id")
+            .in("contact_id", searchContactIds)
+            .eq("whatsapp_instance_id", instance_id)
+            .in("status", ["waiting", "active"])
+            .order("started_at", { ascending: false })
+            .limit(1);
+
+          if (openConvs && openConvs.length > 0) {
+            convsData = openConvs;
+          } else {
+            // 3b. If no active/waiting, look for ANY conversation on this instance (e.g. resolved)
+            const { data: anyConvs } = await supabaseAdmin
+              .from("conversations")
+              .select("id, status, ai_active, ai_agent_id, contact_id")
+              .in("contact_id", searchContactIds)
+              .eq("whatsapp_instance_id", instance_id)
+              .order("started_at", { ascending: false })
+              .limit(1);
+
+            convsData = anyConvs;
+          }
+        }
+
+        const latestConvs = convsData;
+
+        console.log(
+          `[stevo-webhook] Lookup conversation: instance_id=${instance_id}, contact_id=${contactId}, result=${JSON.stringify(latestConvs)}`,
+        );
+
+        if (latestConvs && latestConvs.length > 0) {
+          const conv = latestConvs[0];
+          conversationId = conv.id;
+
+          // Ensure conversation is linked to primary canonical contact
+          if (conv.contact_id !== contactId) {
+            await supabaseAdmin
+              .from("conversations")
+              .update({ contact_id: contactId })
+              .eq("id", conversationId);
+          }
+
+          if (conv.ai_active) {
+            if (conv.ai_agent_id) {
+              aiActive = true;
+            } else {
+              // Find agent mapped to this instance, or any active agent
+              const { data: fallbackAgents } = await supabaseAdmin
+                .from("ai_agents")
+                .select("id")
+                .eq("company_id", company_id)
+                .eq("is_active", true)
+                .order("instance_id", { ascending: false })
+                .limit(1);
+
+              if (fallbackAgents && fallbackAgents.length > 0) {
+                aiActive = true;
+                await supabaseAdmin
+                  .from("conversations")
+                  .update({ ai_agent_id: fallbackAgents[0].id })
+                  .eq("id", conversationId);
+              }
+            }
+          }
+
+          // 3.5 Dedup: skip if we already have this remote_msg_id in the DB
+          if (remoteMsgId && conversationId) {
+            const { data: existingMsg } = await supabaseAdmin
+              .from("messages")
+              .select("id, metadata")
+              .eq("remote_msg_id", remoteMsgId)
+              .eq("conversation_id", conversationId)
+              .maybeSingle();
+
+            if (existingMsg) {
+              // Already saved - just update conversation timestamp
+              await supabaseAdmin
+                .from("conversations")
+                .update({ last_message_at: new Date().toISOString(), ai_followup_count: 0 })
+                .eq("id", conversationId);
+
+              // Update metadata if the new payload has metadata that might have been missing initially
+              if (Object.keys(metadata).length > 0) {
+                const currentMeta =
+                  typeof existingMsg.metadata === "object" && existingMsg.metadata !== null
+                    ? existingMsg.metadata
+                    : {};
+                const newMetadata = { ...currentMeta, ...metadata };
+                await supabaseAdmin
+                  .from("messages")
+                  .update({ metadata: newMetadata })
+                  .eq("id", existingMsg.id);
+              }
+              return;
+            }
+          }
+
+          const updatePayload: any = {
+            last_message_at: new Date().toISOString(),
+            ai_followup_count: 0,
+            remote_id: extractedLid || phoneNumber,
+          };
+
+          // Se a conversa estava na fila de espera e o atendente respondeu (isFromMe):
+          // Transiciona automaticamente para andamento (active)
+          if (conv.status === "waiting" && isFromMe) {
+            updatePayload.status = "active";
+          }
+
+          // Se a conversa estava resolvida:
+          // Reabre como active se for mensagem enviada pelo atendente (isFromMe),
+          // ou como waiting/active se for recebida do contato (!isFromMe)
+          if (conv.status === "resolved") {
+            console.log(`[stevo-webhook] Reopening resolved conversation: ${conversationId}, isFromMe=${isFromMe}`);
+
+            const previouslyAiActive = conv.ai_active ?? false;
+            let resolvedAgentId = conv.ai_agent_id ?? null;
+
+            if (!resolvedAgentId && !isFromMe) {
+              const { data: defaultAgents } = await supabaseAdmin
+                .from("ai_agents")
+                .select("id, active_by_default")
+                .eq("company_id", company_id)
+                .eq("is_active", true)
+                .or("is_main_agent.eq.true,active_by_default.eq.true")
+                .order("is_main_agent", { ascending: false })
+                .limit(1);
+              resolvedAgentId = defaultAgents?.[0]?.id ?? null;
+            }
+
+            updatePayload.status = isFromMe ? "active" : previouslyAiActive ? "active" : "waiting";
+            updatePayload.ai_active = isFromMe ? false : previouslyAiActive;
+            updatePayload.ai_agent_id = isFromMe ? conv.ai_agent_id : resolvedAgentId;
+            updatePayload.assigned_agent_id = isFromMe ? conv.assigned_agent_id : null;
+            updatePayload.resolved_at = null;
+
+            aiActive = isFromMe ? false : previouslyAiActive;
+
+            // Abre um novo ticket (sessão)
+            let sessionId = null;
+            let { data: existingSession } = await supabaseAdmin
+              .from("conversation_sessions")
+              .select("id")
+              .eq("conversation_id", conversationId)
+              .is("resolved_at", null)
+              .maybeSingle();
+
+            if (existingSession) {
+              sessionId = existingSession.id;
+            } else {
+              const { data: newSession, error: sessionErr } = await supabaseAdmin
+                .from("conversation_sessions")
+                .insert({
+                  conversation_id: conversationId,
+                  contact_id: contactId,
+                  whatsapp_instance_id: instance_id,
+                  started_at: new Date().toISOString(),
+                })
+                .select()
+                .single();
+
+              if (sessionErr) {
+                if (sessionErr.code === "23505") {
+                  const { data: concSession } = await supabaseAdmin
+                    .from("conversation_sessions")
+                    .select("id")
+                    .eq("conversation_id", conversationId)
+                    .is("resolved_at", null)
+                    .maybeSingle();
+                  if (concSession) sessionId = concSession.id;
+                  existingSession = concSession; // Mark as existing so we don't duplicate events
+                } else {
+                  console.error("[stevo-webhook] Error creating session:", sessionErr);
+                }
+              } else if (newSession) {
+                sessionId = newSession.id;
+              }
+            }
+
+            if (sessionId) {
+              updatePayload.current_session_id = sessionId;
+              if (!existingSession) {
+                const events: any[] = [{ session_id: sessionId, event_type: "started" }];
+                if (aiActive && resolvedAgentId) {
+                  const { data: agentData } = await supabaseAdmin
+                    .from("ai_agents")
+                    .select("name")
+                    .eq("id", resolvedAgentId)
+                    .single();
+                  events.push({
+                    session_id: sessionId,
+                    event_type: "assigned",
+                    metadata: {
+                      by_ai: true,
+                      ai_agent_id: resolvedAgentId,
+                      ai_agent_name: agentData?.name || "IA",
+                    },
+                  });
+                }
+                await supabaseAdmin.from("session_events").insert(events);
+              }
+            }
+          } else {
+            console.log(`[stevo-webhook] Found active/waiting conversation: ${conversationId}`);
+          }
+
+          await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
+        } else {
+          console.log(`[stevo-webhook] No existing conversation found. Checking race condition before creating.`);
+
+          // Double check race condition across searchContactIds
+          const { data: raceCheck } = await supabaseAdmin
+            .from("conversations")
+            .select("id, status, ai_active, ai_agent_id")
+            .in("contact_id", searchContactIds)
+            .eq("whatsapp_instance_id", instance_id)
+            .order("started_at", { ascending: false })
+            .limit(1);
+
+          if (raceCheck && raceCheck.length > 0) {
+            conversationId = raceCheck[0].id;
+            aiActive = raceCheck[0].ai_active ?? false;
+            await supabaseAdmin
+              .from("conversations")
+              .update({ last_message_at: new Date().toISOString() })
+              .eq("id", conversationId);
+          } else {
+            // Check for default AI agent
+            const { data: defaultAgents } = await supabaseAdmin
+              .from("ai_agents")
+              .select("id, is_main_agent, active_by_default")
+              .eq("company_id", company_id)
+              .eq("is_active", true)
+              .eq("is_main_agent", true)
+              .limit(1);
+            const defaultAgentId =
+              defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
+            const isActiveByDefault =
+              defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
+            if (isActiveByDefault) aiActive = true;
+
+            // Create new conversation (always active or waiting, NEVER pre-resolved)
+            const { data: newConv, error: convErr } = await supabaseAdmin
+              .from("conversations")
+              .insert({
+                unit_id: unit_id,
+                whatsapp_instance_id: instance_id,
+                contact_id: contactId,
+                channel: "whatsapp",
+                remote_id: extractedLid || phoneNumber,
+                status: isFromMe ? "active" : isActiveByDefault ? "active" : "waiting",
+                last_message_at: new Date().toISOString(),
+                resolved_at: null,
+                ai_active: isFromMe ? false : isActiveByDefault,
+                ai_agent_id: defaultAgentId,
+              })
+              .select()
+              .single();
+
+            if (convErr) {
+              console.warn(
+                "[stevo-webhook] Conversation insert failed, checking for race condition:",
+                convErr.message,
+              );
+              const { data: racedConv } = await supabaseAdmin
+                .from("conversations")
+                .select("id, status, ai_active, ai_agent_id")
+                .in("contact_id", searchContactIds)
+                .eq("whatsapp_instance_id", instance_id)
+                .order("started_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+              if (racedConv) {
+                conversationId = racedConv.id;
+                aiActive = racedConv.ai_active ?? false;
+                await supabaseAdmin
+                  .from("conversations")
+                  .update({ last_message_at: new Date().toISOString(), ai_followup_count: 0 })
+                  .eq("id", conversationId);
+              } else {
+                throw convErr;
+              }
+            } else {
+              conversationId = newConv.id;
+            }
+
+            // Abre um novo ticket (sessão)
+            if (conversationId) {
+              let sessionId = null;
+              let { data: existingSession } = await supabaseAdmin
+                .from("conversation_sessions")
+                .select("id")
+                .eq("conversation_id", conversationId)
+                .is("resolved_at", null)
+                .maybeSingle();
+
+              if (existingSession) {
+                sessionId = existingSession.id;
+              } else {
+                const { data: newSession, error: sessionErr } = await supabaseAdmin
+                  .from("conversation_sessions")
+                  .insert({
+                    conversation_id: conversationId,
+                    contact_id: contactId,
+                    whatsapp_instance_id: instance_id,
+                    started_at: new Date().toISOString(),
+                  })
+                  .select()
+                  .single();
+
+                if (sessionErr) {
+                  if (sessionErr.code === "23505") {
+                    const { data: concSession } = await supabaseAdmin
+                      .from("conversation_sessions")
+                      .select("id")
+                      .eq("conversation_id", conversationId)
+                      .is("resolved_at", null)
+                      .maybeSingle();
+                    if (concSession) sessionId = concSession.id;
+                    existingSession = concSession;
+                  } else {
+                    console.error("[stevo-webhook] Error creating session:", sessionErr);
+                  }
+                } else if (newSession) {
+                  sessionId = newSession.id;
+                }
+              }
+
+              if (sessionId) {
+                await supabaseAdmin
+                  .from("conversations")
+                  .update({ current_session_id: sessionId })
+                  .eq("id", conversationId);
+                if (!existingSession) {
+                  const events: any[] = [{ session_id: sessionId, event_type: "started" }];
+                  if (isActiveByDefault && defaultAgentId) {
+                    const { data: defaultAgentData } = await supabaseAdmin
+                      .from("ai_agents")
+                      .select("name")
+                      .eq("id", defaultAgentId)
+                      .single();
+                    events.push({
+                      session_id: sessionId,
+                      event_type: "assigned",
+                      metadata: {
+                        by_ai: true,
+                        ai_agent_id: defaultAgentId,
+                        ai_agent_name: defaultAgentData?.name || "IA",
+                      },
+                    });
+                  }
+                  await supabaseAdmin.from("session_events").insert(events);
+                }
+              }
+            }
+          }
+        }
+
+        // Dispara automação de novo contato criado se for o primeiro contato
+        if (isBrandNewContact && contactId) {
+          dispatchAutomationEvent({
+            companyId: company_id,
+            unitId: unit_id || null,
+            contactId: contactId,
+            conversationId: conversationId || null,
+            triggerType: "contact_created",
+            metadata: {
+              name: brandNewContactName,
+              phone: phoneNumber,
+            },
+          }).catch((err) => console.error("[stevo-webhook] contact_created automation error:", err));
+        }
 
       // 4. Resolve quoted message internal ID
       let quotedInternalId = null;
@@ -1348,12 +1469,13 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
       } else if (newMessage && mediaType === "audio" && audioBase64 && instance.company_id) {
         await triggerAudioTranscription(newMessage.id, audioBase64, instance.company_id);
       }
+      });
 
       // 6.5. Check for Ad Lead and save to ad_leads table
       if (Object.keys(metadata).length > 0 && metadata.externalAdReply && !isFromMe) {
         try {
-          // Utiliza source_id do ad ou fallback para a URL
-          const sourceId = metadata.externalAdReply.sourceID || metadata.externalAdReply.sourceURL;
+          // Utiliza source_id do ad ou fallback para ctwaClid/URL
+          const sourceId = metadata.externalAdReply.sourceID || metadata.externalAdReply.sourceURL || metadata.externalAdReply.ctwaClid || `ad_${contactId}`;
 
           if (sourceId) {
             const { data: existingAdLead } = await supabaseAdmin

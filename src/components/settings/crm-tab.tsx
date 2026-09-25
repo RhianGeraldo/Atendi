@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit2, GripVertical, Settings2 } from "lucide-react";
+import { Plus, Trash2, Edit2, GripVertical, Settings2, ChevronUp, ChevronDown } from "lucide-react";
+import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -285,6 +286,55 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
     onError: (e) => toast.error("Erro ao atualizar evento", { description: (e as Error).message }),
   });
 
+  const reorderStages = useMutation({
+    mutationFn: async (newOrderedStages: any[]) => {
+      const updates = newOrderedStages.map((stage, idx) =>
+        supabase
+          .from("pipeline_stages")
+          .update({ order: idx + 1 })
+          .eq("id", stage.id)
+      );
+      await Promise.all(updates);
+    },
+    onMutate: async (newOrderedStages) => {
+      await qc.cancelQueries({ queryKey: ["pipeline-stages", pipeline.id] });
+      const previousStages = qc.getQueryData(["pipeline-stages", pipeline.id]);
+      qc.setQueryData(["pipeline-stages", pipeline.id], newOrderedStages);
+      return { previousStages };
+    },
+    onError: (e, _vars, context) => {
+      if (context?.previousStages) {
+        qc.setQueryData(["pipeline-stages", pipeline.id], context.previousStages);
+      }
+      toast.error("Erro ao reordenar etapas", { description: (e as Error).message });
+    },
+    onSuccess: () => {
+      toast.success("Ordem das etapas atualizada!");
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["pipeline-stages"] });
+    },
+  });
+
+  const onDragEnd = (result: DropResult) => {
+    if (!result.destination || !stages) return;
+    if (result.destination.index === result.source.index) return;
+
+    const items = Array.from(stages);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
+
+    reorderStages.mutate(items);
+  };
+
+  const moveStageIndex = (fromIndex: number, toIndex: number) => {
+    if (!stages || toIndex < 0 || toIndex >= stages.length) return;
+    const items = Array.from(stages);
+    const [item] = items.splice(fromIndex, 1);
+    items.splice(toIndex, 0, item);
+    reorderStages.mutate(items);
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -293,7 +343,7 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
           Etapas: {pipeline.name}
         </CardTitle>
         <CardDescription>
-          Gerencie as colunas do seu quadro Kanban. Arraste para reordenar (em breve).
+          Gerencie e reordene as colunas do seu quadro Kanban arrastando ou usando as setas.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -342,67 +392,118 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
               Nenhuma etapa configurada neste funil.
             </p>
           ) : (
-            stages?.map((stage, index) => (
-              <div
-                key={stage.id}
-                className="flex items-center gap-3 p-3 bg-muted/30 border rounded-md"
-              >
-                <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab opacity-50" />
-                <span className="text-xs font-mono text-muted-foreground w-4">{index + 1}</span>
-
-                <div className="relative flex h-8 w-8 overflow-hidden rounded-md border border-input shrink-0">
-                  <input
-                    type="color"
-                    value={stage.color}
-                    onChange={(e) =>
-                      updateStageColor.mutate({ id: stage.id, color: e.target.value })
-                    }
-                    className="h-full w-full cursor-pointer bg-transparent border-0 p-0"
-                    title="Alterar cor"
-                  />
-                </div>
-
-                <div className="flex-1 font-medium text-sm">{stage.name}</div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <span className="text-[11px] text-muted-foreground hidden sm:inline">Meta CAPI:</span>
-                  <Select
-                    value={(stage as any).meta_event_name || "none"}
-                    onValueChange={(val) => updateStageMetaEvent.mutate({ id: stage.id, metaEvent: val })}
+            <DragDropContext onDragEnd={onDragEnd}>
+              <Droppable droppableId="pipeline-stages-droppable">
+                {(provided) => (
+                  <div
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                    className="space-y-2"
                   >
-                    <SelectTrigger className="h-8 w-[140px] text-xs">
-                      <SelectValue placeholder="Sem evento" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhum (Sem envio)</SelectItem>
-                      <SelectItem value="Lead">Lead</SelectItem>
-                      <SelectItem value="Contact">Contact</SelectItem>
-                      <SelectItem value="Schedule">Schedule (Agendamento)</SelectItem>
-                      <SelectItem value="SubmitApplication">Submit Application</SelectItem>
-                      <SelectItem value="QualifiedLead">Qualified Lead</SelectItem>
-                      <SelectItem value="InitiateCheckout">Initiate Checkout</SelectItem>
-                      <SelectItem value="Purchase">Purchase (Compra)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                    {stages?.map((stage, index) => (
+                      <Draggable key={stage.id} draggableId={stage.id} index={index}>
+                        {(provided, snapshot) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
+                            className={`flex items-center gap-3 p-3 bg-muted/30 border rounded-md transition-all ${
+                              snapshot.isDragging ? "shadow-lg bg-card ring-2 ring-primary/40 z-10" : ""
+                            }`}
+                          >
+                            <div 
+                              {...provided.dragHandleProps} 
+                              className="cursor-grab active:cursor-grabbing p-1 -m-1 text-muted-foreground hover:text-foreground" 
+                              title="Arraste para reordenar"
+                            >
+                              <GripVertical className="h-4 w-4" />
+                            </div>
 
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => {
-                    if (
-                      confirm(
-                        "Excluir esta etapa? Todas as oportunidades nela podem ficar sem etapa definida.",
-                      )
-                    ) {
-                      deleteStage.mutate(stage.id);
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
-              </div>
-            ))
+                            {/* Up / Down arrows */}
+                            <div className="flex flex-col -space-y-0.5">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-4 w-4 text-muted-foreground hover:text-foreground disabled:opacity-20 cursor-pointer p-0"
+                                disabled={index === 0 || reorderStages.isPending}
+                                onClick={() => moveStageIndex(index, index - 1)}
+                                title="Mover para cima"
+                              >
+                                <ChevronUp className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-4 w-4 text-muted-foreground hover:text-foreground disabled:opacity-20 cursor-pointer p-0"
+                                disabled={index === stages.length - 1 || reorderStages.isPending}
+                                onClick={() => moveStageIndex(index, index + 1)}
+                                title="Mover para baixo"
+                              >
+                                <ChevronDown className="h-3 w-3" />
+                              </Button>
+                            </div>
+
+                            <span className="text-xs font-mono text-muted-foreground w-4">{index + 1}</span>
+
+                            <div className="relative flex h-8 w-8 overflow-hidden rounded-md border border-input shrink-0">
+                              <input
+                                type="color"
+                                value={stage.color}
+                                onChange={(e) =>
+                                  updateStageColor.mutate({ id: stage.id, color: e.target.value })
+                                }
+                                className="h-full w-full cursor-pointer bg-transparent border-0 p-0"
+                                title="Alterar cor"
+                              />
+                            </div>
+
+                            <div className="flex-1 font-medium text-sm">{stage.name}</div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[11px] text-muted-foreground hidden sm:inline">Meta CAPI:</span>
+                              <Select
+                                value={(stage as any).meta_event_name || "none"}
+                                onValueChange={(val) => updateStageMetaEvent.mutate({ id: stage.id, metaEvent: val })}
+                              >
+                                <SelectTrigger className="h-8 w-[140px] text-xs">
+                                  <SelectValue placeholder="Sem evento" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Nenhum (Sem envio)</SelectItem>
+                                  <SelectItem value="Lead">Lead</SelectItem>
+                                  <SelectItem value="Contact">Contact</SelectItem>
+                                  <SelectItem value="Schedule">Schedule (Agendamento)</SelectItem>
+                                  <SelectItem value="SubmitApplication">Submit Application</SelectItem>
+                                  <SelectItem value="QualifiedLead">Qualified Lead</SelectItem>
+                                  <SelectItem value="InitiateCheckout">Initiate Checkout</SelectItem>
+                                  <SelectItem value="Purchase">Purchase (Compra)</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    "Excluir esta etapa? Todas as oportunidades nela podem ficar sem etapa definida.",
+                                  )
+                                ) {
+                                  deleteStage.mutate(stage.id);
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
+                  </div>
+                )}
+              </Droppable>
+            </DragDropContext>
           )}
         </div>
       </CardContent>

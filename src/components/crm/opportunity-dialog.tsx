@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,17 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CheckSquare, Circle, CheckCircle2, Pencil, Trash2, Calendar as CalendarIcon, Target, Plus, Phone, MessageSquare, Video, CalendarClock, Clock, Info, ListTodo, StickyNote, User, UserCheck, Save, History } from "lucide-react";
 import { TaskDialog } from "@/components/crm/task-dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 // BRL Currency formatting helpers
 const formatBRLString = (num: number | string | undefined | null) => {
@@ -48,6 +59,16 @@ const parseBRLToFloat = (brlStr: string) => {
 const formatDateSafe = (dateVal: any, formatStr: string = "dd/MM/yyyy 'às' HH:mm") => {
   if (!dateVal) return "";
   try {
+    if (typeof dateVal === "string" && /^\d{4}-\d{2}-\d{2}/.test(dateVal.trim())) {
+      const datePart = dateVal.trim().split("T")[0];
+      const parts = datePart.split("-");
+      if (parts.length === 3) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        return format(new Date(year, month, day, 12, 0, 0), formatStr, { locale: ptBR });
+      }
+    }
     const d = new Date(dateVal);
     if (isNaN(d.getTime())) return "";
     return format(d, formatStr, { locale: ptBR });
@@ -282,6 +303,11 @@ export function OpportunityDialog({
 
   const [contactSearch, setContactSearch] = useState("");
   const [contactComboboxOpen, setContactComboboxOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingUpdatesRef = useRef<Record<string, any>>({});
+  const statusResetTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -295,6 +321,7 @@ export function OpportunityDialog({
         setPipelineId(opportunity.pipeline_stages?.pipeline_id || opportunity.pipeline_stages?.pipelines?.id || defaultPipelineId || "");
         setStageId(opportunity.stage_id || defaultStageId || "");
         setStatus(opportunity.status || "open");
+        setSaveStatus("idle");
       } else {
         setTitle("");
         setValue("");
@@ -305,6 +332,7 @@ export function OpportunityDialog({
         setPipelineId(defaultPipelineId || "");
         setStageId(defaultStageId || "");
         setStatus("open");
+        setSaveStatus("idle");
       }
     }
   }, [open, opportunity, defaultContactId, defaultPipelineId, defaultStageId, profile?.id]);
@@ -370,6 +398,114 @@ export function OpportunityDialog({
     }
   });
 
+  // Auto-Save Mutation for existing opportunities
+  const autoSaveMutation = useMutation({
+    mutationFn: async (updatedFields: Record<string, any>) => {
+      if (!opportunity?.id) return;
+
+      const payload: Record<string, any> = {};
+      if (updatedFields.title !== undefined) payload.title = updatedFields.title;
+      if (updatedFields.value !== undefined) payload.value = parseBRLToFloat(updatedFields.value);
+      if (updatedFields.notes !== undefined) payload.notes = updatedFields.notes;
+      if (updatedFields.expectedCloseDate !== undefined) {
+        payload.expected_close_date = updatedFields.expectedCloseDate ? updatedFields.expectedCloseDate.split('T')[0] : null;
+      }
+      if (updatedFields.contactId !== undefined) payload.contact_id = updatedFields.contactId || null;
+      if (updatedFields.ownerId !== undefined) payload.owner_id = updatedFields.ownerId || null;
+      if (updatedFields.stageId !== undefined) payload.stage_id = updatedFields.stageId;
+
+      if (Object.keys(payload).length === 0) return;
+
+      const { error } = await supabase.from("opportunities").update(payload).eq("id", opportunity.id);
+      if (error) throw error;
+
+      // Se mudou de etapa, registrar no histórico e disparar CAPI
+      if (updatedFields.stageId && updatedFields.stageId !== opportunity.stage_id) {
+        const stageName = stages?.find(s => s.id === updatedFields.stageId)?.name || "Nova etapa";
+        await supabase.from("opportunity_history").insert({
+          opportunity_id: opportunity.id,
+          user_id: profile?.id,
+          action_type: "stage_change",
+          description: `Oportunidade movida para a etapa "${stageName}"`
+        });
+
+        if (activeCompanyId || profile?.company_id) {
+          triggerOpportunityCapiAction({
+            data: {
+              companyId: (activeCompanyId || profile?.company_id)!,
+              opportunityId: opportunity.id,
+              triggerType: "stage_change",
+              stageId: updatedFields.stageId,
+            }
+          }).catch(err => console.warn("[CAPI] Falha ao disparar evento de etapa:", err));
+        }
+      }
+    },
+    onMutate: () => {
+      setSaveStatus("saving");
+    },
+    onSuccess: () => {
+      setSaveStatus("saved");
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-history", opportunity?.id] });
+      qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
+      if (statusResetTimerRef.current) clearTimeout(statusResetTimerRef.current);
+      statusResetTimerRef.current = setTimeout(() => {
+        setSaveStatus(prev => prev === "saved" ? "idle" : prev);
+      }, 2000);
+    },
+    onError: (err: any) => {
+      setSaveStatus("error");
+      toast.error("Erro ao salvar alteração", { description: err.message });
+    }
+  });
+
+  const flushAutoSave = (fieldsToMerge?: Record<string, any>) => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    const finalPayload = { ...pendingUpdatesRef.current, ...fieldsToMerge };
+    pendingUpdatesRef.current = {};
+    if (opportunity?.id && Object.keys(finalPayload).length > 0) {
+      autoSaveMutation.mutate(finalPayload);
+    }
+  };
+
+  const scheduleDebouncedAutoSave = (fields: Record<string, any>) => {
+    pendingUpdatesRef.current = { ...pendingUpdatesRef.current, ...fields };
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    setSaveStatus("saving");
+    debounceTimerRef.current = setTimeout(() => {
+      flushAutoSave();
+    }, 600);
+  };
+
+  // Garante que qualquer alteração pendente seja salva se o modal for fechado
+  useEffect(() => {
+    if (!open && Object.keys(pendingUpdatesRef.current).length > 0 && opportunity?.id) {
+      flushAutoSave();
+    }
+  }, [open]);
+
+  // Limpa timers ao desmontar
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      if (statusResetTimerRef.current) clearTimeout(statusResetTimerRef.current);
+    };
+  }, []);
+
+  const handleDateChange = (newDateStr: string) => {
+    setExpectedCloseDate(newDateStr);
+    if (opportunity) {
+      flushAutoSave({ expectedCloseDate: newDateStr });
+    }
+  };
+
+  // Manual save for NEW opportunity creation
   const saveOpportunity = useMutation({
     mutationFn: async () => {
       const effectiveUnitId = selectedUnitId || fallbackUnit?.id;
@@ -379,7 +515,7 @@ export function OpportunityDialog({
         title,
         value: parseBRLToFloat(value),
         notes,
-        expected_close_date: expectedCloseDate ? new Date(expectedCloseDate).toISOString() : null,
+        expected_close_date: expectedCloseDate ? expectedCloseDate.split('T')[0] : null,
         contact_id: contactId,
         stage_id: stageId,
         unit_id: effectiveUnitId,
@@ -387,32 +523,54 @@ export function OpportunityDialog({
         status,
       };
 
-      if (opportunity?.id) {
-        const { error } = await supabase.from("opportunities").update(payload).eq("id", opportunity.id);
-        if (error) throw error;
-      } else {
-        const { data: newOpp, error } = await supabase.from("opportunities").insert(payload).select("id").single();
-        if (error) throw error;
-        
-        // Record creation in dedicated opportunity_history table
-        if (newOpp?.id) {
-          await supabase.from("opportunity_history").insert({
-            opportunity_id: newOpp.id,
-            user_id: profile?.id,
-            action_type: "creation",
-            description: `Oportunidade "${title}" foi criada no funil.`
-          });
-        }
+      const { data: newOpp, error } = await supabase.from("opportunities").insert(payload).select("id").single();
+      if (error) throw error;
+      
+      // Record creation in dedicated opportunity_history table
+      if (newOpp?.id) {
+        await supabase.from("opportunity_history").insert({
+          opportunity_id: newOpp.id,
+          user_id: profile?.id,
+          action_type: "creation",
+          description: `Oportunidade "${title}" foi criada no funil.`
+        });
       }
     },
     onSuccess: () => {
-      toast.success(opportunity ? "Oportunidade atualizada!" : "Oportunidade criada!");
+      toast.success("Oportunidade criada com sucesso!");
       qc.invalidateQueries({ queryKey: ["opportunities"] });
-      qc.invalidateQueries({ queryKey: ["opportunity-history", opportunity?.id] });
       qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
-      if (!opportunity) setOpen(false);
+      setOpen(false);
     },
     onError: (e) => toast.error("Erro", { description: (e as Error).message })
+  });
+
+  const deleteOpportunity = useMutation({
+    mutationFn: async () => {
+      if (!opportunity?.id) return;
+      const oppId = opportunity.id;
+
+      // 1. Exclui tarefas vinculadas
+      await supabase.from("tasks").delete().eq("opportunity_id", oppId);
+
+      // 2. Exclui anotações vinculadas
+      await supabase.from("opportunity_notes").delete().eq("opportunity_id", oppId);
+
+      // 3. Exclui histórico vinculado
+      await supabase.from("opportunity_history").delete().eq("opportunity_id", oppId);
+
+      // 4. Exclui a oportunidade
+      const { error } = await supabase.from("opportunities").delete().eq("id", oppId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Oportunidade excluída com sucesso!");
+      setDeleteDialogOpen(false);
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
+    },
+    onError: (e) => toast.error("Erro ao excluir oportunidade", { description: (e as Error).message })
   });
 
   // Dedicated Opportunity History Audit Trail
@@ -695,6 +853,19 @@ export function OpportunityDialog({
 
             {opportunity && (
               <div className="flex items-center gap-2 shrink-0 pr-6">
+                {saveStatus === "saving" && (
+                  <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] text-primary font-medium mr-1 bg-primary/10 px-2 py-1 rounded-md animate-pulse">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Salvando...
+                  </span>
+                )}
+                {saveStatus === "saved" && (
+                  <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mr-1 bg-emerald-500/10 px-2 py-1 rounded-md">
+                    <Check className="h-3 w-3" />
+                    Salvo
+                  </span>
+                )}
+
                 {status === 'open' ? (
                   <>
                     <Button 
@@ -727,6 +898,24 @@ export function OpportunityDialog({
                     </Button>
                   </>
                 )}
+
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer ml-1" 
+                        onClick={() => setDeleteDialogOpen(true)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      <p className="text-xs">Excluir Oportunidade</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
             )}
           </div>
@@ -819,7 +1008,17 @@ export function OpportunityDialog({
                     <Input 
                       placeholder="Ex: Projeto Comercial / Consultoria" 
                       value={title} 
-                      onChange={e => setTitle(e.target.value)} 
+                      onChange={e => {
+                        setTitle(e.target.value);
+                        if (opportunity) {
+                          scheduleDebouncedAutoSave({ title: e.target.value });
+                        }
+                      }}
+                      onBlur={() => {
+                        if (opportunity) {
+                          flushAutoSave({ title });
+                        }
+                      }} 
                       className="font-medium bg-background"
                     />
                   </div>
@@ -836,7 +1035,18 @@ export function OpportunityDialog({
                           inputMode="numeric"
                           placeholder="0,00" 
                           value={value} 
-                          onChange={e => setValue(maskBRLInput(e.target.value))} 
+                          onChange={e => {
+                            const masked = maskBRLInput(e.target.value);
+                            setValue(masked);
+                            if (opportunity) {
+                              scheduleDebouncedAutoSave({ value: masked });
+                            }
+                          }}
+                          onBlur={() => {
+                            if (opportunity) {
+                              flushAutoSave({ value });
+                            }
+                          }} 
                           className="pl-9 font-semibold text-emerald-600 dark:text-emerald-400 bg-background"
                         />
                       </div>
@@ -863,7 +1073,7 @@ export function OpportunityDialog({
                               variant="ghost" 
                               size="sm" 
                               className="h-7 text-[11px] cursor-pointer" 
-                              onClick={() => setExpectedCloseDate(format(new Date(), "yyyy-MM-dd"))}
+                              onClick={() => handleDateChange(format(new Date(), "yyyy-MM-dd"))}
                             >
                               Hoje
                             </Button>
@@ -874,7 +1084,7 @@ export function OpportunityDialog({
                               onClick={() => {
                                 const d = new Date();
                                 d.setDate(d.getDate() + 7);
-                                setExpectedCloseDate(format(d, "yyyy-MM-dd"));
+                                handleDateChange(format(d, "yyyy-MM-dd"));
                               }}
                             >
                               +7 Dias
@@ -886,7 +1096,7 @@ export function OpportunityDialog({
                               onClick={() => {
                                 const d = new Date();
                                 d.setDate(d.getDate() + 30);
-                                setExpectedCloseDate(format(d, "yyyy-MM-dd"));
+                                handleDateChange(format(d, "yyyy-MM-dd"));
                               }}
                             >
                               +30 Dias
@@ -895,7 +1105,7 @@ export function OpportunityDialog({
                           <Calendar
                             mode="single"
                             selected={expectedCloseDate ? new Date(expectedCloseDate + 'T12:00:00') : undefined}
-                            onSelect={(date) => setExpectedCloseDate(date ? format(date, "yyyy-MM-dd") : "")}
+                            onSelect={(date) => handleDateChange(date ? format(date, "yyyy-MM-dd") : "")}
                             initialFocus
                           />
                         </PopoverContent>
@@ -957,8 +1167,12 @@ export function OpportunityDialog({
                                     value={c.id}
                                     className="cursor-pointer"
                                     onSelect={(currentValue) => {
-                                      setContactId(currentValue === contactId ? "" : currentValue);
+                                      const newContact = currentValue === contactId ? "" : currentValue;
+                                      setContactId(newContact);
                                       setContactComboboxOpen(false);
+                                      if (opportunity) {
+                                        flushAutoSave({ contactId: newContact });
+                                      }
                                     }}
                                   >
                                     <Check
@@ -983,7 +1197,15 @@ export function OpportunityDialog({
                     {/* Atendente Responsável */}
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium text-muted-foreground">Atendente Responsável</Label>
-                      <Select value={ownerId} onValueChange={setOwnerId}>
+                      <Select 
+                        value={ownerId} 
+                        onValueChange={(val) => {
+                          setOwnerId(val);
+                          if (opportunity) {
+                            flushAutoSave({ ownerId: val });
+                          }
+                        }}
+                      >
                         <SelectTrigger className="cursor-pointer bg-background">
                           <div className="flex items-center gap-2 truncate">
                             <UserCheck className="h-4 w-4 text-primary shrink-0" />
@@ -1004,7 +1226,23 @@ export function OpportunityDialog({
                   <div className="grid grid-cols-2 gap-4 pt-1">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium text-muted-foreground">Funil de Vendas</Label>
-                      <Select value={pipelineId} onValueChange={(v) => { setPipelineId(v); setStageId(""); }}>
+                      <Select 
+                        value={pipelineId} 
+                        onValueChange={async (v) => { 
+                          setPipelineId(v); 
+                          const { data: pStages } = await supabase
+                            .from("pipeline_stages")
+                            .select("id, name")
+                            .eq("pipeline_id", v)
+                            .order("order")
+                            .limit(1);
+                          const firstStage = pStages?.[0]?.id || "";
+                          setStageId(firstStage);
+                          if (opportunity && firstStage) {
+                            flushAutoSave({ stageId: firstStage });
+                          }
+                        }}
+                      >
                         <SelectTrigger className="cursor-pointer bg-background"><SelectValue placeholder="Selecione o funil..." /></SelectTrigger>
                         <SelectContent>
                           {pipelines?.map(p => <SelectItem key={p.id} value={p.id} className="cursor-pointer">{p.name}</SelectItem>)}
@@ -1013,7 +1251,16 @@ export function OpportunityDialog({
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs font-medium text-muted-foreground">Etapa do Funil</Label>
-                      <Select value={stageId} onValueChange={setStageId} disabled={!pipelineId}>
+                      <Select 
+                        value={stageId} 
+                        onValueChange={(v) => {
+                          setStageId(v);
+                          if (opportunity) {
+                            flushAutoSave({ stageId: v });
+                          }
+                        }} 
+                        disabled={!pipelineId}
+                      >
                         <SelectTrigger className="cursor-pointer bg-background"><SelectValue placeholder="Selecione a etapa..." /></SelectTrigger>
                         <SelectContent>
                           {stages?.map(s => <SelectItem key={s.id} value={s.id} className="cursor-pointer">{s.name}</SelectItem>)}
@@ -1023,11 +1270,30 @@ export function OpportunityDialog({
                   </div>
                 </div>
 
-                <div className="pt-2">
-                  <Button className="w-full font-semibold gap-2 cursor-pointer h-10 text-sm shadow-sm" onClick={() => saveOpportunity.mutate()} disabled={!title || !stageId || saveOpportunity.isPending}>
-                    {saveOpportunity.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    Salvar Alterações
-                  </Button>
+                {/* Auto-Save Status Bar */}
+                <div className="pt-3 border-t border-border/40 flex items-center justify-between text-xs mt-2">
+                  <div className="flex items-center gap-2">
+                    {saveStatus === "saving" ? (
+                      <span className="flex items-center gap-1.5 text-primary font-medium">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Salvando alterações...
+                      </span>
+                    ) : saveStatus === "saved" ? (
+                      <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+                        <Check className="h-3.5 w-3.5" />
+                        Salvo automaticamente
+                      </span>
+                    ) : saveStatus === "error" ? (
+                      <span className="flex items-center gap-1.5 text-rose-500 font-medium">
+                        Erro ao salvar alterações
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground flex items-center gap-1.5">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground/60" />
+                        Todas as alterações são salvas automaticamente
+                      </span>
+                    )}
+                  </div>
                 </div>
               </TabsContent>
 
@@ -1378,6 +1644,31 @@ export function OpportunityDialog({
           </div>
         )}
       </DialogContent>
+
+      {/* Confirmação de Exclusão da Oportunidade */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Oportunidade</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza de que deseja excluir permanentemente a oportunidade <strong>"{title || opportunity?.title}"</strong>? 
+              Essa ação removerá o registro e todas as tarefas e anotações vinculadas. Esta ação não poderá ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteOpportunity.isPending}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground cursor-pointer"
+              onClick={() => deleteOpportunity.mutate()}
+              disabled={deleteOpportunity.isPending}
+            >
+              {deleteOpportunity.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+              {deleteOpportunity.isPending ? "Excluindo..." : "Sim, Excluir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
+

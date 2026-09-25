@@ -20,6 +20,7 @@ import { downloadZernioMedia, ZernioClient } from "../canais/zernio/client";
 import { enqueueAiMessage } from "./ai-queue";
 import { getPhoneVariants } from "@/lib/utils";
 import { persistirAvatarContatoNoStorage } from "../avatar-storage";
+import { dispatchAutomationEvent } from "./automation-engine";
 
 export async function handleZernioWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -236,7 +237,9 @@ async function processarMensagem(
     const { data: foundContact } = await query.limit(1).maybeSingle();
     contact = foundContact;
 
+    let isBrandNewContact = false;
     if (!contact) {
+      isBrandNewContact = true;
       const { data: newContact, error: createErr } = await supabaseAdmin
         .from("contacts")
         .insert({
@@ -296,7 +299,9 @@ async function processarMensagem(
 
     contact = foundContacts?.[0];
 
+    let isBrandNewContact = false;
     if (!contact) {
+      isBrandNewContact = true;
       const { data: newContact, error: createErr } = await supabaseAdmin
         .from("contacts")
         .insert({
@@ -474,7 +479,7 @@ async function processarMensagem(
         whatsapp_instance_id: instance.id,
         unit_id: unitId,
         channel: redeFinal,
-        status: isFromMe ? "resolved" : isAiDefault ? "active" : "waiting",
+        status: isFromMe ? "active" : isAiDefault ? "active" : "waiting",
         started_at: nowIso,
         last_message_at: nowIso,
         last_message_preview: previewText,
@@ -493,6 +498,21 @@ async function processarMensagem(
       return;
     }
     conversationId = newConv.id;
+  }
+
+  // Dispara automação de novo contato criado se for o primeiro contato
+  if ((typeof isBrandNewContact !== "undefined" && isBrandNewContact) && contact?.id) {
+    dispatchAutomationEvent({
+      companyId: companyId,
+      unitId: unitId || null,
+      contactId: contact.id,
+      conversationId: conversationId || null,
+      triggerType: "contact_created",
+      metadata: {
+        name: contact.name,
+        phone: contact.phone,
+      },
+    }).catch((err) => console.error("[zernio:webhook] contact_created automation error:", err));
   }
 
   // 4. Inserir Mensagem com Deduplicação por remote_msg_id
