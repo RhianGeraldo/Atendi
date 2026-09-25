@@ -131,7 +131,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       let actualGroupName: string | null = null;
       let extractedLid: string | null = null;
 
-      let metadata: any = {};
+      const metadata: any = {};
 
       if (body.event === "Message" || body.event === "SendMessage") {
         // WhatsMeow / EvoGo native format
@@ -197,8 +197,17 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         }
 
         // Parse quoted messages and external ad reply
+        const rawContextInfo =
+          msg.extendedTextMessage?.contextInfo ||
+          msg.imageMessage?.contextInfo ||
+          msg.videoMessage?.contextInfo ||
+          msg.audioMessage?.contextInfo ||
+          msg.documentMessage?.contextInfo ||
+          msg.stickerMessage?.contextInfo ||
+          msg.ptvMessage?.contextInfo;
+
         if (body.data?.isQuoted && body.data?.quoted) {
-          quotedStanzaId = body.data.quoted.stanzaID;
+          quotedStanzaId = body.data.quoted.stanzaID || body.data.quoted.stanzaId;
           const qm = body.data.quoted.quotedMessage;
           quotedContent =
             qm?.conversation ||
@@ -212,10 +221,10 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
                   ? "📄 Documento"
                   : qm?.stickerMessage
                     ? "🖼️ Figurinha"
-                    : "Anexo");
-        } else if (msg.extendedTextMessage?.contextInfo?.stanzaId) {
-          quotedStanzaId = msg.extendedTextMessage.contextInfo.stanzaId;
-          const qm = msg.extendedTextMessage.contextInfo.quotedMessage;
+                    : null);
+        } else if (rawContextInfo?.stanzaID || rawContextInfo?.stanzaId) {
+          quotedStanzaId = rawContextInfo.stanzaID || rawContextInfo.stanzaId;
+          const qm = rawContextInfo.quotedMessage;
           quotedContent =
             qm?.conversation ||
             qm?.extendedTextMessage?.text ||
@@ -228,7 +237,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
                   ? "📄 Documento"
                   : qm?.stickerMessage
                     ? "🖼️ Figurinha"
-                    : "Anexo");
+                    : null);
         }
 
         const ci = msg.extendedTextMessage?.contextInfo;
@@ -530,9 +539,18 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         const msgType = messageData.message;
         const base64Content = body.base64 || messageData.base64;
 
-        if (msgType?.extendedTextMessage?.contextInfo?.stanzaId) {
-          quotedStanzaId = msgType.extendedTextMessage.contextInfo.stanzaId;
-          const qm = msgType.extendedTextMessage.contextInfo.quotedMessage;
+        const rawContextInfo2 =
+          msgType?.extendedTextMessage?.contextInfo ||
+          msgType?.imageMessage?.contextInfo ||
+          msgType?.videoMessage?.contextInfo ||
+          msgType?.audioMessage?.contextInfo ||
+          msgType?.documentMessage?.contextInfo ||
+          msgType?.stickerMessage?.contextInfo ||
+          msgType?.ptvMessage?.contextInfo;
+
+        if (rawContextInfo2?.stanzaID || rawContextInfo2?.stanzaId) {
+          quotedStanzaId = rawContextInfo2.stanzaID || rawContextInfo2.stanzaId;
+          const qm = rawContextInfo2.quotedMessage;
           quotedContent =
             qm?.conversation ||
             qm?.extendedTextMessage?.text ||
@@ -545,7 +563,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
                   ? "📄 Documento"
                   : qm?.stickerMessage
                     ? "🖼️ Figurinha"
-                    : "Anexo");
+                    : null);
         }
 
         const ci2 = msgType?.extendedTextMessage?.contextInfo;
@@ -814,7 +832,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         return;
       }
 
-      let { id: instance_id, company_id, unit_id } = instance;
+      const { id: instance_id, company_id, unit_id } = instance;
       // Se não tem unit_id, significa que é da Empresa Mãe (Matriz), o que é perfeitamente válido.
       // Mantemos unit_id como null ou undefined.
 
@@ -927,7 +945,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       let convsData = activeConv ? [activeConv] : null;
 
       if (!activeConv) {
-        let convQuery = supabaseAdmin
+        const convQuery = supabaseAdmin
           .from("conversations")
           .select("id, status, ai_active, ai_agent_id")
           .eq("contact_id", contactId)
@@ -1255,11 +1273,16 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       if (quotedStanzaId) {
         const { data: quotedMsg } = await supabaseAdmin
           .from("messages")
-          .select("id")
+          .select("id, content, media_type")
           .eq("remote_msg_id", quotedStanzaId)
-          .single();
+          .maybeSingle();
         if (quotedMsg) {
           quotedInternalId = quotedMsg.id;
+          if (!quotedContent || quotedContent === "Anexo") {
+            quotedContent =
+              quotedMsg.content ||
+              (quotedMsg.media_type ? `[${quotedMsg.media_type}]` : "Anexo");
+          }
         }
       }
 

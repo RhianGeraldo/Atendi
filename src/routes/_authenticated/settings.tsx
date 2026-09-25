@@ -111,7 +111,7 @@ export const Route = createFileRoute("/_authenticated/settings")({
 });
 
 function SettingsPage() {
-  const { profile, user } = useAuth();
+  const { profile, user, refreshProfile } = useAuth();
   const { selectedUnitId } = useUnit();
   const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
@@ -119,7 +119,13 @@ function SettingsPage() {
   const [stevoHost, setStevoHost] = useState("");
   const [token, setToken] = useState("");
   const [stevoToken, setStevoToken] = useState("");
-  const [useSignature, setUseSignature] = useState(profile?.use_signature ?? true);
+  const [useSignature, setUseSignature] = useState(profile?.use_signature !== false);
+
+  useEffect(() => {
+    if (profile?.use_signature !== undefined && profile?.use_signature !== null) {
+      setUseSignature(profile.use_signature);
+    }
+  }, [profile?.use_signature]);
 
   const [aiSettings, setAiSettings] = useState({
     keys: { openai: "", groq: "", openrouter: "" },
@@ -422,12 +428,13 @@ function SettingsPage() {
       if (error) throw error;
       return enabled;
     },
-    onSuccess: (enabled) => {
+    onSuccess: async (enabled) => {
       setUseSignature(enabled);
+      await refreshProfile();
       toast.success(enabled ? "Assinatura ativada!" : "Assinatura desativada!");
     },
     onError: (e) => {
-      setUseSignature(!useSignature); // Revert on error
+      setUseSignature(profile?.use_signature !== false); // Revert on error
       toast.error("Erro ao alterar assinatura", { description: (e as Error).message });
     },
   });
@@ -2221,7 +2228,7 @@ function SettingsPage() {
                         <label className="text-sm font-semibold">Assinatura de Mensagem</label>
                         <p className="text-xs text-muted-foreground">
                           Adicionar automaticamente seu nome ("*{profile?.name || "Seu Nome"}*:") ao
-                          final das mensagens enviadas aos clientes.
+                          início das mensagens enviadas aos clientes.
                         </p>
                       </div>
                       <Switch

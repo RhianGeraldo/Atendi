@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
-import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban } from "lucide-react";
+import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, XCircle, Check, Pencil, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { ChannelIcon } from "@/components/common/channel-icon";
@@ -14,6 +14,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -34,6 +45,7 @@ import { MergeContactDialog } from "./merge-contact-dialog";
 import { ContactBlockDialog } from "./contact-block-dialog";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import { blockContactAction, unblockContactAction } from "@/lib/api/chat.functions";
+import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 
 interface ContactDetailsSheetProps {
   contactId: string | null;
@@ -83,14 +95,16 @@ function ContactTasks({ contactId }: { contactId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <CheckSquare className="h-5 w-5 text-muted-foreground" />
-          <h3 className="text-lg font-semibold">Tarefas</h3>
+      <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
+        <div>
+          <span className="text-xs font-semibold text-foreground">
+            {tasks?.length || 0} {tasks?.length === 1 ? "Tarefa" : "Tarefas"}
+          </span>
+          <p className="text-[10px] text-muted-foreground">Follow-ups e lembretes</p>
         </div>
         <TaskDialog contactId={contactId}>
-          <Button size="sm" variant="outline">
-            <Plus className="h-4 w-4 mr-1" /> Nova Tarefa
+          <Button size="sm" className="h-7 px-2.5 text-xs gap-1 shadow-xs font-medium">
+            <Plus className="h-3.5 w-3.5" /> Nova Tarefa
           </Button>
         </TaskDialog>
       </div>
@@ -216,10 +230,12 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2 mb-6">
-        <Megaphone className="h-5 w-5 text-muted-foreground" />
-        <h3 className="text-lg font-semibold">Jornada de Anúncios</h3>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
+        <div>
+          <span className="text-xs font-semibold text-foreground">Jornada de Anúncios</span>
+          <p className="text-[10px] text-muted-foreground">Campanhas e anúncios de origem</p>
+        </div>
       </div>
       
       <div className="flex flex-col">
@@ -451,10 +467,12 @@ function ContactJourney({ contactId }: { contactId: string }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2 mb-6">
-        <Map className="h-5 w-5 text-muted-foreground" />
-        <h3 className="text-lg font-semibold">Jornada do Lead</h3>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
+        <div>
+          <span className="text-xs font-semibold text-foreground">Jornada do Lead</span>
+          <p className="text-[10px] text-muted-foreground">Linha do tempo consolidada</p>
+        </div>
       </div>
       
       <div className="flex flex-col">
@@ -703,8 +721,121 @@ function ContactJourney({ contactId }: { contactId: string }) {
   );
 }
 
-export function ContactDetailsTabs({ contactId, conversationId }: { contactId: string; conversationId?: string }) {
-  const [activeTab, setActiveTab] = useState("jornada");
+function OpportunityValueEditor({ 
+  opp, 
+  onSave, 
+  isPending 
+}: { 
+  opp: any; 
+  onSave: (val: number) => void; 
+  isPending?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(String(opp.value || 0));
+
+  useEffect(() => {
+    if (open) {
+      setValue(opp.value !== undefined && opp.value !== null ? String(opp.value) : "0");
+    }
+  }, [opp.value, open]);
+
+  const handleSave = () => {
+    const cleanStr = String(value).trim().replace(/\s/g, '').replace(',', '.');
+    const num = parseFloat(cleanStr);
+    if (isNaN(num) || num < 0) {
+      toast.error("Por favor, informe um valor válido.");
+      return;
+    }
+    if (num !== Number(opp.value)) {
+      onSave(num);
+    }
+    setOpen(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={isPending}
+          className="group/val text-right hover:bg-muted/60 px-1.5 py-0.5 rounded transition-all cursor-pointer flex items-center gap-1 select-none focus:outline-none focus:ring-1 focus:ring-ring shrink-0"
+          title="Clique para editar o valor"
+        >
+          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(opp.value || 0)}
+          </span>
+          <Pencil className="h-2.5 w-2.5 text-muted-foreground/40 group-hover/val:text-primary transition-colors shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-56 p-3 shadow-xl z-50">
+        <div className="space-y-2.5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-foreground">Alterar Valor</span>
+            <span className="text-[10px] text-muted-foreground font-mono">BRL (R$)</span>
+          </div>
+          <div className="relative flex items-center">
+            <span className="absolute left-2.5 text-xs text-muted-foreground font-mono font-medium">R$</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              autoFocus
+              placeholder="0,00"
+              className="h-8 w-full pl-8 pr-2 text-xs font-mono font-bold bg-background border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
+            />
+          </div>
+          <div className="flex justify-end gap-1.5 pt-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs px-2"
+              onClick={() => setOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 text-xs px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+              onClick={handleSave}
+              disabled={isPending}
+            >
+              Salvar
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+export function ContactDetailsTabs({ 
+  contactId, 
+  conversationId, 
+  defaultTab = "opportunities" 
+}: { 
+  contactId: string; 
+  conversationId?: string; 
+  defaultTab?: string;
+}) {
+  const [activeTab, setActiveTab] = useState(defaultTab);
+
+  useEffect(() => {
+    setActiveTab(defaultTab);
+  }, [contactId, defaultTab]);
 
   useEffect(() => {
     const handleSwitch = (e: any) => {
@@ -813,6 +944,7 @@ export function ContactDetailsTabs({ contactId, conversationId }: { contactId: s
           created_at,
           stage_id,
           contact_id,
+          status,
           pipeline_stages (
             id,
             name,
@@ -829,6 +961,167 @@ export function ContactDetailsTabs({ contactId, conversationId }: { contactId: s
       if (error) throw error;
       return data;
     },
+  });
+
+  const qc = useQueryClient();
+
+  // Fetch all stages for the pipelines referenced by the contact's opportunities
+  const pipelineIds = React.useMemo(() => {
+    if (!opportunities) return [];
+    const ids = new Set<string>();
+    opportunities.forEach((opp: any) => {
+      const pId = opp.pipeline_stages?.pipeline_id;
+      if (pId) ids.add(pId);
+    });
+    return Array.from(ids);
+  }, [opportunities]);
+
+  const { data: pipelineStages } = useQuery({
+    queryKey: ["opportunity-pipeline-stages", pipelineIds],
+    enabled: pipelineIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pipeline_stages")
+        .select("id, name, color, order, pipeline_id")
+        .in("pipeline_id", pipelineIds)
+        .order("order", { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const moveOpportunityStage = useMutation({
+    mutationFn: async ({ oppId, newStageId, targetStageName }: { oppId: string; newStageId: string; targetStageName: string }) => {
+      const { error: oppError } = await supabase
+        .from("opportunities")
+        .update({ stage_id: newStageId })
+        .eq("id", oppId);
+      if (oppError) throw oppError;
+
+      // Record stage movement in opportunity_history
+      const { error: histError } = await supabase
+        .from("opportunity_history")
+        .insert({
+          opportunity_id: oppId,
+          user_id: profile?.id,
+          action_type: "stage_change",
+          description: `Oportunidade movida para a etapa "${targetStageName}"`
+        });
+      if (histError && histError.code !== '42P01') {
+        console.warn("Could not record stage history:", histError);
+      }
+
+      // Dispara evento CAPI se empresa estiver disponível
+      const companyId = profile?.company_id || contact?.company_id;
+      if (companyId) {
+        triggerOpportunityCapiAction({
+          data: {
+            companyId,
+            opportunityId: oppId,
+            triggerType: "stage_change",
+            stageId: newStageId,
+          }
+        }).catch(err => console.warn("[CAPI] Falha ao disparar evento de etapa:", err));
+      }
+    },
+    onSuccess: (_, variables) => {
+      toast.success(`Etapa alterada para "${variables.targetStageName}"`);
+      qc.invalidateQueries({ queryKey: ["contact-opportunities", contactId] });
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["contact-journey", contactId] });
+    },
+    onError: (err: any) => {
+      toast.error("Erro ao alterar etapa: " + (err.message || "Tente novamente"));
+    }
+  });
+
+  const changeOpportunityStatus = useMutation({
+    mutationFn: async ({ oppId, newStatus }: { oppId: string; newStatus: "won" | "lost" | "open" }) => {
+      const { error: oppError } = await supabase
+        .from("opportunities")
+        .update({ status: newStatus })
+        .eq("id", oppId);
+      if (oppError) throw oppError;
+
+      let statusText = "";
+      if (newStatus === "won") statusText = "Oportunidade marcada como GANHA 🎉";
+      else if (newStatus === "lost") statusText = "Oportunidade marcada como PERDIDA ❌";
+      else statusText = "Oportunidade REABERTA no funil 🔄";
+
+      // Save status change in dedicated opportunity_history table
+      const { error: histError } = await supabase
+        .from("opportunity_history")
+        .insert({
+          opportunity_id: oppId,
+          user_id: profile?.id,
+          action_type: "status_change",
+          description: statusText
+        });
+      if (histError && histError.code !== '42P01') {
+        console.warn("Could not record status history:", histError);
+      }
+
+      // Se a oportunidade foi marcada como GANHA, dispara evento CAPI de Purchase para a Meta
+      const companyId = profile?.company_id || contact?.company_id;
+      if (newStatus === "won" && companyId) {
+        triggerOpportunityCapiAction({
+          data: {
+            companyId,
+            opportunityId: oppId,
+            triggerType: "won",
+          }
+        }).catch(err => console.warn("[CAPI] Falha ao disparar evento de Purchase:", err));
+      }
+
+      return newStatus;
+    },
+    onSuccess: (newStatus) => {
+      toast.success(
+        newStatus === 'won' 
+          ? "Oportunidade marcada como GANHA! 🎉" 
+          : newStatus === 'lost' 
+            ? "Oportunidade marcada como PERDIDA!" 
+            : "Oportunidade REABERTA no funil!"
+      );
+      qc.invalidateQueries({ queryKey: ["contact-opportunities", contactId] });
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["contact-journey", contactId] });
+      qc.invalidateQueries({ queryKey: ["opportunity-history"] });
+    },
+    onError: (e: any) => toast.error("Erro ao alterar status: " + (e.message || "Tente novamente"))
+  });
+
+  const updateOpportunityValue = useMutation({
+    mutationFn: async ({ oppId, newValue }: { oppId: string; newValue: number }) => {
+      const { error: oppError } = await supabase
+        .from("opportunities")
+        .update({ value: newValue })
+        .eq("id", oppId);
+      if (oppError) throw oppError;
+
+      const formattedVal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(newValue);
+
+      // Record value change in opportunity_history table
+      const { error: histError } = await supabase
+        .from("opportunity_history")
+        .insert({
+          opportunity_id: oppId,
+          user_id: profile?.id,
+          action_type: "value_change",
+          description: `Valor alterado para ${formattedVal}`
+        });
+      if (histError && histError.code !== '42P01') {
+        console.warn("Could not record value history:", histError);
+      }
+    },
+    onSuccess: (_, variables) => {
+      const formattedVal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(variables.newValue);
+      toast.success(`Valor atualizado para ${formattedVal}`);
+      qc.invalidateQueries({ queryKey: ["contact-opportunities", contactId] });
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["contact-journey", contactId] });
+    },
+    onError: (e: any) => toast.error("Erro ao alterar valor: " + (e.message || "Tente novamente"))
   });
 
   const getStatusColor = (status: string) => {
@@ -869,39 +1162,116 @@ export function ContactDetailsTabs({ contactId, conversationId }: { contactId: s
     );
   }
 
+  const totalOppValue = opportunities?.reduce((sum: number, opp: any) => sum + (Number(opp.value) || 0), 0) || 0;
+
+  const isMoreActive = ["jornada", "conversations", "ads"].includes(activeTab);
+
+  const moreLabels: Record<string, { label: string; icon: any }> = {
+    jornada: { label: "Jornada", icon: Map },
+    conversations: { label: "Histórico", icon: MessageSquare },
+    ads: { label: "Anúncios", icon: Megaphone },
+  };
+
+  const activeMore = isMoreActive ? moreLabels[activeTab] : null;
+  const MoreIcon = activeMore ? activeMore.icon : MoreHorizontal;
+
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col h-full min-h-0 w-full">
-      <div className="px-4 pt-4 border-b w-full">
-        <TabsList className="grid w-full grid-cols-3 h-auto p-1 bg-muted/50 mb-3 gap-1">
-          <TabsTrigger value="jornada" className="px-1 py-1.5 text-[10px] sm:text-[11px] font-bold truncate">Jornada</TabsTrigger>
-          <TabsTrigger value="observacoes" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Notas</TabsTrigger>
-          <TabsTrigger value="conversations" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Atendimentos</TabsTrigger>
-          <TabsTrigger value="opportunities" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">CRM</TabsTrigger>
-          <TabsTrigger value="tasks" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Tarefas</TabsTrigger>
-          <TabsTrigger value="ads" className="px-1 py-1.5 text-[10px] sm:text-[11px] truncate">Anúncios</TabsTrigger>
+      <div className="px-3 pt-3 pb-2 border-b w-full bg-card">
+        <TabsList className="grid w-full grid-cols-4 h-9 p-0.5 bg-muted/70 gap-0.5 rounded-lg">
+          <TabsTrigger 
+            value="opportunities" 
+            className="gap-1 px-1.5 py-1 text-xs font-medium data-[state=active]:font-semibold"
+          >
+            <Target className="h-3.5 w-3.5 text-primary shrink-0" />
+            <span className="truncate">CRM</span>
+            {opportunities && opportunities.length > 0 && (
+              <span className="text-[10px] px-1 rounded-full bg-primary/10 text-primary font-bold">
+                {opportunities.length}
+              </span>
+            )}
+          </TabsTrigger>
+
+          <TabsTrigger 
+            value="observacoes" 
+            className="gap-1 px-1.5 py-1 text-xs font-medium data-[state=active]:font-semibold"
+          >
+            <Edit2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="truncate">Notas</span>
+          </TabsTrigger>
+
+          <TabsTrigger 
+            value="tasks" 
+            className="gap-1 px-1.5 py-1 text-xs font-medium data-[state=active]:font-semibold"
+          >
+            <CheckSquare className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="truncate">Tarefas</span>
+          </TabsTrigger>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium ring-offset-background cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  isMoreActive
+                    ? "bg-background text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
+                )}
+              >
+                <MoreIcon className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{activeMore ? activeMore.label : "Mais"}</span>
+                <ChevronDown className="h-3 w-3 opacity-60 shrink-0" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48 shadow-lg">
+              <DropdownMenuItem 
+                onClick={() => setActiveTab("jornada")} 
+                className={cn("gap-2 text-xs cursor-pointer", activeTab === "jornada" && "bg-accent font-semibold text-primary")}
+              >
+                <Map className="h-4 w-4" />
+                <span>Jornada do Contato</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                onClick={() => setActiveTab("conversations")} 
+                className={cn("gap-2 text-xs cursor-pointer", activeTab === "conversations" && "bg-accent font-semibold text-primary")}
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span>Histórico de Atendimentos</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                onClick={() => setActiveTab("ads")} 
+                className={cn("gap-2 text-xs cursor-pointer", activeTab === "ads" && "bg-accent font-semibold text-primary")}
+              >
+                <Megaphone className="h-4 w-4" />
+                <span>Origem / Anúncios</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </TabsList>
       </div>
 
-      <div className="flex-1 p-4 overflow-y-auto overflow-x-hidden min-w-0">
-
-
-
+      <div className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-w-0">
         <TabsContent value="jornada" className="mt-0">
           <ContactJourney contactId={contactId} />
         </TabsContent>
 
-        <TabsContent value="observacoes" className="mt-0">
-          <div className="flex items-center gap-2 mb-6">
-            <History className="h-5 w-5 text-muted-foreground" />
-            <h3 className="text-lg font-semibold">Observações</h3>
+        <TabsContent value="observacoes" className="mt-0 space-y-3">
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
+            <div>
+              <span className="text-xs font-semibold text-foreground">Notas e Observações</span>
+              <p className="text-[10px] text-muted-foreground">Anotações internas sobre o contato</p>
+            </div>
           </div>
           <ContactNotes contactId={contactId} />
         </TabsContent>
 
-        <TabsContent value="conversations" className="mt-0">
-          <div className="flex items-center gap-2 mb-6">
-            <History className="h-5 w-5 text-muted-foreground" />
-            <h3 className="text-lg font-semibold">Atendimentos</h3>
+        <TabsContent value="conversations" className="mt-0 space-y-3">
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
+            <div>
+              <span className="text-xs font-semibold text-foreground">Histórico de Atendimentos</span>
+              <p className="text-[10px] text-muted-foreground">Tickets e sessões anteriores</p>
+            </div>
           </div>
 
           {isLoadingSessions ? (
@@ -1044,15 +1414,27 @@ export function ContactDetailsTabs({ contactId, conversationId }: { contactId: s
           )}
         </TabsContent>
 
-        <TabsContent value="opportunities" className="mt-0">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-2">
-              <Target className="h-5 w-5 text-muted-foreground" />
-              <h3 className="text-lg font-semibold">Oportunidades</h3>
+        <TabsContent value="opportunities" className="mt-0 space-y-3">
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-foreground">
+                  {opportunities?.length || 0} {opportunities?.length === 1 ? "Oportunidade" : "Oportunidades"}
+                </span>
+                {totalOppValue > 0 && (
+                  <Badge variant="secondary" className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20 px-1.5 py-0 h-4">
+                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalOppValue)}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Negócios vinculados no CRM
+              </p>
             </div>
+
             <OpportunityDialog defaultContactId={contactId}>
-              <Button size="sm" variant="outline" className="h-8">
-                <Plus className="h-4 w-4 mr-1" /> Nova
+              <Button size="sm" className="h-7 px-2.5 text-xs gap-1 shadow-xs font-medium">
+                <Plus className="h-3.5 w-3.5" /> Nova
               </Button>
             </OpportunityDialog>
           </div>
@@ -1062,56 +1444,246 @@ export function ContactDetailsTabs({ contactId, conversationId }: { contactId: s
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : !opportunities || opportunities.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground border rounded-lg border-dashed">
-              Nenhuma oportunidade registrada para este contato.
+            <div className="text-center py-8 px-4 rounded-xl border border-dashed border-border/80 bg-muted/20 flex flex-col items-center justify-center space-y-2.5">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                <Target className="h-5 w-5" />
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-xs font-semibold text-foreground">Nenhuma oportunidade em aberto</p>
+                <p className="text-[11px] text-muted-foreground max-w-[220px]">
+                  Cadastre este lead no funil de vendas para acompanhar a negociação.
+                </p>
+              </div>
+              <OpportunityDialog defaultContactId={contactId}>
+                <Button size="sm" variant="default" className="h-8 text-xs gap-1.5 mt-1">
+                  <Plus className="h-3.5 w-3.5" /> Criar 1ª Oportunidade
+                </Button>
+              </OpportunityDialog>
             </div>
           ) : (
-            <div className="space-y-4">
-              {opportunities.map((opp: any) => (
-                <div key={opp.id} className="relative group flex flex-col gap-3 p-4 rounded-lg border bg-card text-card-foreground shadow-sm hover:shadow-md transition-all">
-                  <OpportunityDialog opportunity={opp}>
-                    <div className="cursor-pointer space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="font-medium hover:text-primary transition-colors">{opp.title}</div>
-                          {opp.pipeline_stages?.pipelines?.name && (
-                            <div className="text-xs text-muted-foreground mt-0.5">
-                              Funil: {opp.pipeline_stages.pipelines.name}
-                            </div>
-                          )}
-                        </div>
-                        {opp.pipeline_stages && (
-                          <Badge style={{ backgroundColor: opp.pipeline_stages.color, color: '#fff' }} variant="outline">
-                            {opp.pipeline_stages.name}
-                          </Badge>
+            <div className="space-y-2.5">
+              {opportunities.map((opp: any) => {
+                const oppPipelineId = opp.pipeline_stages?.pipeline_id;
+                const stages = pipelineStages?.filter((s: any) => !oppPipelineId || s.pipeline_id === oppPipelineId) || [];
+                const isWon = opp.status === 'won';
+                const isLost = opp.status === 'lost';
+                const isOpen = !isWon && !isLost;
+
+                return (
+                  <div 
+                    key={opp.id} 
+                    className="relative group rounded-xl border border-border/70 bg-card p-3 shadow-xs hover:shadow-md hover:border-primary/40 transition-all space-y-2.5"
+                  >
+                    {/* Linha 1: Título e Funil (com link externo para o pipeline) */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <OpportunityDialog opportunity={opp}>
+                          <span 
+                            className="font-semibold text-sm text-foreground hover:text-primary transition-colors cursor-pointer line-clamp-1 block" 
+                            title={opp.title}
+                          >
+                            {opp.title}
+                          </span>
+                        </OpportunityDialog>
+                        {opp.pipeline_stages?.pipelines?.name && (
+                          <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5 truncate">
+                            <span className="opacity-70">Funil:</span>
+                            <span className="font-medium text-foreground/80">{opp.pipeline_stages.pipelines.name}</span>
+                          </div>
                         )}
                       </div>
-                      
-                      <Separator />
-                      
-                      <div className="flex items-center justify-between text-sm">
-                        <div className="flex items-center gap-1.5 text-green-600 font-medium">
-                          <DollarSign className="h-4 w-4" />
-                          <span>
-                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(opp.value || 0)}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <CalendarDays className="h-3 w-3" />
-                          <span>{format(new Date(opp.created_at), "dd/MM/yyyy", { locale: ptBR })}</span>
-                        </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Link 
+                          to="/pipeline" 
+                          className="h-6 w-6 rounded-md bg-muted/60 flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" 
+                          title="Ver no Funil / Pipeline"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </Link>
                       </div>
                     </div>
-                  </OpportunityDialog>
 
-                  {/* Link to CRM */}
-                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Link to="/pipeline" className="h-7 w-7 rounded-full bg-background/80 backdrop-blur border flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-colors" title="Ver no CRM">
-                      <ExternalLink className="h-3 w-3" />
-                    </Link>
+                    {/* Linha 2: Etapa (com Dropdown direto) + Valor editável */}
+                    <div className="flex items-center justify-between gap-2 pt-0.5 min-w-0">
+                      <div className="min-w-0 flex-1">
+                        {stages.length === 0 ? (
+                          opp.pipeline_stages ? (
+                            <Badge 
+                              variant="outline" 
+                              className="text-[10px] font-medium px-2 py-0.5 border truncate max-w-[140px]"
+                              style={{ 
+                                backgroundColor: `${opp.pipeline_stages.color || '#3b82f6'}15`, 
+                                color: opp.pipeline_stages.color || '#3b82f6',
+                                borderColor: `${opp.pipeline_stages.color || '#3b82f6'}40`
+                              }}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full mr-1.5 shrink-0" style={{ backgroundColor: opp.pipeline_stages.color || '#3b82f6' }} />
+                              <span className="truncate">{opp.pipeline_stages.name}</span>
+                            </Badge>
+                          ) : null
+                        ) : (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                disabled={moveOpportunityStage.isPending}
+                                className={cn(
+                                  "inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full border transition-all cursor-pointer hover:opacity-90 active:scale-95 select-none focus:outline-none focus:ring-1 focus:ring-ring max-w-full",
+                                  moveOpportunityStage.isPending && "opacity-50 cursor-not-allowed"
+                                )}
+                                style={{ 
+                                  backgroundColor: `${opp.pipeline_stages?.color || '#3b82f6'}15`, 
+                                  color: opp.pipeline_stages?.color || '#3b82f6',
+                                  borderColor: `${opp.pipeline_stages?.color || '#3b82f6'}40`
+                                }}
+                                title="Clique para alterar a etapa diretamente"
+                              >
+                                <span 
+                                  className="w-1.5 h-1.5 rounded-full shrink-0" 
+                                  style={{ backgroundColor: opp.pipeline_stages?.color || '#3b82f6' }} 
+                                />
+                                <span className="truncate font-semibold max-w-[110px]">
+                                  {opp.pipeline_stages?.name || "Sem Etapa"}
+                                </span>
+                                <ChevronDown className="h-3 w-3 opacity-60 shrink-0" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="w-52 p-1 shadow-lg z-50">
+                              <div className="px-2 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/40 mb-1">
+                                Mover para etapa:
+                              </div>
+                              {stages.map((stage: any) => {
+                                const isCurrent = stage.id === opp.stage_id;
+                                return (
+                                  <DropdownMenuItem
+                                    key={stage.id}
+                                    disabled={isCurrent || moveOpportunityStage.isPending}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!isCurrent) {
+                                        moveOpportunityStage.mutate({
+                                          oppId: opp.id,
+                                          newStageId: stage.id,
+                                          targetStageName: stage.name,
+                                        });
+                                      }
+                                    }}
+                                    className={cn(
+                                      "flex items-center justify-between text-xs py-1.5 px-2 rounded-md cursor-pointer transition-colors",
+                                      isCurrent && "bg-muted font-bold cursor-default"
+                                    )}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span
+                                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                                        style={{ backgroundColor: stage.color || '#3b82f6' }}
+                                      />
+                                      <span className="truncate">{stage.name}</span>
+                                    </div>
+                                    {isCurrent && (
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0 ml-1" />
+                                    )}
+                                  </DropdownMenuItem>
+                                );
+                              })}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
+
+                      <OpportunityValueEditor
+                        opp={opp}
+                        onSave={(val) => updateOpportunityValue.mutate({ oppId: opp.id, newValue: val })}
+                        isPending={updateOpportunityValue.isPending}
+                      />
+                    </div>
+
+                    {/* Linha 3: Data de Previsão ou Criação */}
+                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <CalendarDays className="h-3 w-3 shrink-0 opacity-70" />
+                      <span>
+                        {opp.expected_close_date 
+                          ? `Previsão: ${format(new Date(opp.expected_close_date), "dd/MM/yyyy", { locale: ptBR })}`
+                          : `Criado em: ${format(new Date(opp.created_at), "dd/MM/yyyy", { locale: ptBR })}`
+                        }
+                      </span>
+                    </div>
+
+                    {/* Linha 4: Ações de Status (Ganho / Perdido / Reabrir) */}
+                    <div className="pt-2 border-t border-border/40">
+                      {isOpen ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={changeOpportunityStatus.isPending}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: 'won' });
+                            }}
+                            className="inline-flex items-center justify-center gap-1.5 h-7 px-2 text-xs font-semibold rounded-lg border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-600 hover:text-white transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                            title="Marcar oportunidade como Ganha"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                            <span>Ganho</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={changeOpportunityStatus.isPending}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: 'lost' });
+                            }}
+                            className="inline-flex items-center justify-center gap-1.5 h-7 px-2 text-xs font-semibold rounded-lg border border-rose-500/40 text-rose-600 dark:text-rose-400 bg-rose-500/10 hover:bg-rose-600 hover:text-white transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                            title="Marcar oportunidade como Perdida"
+                          >
+                            <XCircle className="h-3.5 w-3.5 shrink-0" />
+                            <span>Perdido</span>
+                          </button>
+                        </div>
+                      ) : isWon ? (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                            <span>Ganho 🎉</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: 'open' });
+                            }}
+                            disabled={changeOpportunityStatus.isPending}
+                            className="text-xs text-muted-foreground hover:text-foreground font-medium hover:underline cursor-pointer transition-colors"
+                            title="Reabrir negócio no funil"
+                          >
+                            Reabrir
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-xs font-semibold">
+                            <XCircle className="h-3.5 w-3.5 shrink-0" />
+                            <span>Perdido ❌</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: 'open' });
+                            }}
+                            disabled={changeOpportunityStatus.isPending}
+                            className="text-xs text-muted-foreground hover:text-foreground font-medium hover:underline cursor-pointer transition-colors"
+                            title="Reabrir negócio no funil"
+                          >
+                            Reabrir
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </TabsContent>

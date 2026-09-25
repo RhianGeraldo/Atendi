@@ -11,6 +11,7 @@ import {
   sendEvogoReaction,
   editEvogoMessage,
   deleteEvogoMessage,
+  checkEvogoUser,
 } from "../evogo";
 import {
   sendStevoText,
@@ -19,11 +20,134 @@ import {
   sendStevoReaction,
   editStevoMessage,
   deleteStevoMessage,
+  checkStevoUser,
 } from "../stevo";
 import { getPhoneVariants } from "@/lib/utils";
 import { getCompanyPlaybookSummary } from "./training.functions";
 import { ZernioClient } from "../canais/zernio/client";
 import { persistirAvatarContatoNoStorage } from "../avatar-storage";
+
+const chatJidCache = new Map<string, { jid: string; expiresAt: number }>();
+
+async function resolveWhatsAppChatJid({
+  conversationId,
+  channel,
+  remoteId,
+  rawPhone,
+  messageMetadata,
+  host,
+  token,
+  provider,
+}: {
+  conversationId: string;
+  channel?: string | null;
+  remoteId?: string | null;
+  rawPhone?: string | null;
+  messageMetadata?: any;
+  host?: string | null;
+  token?: string | null;
+  provider?: string | null;
+}): Promise<string> {
+  // 1. Group checks: always use group JID
+  const isGroup =
+    channel === "whatsapp_group" ||
+    (remoteId && remoteId.includes("@g.us")) ||
+    (rawPhone && rawPhone.includes("@g.us"));
+
+  if (isGroup) {
+    if (remoteId && remoteId.includes("@g.us")) return remoteId;
+    if (rawPhone && rawPhone.includes("@g.us")) return rawPhone;
+    if (rawPhone) return `${rawPhone.replace(/\D/g, "")}@g.us`;
+    if (remoteId) return `${remoteId}@g.us`;
+  }
+
+  // Check in-memory cache for fast repeated sends (TTL 15 min)
+  if (conversationId && !isGroup) {
+    const cached = chatJidCache.get(conversationId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.jid;
+    }
+  }
+
+  const cacheAndReturn = (jid: string): string => {
+    if (conversationId && !isGroup && jid && jid.includes("@")) {
+      chatJidCache.set(conversationId, { jid, expiresAt: Date.now() + 15 * 60 * 1000 });
+    }
+    return jid;
+  };
+
+  // 2. Direct metadata on the message being edited/deleted/reacted/quoted
+  if (messageMetadata && typeof messageMetadata === "object" && messageMetadata.chat_jid) {
+    return cacheAndReturn(String(messageMetadata.chat_jid));
+  }
+
+  // 3. If remoteId is already an explicit WhatsApp user JID or LID
+  if (remoteId && (remoteId.includes("@s.whatsapp.net") || remoteId.includes("@lid"))) {
+    return cacheAndReturn(remoteId.replace(/:\d+@/, "@"));
+  }
+
+  // 4. Query messages in the conversation for participant_jid from 'contact'
+  // When contacts send messages, WhatsApp records their exact session JID (e.g. without 9th digit)
+  const { data: contactMsg } = await supabaseAdmin
+    .from("messages")
+    .select("participant_jid")
+    .eq("conversation_id", conversationId)
+    .eq("sender_type", "contact")
+    .not("participant_jid", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (contactMsg?.participant_jid && !contactMsg.participant_jid.includes("-")) {
+    return cacheAndReturn(contactMsg.participant_jid.replace(/:\d+@/, "@"));
+  }
+
+  // 5. Query any recent message in the conversation that has chat_jid in metadata
+  const { data: metaMsgs } = await supabaseAdmin
+    .from("messages")
+    .select("metadata")
+    .eq("conversation_id", conversationId)
+    .not("metadata", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  if (metaMsgs && metaMsgs.length > 0) {
+    for (const m of metaMsgs) {
+      if (m.metadata && typeof m.metadata === "object" && (m.metadata as any).chat_jid) {
+        return cacheAndReturn(String((m.metadata as any).chat_jid));
+      }
+    }
+  }
+
+  // 6. Query WhatsApp servers via /user/check using EvoGo/Stevo
+  const cleanPhone = (rawPhone || "").replace(/\D/g, "");
+  if (host && token && cleanPhone) {
+    try {
+      const variants = getPhoneVariants(cleanPhone);
+      const queryList = variants.length > 0 ? variants : [cleanPhone];
+      let checkData: any = null;
+
+      if (provider === "stevo") {
+        checkData = await checkStevoUser({ host, token, numbers: queryList });
+      } else {
+        checkData = await checkEvogoUser({ host, token, numbers: queryList });
+      }
+
+      const users = checkData?.data?.Users;
+      if (Array.isArray(users) && users.length > 0) {
+        const found = users.find((u: any) => u.IsInWhatsapp && (u.JID || u.RemoteJID));
+        if (found?.JID) return cacheAndReturn(String(found.JID).replace(/:\d+@/, "@"));
+        if (found?.RemoteJID) return cacheAndReturn(String(found.RemoteJID).replace(/:\d+@/, "@"));
+      }
+    } catch (e) {
+      console.warn("[resolveWhatsAppChatJid] /user/check failed, falling back to clean phone:", e);
+    }
+  }
+
+  // 7. Fallback: clean phone + @s.whatsapp.net
+  const fallback = cleanPhone ? `${cleanPhone}@s.whatsapp.net` : `${rawPhone}@s.whatsapp.net`;
+  return cacheAndReturn(fallback);
+}
 
 export const sendMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -42,16 +166,45 @@ export const sendMessageAction = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const targetConversationId = data.conversationId;
 
-    const { data: conv, error: convErr } = await supabase
+    // 1. Parallel fetch: conversation, user profile (signature), and quoted message (if replying)
+    const convPromise = supabase
       .from("conversations")
       .select(
         "status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, assigned_agent_id, contacts(phone, whatsapp_lid, company_id, instagram_id, messenger_id)",
       )
-      .eq("id", data.conversationId)
+      .eq("id", targetConversationId)
       .single();
 
-    if (convErr || !conv) {
+    const profilePromise = supabase
+      .from("profiles")
+      .select("name, use_signature")
+      .eq("id", userId)
+      .single();
+
+    const qMsgPromise = data.quotedInternalId
+      ? supabaseAdmin
+          .from("messages")
+          .select("id, remote_msg_id, sender_type, participant_jid, content, media_type")
+          .eq("id", data.quotedInternalId)
+          .maybeSingle()
+      : data.quotedMessageId
+        ? supabaseAdmin
+            .from("messages")
+            .select("id, remote_msg_id, sender_type, participant_jid, content, media_type")
+            .eq("remote_msg_id", data.quotedMessageId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null });
+
+    const [convRes, profileRes, qMsgRes] = await Promise.all([
+      convPromise,
+      profilePromise,
+      qMsgPromise,
+    ]);
+
+    const conv = convRes.data;
+    if (convRes.error || !conv) {
       throw new Error("Conversation not found or access denied.");
     }
 
@@ -66,21 +219,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       );
     }
 
-    const targetConversationId = data.conversationId;
-
-    // O identificador final será resolvido após descobrir o provedor
-
-    /**
-     * O canal, e só então o destinatário.
-     *
-     * Eram ~150 linhas idênticas às de `message-sender.ts`, deduzindo o provedor
-     * a partir do `channel` da conversa. Quem resolve agora é `abrirCanal`, que
-     * parte da instância — ver `src/lib/canais/motor.ts`.
-     *
-     * **Nota interna não abre canal.** Ela não atravessa provedor nenhum, e
-     * exigir conexão para escrevê-la impediria anotar numa conversa cuja
-     * instância foi removida — que é justamente quando alguém quer anotar.
-     */
+    // 2. O canal, e só então o destinatário.
     let canal: CanalAberto | null = null;
     let destino: Destinatario | null = null;
 
@@ -101,6 +240,19 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     const resolvedInstanceId = canal?.id ?? conv.whatsapp_instance_id;
     const phone = destino?.identificador ?? "";
 
+    const phoneToSend =
+      !data.isInternal && (provider === "evogo" || provider === "stevo")
+        ? await resolveWhatsAppChatJid({
+            conversationId: targetConversationId,
+            channel: conv.channel,
+            remoteId: conv.remote_id,
+            rawPhone: phone,
+            host,
+            token,
+            provider,
+          })
+        : phone;
+
     // Os provedores de sessão precisam dos três; os da Meta, de nenhum deles.
     if (
       canal &&
@@ -113,51 +265,61 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       );
     }
 
-    // 3. Get user profile for signature
-    const { data: userProfile } = await supabase
-      .from("profiles")
-      .select("name, use_signature")
-      .eq("id", userId)
-      .single();
-
+    // 3. User signature
+    const userProfile = profileRes.data;
     let textToSend = data.text || "";
-    if (!data.isInternal && userProfile?.use_signature && userProfile?.name) {
-      textToSend = textToSend.trim()
-        ? `*${userProfile.name}*:\n${textToSend}`
-        : `*${userProfile.name}*:`;
+    const shouldSign = !data.isInternal && (userProfile?.use_signature !== false) && !!userProfile?.name;
+    if (shouldSign) {
+      const signaturePrefix = `*${userProfile.name}*:`;
+      if (!textToSend.startsWith(signaturePrefix)) {
+        textToSend = textToSend.trim()
+          ? `${signaturePrefix}\n${textToSend}`
+          : signaturePrefix;
+      }
     }
 
-    // 4. Send message via EvoGo
+    // 4. Send message via EvoGo / Stevo
     let evogoResponse: any = null;
     let mediaUrlToSend = data.mediaBase64;
-    let finalParticipant = data.quotedParticipant;
     let finalMessageId = data.quotedMessageId;
+    let finalParticipant = data.quotedParticipant;
+    let quotedContent = data.quotedContent;
 
-    // Fallback: If UI forgot to send the remote_msg_id, but sent the internal ID, fetch it from the DB!
+    const qMsg = qMsgRes.data;
     let quotedSenderType = "contact";
-    if (data.quotedInternalId) {
-      const { data: qMsg } = await supabaseAdmin
-        .from("messages")
-        .select("remote_msg_id, sender_type")
-        .eq("id", data.quotedInternalId)
-        .single();
 
-      if (!finalMessageId && qMsg?.remote_msg_id) {
+    if (qMsg) {
+      if (qMsg.remote_msg_id) {
         finalMessageId = qMsg.remote_msg_id;
       }
-      if (qMsg?.sender_type) {
+      if (qMsg.sender_type) {
         quotedSenderType = qMsg.sender_type;
+      }
+      if (!quotedContent) {
+        quotedContent =
+          qMsg.content || (qMsg.media_type ? `[${qMsg.media_type}]` : undefined);
+      }
+      if (!data.quotedInternalId) {
+        data.quotedInternalId = qMsg.id;
       }
     }
 
-    // Injetar o JID do contato SOMENTE se a mensagem original foi enviada pelo contato
-    if (
-      !finalParticipant &&
-      quotedSenderType === "contact" &&
-      conv.contacts?.phone &&
-      !conv.contacts.phone.includes("-")
-    ) {
-      finalParticipant = `${conv.contacts.phone}@s.whatsapp.net`;
+    // 2. Determine correct participant JID for WhatsApp quote:
+    // If quoting a message from a contact:
+    // - In 1-on-1 chats: participant is ALWAYS the contact's canonical WhatsApp JID (phoneToSend, e.g. 554491529987@s.whatsapp.net)
+    // - In group chats: participant is the specific member's JID (qMsg.participant_jid)
+    if (quotedSenderType === "contact") {
+      if (qMsg?.participant_jid && qMsg.participant_jid.includes("@") && !qMsg.participant_jid.includes("@s.whatsapp.net")) {
+        finalParticipant = qMsg.participant_jid.replace(/:\d+@/, "@");
+      } else {
+        finalParticipant = phoneToSend.includes("@")
+          ? phoneToSend.replace(/:\d+@/, "@")
+          : `${phoneToSend}@s.whatsapp.net`;
+      }
+    } else {
+      // If quoting an agent / company message (fromMe):
+      // On WhatsApp 1-on-1 chats, quoting your own message does NOT take a participant field!
+      finalParticipant = undefined;
     }
 
     const quoted = finalMessageId
@@ -423,13 +585,44 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           isMessenger: true,
           participant: instance.oficial_phone_number_id,
         };
+      } else if (provider === "stevo") {
+        if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
+          evogoResponse = await sendStevoMedia({
+            host: host!,
+            token: token!,
+            instanceName: instanceName!,
+            number: phoneToSend,
+            base64: mediaUrlToSend!,
+            mediatype: data.mediaType as any,
+            caption: textToSend,
+            quoted,
+          });
+        } else if (textToSend.match(/https?:\/\//)) {
+          evogoResponse = await sendStevoLink({
+            host: host!,
+            token: token!,
+            instanceName: instanceName!,
+            number: phoneToSend,
+            text: textToSend,
+            quoted,
+          });
+        } else {
+          evogoResponse = await sendStevoText({
+            host: host!,
+            token: token!,
+            instanceName: instanceName!,
+            number: phoneToSend,
+            text: textToSend,
+            quoted,
+          });
+        }
       } else {
         if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
           evogoResponse = await sendEvogoMedia({
             host: host!,
             token: token!,
             instanceName: instanceName!,
-            number: phone,
+            number: phoneToSend,
             base64: mediaUrlToSend!,
             mediatype: data.mediaType as any,
             caption: textToSend,
@@ -440,7 +633,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
             host: host!,
             token: token!,
             instanceName: instanceName!,
-            number: phone,
+            number: phoneToSend,
             text: textToSend,
             quoted,
           });
@@ -449,7 +642,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
             host: host!,
             token: token!,
             instanceName: instanceName!,
-            number: phone,
+            number: phoneToSend,
             text: textToSend,
             quoted,
           });
@@ -474,24 +667,19 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
     if (remoteMsgId && !data.isInternal) insertPayload.remote_msg_id = remoteMsgId;
     if (data.quotedInternalId) insertPayload.quoted_message_id = data.quotedInternalId;
-    if (data.quotedContent) insertPayload.quoted_content = data.quotedContent;
+    if (quotedContent) insertPayload.quoted_content = quotedContent;
     if (evogoResponse?.data?.Info?.Sender)
       insertPayload.participant_jid = evogoResponse.data.Info.Sender;
     if (evogoResponse?.isInstagram && evogoResponse?.participant)
       insertPayload.participant_jid = evogoResponse.participant;
-
-    const { data: msg, error: msgErr } = await supabase
-      .from("messages")
-      .insert(insertPayload)
-      .select()
-      .single();
-
-    if (msgErr) {
-      console.error("Failed to save message in DB:", msgErr);
-      throw new Error("Message sent but failed to save in history.");
+    const evogoChatJid = evogoResponse?.data?.Info?.Chat;
+    if (evogoChatJid) {
+      insertPayload.metadata = { chat_jid: evogoChatJid };
+    } else if (phoneToSend && phoneToSend.includes("@")) {
+      insertPayload.metadata = { chat_jid: phoneToSend };
     }
 
-    // 5. Update conversation last_message_at and reopen if resolved
+    // 5. Save message in DB and update conversation in parallel
     const convUpdate: any = { last_message_at: new Date().toISOString() };
     if (conv.status === "resolved") {
       convUpdate.status = "active";
@@ -501,9 +689,18 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       convUpdate.status = "active";
       convUpdate.assigned_agent_id = userId;
     }
-    await supabaseAdmin.from("conversations").update(convUpdate).eq("id", targetConversationId);
 
-    return { success: true, message: msg };
+    const [msgRes] = await Promise.all([
+      supabase.from("messages").insert(insertPayload).select().single(),
+      supabaseAdmin.from("conversations").update(convUpdate).eq("id", targetConversationId),
+    ]);
+
+    if (msgRes.error) {
+      console.error("Failed to save message in DB:", msgRes.error);
+      throw new Error("Message sent but failed to save in history.");
+    }
+
+    return { success: true, message: msgRes.data };
   });
 
 export const sendProactiveMessageAction = createServerFn({ method: "POST" })
@@ -558,10 +755,14 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       userProfile?.role === "manager";
 
     let textToSend = data.text;
-    if (textToSend && userProfile?.use_signature && userProfile?.name) {
-      textToSend = textToSend?.trim()
-        ? `*${userProfile.name}*:\n${textToSend}`
-        : `*${userProfile.name}*:`;
+    const shouldSign = (userProfile?.use_signature !== false) && !!userProfile?.name;
+    if (textToSend && shouldSign) {
+      const signaturePrefix = `*${userProfile.name}*:`;
+      if (!textToSend.startsWith(signaturePrefix)) {
+        textToSend = textToSend.trim()
+          ? `${signaturePrefix}\n${textToSend}`
+          : signaturePrefix;
+      }
     }
 
     // 4. Find or create Contact
@@ -668,7 +869,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
             .select("current_session_id")
             .eq("id", conversationId)
             .single();
-          let currentSessionId = convData?.current_session_id;
+          const currentSessionId = convData?.current_session_id;
 
           // Force new session if resolved, or if missing session
           if (conv.status === "resolved" || !currentSessionId) {
@@ -975,7 +1176,6 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
       }
     }
 
-    return { success: true };
   });
 
 export const reactToMessageAction = createServerFn({ method: "POST" })
@@ -987,218 +1187,64 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       emoji: z.string(),
     }),
   )
-  .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-
+  .handler(async ({ data }) => {
     // 1. Get conversation and message
-    const { data: conv } = await supabase
+    const { data: conv } = await supabaseAdmin
       .from("conversations")
       .select(
-        "whatsapp_instance_id, unit_id, contact_id, channel, remote_id, contacts(phone, whatsapp_lid, instagram_id, messenger_id)",
+        "id, whatsapp_instance_id, unit_id, contact_id, channel, remote_id, contacts(phone, whatsapp_lid, instagram_id, messenger_id)",
       )
       .eq("id", data.conversationId)
       .single();
 
-    if (!conv) throw new Error("Conversation not found");
+    if (!conv) throw new Error("Conversa não encontrada.");
 
-    const { data: msg } = await supabase
+    const { data: msg } = await supabaseAdmin
       .from("messages")
-      .select("remote_msg_id, sender_type, reactions")
+      .select("id, remote_msg_id, sender_type, participant_jid, reactions, metadata, is_internal")
       .eq("id", data.messageId)
       .single();
 
-    if (!msg) throw new Error("Message not found");
-    if (!msg.remote_msg_id) throw new Error("Cannot react to a message without a remote ID");
+    if (!msg) throw new Error("Mensagem não encontrada.");
 
-    // 2. Obter instância
-    let provider: string = "coex";
-    let host: string | null = null;
-    let token: string | null = null;
-    let instanceName: string | null = null;
-    let oficialToken: string | null = null;
-    let oficialPhoneId: string | null = null;
-    let resolvedInstanceId = conv.whatsapp_instance_id;
-
-    if ((conv.channel as string) === "instagram") {
-      provider = "instagram";
-      let instance = null;
-
-      if (resolvedInstanceId) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id, oficial_access_token, oficial_phone_number_id")
-          .eq("id", resolvedInstanceId)
-          .eq("provider", "instagram")
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id, oficial_access_token, oficial_phone_number_id")
-          .eq("unit_id", conv.unit_id)
-          .eq("provider", "instagram")
-          .limit(1)
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data: unitData } = await supabaseAdmin
-          .from("units")
-          .select("company_id")
-          .eq("id", conv.unit_id)
-          .single();
-        if (unitData) {
-          const { data } = await supabaseAdmin
-            .from("whatsapp_instances")
-            .select("id, oficial_access_token, oficial_phone_number_id")
-            .eq("company_id", unitData.company_id)
-            .eq("provider", "instagram")
-            .limit(1)
-            .maybeSingle();
-          instance = data;
-        }
-      }
-
-      if (instance) {
-        resolvedInstanceId = instance.id;
-        oficialToken = instance.oficial_access_token;
-        oficialPhoneId = instance.oficial_phone_number_id;
-      }
-    } else if ((conv.channel as string) === "messenger") {
-      provider = "messenger";
-      let instance = null;
-
-      if (resolvedInstanceId) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id, oficial_access_token, oficial_phone_number_id")
-          .eq("id", resolvedInstanceId)
-          .eq("provider", "messenger")
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select("id, oficial_access_token, oficial_phone_number_id")
-          .eq("unit_id", conv.unit_id)
-          .eq("provider", "messenger")
-          .limit(1)
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data: unitData } = await supabaseAdmin
-          .from("units")
-          .select("company_id")
-          .eq("id", conv.unit_id)
-          .single();
-        if (unitData) {
-          const { data } = await supabaseAdmin
-            .from("whatsapp_instances")
-            .select("id, oficial_access_token, oficial_phone_number_id")
-            .eq("company_id", unitData.company_id)
-            .eq("provider", "messenger")
-            .limit(1)
-            .maybeSingle();
-          instance = data;
-        }
-      }
-
-      if (instance) {
-        resolvedInstanceId = instance.id;
-        oficialToken = instance.oficial_access_token;
-        oficialPhoneId = instance.oficial_phone_number_id;
-      }
-    } else {
-      // WhatsApp channel
-      let instance = null;
-
-      if (resolvedInstanceId) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select(
-            "id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)",
-          )
-          .eq("id", resolvedInstanceId)
-          .in("provider", ["evogo", "oficial", "stevo"])
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select(
-            "id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)",
-          )
-          .eq("unit_id", conv.unit_id)
-          .in("provider", ["evogo", "oficial", "stevo"])
-          .limit(1)
-          .maybeSingle();
-        instance = data;
-      }
-
-      if (!instance && conv.unit_id) {
-        const { data: unitData } = await supabaseAdmin
-          .from("units")
-          .select("company_id")
-          .eq("id", conv.unit_id)
-          .single();
-        if (unitData) {
-          const { data } = await supabaseAdmin
-            .from("whatsapp_instances")
-            .select(
-              "id, provider, instance_name, evogo_api_key, oficial_access_token, oficial_phone_number_id, companies(evogo_host)",
-            )
-            .eq("company_id", unitData.company_id)
-            .in("provider", ["evogo", "oficial", "stevo"])
-            .limit(1)
-            .maybeSingle();
-          instance = data;
-        }
-      }
-
-      if (instance) {
-        resolvedInstanceId = instance.id;
-        provider = instance.provider || "coex";
-        host =
-          instance.custom_host ||
-          (instance.provider === "stevo"
-            ? instance.companies?.stevo_host
-            : instance.companies?.evogo_host);
-        token = instance.provider === "stevo" ? instance.stevo_api_key : instance.evogo_api_key;
-        instanceName = instance.instance_name;
-        oficialToken = instance.oficial_access_token;
-        oficialPhoneId = instance.oficial_phone_number_id;
-      }
-    }
-
-    // Auto-repair conversation whatsapp_instance_id
-    if (resolvedInstanceId && conv.whatsapp_instance_id !== resolvedInstanceId) {
+    // Internal notes don't have remote WhatsApp reactions
+    if (msg.is_internal || !msg.remote_msg_id) {
+      const newReactions = data.emoji.trim() ? { [data.emoji.trim()]: 1 } : {};
       await supabaseAdmin
-        .from("conversations")
-        .update({ whatsapp_instance_id: resolvedInstanceId })
-        .eq("id", data.conversationId);
+        .from("messages")
+        .update({ reactions: newReactions })
+        .eq("id", data.messageId);
+      return { success: true };
     }
 
-    // 3. Enviar Reação conforme o provedor
+    // 2. Open canal
+    const canal = await abrirCanal({
+      id: conv.id,
+      channel: conv.channel as string,
+      unit_id: conv.unit_id,
+      whatsapp_instance_id: conv.whatsapp_instance_id,
+    });
+
+    const provider = canal.provedor;
+    const host = canal.host;
+    const token = canal.token;
+    const instanceName = canal.instanceName;
+
+    // 3. Send Reaction based on provider
     try {
       if (provider === "instagram" || provider === "messenger") {
-        if (!oficialToken || !oficialPhoneId) throw new Error("Missing Meta tokens");
-        const igsid = conv.contacts.whatsapp_lid;
-        if (!igsid) throw new Error("Missing recipient scoped ID");
+        const destino = destinatarioDe(canal, conv, conv.contacts);
+        const recipientId = destino.identificador;
+        const pageToken = canal.contaToken;
+        const pageId = canal.contaId;
 
-        const isDirectToken = oficialToken.startsWith("IGA");
+        if (!pageToken || !pageId) throw new Error("Credenciais do canal incompletas.");
+
+        const isDirectToken = pageToken.startsWith("IGA");
         const endpoint =
           provider === "instagram" && isDirectToken
-            ? `https://graph.instagram.com/v20.0/${oficialPhoneId}/messages?access_token=${oficialToken}`
-            : `https://graph.facebook.com/v20.0/me/messages?access_token=${oficialToken}`;
+            ? `https://graph.instagram.com/v20.0/${pageId}/messages?access_token=${pageToken}`
+            : `https://graph.facebook.com/v20.0/me/messages?access_token=${pageToken}`;
 
         const emojiMap: Record<string, string> = {
           "❤️": "love",
@@ -1218,16 +1264,16 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
         };
 
         const payload: any = {
-          recipient: { id: igsid },
+          recipient: { id: recipientId },
           sender_action: "react",
           payload: { message_id: msg.remote_msg_id },
         };
 
-        if (data.emoji) {
+        if (data.emoji.trim()) {
           if (provider === "messenger") {
-            payload.payload.reaction = emojiMap[data.emoji] || "like";
+            payload.payload.reaction = emojiMap[data.emoji.trim()] || "like";
           } else {
-            payload.payload.reaction = data.emoji; // Instagram exige o caractere do emoji exato
+            payload.payload.reaction = data.emoji.trim();
           }
         }
 
@@ -1240,56 +1286,81 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
           console.error(`Meta API Reaction Error:`, await res.text());
         }
       } else if (provider === "oficial") {
-        if (!oficialToken || !oficialPhoneId) throw new Error("Missing Meta tokens");
-        const endpoint = `https://graph.facebook.com/v20.0/${oficialPhoneId}/messages`;
+        if (!canal.contaToken || !canal.contaId) throw new Error("Missing Meta tokens");
+        const cleanPhone = (conv.contacts?.phone || "").replace(/\D/g, "");
+        const endpoint = `https://graph.facebook.com/v20.0/${canal.contaId}/messages`;
         const payload = {
           messaging_product: "whatsapp",
           recipient_type: "individual",
-          to: conv.contacts.phone,
+          to: cleanPhone,
           type: "reaction",
           reaction: {
             message_id: msg.remote_msg_id,
-            emoji: data.emoji || "",
+            emoji: data.emoji.trim(),
           },
         };
 
         const res = await fetch(endpoint, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${oficialToken}` },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${canal.contaToken}` },
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
           console.error(`Cloud API Reaction Error:`, await res.text());
         }
       } else {
-        // Evogo / Coex
-        if (!host || !token || !instanceName) throw new Error("EvoGo is not configured");
+        // EvoGo / Stevo
+        if (!host || !token || !instanceName) {
+          throw new Error("A conexão WhatsApp desta conversa não está configurada.");
+        }
+
+        const chatJid = await resolveWhatsAppChatJid({
+          conversationId: conv.id,
+          channel: conv.channel,
+          remoteId: conv.remote_id,
+          rawPhone: conv.contacts?.phone,
+          messageMetadata: msg.metadata,
+          host,
+          token,
+          provider,
+        });
+
+        const fromMe = msg.sender_type !== "contact";
+        const isGroup = conv.channel === "whatsapp_group" || (conv.remote_id && conv.remote_id.includes("@g.us"));
+        const participant = isGroup ? (msg.participant_jid || undefined) : undefined;
+        // In WhatsApp protocol, clearing a reaction is sending a space " "
+        const reactionText = data.emoji.trim() ? data.emoji.trim() : " ";
+
         if (provider === "stevo") {
           await sendStevoReaction({
             host,
             token,
-            number: conv.contacts.phone,
+            number: chatJid,
             remoteMsgId: msg.remote_msg_id,
-            emoji: data.emoji,
+            emoji: reactionText,
+            fromMe,
+            participant,
           });
         } else {
           await sendEvogoReaction({
             host,
             token,
-            number: conv.contacts.phone,
+            number: chatJid,
             remoteMsgId: msg.remote_msg_id,
-            emoji: data.emoji,
-            fromMe: msg.sender_type === "agent",
+            emoji: reactionText,
+            fromMe,
+            participant,
           });
         }
       }
-    } catch (err) {
-      console.warn("Reaction API failed, still updating DB.", err);
+    } catch (err: any) {
+      console.error("Reaction API failed:", err);
+      throw new Error(`Falha ao reagir à mensagem no WhatsApp: ${err.message || String(err)}`);
     }
 
     // 4. Update DB
     // No WhatsApp 1:1, a reação substitui a anterior
-    const newReactions = data.emoji ? { [data.emoji]: 1 } : {};
+    const newReactions = data.emoji.trim() ? { [data.emoji.trim()]: 1 } : {};
     await supabaseAdmin
       .from("messages")
       .update({ reactions: newReactions })
@@ -1751,13 +1822,13 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
       };
     }
 
-    let host =
+    const host =
       instance?.custom_host ||
       (instance?.provider === "stevo"
         ? instance?.companies?.stevo_host
         : instance?.companies?.evogo_host);
-    let token = instance?.provider === "stevo" ? instance?.stevo_api_key : instance?.evogo_api_key;
-    let instanceName = instance?.instance_name;
+    const token = instance?.provider === "stevo" ? instance?.stevo_api_key : instance?.evogo_api_key;
+    const instanceName = instance?.instance_name;
 
     if (!host || !token || !instanceName) {
       return {
@@ -1895,106 +1966,105 @@ export const editMessageAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
+    const { userId } = context;
 
     // 1. Get conversation and message
-    const { data: conv } = await supabase
+    const { data: conv } = await supabaseAdmin
       .from("conversations")
-      .select("whatsapp_instance_id, unit_id, contact_id, contacts(phone)")
+      .select("id, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid)")
       .eq("id", data.conversationId)
       .single();
 
-    if (!conv || !conv.contacts?.phone) throw new Error("Conversation not found");
+    if (!conv) throw new Error("Conversa não encontrada.");
 
-    const { data: msg } = await supabase
+    const { data: msg } = await supabaseAdmin
       .from("messages")
-      .select("remote_msg_id, sender_type, sender_id, media_type")
+      .select("id, remote_msg_id, sender_type, sender_id, media_type, metadata, is_internal, content")
       .eq("id", data.messageId)
       .single();
 
-    if (!msg) throw new Error("Message not found");
-    if (!msg.remote_msg_id) throw new Error("Cannot edit a message without a remote ID");
-    if (msg.sender_type !== "agent") throw new Error("You can only edit messages sent by an agent");
+    if (!msg) throw new Error("Mensagem não encontrada.");
+    if (msg.sender_type !== "agent") throw new Error("Você só pode editar mensagens enviadas por um atendente.");
     if (msg.media_type && msg.media_type !== "text")
-      throw new Error("Only text messages can be edited");
+      throw new Error("Apenas mensagens de texto podem ser editadas.");
 
-    // 2. Format content with signature if enabled
-    let textToSend = data.newContent;
-    const { data: userProfile } = await supabase
+    // Check user permission (author or admin/manager)
+    const { data: profile } = await supabaseAdmin
       .from("profiles")
-      .select("name, use_signature")
+      .select("role, name, use_signature")
       .eq("id", userId)
       .single();
 
-    if (userProfile?.use_signature && userProfile?.name) {
-      textToSend = textToSend.trim()
-        ? `*${userProfile.name}*:\n${textToSend}`
-        : `*${userProfile.name}*:`;
+    const isAdminOrManager = ["admin_company", "super_admin", "manager"].includes(profile?.role || "");
+    if (msg.sender_id !== userId && !isAdminOrManager) {
+      throw new Error("Você não tem permissão para editar esta mensagem.");
     }
 
-    // 3. Get evogo configuration
-    let host, token, instanceName, provider;
-
-    if (conv.whatsapp_instance_id) {
-      const { data: instance } = await supabaseAdmin
-        .from("whatsapp_instances")
-        .select(
-          "instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)",
-        )
-        .eq("id", conv.whatsapp_instance_id)
-        .single();
-
-      if (instance) {
-        host =
-          instance.custom_host ||
-          (instance.provider === "stevo"
-            ? instance.companies?.stevo_host
-            : instance.companies?.evogo_host);
-        token = instance.provider === "stevo" ? instance.stevo_api_key : instance.evogo_api_key;
-        instanceName = instance.instance_name;
+    // 2. Format content with signature if enabled
+    let textToSend = data.newContent;
+    const shouldSign = !msg.is_internal && (profile?.use_signature !== false) && !!profile?.name;
+    if (shouldSign) {
+      const signaturePrefix = `*${profile.name}*:`;
+      if (!textToSend.startsWith(signaturePrefix)) {
+        textToSend = textToSend.trim()
+          ? `${signaturePrefix}\n${textToSend}`
+          : signaturePrefix;
       }
     }
 
-    if (!host && conv.unit_id) {
-      const { data: unitData } = await supabaseAdmin
-        .from("units")
-        .select("company_id")
-        .eq("id", conv.unit_id)
-        .single();
-      if (unitData) {
-        const { data: companyInstance } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select(
-            "instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)",
-          )
-          .eq("company_id", unitData.company_id)
-          .limit(1)
-          .maybeSingle();
-        if (companyInstance) {
-          host =
-            companyInstance.custom_host ||
-            (companyInstance.provider === "stevo"
-              ? companyInstance.companies?.stevo_host
-              : companyInstance.companies?.evogo_host);
-          token =
-            companyInstance.provider === "stevo"
-              ? companyInstance.stevo_api_key
-              : companyInstance.evogo_api_key;
-          instanceName = companyInstance.instance_name;
-          provider = companyInstance.provider || "evogo";
-        }
+    // 3. If internal note or non-remote message, update only in DB
+    if (msg.is_internal || !msg.remote_msg_id) {
+      const { error: updateErr } = await supabaseAdmin
+        .from("messages")
+        .update({
+          content: textToSend,
+          is_edited: true,
+        })
+        .eq("id", data.messageId);
+
+      if (updateErr) {
+        console.error("Failed to update note in DB:", updateErr);
+        throw new Error("Falha ao salvar edição no banco de dados.");
       }
+      return { success: true };
     }
 
-    if (!host || !token || !instanceName) throw new Error("EvoGo is not configured");
+    // 4. Resolve Canal and Credentials
+    const canal = await abrirCanal({
+      id: conv.id,
+      channel: conv.channel as string,
+      unit_id: conv.unit_id,
+      whatsapp_instance_id: conv.whatsapp_instance_id,
+    });
 
-    // 4. Send Edit Request via EvoGo API
+    const host = canal.host;
+    const token = canal.token;
+    const instanceName = canal.instanceName;
+    const provider = canal.provedor;
+
+    if (!host || !token || !instanceName) {
+      throw new Error("A conexão WhatsApp desta conversa não está configurada corretamente.");
+    }
+
+    // Resolve canonical WhatsApp Chat JID
+    const chatJid = await resolveWhatsAppChatJid({
+      conversationId: conv.id,
+      channel: conv.channel,
+      remoteId: conv.remote_id,
+      rawPhone: conv.contacts?.phone,
+      messageMetadata: msg.metadata,
+      host,
+      token,
+      provider,
+    });
+
+    // 5. Send Edit Request via WhatsApp API
     try {
       if (provider === "stevo") {
         await editStevoMessage({
           host,
           token,
-          number: conv.contacts.phone,
+          number: chatJid,
           remoteMsgId: msg.remote_msg_id,
           message: textToSend,
         });
@@ -2002,22 +2072,28 @@ export const editMessageAction = createServerFn({ method: "POST" })
         await editEvogoMessage({
           host,
           token,
-          number: conv.contacts.phone,
+          number: chatJid,
           remoteMsgId: msg.remote_msg_id,
           message: textToSend,
         });
       }
     } catch (err: any) {
-      console.error("EvoGo Edit failed:", err);
-      throw new Error(`Failed to edit message in WhatsApp: ${err.message || String(err)}`);
+      console.error("WhatsApp Edit failed:", err);
+      throw new Error(`Falha ao editar mensagem no WhatsApp: ${err.message || String(err)}`);
     }
 
-    // 5. Update DB
+    // 6. Update DB with edited content and save chat_jid in metadata
+    const updatedMetadata = {
+      ...(typeof msg.metadata === "object" && msg.metadata !== null ? msg.metadata : {}),
+      chat_jid: chatJid,
+    };
+
     const { error: updateErr } = await supabaseAdmin
       .from("messages")
       .update({
         content: textToSend,
         is_edited: true,
+        metadata: updatedMetadata,
       })
       .eq("id", data.messageId);
 
@@ -2045,100 +2121,105 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
       .eq("id", data.messageId)
       .single();
 
-    if (!msg || msg.sender_id !== userId) {
-      throw new Error("Message not found or access denied.");
+    if (!msg) {
+      throw new Error("Mensagem não encontrada.");
     }
 
-    if (!msg.remote_msg_id) {
-      throw new Error("Cannot delete a message that was not sent via WhatsApp");
+    // Check permissions: sender or admin/manager
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .single();
+
+    const isAdminOrManager = ["admin_company", "super_admin", "manager"].includes(profile?.role || "");
+    if (msg.sender_id !== userId && !isAdminOrManager) {
+      throw new Error("Você não tem permissão para apagar esta mensagem.");
+    }
+
+    // 2. If internal note or non-remote message, update only in DB
+    if (msg.is_internal || !msg.remote_msg_id) {
+      const { error: updateErr } = await supabaseAdmin
+        .from("messages")
+        .update({
+          is_deleted: true,
+        })
+        .eq("id", data.messageId);
+
+      if (updateErr) {
+        console.error("Failed to mark internal message as deleted:", updateErr);
+        throw new Error("Falha ao apagar nota.");
+      }
+      return { success: true };
     }
 
     const conv = msg.conversations;
-    if (!conv || !conv.contacts?.phone) throw new Error("Conversation or contact not found");
-
-    // 2. Fetch EvoGo Credentials
-    let host, token, instanceName, provider;
-
-    if (conv.whatsapp_instance_id) {
-      const { data: instance } = await supabaseAdmin
-        .from("whatsapp_instances")
-        .select(
-          "instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)",
-        )
-        .eq("id", conv.whatsapp_instance_id)
-        .single();
-
-      if (instance) {
-        host =
-          instance.custom_host ||
-          (instance.provider === "stevo"
-            ? instance.companies?.stevo_host
-            : instance.companies?.evogo_host);
-        token = instance.provider === "stevo" ? instance.stevo_api_key : instance.evogo_api_key;
-        instanceName = instance.instance_name;
-      }
+    if (!conv) {
+      throw new Error("Conversa associada não encontrada.");
     }
 
-    if (!host && conv.unit_id) {
-      const { data: unitData } = await supabaseAdmin
-        .from("units")
-        .select("company_id")
-        .eq("id", conv.unit_id)
-        .single();
-      if (unitData) {
-        const { data: companyInstance } = await supabaseAdmin
-          .from("whatsapp_instances")
-          .select(
-            "instance_name, evogo_api_key, stevo_api_key, provider, custom_host, companies(evogo_host, stevo_host)",
-          )
-          .eq("company_id", unitData.company_id)
-          .limit(1)
-          .maybeSingle();
-        if (companyInstance) {
-          host =
-            companyInstance.custom_host ||
-            (companyInstance.provider === "stevo"
-              ? companyInstance.companies?.stevo_host
-              : companyInstance.companies?.evogo_host);
-          token =
-            companyInstance.provider === "stevo"
-              ? companyInstance.stevo_api_key
-              : companyInstance.evogo_api_key;
-          instanceName = companyInstance.instance_name;
-          provider = companyInstance.provider || "evogo";
-        }
-      }
+    // 3. Resolve Canal and Credentials
+    const canal = await abrirCanal({
+      id: conv.id,
+      channel: conv.channel as string,
+      unit_id: conv.unit_id,
+      whatsapp_instance_id: conv.whatsapp_instance_id,
+    });
+
+    const host = canal.host;
+    const token = canal.token;
+    const instanceName = canal.instanceName;
+    const provider = canal.provedor;
+
+    if (!host || !token || !instanceName) {
+      throw new Error("A conexão WhatsApp desta conversa não está configurada.");
     }
 
-    if (!host || !token || !instanceName) throw new Error("EvoGo is not configured");
+    // Resolve canonical WhatsApp Chat JID
+    const chatJid = await resolveWhatsAppChatJid({
+      conversationId: conv.id,
+      channel: conv.channel,
+      remoteId: conv.remote_id,
+      rawPhone: conv.contacts?.phone,
+      messageMetadata: msg.metadata,
+      host,
+      token,
+      provider,
+    });
 
-    // 3. Send Delete Request via EvoGo API
+    // 4. Send Delete Request via WhatsApp API
     try {
       if (provider === "stevo") {
         await deleteStevoMessage({
           host,
           token,
-          number: conv.contacts.phone,
+          number: chatJid,
           remoteMsgId: msg.remote_msg_id,
         });
       } else {
         await deleteEvogoMessage({
           host,
           token,
-          number: conv.contacts.phone,
+          number: chatJid,
           remoteMsgId: msg.remote_msg_id,
         });
       }
     } catch (err: any) {
-      console.error("EvoGo Delete failed:", err);
-      throw new Error(`Failed to delete message in WhatsApp: ${err.message || String(err)}`);
+      console.error("WhatsApp Delete failed:", err);
+      throw new Error(`Falha ao apagar mensagem no WhatsApp: ${err.message || String(err)}`);
     }
 
-    // 4. Update DB
+    // 5. Update DB
+    const updatedMetadata = {
+      ...(typeof msg.metadata === "object" && msg.metadata !== null ? msg.metadata : {}),
+      chat_jid: chatJid,
+    };
+
     const { error: updateErr } = await supabaseAdmin
       .from("messages")
       .update({
         is_deleted: true,
+        metadata: updatedMetadata,
       })
       .eq("id", data.messageId);
 
@@ -2321,7 +2402,7 @@ export const fixMessageTextAction = createServerFn({ method: "POST" })
     const aiSettings = (company?.ai_settings as any) || {};
 
     // 1. Resolver o modelo desejado (personalizado > sales coach > chatbot ativo > fallback gpt-4o-mini)
-    let resolvedModel = (
+    const resolvedModel = (
       aiSettings.text_correction_model ||
       aiSettings.sales_coach_model ||
       aiSettings.active_chatbot_model ||

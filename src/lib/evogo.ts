@@ -19,15 +19,20 @@ function parseEvogoError(status: number, statusText: string, errorText: string) 
   return errorMessage;
 }
 
+export type QuotedParams = {
+  messageId: string;
+  participant?: string;
+};
+
 export async function sendEvogoText({
   host,
   token,
   instanceName,
   number,
   text,
-  delay = 1000,
+  delay = 0,
   quoted,
-}: SendMessageParams & { quoted?: { messageId: string, participant?: string } }) {
+}: SendMessageParams & { quoted?: QuotedParams }) {
   // Normalize host URL
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/text`;
@@ -41,9 +46,7 @@ export async function sendEvogoText({
     body: JSON.stringify({
       number,
       text,
-      delay,
-      preview: true,
-      linkPreview: true,
+      ...(delay > 0 ? { delay } : {}),
       ...(quoted && { quoted }),
     }),
   });
@@ -63,9 +66,9 @@ export async function sendEvogoLink({
   instanceName,
   number,
   text,
-  delay = 1000,
+  delay = 0,
   quoted,
-}: SendMessageParams & { quoted?: { messageId: string, participant?: string } }) {
+}: SendMessageParams & { quoted?: QuotedParams }) {
   // Normalize host URL
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/link`;
@@ -79,7 +82,7 @@ export async function sendEvogoLink({
     body: JSON.stringify({
       number,
       text,
-      delay,
+      ...(delay > 0 ? { delay } : {}),
       ...(quoted && { quoted }),
     }),
   });
@@ -112,9 +115,9 @@ export async function sendEvogoMedia({
   base64,
   mediatype,
   caption = '',
-  delay = 1000,
+  delay = 0,
   quoted,
-}: SendMediaParams & { quoted?: { messageId: string, participant?: string } }) {
+}: SendMediaParams & { quoted?: QuotedParams }) {
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/media`;
 
@@ -126,7 +129,7 @@ export async function sendEvogoMedia({
     url: rawBase64,
     caption,
     type: mediatype, // "image", "video", "audio", "document"
-    delay,
+    ...(delay > 0 ? { delay } : {}),
     ...(quoted && { quoted }),
   };
 
@@ -178,6 +181,7 @@ type SendReactionParams = {
   remoteMsgId: string;
   emoji: string;
   fromMe?: boolean;
+  participant?: string;
 };
 
 export async function sendEvogoReaction({
@@ -187,15 +191,17 @@ export async function sendEvogoReaction({
   remoteMsgId,
   emoji,
   fromMe,
+  participant,
 }: SendReactionParams) {
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
   const url = `${baseUrl}/message/react`;
 
-  const body = {
+  const body: any = {
     number: number.includes('@') ? number : `${number}@s.whatsapp.net`,
     id: remoteMsgId,
     reaction: emoji,
     ...(fromMe !== undefined ? { fromMe } : {}),
+    ...(participant ? { participant } : {}),
   };
 
   const response = await fetch(url, {
@@ -291,6 +297,34 @@ export async function deleteEvogoMessage({
   if (!response.ok) {
     const errorText = await response.text();
     console.error('EvoGo Delete API Error:', errorText);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
+  }
+
+  return response.json();
+}
+
+export type CheckUserParams = {
+  host: string;
+  token: string;
+  numbers: string[];
+};
+
+export async function checkEvogoUser({ host, token, numbers }: CheckUserParams) {
+  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/user/check`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ number: numbers }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('EvoGo Check User API Error:', errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 

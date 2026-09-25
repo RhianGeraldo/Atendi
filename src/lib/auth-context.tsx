@@ -11,6 +11,7 @@ export interface Profile {
   company_id: string | null;
   has_matriz_access: boolean;
   department_id: string | null;
+  use_signature?: boolean | null;
   custom_role_id?: string | null;
   allowed_menus?: string[] | null;
   custom_role?: {
@@ -26,6 +27,7 @@ interface AuthContextValue {
   session: Session | null;
   profile: Profile | null;
   loading: boolean;
+  refreshProfile: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (name: string, email: string, password: string, companyId?: string | null) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
@@ -88,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase
         .from("profiles")
         .select(
-          "id,name,email,avatar_url,role,company_id,department_id,custom_role_id,allowed_menus,custom_role:company_roles(id,name,allowed_menus,base_role)",
+          "id,name,email,avatar_url,role,company_id,department_id,custom_role_id,allowed_menus,use_signature,custom_role:company_roles(id,name,allowed_menus,base_role)",
         )
         .eq("id", userId)
         .maybeSingle();
@@ -106,6 +108,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session,
     profile,
     loading,
+    async refreshProfile() {
+      if (session?.user?.id) {
+        await loadProfile(session.user.id);
+      }
+    },
     async signIn(email, password) {
       try {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
