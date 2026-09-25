@@ -59,7 +59,7 @@ function ConversationsPage() {
   const navigate = Route.useNavigate();
   const qc = useQueryClient();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const [tab, setTab] = useState<TabType>(searchTab || "waiting");
+  const [tab, setTab] = useState<TabType>(searchTab && searchTab !== "groups" ? searchTab : "waiting");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(searchConvId || null);
@@ -911,36 +911,37 @@ function ConversationsPage() {
             <WavoipDialer open={dialerOpen} onOpenChange={setDialerOpen} />
           </div>
           <Tabs value={tab} onValueChange={(v) => setTab(v as TabType)} className="mt-3">
-            <TabsList className="grid w-full grid-cols-4 h-auto py-1">
-              <TabsTrigger value="waiting" className="px-1 py-1.5 text-xs relative">
-                Aguardando
+            <TabsList className="grid w-full grid-cols-3 h-auto py-1">
+              <TabsTrigger value="waiting" className="group px-1 py-1.5 text-xs relative flex items-center justify-center gap-1.5">
+                <span>Aguardando</span>
+                <span className="rounded-full bg-muted-foreground/15 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground group-data-[state=active]:bg-primary/15 group-data-[state=active]:text-primary transition-colors">
+                  {unreadCounts?.waiting?.total || 0}
+                </span>
                 {unreadCounts && unreadCounts.waiting?.unread > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
                     {unreadCounts.waiting.unread > 99 ? "99+" : unreadCounts.waiting.unread}
                   </span>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="active" className="px-1 py-1.5 text-xs relative">
-                Andamento
+              <TabsTrigger value="active" className="group px-1 py-1.5 text-xs relative flex items-center justify-center gap-1.5">
+                <span>Andamento</span>
+                <span className="rounded-full bg-muted-foreground/15 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground group-data-[state=active]:bg-primary/15 group-data-[state=active]:text-primary transition-colors">
+                  {unreadCounts?.active?.total || 0}
+                </span>
                 {unreadCounts && unreadCounts.active?.unread > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
                     {unreadCounts.active.unread > 99 ? "99+" : unreadCounts.active.unread}
                   </span>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="resolved" className="px-1 py-1.5 text-xs relative">
-                Resolvido
+              <TabsTrigger value="resolved" className="group px-1 py-1.5 text-xs relative flex items-center justify-center gap-1.5">
+                <span>Resolvido</span>
+                <span className="rounded-full bg-muted-foreground/15 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground group-data-[state=active]:bg-primary/15 group-data-[state=active]:text-primary transition-colors">
+                  {unreadCounts?.resolved?.total || 0}
+                </span>
                 {unreadCounts && unreadCounts.resolved?.unread > 0 && (
                   <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
                     {unreadCounts.resolved.unread > 99 ? "99+" : unreadCounts.resolved.unread}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="groups" className="px-1 py-1.5 text-xs relative">
-                Grupos
-                {unreadCounts && unreadCounts.groups?.unread > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
-                    {unreadCounts.groups.unread > 99 ? "99+" : unreadCounts.groups.unread}
                   </span>
                 )}
               </TabsTrigger>
