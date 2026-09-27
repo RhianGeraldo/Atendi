@@ -25,7 +25,10 @@ import {
   Video, 
   Headphones, 
   Loader2,
-  AlertCircle 
+  AlertCircle,
+  AlertTriangle,
+  Clock,
+  Check 
 } from "lucide-react";
 import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
@@ -53,10 +56,14 @@ import { useUnit } from "@/lib/unit-context";
 import { useWavoip } from "@/hooks/use-wavoip";
 import { cn } from "@/lib/utils";
 import { initials } from "@/lib/format";
+import { useSlaSettings } from "@/lib/use-sla";
+import { calculateConversationSla } from "@/lib/sla";
 
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { ChannelIcon } from "@/components/common/channel-icon";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -209,6 +216,23 @@ export function ChatPanel({
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 30,
   });
+
+  const { slaSettings } = useSlaSettings();
+  const lastExternalMsg = useMemo(() => {
+    if (!messages || messages.length === 0) {
+      return conv.last_message?.find((m) => !m.is_internal) || conv.last_message?.[0] || null;
+    }
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (!messages[i].is_internal) {
+        return messages[i];
+      }
+    }
+    return null;
+  }, [messages, conv.last_message]);
+
+  const slaInfo = useMemo(() => {
+    return calculateConversationSla(conv, slaSettings, lastExternalMsg);
+  }, [conv, slaSettings, lastExternalMsg]);
 
   // Função para buscar mensagens mais antigas (paginação infinita para cima)
   const loadOlderMessages = async () => {
@@ -437,6 +461,26 @@ export function ChatPanel({
       };
 
       qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
+      
+      if (!payload.isInternal) {
+        qc.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+          if (!oldData || !oldData.pages) return oldData;
+          return {
+            ...oldData,
+            pages: oldData.pages.map((page: any) => {
+              if (!page || !page.rows) return page;
+              return {
+                ...page,
+                rows: page.rows.map((c: ConvRow) => c.id === conv.id ? {
+                  ...c,
+                  last_message: [{ sender_type: "agent", created_at: optimisticMsg.created_at, is_internal: false }]
+                } : c)
+              };
+            })
+          };
+        });
+      }
+
       setText("");
       setSelectedFile(null);
       setReplyingTo(null);
@@ -850,6 +894,41 @@ export function ChatPanel({
     }
   });
 
+  const toggleAi = useMutation({
+    mutationFn: async (active: boolean) => {
+      const { error } = await supabase.from("conversations").update({ ai_active: active }).eq("id", conv.id);
+      if (error) throw error;
+    },
+    onMutate: async (active) => {
+      await qc.cancelQueries({ queryKey: ["conversations"] });
+      qc.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+        if (!oldData) return oldData;
+        if (oldData.pages) {
+          return {
+            ...oldData,
+            pages: oldData.pages.map((page: any) => {
+              if (!page || !page.rows) return page;
+              return {
+                ...page,
+                rows: page.rows.map((r: any) => (r.id === conv.id ? { ...r, ai_active: active } : r)),
+              };
+            }),
+          };
+        }
+        return oldData;
+      });
+      qc.setQueryData(["direct-conversation", conv.id], (old: any) => (old ? { ...old, ai_active: active } : old));
+    },
+    onSuccess: (_, active) => {
+      toast.success(active ? "IA ativada neste atendimento" : "IA pausada neste atendimento");
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["direct-conversation", conv.id] });
+    },
+    onError: (e: any) => {
+      toast.error("Erro ao alterar status da IA", { description: e.message });
+    }
+  });
+
   const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith("120363") || (conv.contact.phone.includes("-") && conv.contact.phone.length > 18)));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
@@ -945,10 +1024,59 @@ export function ChatPanel({
               <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground mt-0.5">
                 <ChannelIcon channel={conv.channel} className="h-3.5 w-3.5" />
                 {conv.department?.name && <span>{conv.department.name}</span>}
+
+                {slaInfo.isWaiting && (
+                  <Badge 
+                    variant="outline" 
+                    className={cn(
+                      "text-[10px] h-5 px-1.5 font-semibold transition-all flex items-center gap-1",
+                      slaInfo.status === "breached" && "bg-destructive/15 text-destructive border-destructive/30 animate-pulse font-bold",
+                      slaInfo.status === "warning" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
+                      slaInfo.status === "ok" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                    )}
+                    title={slaInfo.tooltipText}
+                  >
+                    {slaInfo.status === "breached" ? (
+                      <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
+                    ) : (
+                      <Clock className="h-2.5 w-2.5 shrink-0" />
+                    )}
+                    <span>SLA: {slaInfo.badgeLabel}</span>
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 sm:gap-1.5">
+            {!isGroup && (
+              <div 
+                className={cn(
+                  "flex items-center gap-1.5 sm:gap-2 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border transition-all select-none mr-0.5",
+                  conv.ai_active 
+                    ? "bg-primary/10 border-primary/20 text-primary shadow-xs" 
+                    : "bg-muted/40 border-border/60 text-muted-foreground hover:bg-muted/60"
+                )}
+                title={conv.ai_active ? "A IA está respondendo neste ticket" : "IA pausada neste ticket"}
+              >
+                <div className={cn("p-1 rounded-md shrink-0", conv.ai_active ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground")}>
+                  <Bot className={cn("h-3.5 w-3.5", conv.ai_active && "text-primary animate-pulse")} />
+                </div>
+                <div className="hidden sm:flex flex-col text-left">
+                  <span className="text-[11px] font-semibold leading-tight">
+                    {conv.ai_active ? "IA Ativa" : "IA Pausada"}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground leading-tight">
+                    {conv.ai_active ? "Respondendo" : "Pausada"}
+                  </span>
+                </div>
+                <Switch 
+                  checked={conv.ai_active || false} 
+                  onCheckedChange={(v) => toggleAi.mutate(v)} 
+                  disabled={toggleAi.isPending}
+                  className="scale-75 origin-right cursor-pointer"
+                />
+              </div>
+            )}
             {conv.status === "active" && !isGroup && (
               <>
                 <Button 
@@ -1175,13 +1303,15 @@ export function ChatPanel({
 
         {/* Input / Composer */}
         <div className="border-t border-border bg-card p-3 flex flex-col gap-2 relative">
-          {(conv.status === "waiting" || (conv.status === "active" && ((conv.assigned_agent_id && conv.assigned_agent_id !== profile?.id) || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && (
+          {(conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card gap-2">
               {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager") ? (
                 <>
                   <p className="text-sm font-medium text-muted-foreground text-center px-4">
-                    {(!conv.assigned_agent_id && !conv.ai_active)
-                      ? "Esta conversa está na fila e aguardando um agente." 
+                    {!conv.assigned_agent_id
+                      ? (conv.status === "waiting" 
+                          ? "Esta conversa está na fila e aguardando um agente." 
+                          : "Esta conversa está em andamento sem atendente atribuído.")
                       : conv.assigned_agent_id === profile?.id 
                         ? "Esta conversa foi transferida para você." 
                         : conv.status === "active"
@@ -1190,7 +1320,7 @@ export function ChatPanel({
                   </p>
                   <Button onClick={() => assignConv.mutate()} disabled={assignConv.isPending}>
                     {assignConv.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {(!conv.assigned_agent_id && !conv.ai_active) ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
+                    {!conv.assigned_agent_id ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
                   </Button>
                 </>
               ) : (

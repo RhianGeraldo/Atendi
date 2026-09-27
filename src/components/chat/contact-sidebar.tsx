@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { X, Users, RefreshCw, Bot, Tag, Plus, Square } from "lucide-react";
+import { Users, RefreshCw, Tag, Plus, Square, Target, Check, Edit2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { toggleContactLabelAction, createLabelAction, updateContactFromWhatsappAction } from "@/lib/api/chat.functions";
@@ -12,11 +12,12 @@ import { initials, formatPhone } from "@/lib/format";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 import { ContactBlockDialog } from "@/components/contacts/contact-block-dialog";
+import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
 import type { ConvRow } from "./conversation-types";
 
 interface ContactSidebarProps {
@@ -41,16 +42,47 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
     enabled: !!activeCompanyId
   });
 
-  const toggleAi = useMutation({
-    mutationFn: async (active: boolean) => {
-      const { error } = await supabase.from("conversations").update({ ai_active: active }).eq("id", conv.id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["conversations"] });
-    },
-    onError: (e) => toast.error("Erro ao alterar IA", { description: (e as Error).message })
-  });
+  const { allSources, addSource, updateContactSource } = useContactSources();
+  const [sourcePopoverOpen, setSourcePopoverOpen] = useState(false);
+  const [searchSource, setSearchSource] = useState("");
+  const [detailsInput, setDetailsInput] = useState(conv.contact?.source_details || "");
+
+  useEffect(() => {
+    setDetailsInput(conv.contact?.source_details || "");
+  }, [conv.contact?.source_details]);
+
+  const handleSelectSource = (selectedSource: string | null) => {
+    if (!conv.contact?.id) return;
+    updateContactSource.mutate({
+      contactId: conv.contact.id,
+      source: selectedSource,
+      sourceDetails: selectedSource ? detailsInput : null,
+    });
+    setSourcePopoverOpen(false);
+    setSearchSource("");
+  };
+
+  const handleCreateAndSelectSource = async (newSource: string) => {
+    if (!conv.contact?.id || !newSource.trim()) return;
+    const trimmed = newSource.trim();
+    await addSource.mutateAsync(trimmed);
+    updateContactSource.mutate({
+      contactId: conv.contact.id,
+      source: trimmed,
+      sourceDetails: detailsInput,
+    });
+    setSourcePopoverOpen(false);
+    setSearchSource("");
+  };
+
+  const handleSaveDetails = () => {
+    if (!conv.contact?.id) return;
+    updateContactSource.mutate({
+      contactId: conv.contact.id,
+      source: conv.contact.source || null,
+      sourceDetails: detailsInput.trim() || null,
+    });
+  };
 
   const toggleLabel = useMutation({
     mutationFn: async ({ labelId, action }: { labelId: string, action: "add" | "remove" }) => {
@@ -112,15 +144,8 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
 
   return (
     <div className="flex h-full flex-col bg-background/50">
-      <div className="flex justify-between items-center p-3 pb-0">
-        <h3 className="text-sm font-semibold ml-2 text-muted-foreground">Perfil</h3>
-        <Button variant="ghost" size="icon" className="hidden lg:flex h-8 w-8 text-muted-foreground rounded-full hover:bg-muted" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-
       <div className="flex-1 overflow-y-auto min-w-0 flex flex-col">
-        <div className="px-4 pb-4 space-y-4 pt-1 flex-1 flex flex-col min-h-0">
+        <div className="px-4 pb-4 space-y-4 pt-4 flex-1 flex flex-col min-h-0">
           {/* Dados do Contato e Etiquetas no mesmo card/div igual ao da IA */}
           <div className="bg-card border border-border/60 rounded-xl p-4 shadow-sm space-y-3 shrink-0">
             {/* Foto do perfil no canto esquerdo, Nome e Telefone na direita */}
@@ -171,6 +196,144 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                             ? `@${conv.contact.instagram_username}` 
                             : "Sem número"))}
                 </p>
+              </div>
+            </div>
+
+            {/* Origem do Contato */}
+            <div className="pt-2 border-t border-border/40">
+              <div className="flex items-center justify-between mb-1.5">
+                <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Target className="h-3.5 w-3.5 text-muted-foreground" /> 
+                  Origem
+                </h4>
+                <Popover open={sourcePopoverOpen} onOpenChange={setSourcePopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full text-muted-foreground hover:text-primary" title={conv.contact?.source ? "Alterar origem" : "Adicionar origem"}>
+                      {conv.contact?.source ? <Edit2 className="h-3 w-3" /> : <Plus className="h-4 w-4" />}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="p-0 w-64" align="end">
+                  <Command>
+                    <CommandInput 
+                      placeholder="Buscar ou criar origem..." 
+                      className="h-8 text-xs" 
+                      value={searchSource}
+                      onValueChange={setSearchSource}
+                    />
+                    <CommandList>
+                      <CommandEmpty>
+                        {searchSource.trim().length > 0 ? (
+                          <Button 
+                            variant="ghost" 
+                            className="w-full justify-start text-xs h-8 font-normal"
+                            onClick={() => handleCreateAndSelectSource(searchSource)}
+                            disabled={addSource.isPending || updateContactSource.isPending}
+                          >
+                            <Plus className="h-3.5 w-3.5 mr-1 text-primary" />
+                            Criar "{searchSource.trim()}"
+                          </Button>
+                        ) : "Nenhuma origem encontrada."}
+                      </CommandEmpty>
+                      <CommandGroup heading="Origens">
+                        {allSources.map(src => {
+                          const isSelected = conv.contact?.source?.toLowerCase() === src.toLowerCase();
+                          return (
+                            <CommandItem
+                              key={src}
+                              onSelect={() => handleSelectSource(src)}
+                              className="text-xs flex items-center justify-between gap-2 cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2 truncate flex-1">
+                                {getSourceIcon(src)}
+                                <span className="truncate">{src}</span>
+                              </div>
+                              {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                      {conv.contact?.source && (
+                        <>
+                          <CommandSeparator />
+                          <CommandGroup>
+                            <CommandItem 
+                              onSelect={() => handleSelectSource(null)}
+                              className="text-xs text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
+                            >
+                              <X className="h-3.5 w-3.5 mr-1.5" />
+                              Remover origem
+                            </CommandItem>
+                          </CommandGroup>
+                        </>
+                      )}
+                    </CommandList>
+                  </Command>
+
+                  {conv.contact?.source && (
+                    <div className="p-2 border-t border-border/50 bg-muted/20">
+                      <label className="text-[10px] text-muted-foreground font-medium block mb-1">
+                        Detalhe (Campanha, Indicação, etc.)
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <Input 
+                          placeholder="Ex: Campanha Dia das Mães" 
+                          value={detailsInput}
+                          onChange={(e) => setDetailsInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleSaveDetails();
+                              setSourcePopoverOpen(false);
+                            }
+                          }}
+                          className="h-7 text-xs"
+                        />
+                        <Button 
+                          size="sm" 
+                          className="h-7 px-2 text-xs"
+                          onClick={() => {
+                            handleSaveDetails();
+                            setSourcePopoverOpen(false);
+                          }}
+                          disabled={updateContactSource.isPending}
+                        >
+                          Salvar
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+                {conv.contact?.source ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge 
+                      variant="outline" 
+                      onClick={() => setSourcePopoverOpen(true)}
+                      className="cursor-pointer hover:bg-accent text-xs py-0.5 px-2 flex items-center gap-1.5 font-medium transition-colors border-border/80"
+                      title="Clique para alterar a origem"
+                    >
+                      {getSourceIcon(conv.contact.source)}
+                      <span>{conv.contact.source}</span>
+                    </Badge>
+
+                    {conv.contact.source_details && (
+                      <span className="text-[11px] text-muted-foreground truncate max-w-[180px]" title={conv.contact.source_details}>
+                        • {conv.contact.source_details}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => setSourcePopoverOpen(true)}
+                    className="text-xs text-muted-foreground/70 italic hover:text-primary transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Definir origem do contato
+                  </button>
+                )}
               </div>
             </div>
 
@@ -261,27 +424,6 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
               </div>
             </div>
           </div>
-          {/* AI Status Container */}
-          {!isGroup && (
-            <div className="bg-card border border-border/60 rounded-xl p-4 shadow-sm flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <div className={cn("p-2 rounded-lg", conv.ai_active ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
-                  <Bot className="h-5 w-5" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-semibold text-foreground">Inteligência Artificial</h4>
-                  <p className="text-xs text-muted-foreground">
-                    {conv.ai_active ? "A IA está respondendo" : "IA pausada neste ticket"}
-                  </p>
-                </div>
-              </div>
-              <Switch 
-                checked={conv.ai_active || false} 
-                onCheckedChange={(v) => toggleAi.mutate(v)} 
-                disabled={toggleAi.isPending}
-              />
-            </div>
-          )}
 
           {/* Ficha Completa */}
           {conv.contact?.id && (

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, XCircle, Check, Pencil, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { formatDateOnly } from "@/lib/format";
 import { ChannelIcon } from "@/components/common/channel-icon";
 import {
   Sheet,
@@ -46,6 +47,7 @@ import { ContactBlockDialog } from "./contact-block-dialog";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import { blockContactAction, unblockContactAction } from "@/lib/api/chat.functions";
 import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
+import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
 
 interface ContactDetailsSheetProps {
   contactId: string | null;
@@ -1322,7 +1324,7 @@ export function ContactDetailsTabs({
                             variant="ghost"
                             className="h-6 text-[11px] gap-1 px-2 text-primary hover:text-primary hover:bg-primary/10 mt-0.5"
                             onClick={() => {
-                              window.location.href = `/conversations?c=${session.conversation_id}`;
+                              window.location.href = `/conversations?c=${session.conversation_id}&tab=active`;
                             }}
                           >
                             <MessageSquare className="h-3 w-3" />
@@ -1496,6 +1498,10 @@ export function ContactDetailsTabs({
                       <div className="flex items-center gap-1 shrink-0">
                         <Link 
                           to="/pipeline" 
+                          search={{
+                            pipelineId: oppPipelineId,
+                            opportunityId: opp.id,
+                          }}
                           className="h-6 w-6 rounded-md bg-muted/60 flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" 
                           title="Ver no Funil / Pipeline"
                         >
@@ -1604,7 +1610,7 @@ export function ContactDetailsTabs({
                       <CalendarDays className="h-3 w-3 shrink-0 opacity-70" />
                       <span>
                         {opp.expected_close_date 
-                          ? `Previsão: ${format(new Date(opp.expected_close_date), "dd/MM/yyyy", { locale: ptBR })}`
+                          ? `Previsão: ${formatDateOnly(opp.expected_close_date, "dd/MM/yyyy")}`
                           : `Criado em: ${format(new Date(opp.created_at), "dd/MM/yyyy", { locale: ptBR })}`
                         }
                       </span>
@@ -1824,7 +1830,7 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                                 <StartConversationDialog
                                   contactName={contact.name || ""}
                                   initialPhone={contact.phone || ""}
-                                  onCreated={(id) => { window.location.href = `/conversations?c=${id}`; }}
+                                  onCreated={(id) => { window.location.href = `/conversations?c=${id}&tab=active`; }}
                                   trigger={
                                     <Button 
                                       variant="secondary" 
@@ -1933,9 +1939,14 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
 
 function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () => void }) {
   const qc = useQueryClient();
+  const { allSources, addSource } = useContactSources();
   const [name, setName] = useState(contact.name || "");
   const [email, setEmail] = useState(contact.email || "");
   const [instagram, setInstagram] = useState(contact.instagram_username || "");
+  const [source, setSource] = useState(contact.source || "");
+  const [sourceDetails, setSourceDetails] = useState(contact.source_details || "");
+  const [isAddingNewSource, setIsAddingNewSource] = useState(false);
+  const [newCustomSource, setNewCustomSource] = useState("");
   
   const isPsid = contact.phone && contact.phone.length > 15;
   const [phone, setPhone] = useState(isPsid ? "" : (contact.phone || ""));
@@ -1945,6 +1956,8 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
     setName(contact.name || "");
     setEmail(contact.email || "");
     setInstagram(contact.instagram_username || "");
+    setSource(contact.source || "");
+    setSourceDetails(contact.source_details || "");
     const newIsPsid = contact.phone && contact.phone.length > 15;
     setPhone(newIsPsid ? "" : (contact.phone || ""));
   }, [contact]);
@@ -1954,7 +1967,14 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
       const finalPhone = phone.trim() ? phone.trim() : (isPsid ? contact.phone : null);
       const { error } = await supabase
         .from("contacts")
-        .update({ name, email, instagram_username: instagram, phone: finalPhone })
+        .update({ 
+          name, 
+          email, 
+          instagram_username: instagram, 
+          phone: finalPhone,
+          source: source && source !== "none" ? source.trim() : null,
+          source_details: source && source !== "none" && sourceDetails.trim() ? sourceDetails.trim() : null,
+        })
         .eq("id", contact.id);
       if (error) throw error;
     },
@@ -1970,10 +1990,27 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
     }
   });
 
+  const handleAddNewSource = async () => {
+    if (!newCustomSource.trim()) return;
+    const trimmed = newCustomSource.trim();
+    await addSource.mutateAsync(trimmed);
+    setSource(trimmed);
+    setNewCustomSource("");
+    setIsAddingNewSource(false);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     updateContact.mutate();
   };
+
+  const isUnchanged = 
+    name === contact.name && 
+    email === (contact.email || "") && 
+    instagram === (contact.instagram_username || "") && 
+    phone === (isPsid ? "" : (contact.phone || "")) &&
+    (source || "") === (contact.source || "") &&
+    (sourceDetails || "") === (contact.source_details || "");
 
   return (
     <div className="space-y-6">
@@ -2025,11 +2062,82 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
           />
         </div>
 
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="source">Origem do Contato</Label>
+            {!isAddingNewSource ? (
+              <button 
+                type="button" 
+                onClick={() => setIsAddingNewSource(true)}
+                className="text-[11px] text-primary hover:underline"
+              >
+                + Nova origem
+              </button>
+            ) : (
+              <button 
+                type="button" 
+                onClick={() => setIsAddingNewSource(false)}
+                className="text-[11px] text-muted-foreground hover:underline"
+              >
+                Cancelar
+              </button>
+            )}
+          </div>
+
+          {isAddingNewSource ? (
+            <div className="flex items-center gap-1.5">
+              <Input 
+                placeholder="Nome da nova origem (ex: TikTok)" 
+                value={newCustomSource} 
+                onChange={(e) => setNewCustomSource(e.target.value)} 
+                className="h-9"
+              />
+              <Button 
+                type="button" 
+                size="sm" 
+                onClick={handleAddNewSource} 
+                disabled={!newCustomSource.trim() || addSource.isPending}
+              >
+                Salvar
+              </Button>
+            </div>
+          ) : (
+            <Select value={source || "none"} onValueChange={(val) => setSource(val === "none" ? "" : val)}>
+              <SelectTrigger id="source">
+                <SelectValue placeholder="Selecione a origem" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Nenhuma (Não definida)</SelectItem>
+                {allSources.map(s => (
+                  <SelectItem key={s} value={s}>
+                    <div className="flex items-center gap-2">
+                      {getSourceIcon(s)}
+                      <span>{s}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {source && source !== "none" && (
+          <div className="space-y-2">
+            <Label htmlFor="source_details">Detalhes da Origem (Opcional)</Label>
+            <Input 
+              id="source_details" 
+              placeholder="Ex: Campanha Dia das Mães, Indicado por João" 
+              value={sourceDetails} 
+              onChange={(e) => setSourceDetails(e.target.value)} 
+            />
+          </div>
+        )}
+
         <div className="pt-4">
           <Button 
             type="submit" 
             className="w-full" 
-            disabled={updateContact.isPending || (name === contact.name && email === (contact.email || "") && instagram === (contact.instagram_username || "") && phone === (isPsid ? "" : (contact.phone || "")))}
+            disabled={updateContact.isPending || isUnchanged}
           >
             {updateContact.isPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

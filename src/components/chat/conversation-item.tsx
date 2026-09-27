@@ -1,10 +1,11 @@
 import React, { memo } from "react";
-import { Users, Phone } from "lucide-react";
+import { Users, Phone, Clock, AlertTriangle } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ChannelIcon } from "@/components/common/channel-icon";
 import { cn } from "@/lib/utils";
-import { formatRelative, initials } from "@/lib/format";
+import { formatConversationTime, initials } from "@/lib/format";
+import { calculateConversationSla, type SlaSettings } from "@/lib/sla";
 import type { ConvRow } from "./conversation-types";
 
 interface ConversationItemProps {
@@ -14,6 +15,7 @@ interface ConversationItemProps {
   onPrefetch?: () => void;
   currentUserId?: string;
   showUnitInfo?: boolean;
+  slaSettings?: SlaSettings;
 }
 
 export const ConversationItem = memo(function ConversationItem({
@@ -23,9 +25,11 @@ export const ConversationItem = memo(function ConversationItem({
   onPrefetch,
   currentUserId,
   showUnitInfo,
+  slaSettings,
 }: ConversationItemProps) {
   const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || (conv.contact.phone.includes('-') && conv.contact.phone.length > 18));
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  const slaInfo = calculateConversationSla(conv, slaSettings);
 
   return (
     <button
@@ -35,6 +39,8 @@ export const ConversationItem = memo(function ConversationItem({
       className={cn(
         "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-colors hover:bg-accent/40",
         selected && "bg-accent/60",
+        slaInfo.status === "breached" && "border-l-4 border-l-destructive bg-destructive/[0.02]",
+        slaInfo.status === "warning" && "border-l-2 border-l-amber-500/70",
       )}
     >
       <Avatar className="h-10 w-10">
@@ -51,8 +57,29 @@ export const ConversationItem = memo(function ConversationItem({
           <span className={cn("truncate text-sm font-medium flex-1 min-w-0", conv.unread_count && conv.unread_count > 0 && "font-bold text-foreground")}>
             {contactName}
           </span>
-          <span className={cn("whitespace-nowrap shrink-0 text-[11px]", conv.unread_count && conv.unread_count > 0 ? "font-bold text-success" : "text-muted-foreground")}>
-            {formatRelative(conv.last_message_at)}
+          {slaInfo.isWaiting && (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border shrink-0 transition-colors shadow-xs",
+                slaInfo.status === "breached" && "bg-destructive/15 text-destructive border-destructive/30 animate-pulse font-bold",
+                slaInfo.status === "warning" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
+                slaInfo.status === "ok" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+              )}
+              title={slaInfo.tooltipText}
+            >
+              {slaInfo.status === "breached" ? (
+                <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
+              ) : (
+                <Clock className="h-2.5 w-2.5 shrink-0" />
+              )}
+              <span>{slaInfo.badgeLabel}</span>
+            </span>
+          )}
+          <span 
+            className={cn("whitespace-nowrap shrink-0 text-[11px]", conv.unread_count && conv.unread_count > 0 ? "font-bold text-success" : "text-muted-foreground")}
+            title={conv.last_message_at ? new Date(conv.last_message_at).toLocaleString("pt-BR") : undefined}
+          >
+            {formatConversationTime(conv.last_message_at)}
           </span>
         </div>
         {conv.last_message_preview && (
