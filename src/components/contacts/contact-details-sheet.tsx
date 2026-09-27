@@ -45,6 +45,7 @@ import { Link } from "@tanstack/react-router";
 import { MergeContactDialog } from "./merge-contact-dialog";
 import { ContactBlockDialog } from "./contact-block-dialog";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
+import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { blockContactAction, unblockContactAction } from "@/lib/api/chat.functions";
 import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
@@ -1827,16 +1828,15 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                         <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                                <StartConversationDialog
+                                <ContactChatButton
+                                  contactId={contact.id}
                                   contactName={contact.name || ""}
-                                  initialPhone={contact.phone || ""}
-                                  onCreated={(id) => { window.location.href = `/conversations?c=${id}&tab=active`; }}
+                                  phone={contact.phone || ""}
                                   trigger={
                                     <Button 
                                       variant="secondary" 
                                       size="icon" 
                                       className="h-6 w-6 ml-1 rounded-full shadow-sm hover:bg-primary hover:text-primary-foreground transition-colors"
-                                      onClick={(e) => e.stopPropagation()}
                                     >
                                       <MessageCircle className="h-3 w-3" />
                                     </Button>

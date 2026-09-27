@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { 
@@ -12,7 +12,12 @@ import {
   CheckCircle2, 
   Clock, 
   AlertCircle,
-  Sparkles
+  Sparkles,
+  KanbanSquare,
+  Target,
+  UserPlus,
+  DollarSign,
+  ShieldCheck
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useActiveCompany } from "@/lib/active-company-context";
@@ -37,6 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 interface AutomationRow {
   id: string;
@@ -58,7 +64,15 @@ const TRIGGER_OPTIONS = [
     description: "Disparado na primeira vez que um lead envia mensagem através de um anúncio do WhatsApp/Meta Ads",
     icon: Megaphone,
   },
+  {
+    value: "contact_created",
+    label: "Novo contato cadastrado no sistema",
+    description: "Disparado quando um novo contato é cadastrado no sistema",
+    icon: UserPlus,
+  },
 ];
+
+type ActionCategory = "create_opportunity" | "add_label" | "both";
 
 export function AutomationsTab() {
   const { activeCompanyId } = useActiveCompany();
@@ -70,7 +84,17 @@ export function AutomationsTab() {
   // Form state
   const [name, setName] = useState("");
   const [triggerType, setTriggerType] = useState("ad_lead_first_message");
+  const [actionCategory, setActionCategory] = useState<ActionCategory>("create_opportunity");
+
+  // Label action state
   const [selectedLabelId, setSelectedLabelId] = useState("");
+
+  // CRM action state
+  const [selectedPipelineId, setSelectedPipelineId] = useState("");
+  const [selectedStageId, setSelectedStageId] = useState("");
+  const [opportunityValue, setOpportunityValue] = useState("");
+  const [titleTemplate, setTitleTemplate] = useState("{{contact_name}}");
+  const [preventDuplicates, setPreventDuplicates] = useState(true);
 
   // 1. Consulta automações da empresa
   const { data: automations, isLoading: loadingAutomations } = useQuery({
@@ -104,11 +128,65 @@ export function AutomationsTab() {
     },
   });
 
+  // 3. Consulta funis (pipelines) da empresa
+  const { data: pipelines } = useQuery({
+    queryKey: ["pipelines", activeCompanyId],
+    enabled: !!activeCompanyId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("pipelines")
+        .select("id, name")
+        .eq("company_id", activeCompanyId!)
+        .order("created_at", { ascending: true });
+
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // 4. Consulta etapas (stages) de todos os funis para exibição e seleção
+  const { data: allStages } = useQuery({
+    queryKey: ["all-pipeline-stages", activeCompanyId],
+    enabled: !!activeCompanyId,
+    queryFn: async () => {
+      if (!pipelines || pipelines.length === 0) return [];
+      const pipelineIds = pipelines.map((p) => p.id);
+      const { data, error } = await supabase
+        .from("pipeline_stages")
+        .select("id, name, color, order, pipeline_id")
+        .in("pipeline_id", pipelineIds)
+        .order("order", { ascending: true });
+
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Etapas filtradas pelo funil selecionado no formulário
+  const currentPipelineStages = (allStages || []).filter((s) => s.pipeline_id === selectedPipelineId);
+
+  // Sincroniza primeira etapa ao trocar de funil
+  useEffect(() => {
+    if (selectedPipelineId && currentPipelineStages.length > 0) {
+      if (!currentPipelineStages.some((s) => s.id === selectedStageId)) {
+        setSelectedStageId(currentPipelineStages[0].id);
+      }
+    }
+  }, [selectedPipelineId, currentPipelineStages, selectedStageId]);
+
   const openCreateModal = () => {
     setEditingAutomation(null);
-    setName("Etiquetar Leads de Anúncios");
+    setName("Criar Oportunidade para Leads de Anúncios");
     setTriggerType("ad_lead_first_message");
+    setActionCategory("create_opportunity");
     setSelectedLabelId(labels?.[0]?.id || "");
+    const firstPipeline = pipelines?.[0]?.id || "";
+    setSelectedPipelineId(firstPipeline);
+    const firstStage = allStages?.find((s) => s.pipeline_id === firstPipeline)?.id || "";
+    setSelectedStageId(firstStage);
+    setOpportunityValue("");
+    setTitleTemplate("{{contact_name}}");
+    setPreventDuplicates(true);
     setIsModalOpen(true);
   };
 
@@ -116,8 +194,40 @@ export function AutomationsTab() {
     setEditingAutomation(auto);
     setName(auto.name);
     setTriggerType(auto.trigger_type);
+
     const addLabelAction = auto.actions?.find((a) => a.type === "add_label");
-    setSelectedLabelId(addLabelAction?.params?.label_id || "");
+    const createOppAction = auto.actions?.find((a) => a.type === "create_opportunity");
+
+    if (addLabelAction && createOppAction) {
+      setActionCategory("both");
+    } else if (createOppAction) {
+      setActionCategory("create_opportunity");
+    } else {
+      setActionCategory("add_label");
+    }
+
+    if (addLabelAction) {
+      setSelectedLabelId(addLabelAction.params?.label_id || "");
+    } else {
+      setSelectedLabelId(labels?.[0]?.id || "");
+    }
+
+    if (createOppAction) {
+      setSelectedPipelineId(createOppAction.params?.pipeline_id || pipelines?.[0]?.id || "");
+      setSelectedStageId(createOppAction.params?.stage_id || "");
+      setOpportunityValue(createOppAction.params?.value ? String(createOppAction.params.value) : "");
+      setTitleTemplate(createOppAction.params?.title_template || "{{contact_name}}");
+      setPreventDuplicates(createOppAction.params?.prevent_duplicates !== false);
+    } else {
+      const firstPipeline = pipelines?.[0]?.id || "";
+      setSelectedPipelineId(firstPipeline);
+      const firstStage = allStages?.find((s) => s.pipeline_id === firstPipeline)?.id || "";
+      setSelectedStageId(firstStage);
+      setOpportunityValue("");
+      setTitleTemplate("{{contact_name}}");
+      setPreventDuplicates(true);
+    }
+
     setIsModalOpen(true);
   };
 
@@ -126,22 +236,48 @@ export function AutomationsTab() {
     mutationFn: async () => {
       if (!activeCompanyId) throw new Error("Sem empresa ativa");
       if (!name.trim()) throw new Error("O nome da automação é obrigatório");
-      if (!selectedLabelId) throw new Error("Selecione uma etiqueta para a automação");
 
-      const actions = [
-        {
+      const actions: { type: string; params: Record<string, any> }[] = [];
+
+      // Ação de Etiqueta
+      if (actionCategory === "add_label" || actionCategory === "both") {
+        if (!selectedLabelId) throw new Error("Selecione uma etiqueta para a automação");
+        actions.push({
           type: "add_label",
           params: {
             label_id: selectedLabelId,
           },
-        },
-      ];
+        });
+      }
+
+      // Ação de CRM
+      if (actionCategory === "create_opportunity" || actionCategory === "both") {
+        if (!selectedPipelineId) throw new Error("Selecione o funil de vendas de destino");
+        if (!selectedStageId) throw new Error("Selecione a etapa inicial do funil");
+
+        const parsedVal = opportunityValue ? parseFloat(opportunityValue.replace(",", ".")) : 0;
+
+        actions.push({
+          type: "create_opportunity",
+          params: {
+            pipeline_id: selectedPipelineId,
+            stage_id: selectedStageId,
+            value: isNaN(parsedVal) ? 0 : parsedVal,
+            title_template: titleTemplate.trim() || "{{contact_name}}",
+            prevent_duplicates: preventDuplicates,
+          },
+        });
+      }
+
+      if (actions.length === 0) {
+        throw new Error("Pelo menos uma ação deve ser configurada.");
+      }
 
       if (editingAutomation) {
         const { error } = await supabase
           .from("automations" as any)
           .update({
-            name,
+            name: name.trim(),
             trigger_type: triggerType,
             actions,
             updated_at: new Date().toISOString(),
@@ -154,7 +290,7 @@ export function AutomationsTab() {
           .from("automations" as any)
           .insert({
             company_id: activeCompanyId,
-            name,
+            name: name.trim(),
             trigger_type: triggerType,
             actions,
             is_active: true,
@@ -173,7 +309,7 @@ export function AutomationsTab() {
     },
   });
 
-  // Alternar Ativação (Toggle switch)
+  // Alternar Ativação
   const toggleMutation = useMutation({
     mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
       const { error } = await supabase
@@ -215,6 +351,18 @@ export function AutomationsTab() {
     return labels?.find((l) => l.id === labelId);
   };
 
+  const getPipelineInfo = (pipelineId: string) => {
+    return pipelines?.find((p) => p.id === pipelineId);
+  };
+
+  const getStageInfo = (stageId: string) => {
+    return allStages?.find((s) => s.id === stageId);
+  };
+
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -222,10 +370,10 @@ export function AutomationsTab() {
         <div>
           <div className="flex items-center gap-2">
             <Zap className="h-5 w-5 text-amber-500 fill-amber-500/20" />
-            <h2 className="text-xl font-bold tracking-tight">Automações de Atendimento</h2>
+            <h2 className="text-xl font-bold tracking-tight">Automações de Atendimento & CRM</h2>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Crie fluxos automáticos estilo ManyChat e BotConversa para etiquetar contatos, segmentar anúncios e acelerar processos.
+            Crie fluxos automáticos para criar oportunidades no funil comercial do CRM, anexar etiquetas e acelerar a conversão de leads.
           </p>
         </div>
         <Button onClick={openCreateModal} className="gap-2 shrink-0">
@@ -249,7 +397,7 @@ export function AutomationsTab() {
             </div>
             <h3 className="font-semibold text-base mb-1">Nenhuma automação configurada</h3>
             <p className="text-sm text-muted-foreground max-w-md mb-5">
-              Crie uma automação para que leads vindos de anúncios recebam automaticamente a etiqueta desejada assim que mandarem mensagem!
+              Crie uma automação para que contatos e leads vindos de campanhas criem oportunidades no seu funil comercial automaticamente!
             </p>
             <Button onClick={openCreateModal} variant="outline" className="gap-2">
               <Plus className="h-4 w-4" />
@@ -261,17 +409,23 @@ export function AutomationsTab() {
         <div className="grid gap-4">
           {automations.map((auto) => {
             const addLabelAction = auto.actions?.find((a) => a.type === "add_label");
+            const createOppAction = auto.actions?.find((a) => a.type === "create_opportunity");
+
             const labelInfo = addLabelAction ? getLabelInfo(addLabelAction.params?.label_id) : null;
+            const pipelineInfo = createOppAction ? getPipelineInfo(createOppAction.params?.pipeline_id) : null;
+            const stageInfo = createOppAction ? getStageInfo(createOppAction.params?.stage_id) : null;
+            const triggerInfo = TRIGGER_OPTIONS.find((t) => t.value === auto.trigger_type);
+            const TriggerIcon = triggerInfo?.icon || Zap;
 
             return (
               <Card 
                 key={auto.id} 
-                className={`transition-all border ${auto.is_active ? 'border-border bg-card' : 'border-border/50 bg-muted/20 opacity-75'}`}
+                className={`transition-all border ${auto.is_active ? 'border-border bg-card shadow-xs' : 'border-border/50 bg-muted/20 opacity-75'}`}
               >
                 <CardHeader className="p-4 sm:p-5 pb-3">
                   <div className="flex items-start justify-between gap-4">
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-2.5 flex-wrap">
                         <CardTitle className="text-base font-semibold">{auto.name}</CardTitle>
                         {auto.is_active ? (
                           <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-[11px] gap-1 py-0 h-5">
@@ -286,7 +440,7 @@ export function AutomationsTab() {
                         )}
                       </div>
                       <CardDescription className="text-xs">
-                        Dispara automaticamente no primeiro contato vindo de campanhas
+                        {triggerInfo?.description || "Gatilho configurado para eventos da empresa"}
                       </CardDescription>
                     </div>
 
@@ -324,39 +478,72 @@ export function AutomationsTab() {
                 <CardContent className="p-4 sm:p-5 pt-0">
                   <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-muted/40 p-3 rounded-lg border border-border/50 text-xs">
                     {/* Trigger visual */}
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 shrink-0">
                       <span className="font-semibold text-muted-foreground uppercase text-[10px] tracking-wider">Gatilho:</span>
                       <Badge variant="secondary" className="gap-1.5 font-normal py-1">
-                        <Megaphone className="h-3 w-3 text-amber-500" />
-                        Primeiro contato via Anúncio (CTWA)
+                        <TriggerIcon className="h-3.5 w-3.5 text-amber-500" />
+                        <span>{triggerInfo?.label || auto.trigger_type}</span>
                       </Badge>
                     </div>
 
                     <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 hidden sm:block" />
 
-                    {/* Action visual */}
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-semibold text-muted-foreground uppercase text-[10px] tracking-wider">Ação:</span>
-                      {labelInfo ? (
+                    {/* Actions visual */}
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <span className="font-semibold text-muted-foreground uppercase text-[10px] tracking-wider">Ações:</span>
+                      
+                      {/* Oportunidade no CRM */}
+                      {createOppAction && (
                         <Badge 
                           variant="outline" 
-                          className="gap-1.5 font-medium py-1"
-                          style={{
-                            backgroundColor: `${labelInfo.color || '#6b7280'}15`,
-                            color: labelInfo.color || '#6b7280',
-                            borderColor: `${labelInfo.color || '#6b7280'}40`,
-                          }}
+                          className="gap-1.5 font-medium py-1 bg-primary/10 text-primary border-primary/30"
                         >
-                          <span 
-                            className="h-2 w-2 rounded-full shrink-0" 
-                            style={{ backgroundColor: labelInfo.color || '#6b7280' }} 
-                          />
-                          Aplicar etiqueta: {labelInfo.name}
+                          <KanbanSquare className="h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            Criar Oportunidade: {pipelineInfo?.name || "Funil"} &gt;
+                          </span>
+                          {stageInfo ? (
+                            <span className="inline-flex items-center gap-1 font-semibold">
+                              <span 
+                                className="h-2 w-2 rounded-full shrink-0" 
+                                style={{ backgroundColor: stageInfo.color || '#3b82f6' }} 
+                              />
+                              {stageInfo.name}
+                            </span>
+                          ) : (
+                            <span>Etapa</span>
+                          )}
+                          {Number(createOppAction.params?.value) > 0 && (
+                            <span className="font-bold text-emerald-600 dark:text-emerald-400 ml-0.5">
+                              ({formatCurrency(createOppAction.params.value)})
+                            </span>
+                          )}
                         </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-muted-foreground">
-                          Aplicar etiqueta (não encontrada)
-                        </Badge>
+                      )}
+
+                      {/* Etiqueta */}
+                      {addLabelAction && (
+                        labelInfo ? (
+                          <Badge 
+                            variant="outline" 
+                            className="gap-1.5 font-medium py-1"
+                            style={{
+                              backgroundColor: `${labelInfo.color || '#6b7280'}15`,
+                              color: labelInfo.color || '#6b7280',
+                              borderColor: `${labelInfo.color || '#6b7280'}40`,
+                            }}
+                          >
+                            <span 
+                              className="h-2 w-2 rounded-full shrink-0" 
+                              style={{ backgroundColor: labelInfo.color || '#6b7280' }} 
+                            />
+                            Etiqueta: {labelInfo.name}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-muted-foreground">
+                            Etiqueta (não encontrada)
+                          </Badge>
+                        )
                       )}
                     </div>
                   </div>
@@ -369,14 +556,14 @@ export function AutomationsTab() {
 
       {/* Modal de Criação / Edição */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Zap className="h-5 w-5 text-amber-500" />
-              {editingAutomation ? "Editar Automação" : "Nova Automação de Atendimento"}
+              {editingAutomation ? "Editar Automação" : "Nova Automação de Atendimento & CRM"}
             </DialogTitle>
             <DialogDescription>
-              Configure o gatilho e a ação que o sistema executará de forma 100% automática.
+              Configure o evento de disparo e as ações executadas de forma 100% automática.
             </DialogDescription>
           </DialogHeader>
 
@@ -386,7 +573,7 @@ export function AutomationsTab() {
               <Label htmlFor="auto-name">Nome da Automação</Label>
               <Input
                 id="auto-name"
-                placeholder="Ex: Etiquetar Leads de Tráfego Pago"
+                placeholder="Ex: Criar Oportunidade para Leads de Anúncios"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -411,48 +598,198 @@ export function AutomationsTab() {
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground mt-1">
-                Disparado assim que uma pessoa clica em um anúncio do Meta Ads/WhatsApp e envia a primeira mensagem criando o contato.
+                {TRIGGER_OPTIONS.find((t) => t.value === triggerType)?.description}
               </p>
             </div>
 
-            {/* Ação */}
-            <div className="space-y-2 rounded-xl bg-muted/40 p-4 border border-border/60">
-              <div className="flex items-center gap-2 mb-1">
-                <Tag className="h-4 w-4 text-primary" />
-                <span className="font-semibold text-sm">Ação: Anexar Etiqueta ao Contato</span>
-              </div>
+            {/* Escolha do Tipo de Ação */}
+            <div className="space-y-2">
+              <Label>O que fazer (Ação):</Label>
+              <RadioGroup
+                value={actionCategory}
+                onValueChange={(val) => setActionCategory(val as ActionCategory)}
+                className="grid grid-cols-1 sm:grid-cols-3 gap-2"
+              >
+                <div 
+                  onClick={() => setActionCategory("create_opportunity")}
+                  className={`flex flex-col items-center justify-center p-3 rounded-lg border text-center cursor-pointer transition-all ${
+                    actionCategory === "create_opportunity" 
+                      ? "border-primary bg-primary/10 text-primary shadow-xs" 
+                      : "border-border hover:bg-muted/50 text-muted-foreground"
+                  }`}
+                >
+                  <KanbanSquare className="h-5 w-5 mb-1.5 text-primary" />
+                  <span className="text-xs font-semibold leading-tight">Criar Oportunidade no CRM</span>
+                </div>
 
-              {!labels?.length ? (
-                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
-                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>Você ainda não possui etiquetas cadastradas. Crie primeiro suas etiquetas na aba <b>Etiquetas</b> para poder selecioná-las aqui.</span>
+                <div 
+                  onClick={() => setActionCategory("add_label")}
+                  className={`flex flex-col items-center justify-center p-3 rounded-lg border text-center cursor-pointer transition-all ${
+                    actionCategory === "add_label" 
+                      ? "border-primary bg-primary/10 text-primary shadow-xs" 
+                      : "border-border hover:bg-muted/50 text-muted-foreground"
+                  }`}
+                >
+                  <Tag className="h-5 w-5 mb-1.5 text-primary" />
+                  <span className="text-xs font-semibold leading-tight">Anexar Etiqueta</span>
                 </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <Label htmlFor="label-select" className="text-xs text-muted-foreground">
-                    Selecione qual etiqueta será anexada:
-                  </Label>
-                  <Select value={selectedLabelId} onValueChange={setSelectedLabelId}>
-                    <SelectTrigger id="label-select" className="bg-background">
-                      <SelectValue placeholder="Selecione uma etiqueta..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {labels.map((l) => (
-                        <SelectItem key={l.id} value={l.id}>
-                          <div className="flex items-center gap-2">
-                            <span 
-                              className="h-2.5 w-2.5 rounded-full shrink-0" 
-                              style={{ backgroundColor: l.color || '#6b7280' }} 
-                            />
-                            <span>{l.name}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+
+                <div 
+                  onClick={() => setActionCategory("both")}
+                  className={`flex flex-col items-center justify-center p-3 rounded-lg border text-center cursor-pointer transition-all ${
+                    actionCategory === "both" 
+                      ? "border-primary bg-primary/10 text-primary shadow-xs" 
+                      : "border-border hover:bg-muted/50 text-muted-foreground"
+                  }`}
+                >
+                  <Sparkles className="h-5 w-5 mb-1.5 text-primary" />
+                  <span className="text-xs font-semibold leading-tight">Ambas as Ações (CRM + Etiqueta)</span>
                 </div>
-              )}
+              </RadioGroup>
             </div>
+
+            {/* Configurações de CRM (Oportunidade) */}
+            {(actionCategory === "create_opportunity" || actionCategory === "both") && (
+              <div className="space-y-3 rounded-xl bg-muted/40 p-4 border border-border/60">
+                <div className="flex items-center gap-2 mb-1">
+                  <KanbanSquare className="h-4 w-4 text-primary" />
+                  <span className="font-semibold text-sm">Configuração da Oportunidade no CRM</span>
+                </div>
+
+                {!pipelines?.length ? (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>Nenhum funil de vendas encontrado. Crie primeiro um funil em Configurações &gt; CRM.</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="pipeline-select" className="text-xs font-medium">Funil de Vendas</Label>
+                        <Select value={selectedPipelineId} onValueChange={setSelectedPipelineId}>
+                          <SelectTrigger id="pipeline-select" className="bg-background">
+                            <SelectValue placeholder="Selecione o funil..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {pipelines.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="stage-select" className="text-xs font-medium">Etapa Inicial</Label>
+                        <Select 
+                          value={selectedStageId} 
+                          onValueChange={setSelectedStageId}
+                          disabled={!selectedPipelineId || currentPipelineStages.length === 0}
+                        >
+                          <SelectTrigger id="stage-select" className="bg-background">
+                            <SelectValue placeholder="Selecione a etapa..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {currentPipelineStages.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>
+                                <div className="flex items-center gap-2">
+                                  <span 
+                                    className="h-2.5 w-2.5 rounded-full shrink-0" 
+                                    style={{ backgroundColor: s.color || "#3b82f6" }} 
+                                  />
+                                  <span>{s.name}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="opp-value" className="text-xs font-medium">Valor Padrão (R$)</Label>
+                        <Input
+                          id="opp-value"
+                          type="number"
+                          step="0.01"
+                          placeholder="0,00 (opcional)"
+                          value={opportunityValue}
+                          onChange={(e) => setOpportunityValue(e.target.value)}
+                          className="bg-background"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="opp-title" className="text-xs font-medium">Título da Oportunidade</Label>
+                        <Input
+                          id="opp-title"
+                          placeholder="Ex: {{contact_name}}"
+                          value={titleTemplate}
+                          onChange={(e) => setTitleTemplate(e.target.value)}
+                          className="bg-background"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-border/40 mt-1">
+                      <div className="space-y-0.5">
+                        <Label className="text-xs font-medium cursor-pointer">Evitar Duplicidades no Funil</Label>
+                        <p className="text-[11px] text-muted-foreground">
+                          Não cria nova oportunidade se o contato já possuir uma oportunidade aberta neste funil
+                        </p>
+                      </div>
+                      <Switch
+                        checked={preventDuplicates}
+                        onCheckedChange={setPreventDuplicates}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Configurações de Etiqueta */}
+            {(actionCategory === "add_label" || actionCategory === "both") && (
+              <div className="space-y-2 rounded-xl bg-muted/40 p-4 border border-border/60">
+                <div className="flex items-center gap-2 mb-1">
+                  <Tag className="h-4 w-4 text-primary" />
+                  <span className="font-semibold text-sm">Ação: Anexar Etiqueta ao Contato</span>
+                </div>
+
+                {!labels?.length ? (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <span>Você ainda não possui etiquetas cadastradas. Crie suas etiquetas na aba <b>Etiquetas</b>.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="label-select" className="text-xs text-muted-foreground">
+                      Selecione qual etiqueta será anexada:
+                    </Label>
+                    <Select value={selectedLabelId} onValueChange={setSelectedLabelId}>
+                      <SelectTrigger id="label-select" className="bg-background">
+                        <SelectValue placeholder="Selecione uma etiqueta..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {labels.map((l) => (
+                          <SelectItem key={l.id} value={l.id}>
+                            <div className="flex items-center gap-2">
+                              <span 
+                                className="h-2.5 w-2.5 rounded-full shrink-0" 
+                                style={{ backgroundColor: l.color || '#6b7280' }} 
+                              />
+                              <span>{l.name}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -461,7 +798,7 @@ export function AutomationsTab() {
             </Button>
             <Button 
               onClick={() => saveMutation.mutate()} 
-              disabled={saveMutation.isPending || !selectedLabelId || !name.trim()}
+              disabled={saveMutation.isPending || !name.trim()}
             >
               {saveMutation.isPending ? "Salvando..." : editingAutomation ? "Salvar Alterações" : "Criar Automação"}
             </Button>

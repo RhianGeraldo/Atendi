@@ -21,7 +21,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
+import { dispatchAutomationAction } from "@/lib/api/automations.functions";
 
 interface CreateContactForm {
   name: string;
@@ -144,12 +152,26 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
         .single();
 
       if (error) throw error;
+
+      if (result?.id) {
+        // Dispara automações desacopladas para novo contato
+        dispatchAutomationAction({
+          data: {
+            companyId: companyId,
+            unitId: effectiveUnitId || null,
+            contactId: result.id,
+            triggerType: "contact_created",
+          },
+        }).catch((err: any) => console.error("Erro ao disparar automação contact_created:", err));
+      }
+
       return result;
     },
     onSuccess: () => {
       toast.success("Contato criado com sucesso!");
       qc.invalidateQueries({ queryKey: ["contacts"] });
       qc.invalidateQueries({ queryKey: ["contacts-counts"] });
+      qc.invalidateQueries({ queryKey: ["opportunities"] });
       setOpen(false);
       reset();
     },

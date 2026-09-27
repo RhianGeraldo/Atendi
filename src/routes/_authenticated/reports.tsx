@@ -264,7 +264,6 @@ function ReportsPage() {
           value,
           status,
           created_at,
-          updated_at,
           owner_id,
           unit_id,
           stage_id,

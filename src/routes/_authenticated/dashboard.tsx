@@ -181,10 +181,15 @@ function DashboardPage() {
         .order("due_date", { ascending: true })
         .limit(6);
 
-      if (activeCompanyId) qTasks = qTasks.eq("company_id", activeCompanyId);
-      if (selectedUnitId) qTasks = qTasks.eq("unit_id", selectedUnitId);
+      if (selectedUnitId && selectedUnitId !== "all") {
+        qTasks = qTasks.eq("unit_id", selectedUnitId);
+      }
 
-      const { data } = await qTasks;
+      const { data, error } = await qTasks;
+      if (error) {
+        console.error("Erro ao buscar tarefas no dashboard:", error);
+        return [];
+      }
       return data ?? [];
     },
   });

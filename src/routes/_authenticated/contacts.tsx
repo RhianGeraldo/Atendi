@@ -654,12 +654,24 @@ function ContactsPage() {
                             {contact.has_ad && contact.latest_ad ? (
                               <div className="flex items-center gap-2.5 max-w-[260px]">
                                 {contact.latest_ad.thumbnail_url ? (
-                                  <img 
-                                    src={contact.latest_ad.thumbnail_url} 
-                                    alt="Ad thumbnail" 
-                                    className="h-9 w-9 rounded-md object-cover border border-border shrink-0 shadow-2xs"
-                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                  />
+                                  <>
+                                    <img 
+                                      src={contact.latest_ad.thumbnail_url} 
+                                      alt="Ad thumbnail" 
+                                      className="h-9 w-9 rounded-md object-cover border border-border shrink-0 shadow-2xs"
+                                      onError={(e) => { 
+                                        e.currentTarget.style.display = 'none'; 
+                                        const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                                        if (fallback) fallback.style.display = 'flex';
+                                      }}
+                                    />
+                                    <div 
+                                      style={{ display: 'none' }}
+                                      className="h-9 w-9 rounded-md bg-blue-500/10 text-blue-600 items-center justify-center border border-blue-500/20 shrink-0"
+                                    >
+                                      <Megaphone className="h-4 w-4" />
+                                    </div>
+                                  </>
                                 ) : (
                                   <div className="h-9 w-9 rounded-md bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20 shrink-0">
                                     <Megaphone className="h-4 w-4" />

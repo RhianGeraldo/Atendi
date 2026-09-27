@@ -20,6 +20,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
+import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { useNavigate } from "@tanstack/react-router";
 import { initials } from "@/lib/format";
@@ -138,7 +139,7 @@ function PipelinePage() {
       let query = supabase
         .from("opportunities")
         .select(`
-          id, title, value, stage_id, expected_close_date, contact_id, created_at, notes, owner_id, unit_id, status,
+          id, title, value, stage_id, expected_close_date, contact_id, created_at, notes, owner_id, unit_id, status, conversation_id,
           contacts ( name, phone ),
           profiles:owner_id ( id, name, email ),
           tasks ( id, status ),
@@ -615,23 +616,16 @@ function PipelinePage() {
                                       <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <TooltipProvider>
                                           <Tooltip>
-                                            <StartConversationDialog 
-                                              contactName={opp.contacts?.name || ""}
-                                              initialPhone={opp.contacts?.phone || ""}
-                                              onCreated={(id) => navigate({ to: "/conversations", search: { c: id } as any })}
-                                              trigger={
-                                                <TooltipTrigger asChild>
-                                                  <Button 
-                                                    variant="secondary" 
-                                                    size="icon" 
-                                                    className="h-7 w-7 rounded-full shadow-sm bg-background border hover:bg-primary hover:text-primary-foreground transition-colors"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                  >
-                                                    <MessageCircle className="h-3.5 w-3.5" />
-                                                  </Button>
-                                                </TooltipTrigger>
-                                              }
-                                            />
+                                            <TooltipTrigger asChild>
+                                              <div>
+                                                <ContactChatButton 
+                                                  contactId={opp.contact_id}
+                                                  contactName={opp.contacts?.name || ""}
+                                                  phone={opp.contacts?.phone || ""}
+                                                  conversationId={opp.conversation_id}
+                                                />
+                                              </div>
+                                            </TooltipTrigger>
                                             <TooltipContent side="top">
                                               <p className="text-xs">Ir para conversa</p>
                                             </TooltipContent>

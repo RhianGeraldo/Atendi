@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,8 +23,9 @@ import { toast } from "sonner";
 import { useUnit } from "@/lib/unit-context";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CheckSquare, Circle, CheckCircle2, Pencil, Trash2, Calendar as CalendarIcon, Target, Plus, Phone, MessageSquare, Video, CalendarClock, Clock, Info, ListTodo, StickyNote, User, UserCheck, Save, History, ExternalLink } from "lucide-react";
+import { CheckSquare, Circle, CheckCircle2, Pencil, Trash2, Calendar as CalendarIcon, Target, Plus, Phone, MessageSquare, MessageCircle, Video, CalendarClock, Clock, Info, ListTodo, StickyNote, User, UserCheck, Save, History, ExternalLink } from "lucide-react";
 import { TaskDialog } from "@/components/crm/task-dialog";
+import { ContactChatButton } from "@/components/chat/contact-chat-button";
 
 // BRL Currency formatting helpers
 const formatBRLString = (num: number | string | undefined | null) => {
@@ -796,6 +797,9 @@ export function OpportunityDialog({
                 <Target className="h-5 w-5 text-primary shrink-0" />
                 <span className="truncate">{opportunity ? (title || "Gerenciar Oportunidade") : "Nova Oportunidade"}</span>
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                Gerenciamento da oportunidade de venda e detalhes do cliente
+              </DialogDescription>
               {opportunity?.contacts?.name && (
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground truncate mt-0.5">
                   <span className="font-normal text-muted-foreground">Cliente:</span>
@@ -844,6 +848,27 @@ export function OpportunityDialog({
                       Reabrir
                     </Button>
                   </>
+                )}
+
+                {opportunity && (
+                  <ContactChatButton
+                    contactId={contactId || opportunity.contact_id}
+                    contactName={opportunity.contacts?.name || contacts?.find(c => c.id === contactId)?.name || ""}
+                    phone={opportunity.contacts?.phone || contacts?.find(c => c.id === contactId)?.phone || ""}
+                    conversationId={opportunity.conversation_id}
+                    onNavigate={() => setOpen(false)}
+                    trigger={
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-2.5 gap-1.5 text-xs font-medium text-muted-foreground hover:text-emerald-600 hover:border-emerald-500/40 hover:bg-emerald-500/10 transition-colors cursor-pointer"
+                        title="Ir para o Atendimento / Conversa"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5 text-emerald-500" />
+                        <span className="hidden sm:inline">Ir para o Chat</span>
+                      </Button>
+                    }
+                  />
                 )}
 
                 {opportunity && typeof window !== "undefined" && window.location.pathname !== "/pipeline" && (
@@ -1086,7 +1111,28 @@ export function OpportunityDialog({
                   <div className="grid grid-cols-2 gap-4">
                     {/* Contato Selecionado */}
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-medium text-muted-foreground">Contato Vinculado (Cliente)</Label>
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-medium text-muted-foreground">Contato Vinculado (Cliente)</Label>
+                        {contactId && (
+                          <ContactChatButton
+                            contactId={contactId}
+                            contactName={contacts?.find(c => c.id === contactId)?.name || opportunity?.contacts?.name || ""}
+                            phone={contacts?.find(c => c.id === contactId)?.phone || opportunity?.contacts?.phone || ""}
+                            conversationId={opportunity?.conversation_id}
+                            onNavigate={() => setOpen(false)}
+                            trigger={
+                              <button
+                                type="button"
+                                className="text-[11px] font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 flex items-center gap-1 cursor-pointer hover:underline"
+                                title="Abrir conversa do cliente no Chat"
+                              >
+                                <MessageCircle className="h-3 w-3" />
+                                <span>Abrir no Chat</span>
+                              </button>
+                            }
+                          />
+                        )}
+                      </div>
                       <Popover open={contactComboboxOpen} onOpenChange={setContactComboboxOpen}>
                         <PopoverTrigger asChild>
                           <Button
