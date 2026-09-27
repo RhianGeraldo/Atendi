@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
@@ -25,18 +25,72 @@ import { useNavigate } from "@tanstack/react-router";
 import { initials } from "@/lib/format";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
+  validateSearch: (search: Record<string, unknown>) => {
+    return {
+      pipelineId: search.pipelineId as string | undefined,
+      opportunityId: search.opportunityId as string | undefined,
+      status: search.status as string | undefined,
+    };
+  },
   component: PipelinePage,
 });
 
 function PipelinePage() {
   const navigate = useNavigate();
+  const search = Route.useSearch();
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
-  const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>("open");
+  const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(search.pipelineId || null);
+  const [statusFilter, setStatusFilter] = useState<string>(search.status || "open");
   const [searchTerm, setSearchTerm] = useState("");
+  const [highlightedOppId, setHighlightedOppId] = useState<string | null>(search.opportunityId || null);
+  const boardContainerRef = useRef<HTMLDivElement>(null);
+  const hasScrolledRef = useRef<string | null>(null);
+
+  // Busca dados da oportunidade alvo se veio na URL (garante pipeline correto e que não seja ocultada por filtro)
+  const { data: targetOpp } = useQuery({
+    queryKey: ["target-opportunity-lookup", search.opportunityId],
+    enabled: !!search.opportunityId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("opportunities")
+        .select("id, stage_id, status, pipeline_stages(pipeline_id)")
+        .eq("id", search.opportunityId!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Sincroniza pipeline e status quando a oportunidade alvo é carregada
+  useEffect(() => {
+    if (targetOpp) {
+      const targetPipelineId = (targetOpp.pipeline_stages as any)?.pipeline_id;
+      if (targetPipelineId && targetPipelineId !== selectedPipelineId) {
+        setSelectedPipelineId(targetPipelineId);
+      }
+      if (targetOpp.status && statusFilter !== "all" && targetOpp.status !== statusFilter) {
+        setStatusFilter("all");
+      }
+    }
+  }, [targetOpp]);
+
+  // Sincroniza pipelineId da URL se mudar
+  useEffect(() => {
+    if (search.pipelineId && search.pipelineId !== selectedPipelineId) {
+      setSelectedPipelineId(search.pipelineId);
+    }
+  }, [search.pipelineId]);
+
+  // Atualiza oportunidade destacada caso search param mude
+  useEffect(() => {
+    if (search.opportunityId) {
+      setHighlightedOppId(search.opportunityId);
+      hasScrolledRef.current = null;
+    }
+  }, [search.opportunityId]);
 
   // Fetch Pipelines
   const { data: pipelines, isLoading: isLoadingPipelines } = useQuery({
@@ -53,10 +107,12 @@ function PipelinePage() {
     },
   });
 
-  // Set default pipeline
-  if (!selectedPipelineId && pipelines && pipelines.length > 0) {
-    setSelectedPipelineId(pipelines[0].id);
-  }
+  // Set default pipeline via effect
+  useEffect(() => {
+    if (!selectedPipelineId && pipelines && pipelines.length > 0) {
+      setSelectedPipelineId(pipelines[0].id);
+    }
+  }, [selectedPipelineId, pipelines]);
 
   // Fetch Stages
   const { data: stages, isLoading: isLoadingStages } = useQuery({
@@ -138,6 +194,29 @@ function PipelinePage() {
     });
     return cols;
   }, [stages, filteredOpportunities]);
+
+  // Auto-scroll suave para o card da oportunidade destacada
+  useEffect(() => {
+    if (!highlightedOppId) return;
+    if (hasScrolledRef.current === highlightedOppId) return;
+
+    const timer = setTimeout(() => {
+      const cardEl = document.getElementById(`opp-card-${highlightedOppId}`);
+      if (cardEl) {
+        hasScrolledRef.current = highlightedOppId;
+        cardEl.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+
+        // Temporizador para encerrar o destaque intenso após 6 segundos
+        const clearTimer = setTimeout(() => {
+          setHighlightedOppId(null);
+        }, 6000);
+
+        return () => clearTimeout(clearTimer);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [highlightedOppId, opportunities, stages]);
 
   const moveOpportunity = useMutation({
     mutationFn: async ({ oppId, newStageId }: { oppId: string, newStageId: string }) => {
@@ -311,7 +390,7 @@ function PipelinePage() {
         </div>
       </header>
 
-      <div className="flex-1 overflow-x-auto p-6">
+      <div ref={boardContainerRef} className="flex-1 overflow-x-auto p-6 scroll-smooth">
         {isLoadingStages || isLoadingOpps ? (
           <div className="text-muted-foreground text-sm">Carregando quadro...</div>
         ) : !stages || stages.length === 0 ? (
@@ -326,7 +405,7 @@ function PipelinePage() {
                 const stageTotal = stageOpps.reduce((sum, opp) => sum + (opp.value || 0), 0);
                 
                 return (
-                  <div key={stage.id} className="flex h-full max-h-full w-[310px] shrink-0 flex-col rounded-xl bg-card border border-border/70 shadow-sm">
+                  <div key={stage.id} id={`opp-stage-col-${stage.id}`} className="flex h-full max-h-full w-[310px] shrink-0 flex-col rounded-xl bg-card border border-border/70 shadow-sm">
                     <div 
                       className="flex items-center justify-between p-3.5 border-b border-border/50 shrink-0 rounded-t-xl bg-card/80"
                       style={{ borderTop: `4px solid ${stage.color || '#3b82f6'}` }}
@@ -356,7 +435,7 @@ function PipelinePage() {
                         <div
                           ref={provided.innerRef}
                           {...provided.droppableProps}
-                          className={`flex-1 overflow-y-auto p-3 space-y-3 min-h-[160px] transition-colors rounded-b-xl ${snapshot.isDraggingOver ? 'bg-primary/5 ring-1 ring-primary/20' : ''}`}
+                          className={`flex-1 overflow-y-auto p-3 space-y-3 min-h-[160px] transition-colors rounded-b-xl scroll-smooth ${snapshot.isDraggingOver ? 'bg-primary/5 ring-1 ring-primary/20' : ''}`}
                         >
                           {stageOpps.length === 0 && !snapshot.isDraggingOver ? (
                             <div className="flex flex-col items-center justify-center py-10 px-4 text-center border border-dashed border-border/60 rounded-xl my-1 bg-muted/20">
@@ -378,17 +457,21 @@ function PipelinePage() {
                                     (opp.notes && String(opp.notes).trim().length > 0 ? 1 : 0) + 
                                     (Array.isArray(opp.opportunity_notes) ? opp.opportunity_notes.length : 0);
                                   const hasNotes = notesCount > 0;
+                                  const isHighlighted = highlightedOppId === opp.id;
 
                                   return (
                                     <div
+                                      id={`opp-card-${opp.id}`}
                                       ref={provided.innerRef}
                                       {...provided.draggableProps}
                                       {...provided.dragHandleProps}
                                       style={provided.draggableProps.style}
-                                      className={`group relative rounded-xl border border-border/80 bg-card p-4 shadow-sm hover:shadow-md hover:border-primary/40 ${
+                                      className={`group relative rounded-xl border bg-card p-4 shadow-sm hover:shadow-md transition-all duration-300 ${
                                         snapshot.isDragging 
                                           ? 'shadow-2xl ring-2 ring-primary/60 transition-none z-50 opacity-95' 
-                                          : 'transition-all duration-200'
+                                          : isHighlighted
+                                          ? 'ring-4 ring-primary ring-offset-2 ring-offset-background border-primary shadow-2xl scale-[1.02] z-30 bg-primary/[0.05] animate-pulse'
+                                          : 'border-border/80 hover:border-primary/40'
                                       }`}
                                     >
                                       <OpportunityDialog opportunity={opp} defaultPipelineId={selectedPipelineId || ""}>

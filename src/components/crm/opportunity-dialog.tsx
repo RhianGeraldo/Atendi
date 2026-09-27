@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ import { toast } from "sonner";
 import { useUnit } from "@/lib/unit-context";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CheckSquare, Circle, CheckCircle2, Pencil, Trash2, Calendar as CalendarIcon, Target, Plus, Phone, MessageSquare, Video, CalendarClock, Clock, Info, ListTodo, StickyNote, User, UserCheck, Save, History } from "lucide-react";
+import { CheckSquare, Circle, CheckCircle2, Pencil, Trash2, Calendar as CalendarIcon, Target, Plus, Phone, MessageSquare, Video, CalendarClock, Clock, Info, ListTodo, StickyNote, User, UserCheck, Save, History, ExternalLink } from "lucide-react";
 import { TaskDialog } from "@/components/crm/task-dialog";
 
 // BRL Currency formatting helpers
@@ -843,6 +844,18 @@ export function OpportunityDialog({
                       Reabrir
                     </Button>
                   </>
+                )}
+
+                {opportunity && typeof window !== "undefined" && window.location.pathname !== "/pipeline" && (
+                  <Link 
+                    to="/pipeline" 
+                    search={{ pipelineId, opportunityId: opportunity.id }}
+                    onClick={() => setOpen(false)}
+                    className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border/60 text-muted-foreground hover:text-primary hover:border-primary/40 hover:bg-primary/10 transition-colors cursor-pointer" 
+                    title="Ver no Funil de Vendas"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </Link>
                 )}
 
                 <Button 
