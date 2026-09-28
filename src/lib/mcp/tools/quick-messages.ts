@@ -113,7 +113,7 @@ export const quickMessagesTools: McpToolDefinition[] = [
         media_url: msg.media_url,
         media_type: msg.media_type,
         instrucoes_variaveis:
-          "Substitua tags como {{cliente}} pelo nome do cliente e {{atendente}} pelo seu nome antes de enviar.",
+          "Substitua tags como {{cliente}}, {{primeiro_nome}}, {{atendente}}, {{saudacao}}, {{empresa}}, {{unidade}}, {{telefone}}, {{protocolo}}, {{data}}, {{hora}} antes de enviar.",
       };
     },
   },
@@ -135,7 +135,7 @@ export const quickMessagesTools: McpToolDefinition[] = [
         conteudo: {
           type: "string",
           description:
-            "Texto padrão da mensagem (suporta tags {{cliente}}, {{atendente}}, {{empresa}}).",
+            "Texto padrão da mensagem (suporta tags {{cliente}}, {{primeiro_nome}}, {{atendente}}, {{saudacao}}, {{empresa}}, {{unidade}}, {{telefone}}, {{protocolo}}, {{data}}, {{hora}}).",
         },
         pasta_id: {
           type: "string",

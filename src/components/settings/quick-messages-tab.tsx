@@ -35,6 +35,7 @@ import {
   Download,
   Play,
   CornerDownRight,
+  Building2,
 } from "lucide-react";
 import {
   Dialog,
@@ -69,14 +70,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useActiveCompany } from "@/lib/active-company-context";
 
 const QUICK_VARIABLES = [
   { key: "cliente", label: "Nome do Cliente", example: "{{cliente}}" },
+  { key: "primeiro_nome", label: "Primeiro Nome", example: "{{primeiro_nome}}" },
   { key: "atendente", label: "Seu Nome", example: "{{atendente}}" },
   { key: "saudacao", label: "Bom dia / Boa tarde", example: "{{saudacao}}" },
+  { key: "empresa", label: "Nome da Empresa", example: "{{empresa}}" },
+  { key: "unidade", label: "Nome da Unidade", example: "{{unidade}}" },
   { key: "telefone", label: "Telefone", example: "{{telefone}}" },
   { key: "protocolo", label: "Nº Protocolo", example: "{{protocolo}}" },
-  { key: "empresa", label: "Nome da Empresa", example: "{{empresa}}" },
+  { key: "data", label: "Data Atual", example: "{{data}}" },
+  { key: "hora", label: "Hora Atual", example: "{{hora}}" },
 ];
 
 interface QuickMessageFolder {
@@ -100,6 +106,8 @@ interface QuickMessageItem {
 
 export function QuickMessagesTab() {
   const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
+  const effectiveCompanyId = activeCompanyId || profile?.company_id;
   const qc = useQueryClient();
 
   // Navigation State (Windows Explorer style)
@@ -134,13 +142,13 @@ export function QuickMessagesTab() {
   const [deletingFolder, setDeletingFolder] = useState<QuickMessageFolder | null>(null);
 
   const { data: folders, isLoading: isLoadingFolders } = useQuery({
-    queryKey: ["quick-message-folders", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["quick-message-folders", effectiveCompanyId],
+    enabled: !!effectiveCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("quick_message_folders")
         .select("*")
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", effectiveCompanyId!)
         .order("name");
       if (error) throw error;
       return data || [];
@@ -148,16 +156,30 @@ export function QuickMessagesTab() {
   });
 
   const { data: quickMessages, isLoading: isLoadingMessages } = useQuery({
-    queryKey: ["quick-messages", profile?.company_id],
-    enabled: !!profile?.company_id,
+    queryKey: ["quick-messages", effectiveCompanyId],
+    enabled: !!effectiveCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("quick_messages")
         .select("*")
-        .eq("company_id", profile!.company_id!)
+        .eq("company_id", effectiveCompanyId!)
         .order("shortcut");
       if (error) throw error;
       return data || [];
+    },
+  });
+
+  const { data: companyData } = useQuery({
+    queryKey: ["company-info-qm", effectiveCompanyId],
+    enabled: !!effectiveCompanyId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("companies")
+        .select("name, custom_variables")
+        .eq("id", effectiveCompanyId!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
     },
   });
 
@@ -255,7 +277,7 @@ export function QuickMessagesTab() {
   // Folder Mutations
   const saveFolder = useMutation({
     mutationFn: async () => {
-      if (!profile?.company_id) throw new Error("Sem empresa vinculada");
+      if (!effectiveCompanyId) throw new Error("Sem empresa vinculada");
       if (!folderName.trim()) throw new Error("O nome da pasta é obrigatório");
 
       if (editingFolderId) {
@@ -263,12 +285,12 @@ export function QuickMessagesTab() {
           .from("quick_message_folders")
           .update({ name: folderName.trim() })
           .eq("id", editingFolderId)
-          .eq("company_id", profile.company_id);
+          .eq("company_id", effectiveCompanyId);
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from("quick_message_folders")
-          .insert({ company_id: profile.company_id, name: folderName.trim() });
+          .insert({ company_id: effectiveCompanyId, name: folderName.trim() });
         if (error) throw error;
       }
     },
@@ -301,7 +323,7 @@ export function QuickMessagesTab() {
   // Message Mutations
   const saveMessage = useMutation({
     mutationFn: async () => {
-      if (!profile?.company_id) throw new Error("Sem empresa vinculada");
+      if (!effectiveCompanyId) throw new Error("Sem empresa vinculada");
       let cleanShortcut = shortcut.trim().replace(/\s+/g, "");
       if (!cleanShortcut.startsWith("/")) {
         cleanShortcut = "/" + cleanShortcut;
@@ -324,12 +346,12 @@ export function QuickMessagesTab() {
           .from("quick_messages")
           .update(payload)
           .eq("id", editingId)
-          .eq("company_id", profile.company_id);
+          .eq("company_id", effectiveCompanyId);
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from("quick_messages")
-          .insert({ company_id: profile.company_id, ...payload });
+          .insert({ company_id: effectiveCompanyId, ...payload });
         if (error) throw error;
       }
     },
@@ -1167,7 +1189,7 @@ export function QuickMessagesTab() {
                 <div className="space-y-1.5 pt-1">
                   <span className="text-[11px] font-semibold text-muted-foreground flex items-center gap-1">
                     <Sparkles className="h-3 w-3 text-amber-500" />
-                    Variáveis Disponíveis (clique para inserir no texto):
+                    Variáveis do Sistema (clique para inserir no texto):
                   </span>
                   <div className="flex flex-wrap gap-1.5">
                     {QUICK_VARIABLES.map((v) => (
@@ -1183,6 +1205,29 @@ export function QuickMessagesTab() {
                     ))}
                   </div>
                 </div>
+
+                {/* Variáveis Customizadas da Empresa */}
+                {companyData?.custom_variables && typeof companyData.custom_variables === "object" && Object.keys(companyData.custom_variables).length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[11px] font-semibold text-muted-foreground flex items-center gap-1">
+                      <Building2 className="h-3 w-3 text-primary" />
+                      Variáveis da Empresa (configuradas em Ajustes):
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {Object.entries(companyData.custom_variables as Record<string, string>).map(([key, val]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => insertVariable(key)}
+                          className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 transition-colors cursor-pointer"
+                          title={`Valor cadastrado: ${val}`}
+                        >
+                          {`{{${key}}}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

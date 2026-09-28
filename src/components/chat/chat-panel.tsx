@@ -153,21 +153,24 @@ export function ChatPanel({
     setNewMessagesBelow(0);
   }, [conv.id]);
 
-  const { data: companySettings } = useQuery({
-    queryKey: ["company-settings-chat", activeCompanyId],
-    enabled: !!activeCompanyId,
+  const targetCompanyId = activeCompanyId || conv.contact?.company_id || profile?.company_id;
+
+  const { data: companyData } = useQuery({
+    queryKey: ["company-info-chat", targetCompanyId],
+    enabled: !!targetCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("companies")
-        .select("ai_settings")
-        .eq("id", activeCompanyId)
-        .single();
+        .select("id, name, custom_variables, ai_settings")
+        .eq("id", targetCompanyId!)
+        .maybeSingle();
       if (error) throw error;
       return data;
     },
+    staleTime: 1000 * 60 * 30,
   });
 
-  const aiSettings = companySettings?.ai_settings as any;
+  const aiSettings = companyData?.ai_settings as any;
   const hasAiConfigured = aiSettings && (
     (aiSettings.engines?.chatbot && aiSettings.engines.chatbot !== "none") ||
     (aiSettings.engines?.text && aiSettings.engines.text !== "none") ||
@@ -399,13 +402,13 @@ export function ChatPanel({
   };
 
   const { data: quickMessageFolders } = useQuery({
-    queryKey: ["quick-message-folders", activeCompanyId],
-    enabled: !!activeCompanyId,
+    queryKey: ["quick-message-folders", targetCompanyId],
+    enabled: !!targetCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("quick_message_folders")
         .select("*")
-        .eq("company_id", activeCompanyId!)
+        .eq("company_id", targetCompanyId!)
         .order("name", { ascending: true });
       if (error) throw error;
       return data;
@@ -413,13 +416,13 @@ export function ChatPanel({
   });
 
   const { data: quickMessages } = useQuery({
-    queryKey: ["quick-messages", activeCompanyId],
-    enabled: !!activeCompanyId,
+    queryKey: ["quick-messages", targetCompanyId],
+    enabled: !!targetCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("quick_messages")
         .select("*")
-        .eq("company_id", activeCompanyId!)
+        .eq("company_id", targetCompanyId!)
         .order("shortcut", { ascending: true });
       if (error) throw error;
       return data;
@@ -843,18 +846,61 @@ export function ChatPanel({
   const insertQuickMessage = (qm: { content: string; media_url?: string | null; media_type?: string | null }) => {
     const now = new Date();
     let t = qm.content || "";
-    t = t.replace(/\{\{atendente\}\}/g, profile?.name || "Atendente");
-    t = t.replace(/\{\{cliente\}\}/g, conv.contact?.name && conv.contact.name !== "Desconhecido" ? conv.contact.name : "Cliente");
-    t = t.replace(/\{\{saudacao\}\}/g, getGreeting());
-    t = t.replace(/\{\{telefone\}\}/g, conv.contact?.phone || "");
-    t = t.replace(/\{\{protocolo\}\}/g, conv.id.substring(0, 8).toUpperCase());
-    t = t.replace(/\{\{data\}\}/g, now.toLocaleDateString("pt-BR"));
-    t = t.replace(/\{\{hora\}\}/g, now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
 
+    const clientFullName =
+      conv.contact?.name && conv.contact.name !== "Desconhecido"
+        ? conv.contact.name.trim()
+        : "Cliente";
+    const clientFirstName =
+      clientFullName !== "Cliente" ? clientFullName.split(/\s+/)[0] : "Cliente";
+
+    const companyName =
+      companyData?.name ||
+      qc.getQueryData<string>(["company-name", targetCompanyId]) ||
+      "";
+
+    const unitName = conv.unit?.name || "";
+
+    // 1. Variáveis principais do sistema (case-insensitive com flag 'gi')
+    t = t.replace(/\{\{atendente\}\}/gi, profile?.name || "Atendente");
+    t = t.replace(/\{\{cliente\}\}/gi, clientFullName);
+    t = t.replace(/\{\{primeiro_nome\}\}/gi, clientFirstName);
+    t = t.replace(/\{\{primeiro_nome_cliente\}\}/gi, clientFirstName);
+    t = t.replace(/\{\{saudacao\}\}/gi, getGreeting());
+    t = t.replace(/\{\{telefone\}\}/gi, conv.contact?.phone || "");
+    t = t.replace(/\{\{protocolo\}\}/gi, conv.id.substring(0, 8).toUpperCase());
+    t = t.replace(/\{\{empresa\}\}/gi, companyName || "Empresa");
+    t = t.replace(/\{\{unidade\}\}/gi, unitName || "Unidade");
+    t = t.replace(/\{\{data\}\}/gi, now.toLocaleDateString("pt-BR"));
+    t = t.replace(/\{\{hora\}\}/gi, now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
+
+    if (conv.contact?.email) {
+      t = t.replace(/\{\{email\}\}/gi, conv.contact.email);
+    }
+    if (conv.department?.name) {
+      t = t.replace(/\{\{departamento\}\}/gi, conv.department.name);
+      t = t.replace(/\{\{setor\}\}/gi, conv.department.name);
+    }
+    if (conv.whatsapp_instance?.name) {
+      t = t.replace(/\{\{instancia\}\}/gi, conv.whatsapp_instance.name);
+      t = t.replace(/\{\{conexao\}\}/gi, conv.whatsapp_instance.name);
+    }
+
+    // 2. Variáveis personalizadas da Empresa (cadastradas nas configurações gerais)
+    if (companyData?.custom_variables && typeof companyData.custom_variables === "object") {
+      Object.entries(companyData.custom_variables).forEach(([key, val]) => {
+        if (typeof key === "string" && val !== null && val !== undefined) {
+          const regex = new RegExp(`\\{\\{${key}\\}\\}`, "gi");
+          t = t.replace(regex, String(val));
+        }
+      });
+    }
+
+    // 3. Variáveis personalizadas da Unidade (podem sobrescrever as globais)
     if (conv.unit?.custom_variables && typeof conv.unit.custom_variables === "object") {
       Object.entries(conv.unit.custom_variables).forEach(([key, val]) => {
-        if (typeof key === "string" && val) {
-          const regex = new RegExp(`\\{\\{${key}\\}\\}`, "g");
+        if (typeof key === "string" && val !== null && val !== undefined) {
+          const regex = new RegExp(`\\{\\{${key}\\}\\}`, "gi");
           t = t.replace(regex, String(val));
         }
       });
@@ -1579,7 +1625,7 @@ export function ChatPanel({
                           setQuickMsgIndex(prev => Math.max(prev - 1, 0));
                           return;
                         }
-                        if (e.key === "Enter" && !e.shiftKey) {
+                        if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
                           e.preventDefault();
                           const selectedItem = quickMsgItems.items.find(i => i.type === "message" && i.index === quickMsgIndex);
                           if (selectedItem) insertQuickMessage(selectedItem.qm);
