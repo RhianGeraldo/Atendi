@@ -28,7 +28,9 @@ import {
   AlertCircle,
   AlertTriangle,
   Clock,
-  Check 
+  Check,
+  ChevronRight,
+  Zap
 } from "lucide-react";
 import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
@@ -68,7 +70,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger, PopoverAnchor } from "@/components/ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 import { TransferDialog } from "@/components/chat/transfer-dialog";
@@ -151,6 +153,8 @@ export function ChatPanel({
     isNearBottomRef.current = true;
     setShowScrollBottomBtn(false);
     setNewMessagesBelow(0);
+    setIsQuickMsgDismissed(false);
+    setQuickMsgIndex(0);
   }, [conv.id]);
 
   const targetCompanyId = activeCompanyId || conv.contact?.company_id || profile?.company_id;
@@ -197,25 +201,47 @@ export function ChatPanel({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [quickMsgIndex, setQuickMsgIndex] = useState(0);
+  const [isQuickMsgDismissed, setIsQuickMsgDismissed] = useState(false);
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [resolveDialogOpen, setResolveDialogOpen] = useState(false);
   const [selectedReasonId, setSelectedReasonId] = useState<string>("");
   const [resolveObservation, setResolveObservation] = useState("");
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Consulta otimizada: busca apenas as 15 mensagens mais recentes inicialmente (com cache rápido e polling de segurança)
+  // Consulta otimizada: busca as mensagens mais recentes (com cache inteligente e preservação de paginação)
   const { data: messages, isLoading: loadingMessages } = useQuery({
     queryKey: ["messages", conv.id],
     queryFn: async () => {
-      const list = await fetchConversationMessages(conv.id);
-      if (list.length < 15) {
-        setHasMoreOlder(false);
+      const recent = await fetchConversationMessages(conv.id, 50);
+      const existing = qc.getQueryData<MessageRow[]>(["messages", conv.id]);
+
+      if (!existing || existing.length === 0) {
+        if (recent.length < 50) {
+          setHasMoreOlder(false);
+        }
+        return recent;
       }
-      return list;
+
+      // Preserva mensagens antigas que já foram carregadas por paginação
+      const realContents = new Set(recent.map((r) => `${r.sender_type}__${r.content}`));
+      const map = new Map<string, MessageRow>();
+      for (const m of existing) {
+        if (m.isOptimistic && realContents.has(`${m.sender_type}__${m.content}`)) {
+          continue;
+        }
+        map.set(m.id, m);
+      }
+      for (const m of recent) {
+        map.set(m.id, m);
+      }
+
+      return Array.from(map.values()).sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      );
     },
     staleTime: 1000 * 2,
     gcTime: 1000 * 60 * 30,
@@ -336,7 +362,7 @@ export function ChatPanel({
         .eq("conversation_id", conv.id)
         .lt("created_at", oldestMessage.created_at)
         .order("created_at", { ascending: false })
-        .limit(15);
+        .limit(30);
 
       if (error) throw error;
 
@@ -345,7 +371,7 @@ export function ChatPanel({
         return;
       }
 
-      if (data.length < 15) {
+      if (data.length < 30) {
         setHasMoreOlder(false);
       }
 
@@ -415,7 +441,7 @@ export function ChatPanel({
     },
   });
 
-  const { data: quickMessages } = useQuery({
+  const { data: quickMessages, isLoading: isLoadingQuickMessages } = useQuery({
     queryKey: ["quick-messages", targetCompanyId],
     enabled: !!targetCompanyId,
     queryFn: async () => {
@@ -907,6 +933,7 @@ export function ChatPanel({
     }
 
     setText(t);
+    setIsQuickMsgDismissed(true);
     
     if (qm.media_url && qm.media_type) {
       setSelectedFile({
@@ -1077,7 +1104,7 @@ export function ChatPanel({
 
   const quickMsgItems = useMemo(() => {
     if (!text.startsWith("/") || !quickMessages) return { items: [], focusableCount: 0 };
-    const search = text === "/" ? "" : text.toLowerCase().substring(1);
+    const search = text === "/" ? "" : text.toLowerCase().substring(1).trim();
     const isSearch = search.length > 0;
 
     let items: any[] = [];
@@ -1086,14 +1113,15 @@ export function ChatPanel({
     if (isSearch) {
       const filtered = quickMessages.filter(qm => 
         qm.shortcut.toLowerCase().includes(search) || 
-        (qm.name && qm.name.toLowerCase().includes(search))
+        (qm.name && qm.name.toLowerCase().includes(search)) ||
+        (qm.content && qm.content.toLowerCase().includes(search))
       ).sort((a, b) => a.shortcut.localeCompare(b.shortcut));
       
       items = filtered.map(qm => ({ type: "message", id: qm.id, qm, index: focusCount++ }));
     } else {
       const rootMsgs = quickMessages.filter(qm => !qm.folder_id).sort((a, b) => a.shortcut.localeCompare(b.shortcut));
       if (rootMsgs.length > 0) {
-        items.push({ type: "header", id: "root", name: "Raiz", folderId: null, isExpanded: true, count: rootMsgs.length });
+        items.push({ type: "header", id: "root", name: "Geral", folderId: null, isExpanded: true, count: rootMsgs.length });
         rootMsgs.forEach(qm => items.push({ type: "message", id: qm.id, qm, index: focusCount++ }));
       }
 
@@ -1101,7 +1129,7 @@ export function ChatPanel({
       sortedFolders.forEach(folder => {
         const folderMsgs = quickMessages.filter(qm => qm.folder_id === folder.id).sort((a, b) => a.shortcut.localeCompare(b.shortcut));
         if (folderMsgs.length > 0) {
-          const isExpanded = expandedFolders.has(folder.id);
+          const isExpanded = !collapsedFolders.has(folder.id);
           items.push({ type: "header", id: folder.id, name: folder.name, folderId: folder.id, isExpanded, count: folderMsgs.length });
           if (isExpanded) {
             folderMsgs.forEach(qm => items.push({ type: "message", id: qm.id, qm, index: focusCount++ }));
@@ -1111,7 +1139,9 @@ export function ChatPanel({
     }
 
     return { items, focusableCount: focusCount };
-  }, [text, quickMessages, quickMessageFolders, expandedFolders]);
+  }, [text, quickMessages, quickMessageFolders, collapsedFolders]);
+
+  const isQuickMsgOpen = text.startsWith("/") && !isQuickMsgDismissed && !isRecording;
 
   return (
     <div className="flex h-full min-w-0">
@@ -1529,10 +1559,23 @@ export function ChatPanel({
           <div className="flex items-end gap-2">
             {!isRecording ? (
               <>
-                <div className={cn(
-                  "flex-1 flex items-end bg-muted/50 rounded-3xl border border-transparent shadow-sm px-1 py-1 focus-within:border-border transition-colors",
-                  isInternalNote && "bg-amber-100/50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50"
-                )}>
+                <Popover
+                  open={isQuickMsgOpen}
+                  onOpenChange={(open) => {
+                    if (!open) {
+                      setIsQuickMsgDismissed(true);
+                      if (text === "/") setText("");
+                    }
+                  }}
+                >
+                  <PopoverAnchor asChild>
+                    <div 
+                      id="chat-composer-container"
+                      className={cn(
+                        "flex-1 flex items-end bg-muted/50 rounded-3xl border border-transparent shadow-sm px-1 py-1 focus-within:border-border transition-colors",
+                        isInternalNote && "bg-amber-100/50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50"
+                      )}
+                    >
                   
                   {/* Left Side: Emoji */}
                   <Popover>
@@ -1612,25 +1655,35 @@ export function ChatPanel({
                     onChange={(e) => {
                       setText(e.target.value);
                       setQuickMsgIndex(0);
+                      setIsQuickMsgDismissed(false);
                     }}
                     onKeyDown={(e) => {
-                      if (quickMsgItems.focusableCount > 0) {
-                        if (e.key === "ArrowDown") {
+                      if (isQuickMsgOpen) {
+                        if (e.key === "Escape") {
                           e.preventDefault();
-                          setQuickMsgIndex(prev => Math.min(prev + 1, quickMsgItems.focusableCount - 1));
+                          e.stopPropagation();
+                          setIsQuickMsgDismissed(true);
+                          if (text === "/") setText("");
                           return;
                         }
-                        if (e.key === "ArrowUp") {
-                          e.preventDefault();
-                          setQuickMsgIndex(prev => Math.max(prev - 1, 0));
-                          return;
-                        }
-                        if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
-                          e.preventDefault();
-                          const selectedItem = quickMsgItems.items.find(i => i.type === "message" && i.index === quickMsgIndex);
-                          if (selectedItem) insertQuickMessage(selectedItem.qm);
-                          setQuickMsgIndex(0);
-                          return;
+                        if (quickMsgItems.focusableCount > 0) {
+                          if (e.key === "ArrowDown") {
+                            e.preventDefault();
+                            setQuickMsgIndex(prev => Math.min(prev + 1, quickMsgItems.focusableCount - 1));
+                            return;
+                          }
+                          if (e.key === "ArrowUp") {
+                            e.preventDefault();
+                            setQuickMsgIndex(prev => Math.max(prev - 1, 0));
+                            return;
+                          }
+                          if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+                            e.preventDefault();
+                            const selectedItem = quickMsgItems.items.find(i => i.type === "message" && i.index === quickMsgIndex);
+                            if (selectedItem) insertQuickMessage(selectedItem.qm);
+                            setQuickMsgIndex(0);
+                            return;
+                          }
                         }
                       }
                       if (e.key === "Enter" && !e.shiftKey) {
@@ -1652,11 +1705,22 @@ export function ChatPanel({
                   
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button className="rounded-full p-2.5 text-muted-foreground hover:text-foreground mb-0.5 shrink-0 transition-colors" title="Anexos e Ações">
+                      <button 
+                        data-clip-trigger="true"
+                        className="rounded-full p-2.5 text-muted-foreground hover:text-foreground mb-0.5 shrink-0 transition-colors" 
+                        title="Anexos e Ações"
+                      >
                         <Paperclip className="h-5 w-5 -rotate-45" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56" sideOffset={16}>
+                    <DropdownMenuContent 
+                      align="end" 
+                      className="w-56" 
+                      sideOffset={16}
+                      onCloseAutoFocus={(e) => {
+                        e.preventDefault();
+                      }}
+                    >
                       <DropdownMenuItem asChild>
                         <label htmlFor="file-upload" className="cursor-pointer flex items-center w-full">
                           <ImageIcon className="mr-2 h-4 w-4 text-blue-500" />
@@ -1666,7 +1730,14 @@ export function ChatPanel({
                       
                       <DropdownMenuSeparator />
 
-                      <DropdownMenuItem onClick={() => setText(prev => prev.startsWith("/") ? prev : "/" + prev)}>
+                      <DropdownMenuItem onSelect={() => {
+                        setIsQuickMsgDismissed(false);
+                        setText(prev => prev.startsWith("/") ? prev : "/" + prev);
+                        setTimeout(() => {
+                          const input = document.getElementById("chat-input");
+                          input?.focus();
+                        }, 50);
+                      }}>
                         <MessageSquarePlus className="mr-2 h-4 w-4 text-violet-500" />
                         Mensagens Rápidas
                       </DropdownMenuItem>
@@ -1695,85 +1766,190 @@ export function ChatPanel({
                     </DropdownMenuContent>
                   </DropdownMenu>
 
-                  {/* Quick Messages Popover */}
-                  <Popover open={quickMsgItems.items.length > 0} onOpenChange={() => {}}>
-                    <PopoverTrigger className="sr-only" />
-                    <PopoverContent 
-                      side="top" 
-                      align="start" 
-                      className="w-80 p-0 shadow-lg border-border"
-                      onOpenAutoFocus={(e) => e.preventDefault()}
-                      onCloseAutoFocus={(e) => {
-                        e.preventDefault();
+                </div>
+              </PopoverAnchor>
+
+              {/* Quick Messages Popover Content */}
+              <PopoverContent 
+                side="top" 
+                align="start" 
+                sideOffset={10}
+                className="w-[380px] sm:w-[480px] max-w-[calc(100vw-32px)] p-0 shadow-2xl border-border rounded-xl overflow-hidden bg-popover z-50"
+                onOpenAutoFocus={(e) => e.preventDefault()}
+                onCloseAutoFocus={(e) => {
+                  e.preventDefault();
+                  document.getElementById("chat-input")?.focus();
+                }}
+                onFocusOutside={(e) => {
+                  // O foco fica no textarea do chat (#chat-input), que fica fora do PopoverContent.
+                  // Prevenir default impede que o Popover feche ao focar o input ou ao fechar o dropdown.
+                  e.preventDefault();
+                }}
+                onPointerDownOutside={(e) => {
+                  const target = e.target as HTMLElement | null;
+                  // Se o clique foi no dropdown menu (anexos/clips), não fecha o popover
+                  if (target?.closest('[role="menu"]') || target?.closest('[data-radix-popper-content-wrapper]')) {
+                    e.preventDefault();
+                    return;
+                  }
+                  const composer = document.getElementById("chat-composer-container");
+                  // Se o clique foi dentro da barra de composição (textarea, emoji, etc.), mantém aberto
+                  if (composer && composer.contains(target)) {
+                    // Se clicou no botão do clipe (dropdown trigger), deixa fechar para dar espaço ao menu
+                    if (target?.closest('[data-clip-trigger]')) {
+                      return;
+                    }
+                    e.preventDefault();
+                    return;
+                  }
+                }}
+              >
+                {/* Header with Title and Close Button */}
+                <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/40 select-none">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                    <span className="text-xs font-semibold text-foreground truncate">Mensagens Rápidas</span>
+                    {quickMsgItems.focusableCount > 0 && (
+                      <Badge variant="secondary" className="text-[10px] h-4 px-1.5 font-normal shrink-0">
+                        {quickMsgItems.focusableCount}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] text-muted-foreground hidden sm:inline-block mr-0.5">
+                      <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[9px]">Esc</kbd> fechar
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsQuickMsgDismissed(true);
+                        if (text === "/") setText("");
                         document.getElementById("chat-input")?.focus();
                       }}
+                      className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
+                      title="Fechar (Esc)"
                     >
-                      <div className="max-h-[300px] overflow-y-auto p-1 relative">
-                        {quickMsgItems.items.length === 0 && (
-                          <div className="py-6 text-center text-sm text-muted-foreground">Nenhum atalho encontrado.</div>
-                        )}
-                        {quickMsgItems.items.map((item) => {
-                          if (item.type === "header") {
-                            return (
-                              <div 
-                                key={`header-${item.id}`}
-                                onClick={() => {
-                                  if (item.folderId) {
-                                    setExpandedFolders(prev => {
-                                      const next = new Set(prev);
-                                      if (next.has(item.folderId)) next.delete(item.folderId);
-                                      else next.add(item.folderId);
-                                      return next;
-                                    });
-                                  }
-                                }}
-                                className={cn(
-                                  "px-2 py-1.5 mt-1 mb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 bg-muted/50 sticky top-0 backdrop-blur-md z-10 flex items-center justify-between rounded-sm",
-                                  item.folderId ? "cursor-pointer hover:bg-muted/80 transition-colors" : ""
-                                )}
-                              >
-                                <div className="flex items-center gap-1.5">
-                                  {item.folderId === null ? <MessageSquarePlus className="h-3 w-3" /> : (item.isExpanded ? <FolderOpen className="h-3 w-3" /> : <Folder className="h-3 w-3" />)}
-                                  {item.name}
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          const { qm, index } = item;
-                          return (
-                            <div
-                              key={qm.id}
-                              onClick={() => {
-                                insertQuickMessage(qm);
-                                setQuickMsgIndex(0);
-                              }}
-                              className={cn(
-                                "flex flex-col items-start gap-1 p-2 cursor-pointer rounded-sm mb-0.5", 
-                                index === quickMsgIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50 text-foreground"
-                              )}
-                            >
-                              <div className="flex items-center gap-2 w-full">
-                                <span className="font-semibold text-xs flex-1 truncate">{qm.name || "Mensagem sem nome"}</span>
-                                <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded shrink-0">{qm.shortcut}</span>
-                                {qm.media_url && (
-                                  <span className="shrink-0 text-muted-foreground ml-1">
-                                    {qm.media_type === "image" ? <ImageIcon className="h-3 w-3" /> :
-                                     qm.media_type === "audio" ? <Headphones className="h-3 w-3" /> :
-                                     qm.media_type === "video" ? <Video className="h-3 w-3" /> :
-                                     <Paperclip className="h-3 w-3" />}
-                                  </span>
-                                )}
-                              </div>
-                              <span className="text-xs text-muted-foreground line-clamp-1">{qm.content || "Contém apenas anexo"}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
+
+                {/* Popover Body */}
+                {isLoadingQuickMessages ? (
+                  <div className="py-8 flex flex-col items-center justify-center text-xs text-muted-foreground gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    <span>Carregando mensagens rápidas...</span>
+                  </div>
+                ) : quickMsgItems.items.length === 0 ? (
+                  <div className="py-8 px-4 text-center">
+                    {quickMessages && quickMessages.length === 0 ? (
+                      <>
+                        <MessageSquarePlus className="h-7 w-7 text-muted-foreground/40 mx-auto mb-2" />
+                        <p className="text-xs font-medium text-foreground">Nenhuma mensagem rápida cadastrada</p>
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          Cadastre atalhos em Configurações &gt; Canais &gt; Mensagens Rápidas.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-muted-foreground">
+                          Nenhum atalho encontrado para <span className="font-mono text-primary font-medium">{text}</span>
+                        </p>
+                        <p className="text-[11px] text-muted-foreground/60 mt-1.5">
+                          Pressione <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[9px]">Esc</kbd> para fechar ou <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[9px]">Backspace</kbd> para apagar.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="max-h-[340px] overflow-y-auto p-1.5 space-y-0.5">
+                    {quickMsgItems.items.map((item) => {
+                      if (item.type === "header") {
+                        const isExpanded = item.folderId ? !collapsedFolders.has(item.folderId) : true;
+                        return (
+                          <div 
+                            key={`header-${item.id}`}
+                            onClick={() => {
+                              if (item.folderId) {
+                                setCollapsedFolders(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(item.folderId)) next.delete(item.folderId);
+                                  else next.add(item.folderId);
+                                  return next;
+                                });
+                              }
+                            }}
+                            className={cn(
+                              "px-2.5 py-1.5 mt-1.5 mb-1 text-[11px] font-semibold text-muted-foreground bg-muted/60 sticky top-0 backdrop-blur-md z-10 flex items-center justify-between rounded-md select-none",
+                              item.folderId ? "cursor-pointer hover:bg-muted/90 hover:text-foreground transition-colors" : ""
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              {item.folderId === null ? (
+                                <MessageSquarePlus className="h-3.5 w-3.5 text-primary" />
+                              ) : isExpanded ? (
+                                <FolderOpen className="h-3.5 w-3.5 text-amber-500" />
+                              ) : (
+                                <Folder className="h-3.5 w-3.5 text-amber-500/70" />
+                              )}
+                              <span>{item.name}</span>
+                              <span className="text-[10px] text-muted-foreground/70 font-normal">({item.count})</span>
+                            </div>
+                            {item.folderId && (
+                              isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                          </div>
+                        );
+                      }
+
+                      const { qm, index } = item;
+                      const isSelected = index === quickMsgIndex;
+                      return (
+                        <div
+                          key={qm.id}
+                          ref={(el) => {
+                            if (isSelected && el) {
+                              el.scrollIntoView({ block: "nearest" });
+                            }
+                          }}
+                          onClick={() => {
+                            insertQuickMessage(qm);
+                            setQuickMsgIndex(0);
+                          }}
+                          onMouseEnter={() => setQuickMsgIndex(index)}
+                          className={cn(
+                            "flex flex-col items-start gap-1 px-2.5 py-2 cursor-pointer rounded-lg transition-colors text-left w-full", 
+                            isSelected 
+                              ? "bg-primary/10 text-foreground border border-primary/20 shadow-2xs" 
+                              : "hover:bg-muted/60 text-foreground border border-transparent"
+                          )}
+                        >
+                          <div className="flex items-center gap-2 w-full">
+                            <span className="font-semibold text-xs flex-1 truncate">{qm.name || "Mensagem rápida"}</span>
+                            <span className="font-mono text-[11px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md shrink-0 border border-primary/20">
+                              {qm.shortcut}
+                            </span>
+                            {qm.media_url && (
+                              <span className="shrink-0 text-muted-foreground ml-1" title={qm.media_type || "Mídia"}>
+                                {qm.media_type === "image" ? <ImageIcon className="h-3.5 w-3.5 text-blue-500" /> :
+                                 qm.media_type === "audio" ? <Headphones className="h-3.5 w-3.5 text-emerald-500" /> :
+                                 qm.media_type === "video" ? <Video className="h-3.5 w-3.5 text-purple-500" /> :
+                                 <Paperclip className="h-3.5 w-3.5 text-amber-500" />}
+                              </span>
+                            )}
+                          </div>
+                          {qm.content && (
+                            <span className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                              {qm.content}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
 
                 {/* Send / Mic */}
                 {(text.trim() || selectedFile) ? (

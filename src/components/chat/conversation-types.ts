@@ -65,13 +65,13 @@ export interface MessageRow {
 
 import { supabase } from "@/integrations/supabase/client";
 
-export const fetchConversationMessages = async (convId: string): Promise<MessageRow[]> => {
+export const fetchConversationMessages = async (convId: string, limitCount = 50): Promise<MessageRow[]> => {
   const { data, error } = await supabase
     .from("messages")
     .select("id, conversation_id, sender_type, sender_id, participant_jid, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
     .eq("conversation_id", convId)
     .order("created_at", { ascending: false })
-    .limit(15);
+    .limit(limitCount);
 
   if (error) throw error;
   return ((data ?? []) as MessageRow[]).reverse();
