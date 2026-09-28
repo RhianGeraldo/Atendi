@@ -204,7 +204,7 @@ export function ChatPanel({
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Consulta otimizada: busca apenas as 15 mensagens mais recentes inicialmente (com cache rápido)
+  // Consulta otimizada: busca apenas as 15 mensagens mais recentes inicialmente (com cache rápido e polling de segurança)
   const { data: messages, isLoading: loadingMessages } = useQuery({
     queryKey: ["messages", conv.id],
     queryFn: async () => {
@@ -214,9 +214,88 @@ export function ChatPanel({
       }
       return list;
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 2,
     gcTime: 1000 * 60 * 30,
+    refetchInterval: 3000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
+
+  // Canal Realtime dedicado e filtrado especificamente para esta conversa ativa
+  useEffect(() => {
+    if (!conv.id) return;
+
+    const channelId = `chat-messages-${conv.id}-${Date.now()}`;
+    const channel = supabase
+      .channel(channelId)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${conv.id}`,
+        },
+        (payload) => {
+          const newMsg = payload.new as MessageRow;
+          qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
+            if (!old) return [newMsg];
+            if (old.some((m) => m.id === newMsg.id)) return old;
+
+            const optIndex = old.findIndex(
+              (m) =>
+                m.isOptimistic &&
+                m.sender_type === newMsg.sender_type &&
+                m.content === newMsg.content,
+            );
+            if (optIndex !== -1) {
+              const copy = [...old];
+              copy[optIndex] = newMsg;
+              return copy;
+            }
+
+            return [...old, newMsg];
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${conv.id}`,
+        },
+        (payload) => {
+          const updatedMsg = payload.new as MessageRow;
+          qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
+            if (!old) return old;
+            return old.map((m) => (m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m));
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${conv.id}`,
+        },
+        (payload) => {
+          const oldMsg = payload.old as any;
+          qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
+            if (!old) return old;
+            return old.filter((m) => m.id !== oldMsg.id);
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conv.id, qc]);
 
   const { slaSettings } = useSlaSettings();
   const lastExternalMsg = useMemo(() => {

@@ -946,7 +946,7 @@ function ConversationsPage() {
             const convId = newMsg.conversation_id;
 
             qc.setQueryData(["messages", convId], (old: any) => {
-              if (!old) return old;
+              if (!old) return [newMsg];
               if (old.some((m: any) => m.id === newMsg.id)) return old;
 
               const optIndex = old.findIndex(
