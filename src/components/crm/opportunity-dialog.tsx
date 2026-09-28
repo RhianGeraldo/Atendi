@@ -26,6 +26,7 @@ import { ptBR } from "date-fns/locale";
 import { CheckSquare, Circle, CheckCircle2, Pencil, Trash2, Calendar as CalendarIcon, Target, Plus, Phone, MessageSquare, MessageCircle, Video, CalendarClock, Clock, Info, ListTodo, StickyNote, User, UserCheck, Save, History, ExternalLink } from "lucide-react";
 import { TaskDialog } from "@/components/crm/task-dialog";
 import { ContactChatButton } from "@/components/chat/contact-chat-button";
+import { OpportunityQualificationView } from "@/components/crm/opportunity-qualification-view";
 
 // BRL Currency formatting helpers
 const formatBRLString = (num: number | string | undefined | null) => {
@@ -428,6 +429,9 @@ export function OpportunityDialog({
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["opportunity-history", opportunity?.id] });
       qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-for-qualification"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-stage-answers"] });
+      qc.invalidateQueries({ queryKey: ["opportunity", opportunity?.id] });
       if (statusResetTimerRef.current) clearTimeout(statusResetTimerRef.current);
       statusResetTimerRef.current = setTimeout(() => {
         setSaveStatus(prev => prev === "saved" ? "idle" : prev);
@@ -529,6 +533,9 @@ export function OpportunityDialog({
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["opportunity-history", opportunity?.id] });
       qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-for-qualification"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-stage-answers"] });
+      qc.invalidateQueries({ queryKey: ["opportunity", opportunity?.id] });
       if (!opportunity) setOpen(false);
     },
     onError: (e) => toast.error("Erro", { description: (e as Error).message })
@@ -578,6 +585,9 @@ export function OpportunityDialog({
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["opportunity-history", opportunity?.id] });
       qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-for-qualification"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-stage-answers"] });
+      qc.invalidateQueries({ queryKey: ["opportunity", opportunity?.id] });
     },
     onError: (e) => toast.error("Erro ao alterar status", { description: (e as Error).message })
   });
@@ -907,6 +917,15 @@ export function OpportunityDialog({
                   className="justify-start px-3 py-2.5 text-xs font-semibold rounded-lg transition-all cursor-pointer data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-l-2 data-[state=active]:border-primary data-[state=active]:shadow-none"
                 >
                   <Info className="mr-2 h-4 w-4" /> Detalhes
+                </TabsTrigger>
+
+                <TabsTrigger 
+                  value="qualification" 
+                  className="justify-between px-3 py-2.5 text-xs font-semibold rounded-lg transition-all cursor-pointer data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-l-2 data-[state=active]:border-primary data-[state=active]:shadow-none"
+                >
+                  <div className="flex items-center">
+                    <CheckSquare className="mr-2 h-4 w-4" /> Passos da Etapa
+                  </div>
                 </TabsTrigger>
                 
                 <TabsTrigger 
@@ -1303,6 +1322,11 @@ export function OpportunityDialog({
                     )}
                   </div>
                 </div>
+              </TabsContent>
+
+              {/* TAB: PASSOS DA ETAPA / QUALIFICAÇÃO */}
+              <TabsContent value="qualification" className="m-0 space-y-4">
+                <OpportunityQualificationView opportunityId={opportunity.id} />
               </TabsContent>
 
               {/* TAB: TAREFAS */}

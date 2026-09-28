@@ -2,11 +2,12 @@ import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { toast } from "sonner";
-import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, XCircle, Check, Pencil, X } from "lucide-react";
+import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, ChevronUp, XCircle, Check, Pencil, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { formatDateOnly } from "@/lib/format";
+import { formatDateOnly, initials } from "@/lib/format";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ChannelIcon } from "@/components/common/channel-icon";
 import {
   Sheet,
@@ -38,6 +39,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
 import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
+import { OpportunityQualificationView } from "@/components/crm/opportunity-qualification-view";
 import { TaskDialog } from "@/components/crm/task-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -834,6 +836,7 @@ export function ContactDetailsTabs({
   conversationId?: string; 
   defaultTab?: string;
 }) {
+  const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState(defaultTab);
 
   useEffect(() => {
@@ -850,6 +853,7 @@ export function ContactDetailsTabs({
     return () => window.removeEventListener("open-contact-tab", handleSwitch);
   }, []);
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+  const [qualifyingOppId, setQualifyingOppId] = useState<string | null>(null);
 
   const toggleSession = (id: string) => {
     setExpandedSessions(prev => {
@@ -862,6 +866,37 @@ export function ContactDetailsTabs({
 
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin_company' || profile?.role === 'super_admin' || profile?.role === 'manager';
+
+  // Realtime subscription: updates opportunities, stages and qualification whenever changed in CRM or elsewhere
+  useEffect(() => {
+    if (!contactId) return;
+
+    const channelId = `contact-opps-${contactId}-${Date.now()}`;
+    const channel = supabase
+      .channel(channelId)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "opportunities",
+          filter: `contact_id=eq.${contactId}`,
+        },
+        () => {
+          qc.invalidateQueries({ queryKey: ["contact-opportunities", contactId] });
+          qc.invalidateQueries({ queryKey: ["opportunity-for-qualification"] });
+          qc.invalidateQueries({ queryKey: ["opportunity-stage-answers"] });
+          qc.invalidateQueries({ queryKey: ["opportunities"] });
+          qc.invalidateQueries({ queryKey: ["contact-journey", contactId] });
+          qc.invalidateQueries({ queryKey: ["opportunity-history"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [contactId, qc]);
 
   const { data: contact, isLoading: isLoadingContact } = useQuery({
     queryKey: ["contact-details", contactId],
@@ -966,8 +1001,6 @@ export function ContactDetailsTabs({
     },
   });
 
-  const qc = useQueryClient();
-
   // Fetch all stages for the pipelines referenced by the contact's opportunities
   const pipelineIds = React.useMemo(() => {
     if (!opportunities) return [];
@@ -1031,9 +1064,14 @@ export function ContactDetailsTabs({
       toast.success(`Etapa alterada para "${variables.targetStageName}"`);
       qc.invalidateQueries({ queryKey: ["contact-opportunities", contactId] });
       qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-for-qualification"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-stage-answers"] });
+      qc.invalidateQueries({ queryKey: ["opportunity", variables.oppId] });
       qc.invalidateQueries({ queryKey: ["contact-journey", contactId] });
+      qc.invalidateQueries({ queryKey: ["opportunity-history"] });
     },
     onError: (err: any) => {
+      console.error("[moveOpportunityStage] Erro ao alterar etapa:", err);
       toast.error("Erro ao alterar etapa: " + (err.message || "Tente novamente"));
     }
   });
@@ -1088,6 +1126,8 @@ export function ContactDetailsTabs({
       );
       qc.invalidateQueries({ queryKey: ["contact-opportunities", contactId] });
       qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-for-qualification"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-stage-answers"] });
       qc.invalidateQueries({ queryKey: ["contact-journey", contactId] });
       qc.invalidateQueries({ queryKey: ["opportunity-history"] });
     },
@@ -1617,6 +1657,40 @@ export function ContactDetailsTabs({
                       </span>
                     </div>
 
+                    {/* Linha 3.5: Passos da Etapa / Qualificação */}
+                    <div className="pt-2 border-t border-border/40">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setQualifyingOppId(qualifyingOppId === opp.id ? null : opp.id);
+                        }}
+                        className={cn(
+                          "w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all cursor-pointer select-none",
+                          qualifyingOppId === opp.id
+                            ? "bg-primary/10 border-primary/40 text-primary font-semibold"
+                            : "bg-muted/30 border-border/50 hover:bg-muted/60 text-muted-foreground hover:text-foreground"
+                        )}
+                        title="Ver passos da etapa"
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <CheckSquare className="h-3.5 w-3.5 text-primary shrink-0" />
+                          <span className="truncate">Passos da Etapa</span>
+                        </div>
+                        {qualifyingOppId === opp.id ? (
+                          <ChevronUp className="h-3.5 w-3.5 opacity-60 shrink-0" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
+                        )}
+                      </button>
+                    </div>
+
+                    {qualifyingOppId === opp.id && (
+                      <div className="pt-1.5 animate-in fade-in duration-150">
+                        <OpportunityQualificationView opportunityId={opp.id} compact={true} />
+                      </div>
+                    )}
+
                     {/* Linha 4: Ações de Status (Ganho / Perdido / Reabrir) */}
                     <div className="pt-2 border-t border-border/40">
                       {isOpen ? (
@@ -1772,11 +1846,19 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
             <SheetHeader className="p-6 pb-4 border-b">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  {contact.profile_picture_url && (
-                    <div className="h-12 w-12 rounded-full overflow-hidden border">
-                      <img src={contact.profile_picture_url} alt={contact.name} className="h-full w-full object-cover" />
-                    </div>
-                  )}
+                  <Avatar className="h-12 w-12 border shrink-0">
+                    {contact.profile_picture_url && (
+                      <AvatarImage 
+                        src={contact.profile_picture_url} 
+                        alt={contact.name || ""} 
+                        className="object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    )}
+                    <AvatarFallback className="text-base font-medium bg-muted">
+                      {initials(contact.name)}
+                    </AvatarFallback>
+                  </Avatar>
                   <SheetTitle className="text-2xl">{contact.name}</SheetTitle>
                   {contact.is_blocked && (
                     <Badge variant="destructive" className="ml-2 text-xs">Bloqueado</Badge>

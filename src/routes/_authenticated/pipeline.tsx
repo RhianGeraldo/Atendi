@@ -287,7 +287,12 @@ function PipelinePage() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["opportunities"] });
+      qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-for-qualification"] });
+      qc.invalidateQueries({ queryKey: ["opportunity-stage-answers"] });
+      qc.invalidateQueries({ queryKey: ["opportunity"] });
       qc.invalidateQueries({ queryKey: ["opportunity-history"] });
+      qc.invalidateQueries({ queryKey: ["contact-journey"] });
     }
   });
 

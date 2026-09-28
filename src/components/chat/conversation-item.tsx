@@ -45,7 +45,7 @@ export const ConversationItem = memo(function ConversationItem({
     >
       <Avatar className="h-10 w-10">
         {conv.contact?.avatar_url && (
-          <AvatarImage src={conv.contact.avatar_url} alt={contactName || ""} className="object-cover" />
+          <AvatarImage src={conv.contact.avatar_url} alt={contactName || ""} className="object-cover" referrerPolicy="no-referrer" />
         )}
         <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
           {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}

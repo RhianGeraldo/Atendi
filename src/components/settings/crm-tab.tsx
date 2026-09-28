@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit2, GripVertical, Settings2 } from "lucide-react";
+import { Plus, Trash2, Edit2, GripVertical, Settings2, CheckSquare } from "lucide-react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { StageChecklistDialog } from "@/components/crm/stage-checklist-dialog";
 import {
   Select,
   SelectContent,
@@ -89,11 +91,14 @@ export function CrmTab() {
   });
 
   // Ensure we have a pipeline selected if available
-  if (!selectedPipelineId && pipelines && pipelines.length > 0) {
-    setSelectedPipelineId(pipelines[0].id);
-  }
+  useEffect(() => {
+    if (!selectedPipelineId && pipelines && pipelines.length > 0) {
+      setSelectedPipelineId(pipelines[0].id);
+    }
+  }, [selectedPipelineId, pipelines]);
 
-  const selectedPipeline = pipelines?.find((p) => p.id === selectedPipelineId);
+  const effectivePipelineId = selectedPipelineId || pipelines?.[0]?.id || null;
+  const selectedPipeline = pipelines?.find((p) => p.id === effectivePipelineId);
 
   return (
     <div className="space-y-6">
@@ -130,22 +135,29 @@ export function CrmTab() {
               pipelines?.map((p) => (
                 <Button
                   key={p.id}
-                  variant={selectedPipelineId === p.id ? "default" : "outline"}
+                  variant={effectivePipelineId === p.id ? "default" : "outline"}
                   className="group relative pr-10"
                   onClick={() => setSelectedPipelineId(p.id)}
                 >
                   {p.name}
-                  <button
-                    type="button"
-                    className="absolute right-2 text-muted-foreground/50 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="absolute right-2 text-muted-foreground/50 hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity p-1 cursor-pointer"
                     onClick={(e) => {
                       e.stopPropagation();
                       setDeletingPipeline(p);
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.stopPropagation();
+                        setDeletingPipeline(p);
+                      }
+                    }}
                     title="Excluir funil"
                   >
                     <Trash2 className="h-4 w-4" />
-                  </button>
+                  </span>
                 </Button>
               ))
             )}
@@ -194,6 +206,7 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
   const { profile } = useAuth();
   const [newStageName, setNewStageName] = useState("");
   const [newStageColor, setNewStageColor] = useState("#3b82f6"); // Default blue
+  const [managingChecklistStage, setManagingChecklistStage] = useState<{ id: string; name: string } | null>(null);
 
   // We need a fallback unit_id if selectedUnitId is null, because the original table requires it.
   const { data: fallbackUnit } = useQuery({
@@ -222,6 +235,29 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
         .order("order", { ascending: true });
       if (error) throw error;
       return data;
+    },
+  });
+
+  // Query counts of checklist items per stage
+  const { data: checklistCounts } = useQuery({
+    queryKey: ["stage-checklist-counts", pipeline.id],
+    enabled: !!stages && stages.length > 0,
+    queryFn: async () => {
+      const stageIds = stages?.map((s) => s.id) || [];
+      if (stageIds.length === 0) return {};
+      const { data, error } = await supabase
+        .from("stage_checklist_items")
+        .select("stage_id, id")
+        .in("stage_id", stageIds);
+      if (error) {
+        console.warn("Could not fetch checklist counts:", error);
+        return {};
+      }
+      const counts: Record<string, number> = {};
+      data?.forEach((item: any) => {
+        counts[item.stage_id] = (counts[item.stage_id] || 0) + 1;
+      });
+      return counts;
     },
   });
 
@@ -435,6 +471,23 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
                             </div>
 
                             <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1.5 text-xs font-medium border-border/80 hover:border-primary/40 hover:text-primary transition-colors cursor-pointer shrink-0"
+                              onClick={() => setManagingChecklistStage(stage)}
+                              title="Configurar critérios / passos de qualificação desta etapa"
+                            >
+                              <CheckSquare className="h-3.5 w-3.5 text-primary" />
+                              <span>Passos</span>
+                              {checklistCounts && (checklistCounts[stage.id] ?? 0) > 0 && (
+                                <Badge variant="secondary" className="px-1.5 py-0 text-[10px] h-4 bg-primary/10 text-primary font-bold">
+                                  {checklistCounts[stage.id]}
+                                </Badge>
+                              )}
+                            </Button>
+
+                            <Button
                               variant="ghost"
                               size="icon"
                               onClick={() => {
@@ -461,6 +514,12 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
           )}
         </div>
       </CardContent>
+
+      <StageChecklistDialog
+        stage={managingChecklistStage}
+        open={!!managingChecklistStage}
+        onOpenChange={(open) => !open && setManagingChecklistStage(null)}
+      />
     </Card>
   );
 }

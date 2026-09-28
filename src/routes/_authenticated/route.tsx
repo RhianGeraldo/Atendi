@@ -1,4 +1,5 @@
-import { createFileRoute, Outlet, Navigate } from "@tanstack/react-router";
+import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { AppShell } from "@/components/layout/app-shell";
 import { useAuth } from "@/lib/auth-context";
 import { WavoipProvider } from "@/hooks/use-wavoip";
@@ -11,8 +12,15 @@ export const Route = createFileRoute("/_authenticated")({
 
 function AuthenticatedLayout() {
   const { loading, session } = useAuth();
+  const navigate = useNavigate();
 
-  if (loading) {
+  useEffect(() => {
+    if (!loading && !session) {
+      navigate({ to: "/auth", replace: true });
+    }
+  }, [loading, session, navigate]);
+
+  if (loading || !session) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-background gap-3">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -20,8 +28,6 @@ function AuthenticatedLayout() {
       </div>
     );
   }
-
-  if (!session) return <Navigate to="/auth" replace />;
 
   return (
     <WavoipProvider>

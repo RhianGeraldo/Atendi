@@ -9,7 +9,7 @@ import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { cn } from "@/lib/utils";
 import { initials, formatPhone } from "@/lib/format";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -46,6 +46,12 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
   const [sourcePopoverOpen, setSourcePopoverOpen] = useState(false);
   const [searchSource, setSearchSource] = useState("");
   const [detailsInput, setDetailsInput] = useState(conv.contact?.source_details || "");
+
+  const [imageError, setImageError] = useState(false);
+
+  useEffect(() => {
+    setImageError(false);
+  }, [conv.contact?.avatar_url]);
 
   useEffect(() => {
     setDetailsInput(conv.contact?.source_details || "");
@@ -152,13 +158,18 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
             <div className="flex items-center gap-3">
               <div className="relative shrink-0 group">
                 <Avatar className="h-14 w-14 ring-2 ring-background shadow-md">
-                  {conv.contact?.avatar_url ? (
-                    <img src={conv.contact.avatar_url} alt={conv.contact?.name} className="h-full w-full object-cover" />
-                  ) : (
-                    <AvatarFallback className={cn("text-xl font-medium", isGroup ? "bg-primary/20 text-primary" : "bg-gradient-to-br from-primary/20 to-primary/5 text-primary")}>
-                      {isGroup ? <Users className="h-7 w-7 opacity-80" /> : initials(contactName || "?")}
-                    </AvatarFallback>
+                  {conv.contact?.avatar_url && !imageError && (
+                    <AvatarImage 
+                      src={conv.contact.avatar_url} 
+                      alt={contactName || ""} 
+                      className="h-full w-full object-cover" 
+                      referrerPolicy="no-referrer"
+                      onError={() => setImageError(true)}
+                    />
                   )}
+                  <AvatarFallback className={cn("text-xl font-medium", isGroup ? "bg-primary/20 text-primary" : "bg-gradient-to-br from-primary/20 to-primary/5 text-primary")}>
+                    {isGroup ? <Users className="h-7 w-7 opacity-80" /> : initials(contactName || "?")}
+                  </AvatarFallback>
                 </Avatar>
                 {conv.contact && (
                   <Button 
