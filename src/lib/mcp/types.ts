@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // Tipos para o protocolo MCP (Model Context Protocol - Versão 2024-11-05)
 
 export interface McpContext {
@@ -12,13 +13,16 @@ export interface McpContext {
 
 export interface McpToolInputSchema {
   type: "object";
-  properties: Record<string, {
-    type: string;
-    description: string;
-    enum?: string[];
-    items?: any;
-    default?: any;
-  }>;
+  properties: Record<
+    string,
+    {
+      type: string;
+      description: string;
+      enum?: string[];
+      items?: any;
+      default?: any;
+    }
+  >;
   required?: string[];
 }
 
@@ -30,14 +34,17 @@ export interface McpToolDefinition {
 }
 
 export interface McpToolCallResult {
-  content: Array<{
-    type: "text";
-    text: string;
-  } | {
-    type: "image";
-    data: string;
-    mimeType: string;
-  }>;
+  content: Array<
+    | {
+        type: "text";
+        text: string;
+      }
+    | {
+        type: "image";
+        data: string;
+        mimeType: string;
+      }
+  >;
   isError?: boolean;
 }
 

@@ -1,10 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { McpContext, McpToolDefinition } from "../types";
 
 export const unitsTools: McpToolDefinition[] = [
   {
     name: "listar_unidades",
-    description: "Lista todas as unidades / filiais da empresa com seus IDs, nomes, slugs, endereços e horários de funcionamento.",
+    description:
+      "Lista todas as unidades / filiais da empresa com seus IDs, nomes, slugs, endereços e horários de funcionamento.",
     inputSchema: {
       type: "object",
       properties: {
@@ -38,7 +40,9 @@ export const unitsTools: McpToolDefinition[] = [
 
       return {
         empresa: context.companyName,
-        escopo: context.unitId ? `Restrito à unidade ${context.unitName}` : "Matriz (Todas as Unidades)",
+        escopo: context.unitId
+          ? `Restrito à unidade ${context.unitName}`
+          : "Matriz (Todas as Unidades)",
         total: units?.length || 0,
         unidades: units || [],
       };
@@ -46,13 +50,15 @@ export const unitsTools: McpToolDefinition[] = [
   },
   {
     name: "consultar_unidade",
-    description: "Consulta os dados detalhados de uma unidade/filial específica (endereço, CNPJ, horários, variáveis locais personalizadas).",
+    description:
+      "Consulta os dados detalhados de uma unidade/filial específica (endereço, CNPJ, horários, variáveis locais personalizadas).",
     inputSchema: {
       type: "object",
       properties: {
         unidade_id: {
           type: "string",
-          description: "ID (UUID) da unidade a consultar. Se a chave for restrita a uma unidade, esse campo é opcional.",
+          description:
+            "ID (UUID) da unidade a consultar. Se a chave for restrita a uma unidade, esse campo é opcional.",
         },
       },
       required: [],
@@ -65,7 +71,9 @@ export const unitsTools: McpToolDefinition[] = [
 
       const { data: unit, error } = await supabaseAdmin
         .from("units")
-        .select("id, name, slug, address, business_hours, document, custom_variables, color, active")
+        .select(
+          "id, name, slug, address, business_hours, document, custom_variables, color, active",
+        )
         .eq("id", targetUnitId)
         .eq("company_id", context.companyId)
         .single();
@@ -79,13 +87,15 @@ export const unitsTools: McpToolDefinition[] = [
   },
   {
     name: "listar_departamentos",
-    description: "Lista os departamentos (setores) de atendimento das unidades (ex: Recepção, Comercial, Pós-Venda) com seus SLAs e limites.",
+    description:
+      "Lista os departamentos (setores) de atendimento das unidades (ex: Recepção, Comercial, Pós-Venda) com seus SLAs e limites.",
     inputSchema: {
       type: "object",
       properties: {
         unidade_id: {
           type: "string",
-          description: "ID (UUID) da unidade para filtrar os departamentos. Opcional para chave Matriz.",
+          description:
+            "ID (UUID) da unidade para filtrar os departamentos. Opcional para chave Matriz.",
         },
       },
     },
@@ -94,7 +104,9 @@ export const unitsTools: McpToolDefinition[] = [
 
       let query = supabaseAdmin
         .from("departments")
-        .select("id, name, description, max_agents, sla_minutes, active, unit_id, units(name, slug)")
+        .select(
+          "id, name, description, max_agents, sla_minutes, active, unit_id, units(name, slug)",
+        )
         .order("name", { ascending: true });
 
       if (targetUnitId) {

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import crypto from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { McpContext } from "./types";
@@ -145,7 +146,9 @@ export async function validateMcpToken(rawToken: string): Promise<McpContext | n
 
     const { data: key, error } = await supabaseAdmin
       .from("mcp_api_keys")
-      .select("id, company_id, unit_id, name, permissions, is_active, expires_at, companies(name), units(name)")
+      .select(
+        "id, company_id, unit_id, name, permissions, is_active, expires_at, companies(name), units(name)",
+      )
       .eq("key_hash", hash)
       .single();
 

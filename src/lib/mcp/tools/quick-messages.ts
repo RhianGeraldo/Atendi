@@ -70,7 +70,7 @@ export const quickMessagesTools: McpToolDefinition[] = [
   {
     name: "consultar_mensagem_rapida",
     description:
-      "Recupera o texto exato e mídia de uma mensagem rápida a partir do atalho digitado (ex: /saudacao) ou pelo ID.",
+      "Recupera o texto exato e mídia de uma mensagem rápida a partir do atalho digitado (ex: /saudacao) ou pelo ID. Se fornecido contato_id ou conversa_id, retorna também o texto pronto com todas as variáveis (ex: {{cliente}}, {{primeiro_nome}}, {{empresa}}, {{unidade}}) já preenchidas.",
     inputSchema: {
       type: "object",
       properties: {
@@ -81,6 +81,16 @@ export const quickMessagesTools: McpToolDefinition[] = [
         id: {
           type: "string",
           description: "ID (UUID) da mensagem rápida caso conhecido.",
+        },
+        contato_id: {
+          type: "string",
+          description:
+            "ID (UUID) do contato para pré-renderizar e substituir as variáveis {{cliente}}, {{primeiro_nome}}, {{telefone}}, etc.",
+        },
+        conversa_id: {
+          type: "string",
+          description:
+            "ID (UUID) da conversa ativa para pré-renderizar variáveis de atendimento, protocolo e unidade.",
         },
       },
     },
@@ -95,7 +105,7 @@ export const quickMessagesTools: McpToolDefinition[] = [
       } else if (args.atalho) {
         let clean = String(args.atalho).trim();
         if (!clean.startsWith("/")) clean = "/" + clean;
-        query = query.eq("shortcut", clean);
+        query = query.ilike("shortcut", clean);
       } else {
         throw new Error("Informe 'atalho' ou 'id' para consultar a mensagem rápida.");
       }
@@ -105,15 +115,102 @@ export const quickMessagesTools: McpToolDefinition[] = [
         throw new Error("Mensagem rápida não encontrada com os critérios fornecidos.");
       }
 
+      let renderedContent: string | null = null;
+      if (args.contato_id || args.conversa_id) {
+        let contactData: any = null;
+        let convData: any = null;
+        let unitName = context.unitName || "";
+
+        if (args.conversa_id) {
+          const { data: c } = await supabaseAdmin
+            .from("conversations")
+            .select("id, unit_id, contacts(id, name, phone, email), units(name, custom_variables)")
+            .eq("id", args.conversa_id)
+            .maybeSingle();
+
+          if (c) {
+            convData = c;
+            contactData = c.contacts;
+            if ((c.units as any)?.name) unitName = (c.units as any).name;
+          }
+        }
+
+        if (!contactData && args.contato_id) {
+          const { data: ct } = await supabaseAdmin
+            .from("contacts")
+            .select("id, name, phone, email, units(name)")
+            .eq("id", args.contato_id)
+            .maybeSingle();
+          if (ct) {
+            contactData = ct;
+            if ((ct.units as any)?.name) unitName = (ct.units as any).name;
+          }
+        }
+
+        const now = new Date();
+        const currentHour = now.getHours();
+        const saudacao =
+          currentHour >= 5 && currentHour < 12
+            ? "Bom dia"
+            : currentHour >= 12 && currentHour < 18
+              ? "Boa tarde"
+              : "Boa noite";
+
+        let text = msg.content || "";
+        const clientFullName =
+          contactData?.name && contactData.name !== "Desconhecido"
+            ? String(contactData.name).trim()
+            : "Cliente";
+        const clientFirstName =
+          clientFullName !== "Cliente" ? clientFullName.split(/\s+/)[0] : "Cliente";
+
+        text = text.replace(/\{\{atendente\}\}/gi, context.keyName || "Atendente");
+        text = text.replace(/\{\{cliente\}\}/gi, clientFullName);
+        text = text.replace(/\{\{primeiro_nome\}\}/gi, clientFirstName);
+        text = text.replace(/\{\{primeiro_nome_cliente\}\}/gi, clientFirstName);
+        text = text.replace(/\{\{saudacao\}\}/gi, saudacao);
+        text = text.replace(/\{\{telefone\}\}/gi, contactData?.phone || "");
+        text = text.replace(
+          /\{\{protocolo\}\}/gi,
+          convData?.id
+            ? convData.id.substring(0, 8).toUpperCase()
+            : "PROT-" + Date.now().toString().slice(-6),
+        );
+        text = text.replace(/\{\{empresa\}\}/gi, context.companyName || "Empresa");
+        text = text.replace(/\{\{unidade\}\}/gi, unitName || "Unidade");
+        text = text.replace(/\{\{data\}\}/gi, now.toLocaleDateString("pt-BR"));
+        text = text.replace(
+          /\{\{hora\}\}/gi,
+          now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+        );
+
+        if (contactData?.email) {
+          text = text.replace(/\{\{email\}\}/gi, contactData.email);
+        }
+
+        renderedContent = text;
+      }
+
       return {
         id: msg.id,
         nome: msg.name,
         atalho: msg.shortcut,
-        conteudo: msg.content,
+        conteudo_original: msg.content,
+        conteudo_renderizado: renderedContent || msg.content,
         media_url: msg.media_url,
         media_type: msg.media_type,
-        instrucoes_variaveis:
-          "Substitua tags como {{cliente}}, {{primeiro_nome}}, {{atendente}}, {{saudacao}}, {{empresa}}, {{unidade}}, {{telefone}}, {{protocolo}}, {{data}}, {{hora}} antes de enviar.",
+        variaveis_suportadas: [
+          "{{cliente}}",
+          "{{primeiro_nome}}",
+          "{{atendente}}",
+          "{{saudacao}}",
+          "{{empresa}}",
+          "{{unidade}}",
+          "{{telefone}}",
+          "{{protocolo}}",
+          "{{data}}",
+          "{{hora}}",
+        ],
       };
     },
   },

@@ -1,18 +1,37 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { dispatchAutomationEvent } from "@/lib/server/automation-engine";
 import type { McpContext, McpToolDefinition } from "../types";
+
+const DEFAULT_CONTACT_SOURCES = [
+  "WhatsApp direto",
+  "Instagram",
+  "Site",
+  "Indicação",
+  "Google Ads",
+  "Meta Ads",
+  "Tráfego Pago",
+  "Prospecção Ativa",
+  "Presencial / Balcão",
+  "Outros",
+];
 
 export const contactsTools: McpToolDefinition[] = [
   {
     name: "listar_contatos",
     description:
-      "Lista ou pesquisa contatos/leads cadastrados no CRM da empresa, com suporte a busca por nome/telefone e filtro por unidade.",
+      "Lista ou pesquisa contatos/leads cadastrados no CRM da empresa, com suporte a busca por nome/telefone/email, filtro por unidade e filtro por canal de origem.",
     inputSchema: {
       type: "object",
       properties: {
         busca: {
           type: "string",
           description: "Termo de busca para pesquisar no nome, telefone ou email do contato.",
+        },
+        origem: {
+          type: "string",
+          description:
+            "Filtrar por canal/origem de captação do contato (ex: 'Instagram', 'Meta Ads', 'WhatsApp direto', 'Site', 'Indicação').",
         },
         unidade_id: {
           type: "string",
@@ -33,7 +52,7 @@ export const contactsTools: McpToolDefinition[] = [
       let query = supabaseAdmin
         .from("contacts")
         .select(
-          "id, name, phone, email, unit_id, profile_picture_url, is_blocked, created_at, units(name, slug)",
+          "id, name, phone, email, source, source_details, unit_id, profile_picture_url, is_blocked, created_at, units(name, slug)",
         )
         .eq("company_id", context.companyId)
         .order("created_at", { ascending: false })
@@ -41,6 +60,10 @@ export const contactsTools: McpToolDefinition[] = [
 
       if (targetUnitId) {
         query = query.eq("unit_id", targetUnitId);
+      }
+
+      if (args?.origem && typeof args.origem === "string" && args.origem.trim()) {
+        query = query.ilike("source", `%${args.origem.trim()}%`);
       }
 
       if (args?.busca && typeof args.busca === "string" && args.busca.trim()) {
@@ -55,7 +78,11 @@ export const contactsTools: McpToolDefinition[] = [
 
       return {
         total: contacts?.length || 0,
-        contatos: contacts || [],
+        contatos: (contacts || []).map((c: any) => ({
+          ...c,
+          origem: c.source || null,
+          detalhes_origem: c.source_details || null,
+        })),
       };
     },
   },
@@ -123,7 +150,11 @@ export const contactsTools: McpToolDefinition[] = [
         .limit(10);
 
       return {
-        contato: contact,
+        contato: {
+          ...contact,
+          origem: contact.source || null,
+          detalhes_origem: contact.source_details || null,
+        },
         oportunidades: opps || [],
         ultimas_notas: notes || [],
       };
@@ -132,7 +163,7 @@ export const contactsTools: McpToolDefinition[] = [
   {
     name: "criar_contato",
     description:
-      "Cadastra um novo contato/lead no CRM do Atendi, vinculando à unidade correspondente.",
+      "Cadastra um novo contato/lead no CRM do Atendi, vinculando à unidade correspondente, canal de origem e disparando automações.",
     inputSchema: {
       type: "object",
       properties: {
@@ -147,6 +178,15 @@ export const contactsTools: McpToolDefinition[] = [
         email: {
           type: "string",
           description: "Endereço de e-mail do contato (opcional).",
+        },
+        origem: {
+          type: "string",
+          description:
+            "Canal de captação/origem do lead (ex: 'Instagram', 'Meta Ads', 'WhatsApp direto', 'Site', 'Indicação', 'Google Ads').",
+        },
+        detalhes_origem: {
+          type: "string",
+          description: "Detalhes complementares sobre a origem (ex: campanha, indicador, link).",
         },
         unidade_id: {
           type: "string",
@@ -165,6 +205,8 @@ export const contactsTools: McpToolDefinition[] = [
       const rawPhone = String(args.telefone).replace(/\D/g, "");
       const email = args.email ? String(args.email).trim().toLowerCase() : null;
       const targetUnitId = context.unitId || args.unidade_id || null;
+      const source = args.origem ? String(args.origem).trim() : null;
+      const sourceDetails = args.detalhes_origem ? String(args.detalhes_origem).trim() : null;
 
       if (!name || !rawPhone) {
         throw new Error("Nome e telefone são obrigatórios para criar um contato.");
@@ -173,7 +215,7 @@ export const contactsTools: McpToolDefinition[] = [
       // Verificar se já existe contato com esse telefone na empresa
       const { data: existing } = await supabaseAdmin
         .from("contacts")
-        .select("id, name, phone, unit_id")
+        .select("id, name, phone, unit_id, source, source_details")
         .eq("company_id", context.companyId)
         .eq("phone", rawPhone)
         .maybeSingle();
@@ -195,6 +237,8 @@ export const contactsTools: McpToolDefinition[] = [
           name,
           phone: rawPhone,
           email,
+          source,
+          source_details: sourceDetails,
         })
         .select("*, units(name, slug)")
         .single();
@@ -210,9 +254,29 @@ export const contactsTools: McpToolDefinition[] = [
         });
       }
 
+      // Disparar automações de novo contato cadastrado (ex: criar oportunidade, adicionar tags)
+      try {
+        await dispatchAutomationEvent({
+          companyId: context.companyId,
+          unitId: targetUnitId,
+          contactId: created.id,
+          triggerType: "contact_created",
+          metadata: {
+            source,
+            sourceDetails,
+          },
+        });
+      } catch (autoErr) {
+        console.error("[contactsTools] Erro ao disparar automações de contact_created:", autoErr);
+      }
+
       return {
         sucesso: true,
-        contato: created,
+        contato: {
+          ...created,
+          origem: created.source || null,
+          detalhes_origem: created.source_details || null,
+        },
         ja_existia: false,
       };
     },
@@ -220,7 +284,7 @@ export const contactsTools: McpToolDefinition[] = [
   {
     name: "atualizar_contato",
     description:
-      "Atualiza os dados de um contato existente (nome, telefone, email ou troca de unidade).",
+      "Atualiza os dados de um contato existente (nome, telefone, email, canal de origem ou filial).",
     inputSchema: {
       type: "object",
       properties: {
@@ -240,6 +304,15 @@ export const contactsTools: McpToolDefinition[] = [
           type: "string",
           description: "Novo email do contato.",
         },
+        origem: {
+          type: "string",
+          description:
+            "Novo canal de origem (ex: 'Instagram', 'Meta Ads', 'WhatsApp direto', 'Site', 'Indicação').",
+        },
+        detalhes_origem: {
+          type: "string",
+          description: "Detalhes complementares sobre a origem.",
+        },
         unidade_id: {
           type: "string",
           description: "Novo ID de unidade (apenas para chaves com visão Matriz).",
@@ -255,6 +328,12 @@ export const contactsTools: McpToolDefinition[] = [
       if (args.telefone) updateData.phone = String(args.telefone).replace(/\D/g, "");
       if (args.email !== undefined)
         updateData.email = args.email ? String(args.email).trim().toLowerCase() : null;
+      if (args.origem !== undefined)
+        updateData.source = args.origem ? String(args.origem).trim() : null;
+      if (args.detalhes_origem !== undefined)
+        updateData.source_details = args.detalhes_origem
+          ? String(args.detalhes_origem).trim()
+          : null;
       if (args.unidade_id !== undefined && !context.unitId) updateData.unit_id = args.unidade_id;
 
       let query = supabaseAdmin
@@ -276,7 +355,11 @@ export const contactsTools: McpToolDefinition[] = [
 
       return {
         sucesso: true,
-        contato: updated,
+        contato: {
+          ...updated,
+          origem: updated.source || null,
+          detalhes_origem: updated.source_details || null,
+        },
       };
     },
   },
@@ -543,6 +626,113 @@ export const contactsTools: McpToolDefinition[] = [
         sucesso: true,
         mensagem: "Contato desbloqueado com sucesso!",
         contato_id: contactId,
+      };
+    },
+  },
+  {
+    name: "listar_origens_contato",
+    description:
+      "Lista todos os canais e fontes de captação de contatos homologados para a empresa (ex: WhatsApp direto, Instagram, Site, Indicação, Meta Ads, Google Ads).",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    handler: async (_args: any, context: McpContext) => {
+      const { data: comp } = await supabaseAdmin
+        .from("companies")
+        .select("custom_variables")
+        .eq("id", context.companyId)
+        .single();
+
+      const customVars = (comp?.custom_variables as Record<string, any>) || {};
+      const sources: string[] =
+        Array.isArray(customVars.contact_sources) && customVars.contact_sources.length > 0
+          ? customVars.contact_sources
+          : DEFAULT_CONTACT_SOURCES;
+
+      return {
+        empresa: context.companyName,
+        total: sources.length,
+        origens: sources,
+      };
+    },
+  },
+  {
+    name: "gerenciar_origens_contato",
+    description:
+      "Cadastra uma nova origem/canal de captação de leads na empresa ou remove uma origem existente.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        acao: {
+          type: "string",
+          enum: ["adicionar", "remover"],
+          description:
+            "Ação a executar: 'adicionar' (adiciona nova origem à empresa) ou 'remover' (exclui da lista).",
+        },
+        origem: {
+          type: "string",
+          description:
+            "Nome do canal/origem (ex: 'TikTok Ads', 'Evento Presencial', 'Parceria Clínica X').",
+        },
+      },
+      required: ["acao", "origem"],
+    },
+    handler: async (args: any, context: McpContext) => {
+      const action = args.acao;
+      const sourceName = String(args.origem).trim();
+
+      if (!sourceName) {
+        throw new Error("O nome da origem não pode ser vazio.");
+      }
+
+      const { data: comp, error: fetchErr } = await supabaseAdmin
+        .from("companies")
+        .select("custom_variables")
+        .eq("id", context.companyId)
+        .single();
+
+      if (fetchErr || !comp) {
+        throw new Error("Empresa não encontrada.");
+      }
+
+      const customVars = (comp.custom_variables as Record<string, any>) || {};
+      let currentSources: string[] = Array.isArray(customVars.contact_sources)
+        ? [...customVars.contact_sources]
+        : [...DEFAULT_CONTACT_SOURCES];
+
+      if (action === "adicionar") {
+        if (!currentSources.some((s) => s.toLowerCase() === sourceName.toLowerCase())) {
+          currentSources.push(sourceName);
+        }
+      } else if (action === "remover") {
+        currentSources = currentSources.filter((s) => s.toLowerCase() !== sourceName.toLowerCase());
+      } else {
+        throw new Error(`Ação inválida: ${action}`);
+      }
+
+      const { error: updErr } = await supabaseAdmin
+        .from("companies")
+        .update({
+          custom_variables: {
+            ...customVars,
+            contact_sources: currentSources,
+            contact_sources_migrated_v2: true,
+          },
+        })
+        .eq("id", context.companyId);
+
+      if (updErr) {
+        throw new Error(`Erro ao salvar origens: ${updErr.message}`);
+      }
+
+      return {
+        sucesso: true,
+        mensagem:
+          action === "adicionar"
+            ? `Origem "${sourceName}" adicionada com sucesso!`
+            : `Origem "${sourceName}" removida com sucesso!`,
+        origens_atualizadas: currentSources,
       };
     },
   },

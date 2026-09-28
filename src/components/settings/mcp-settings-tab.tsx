@@ -632,10 +632,11 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-amber-500" />
-            24 Ferramentas Nativas Disponíveis no Servidor MCP
+            47 Ferramentas Nativas Disponíveis no Servidor MCP
           </CardTitle>
           <CardDescription className="text-xs">
-            Qualquer cliente conectado tem acesso às seguintes funções do CRM em tempo real:
+            Qualquer agente de IA ou cliente conectado tem acesso às seguintes funções do CRM em
+            tempo real:
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -647,32 +648,37 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
-              <span className="font-semibold text-foreground">👥 Contatos, Tags & Bloqueio</span>
+              <span className="font-semibold text-foreground">👥 Contatos, Origens & Tags</span>
               <p className="text-muted-foreground text-[11px]">
                 listar_contatos, consultar_contato, criar_contato, atualizar_contato,
-                adicionar_nota_contato, gerenciar_etiquetas_contato, bloquear_contato,
-                desbloquear_contato
+                listar_origens_contato, gerenciar_origens_contato, adicionar_nota_contato,
+                gerenciar_etiquetas_contato, bloquear_contato, desbloquear_contato
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
-              <span className="font-semibold text-foreground">💬 Atendimento, Fila & WhatsApp</span>
+              <span className="font-semibold text-foreground">💬 Atendimento, WhatsApp & SLA</span>
               <p className="text-muted-foreground text-[11px]">
-                listar_conversas, consultar_conversa, enviar_mensagem_whatsapp, assumir_conversa,
+                listar_conversas (com SLA em tempo real), consultar_conversa,
+                consultar_sla_atendimento, enviar_mensagem_whatsapp, assumir_conversa,
                 transferir_conversa, adicionar_nota_interna, listar_motivos_encerramento,
                 encerrar_atendimento
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
-              <span className="font-semibold text-foreground">📁 Mensagens Rápidas & Atalhos</span>
+              <span className="font-semibold text-foreground">
+                📁 Mensagens Rápidas & Variáveis
+              </span>
               <p className="text-muted-foreground text-[11px]">
-                listar_mensagens_rapidas, consultar_mensagem_rapida, criar_mensagem_rapida
+                listar_mensagens_rapidas, consultar_mensagem_rapida (renderização dinâmica de
+                variáveis), criar_mensagem_rapida
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
-              <span className="font-semibold text-foreground">🎯 Funis & Oportunidades</span>
+              <span className="font-semibold text-foreground">🎯 Funis, Qualificação & CRM</span>
               <p className="text-muted-foreground text-[11px]">
                 listar_funis, listar_etapas, listar_oportunidades, criar_oportunidade,
-                mover_oportunidade, atualizar_oportunidade
+                mover_oportunidade, atualizar_oportunidade, listar_passos_etapa,
+                consultar_qualificacao_oportunidade, preencher_qualificacao_oportunidade
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
@@ -682,10 +688,10 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
-              <span className="font-semibold text-foreground">🧠 Sales Coach, Ads & Objeções</span>
+              <span className="font-semibold text-foreground">🧠 Sales Coach, Ads & Meta CAPI</span>
               <p className="text-muted-foreground text-[11px]">
                 consultar_analise_sales_coach, consultar_origem_anuncio_lead,
-                minerar_objecoes_empresa
+                minerar_objecoes_empresa, enviar_evento_conversao_meta
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
@@ -700,8 +706,9 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               <span className="font-semibold text-foreground">📖 Playbook, Métricas & Prompts</span>
               <p className="text-muted-foreground text-[11px]">
                 consultar_playbook, listar_procedimentos, salvar_procedimento,
-                consultar_metricas_dashboard (Recursos: atendi://playbook, atendi://metricas-hoje |
-                Prompts: qualificar_lead, auditar_atendimento, resumo_handover)
+                consultar_metricas_dashboard (Recursos: atendi://playbook, atendi://metricas-hoje,
+                atendi://sla, atendi://origens | Prompts: qualificar_lead, responder_lead_sla,
+                qualificar_oportunidade, auditar_atendimento, resumo_handover)
               </p>
             </div>
           </div>

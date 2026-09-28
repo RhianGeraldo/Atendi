@@ -1,13 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendPlatformMessage } from "@/lib/server/message-sender";
+import { calculateConversationSla, DEFAULT_SLA_SETTINGS, type SlaSettings } from "@/lib/sla";
 import type { McpContext, McpToolDefinition } from "../types";
 
 export const conversationsTools: McpToolDefinition[] = [
   {
     name: "listar_conversas",
     description:
-      "Lista as conversas/atendimentos de WhatsApp e Instagram da empresa ou filial, com status e última mensagem.",
+      "Lista as conversas/atendimentos de WhatsApp e Instagram da empresa ou filial, com status, SLA em tempo real, última mensagem e filtros avançados.",
     inputSchema: {
       type: "object",
       properties: {
@@ -17,6 +18,19 @@ export const conversationsTools: McpToolDefinition[] = [
             "Status da conversa: 'all', 'waiting' (aguardando), 'active' (em atendimento), 'resolved' (resolvida/finalizada). Padrão: 'active'.",
           enum: ["all", "waiting", "active", "resolved"],
           default: "active",
+        },
+        filtro_sla: {
+          type: "string",
+          description:
+            "Filtrar por situação do SLA de resposta: 'all', 'breached' (SLA estourado/atrasado), 'warning' (em alerta/próximo de estourar), 'ok' (dentro do prazo), 'waiting' (cliente aguardando resposta).",
+          enum: ["all", "breached", "warning", "ok", "waiting"],
+          default: "all",
+        },
+        ignorar_grupos: {
+          type: "boolean",
+          description:
+            "Se true, oculta conversas de grupos de WhatsApp, focando apenas em conversas 1:1 com clientes. Padrão: true.",
+          default: true,
         },
         canal: {
           type: "string",
@@ -43,6 +57,21 @@ export const conversationsTools: McpToolDefinition[] = [
       const limit = Math.min(Math.max(Number(args?.limite) || 20, 1), 50);
       const targetStatus = args?.status || "active";
       const targetUnitId = context.unitId || args?.unidade_id;
+      const ignoreGroups = args?.ignorar_grupos !== false;
+      const slaFilter = args?.filtro_sla || "all";
+
+      // 1. Obter configurações de SLA da empresa
+      const { data: company } = await supabaseAdmin
+        .from("companies")
+        .select("custom_variables")
+        .eq("id", context.companyId)
+        .single();
+
+      const customVars = (company?.custom_variables as Record<string, any>) || {};
+      const slaSettings: SlaSettings = {
+        ...DEFAULT_SLA_SETTINGS,
+        ...(customVars.sla || {}),
+      };
 
       let query = supabaseAdmin
         .from("conversations")
@@ -53,17 +82,19 @@ export const conversationsTools: McpToolDefinition[] = [
           channel,
           last_message,
           last_message_at,
+          last_message_preview,
+          started_at,
           unread_count,
           ai_active,
           unit_id,
-          contacts!inner(id, name, phone, company_id),
+          contacts!inner(id, name, phone, company_id, source, source_details),
           units(name, slug),
           profiles(name)
         `,
         )
         .eq("contacts.company_id", context.companyId)
         .order("last_message_at", { ascending: false, nullsFirst: false })
-        .limit(limit);
+        .limit(limit * 2); // Busca mais para aplicar filtros de grupo/SLA com precisão
 
       if (targetStatus !== "all") {
         query = query.eq("status", targetStatus);
@@ -87,23 +118,77 @@ export const conversationsTools: McpToolDefinition[] = [
         throw new Error(`Erro ao listar conversas: ${error.message}`);
       }
 
-      return {
-        total: convs?.length || 0,
-        conversas: (convs || []).map((c: any) => ({
+      let processed = (convs || []).map((c: any) => {
+        const contactPhone = c.contacts?.phone || "";
+        const isGroup =
+          contactPhone.startsWith("120363") ||
+          (contactPhone.includes("-") && contactPhone.length > 18);
+
+        // Adaptação para o calculador de SLA
+        const convRowForSla: any = {
+          id: c.id,
+          channel: c.channel,
+          status: c.status,
+          last_message: c.last_message,
+          last_message_at: c.last_message_at,
+          last_message_preview: c.last_message_preview,
+          started_at: c.started_at,
+          contact: {
+            ...c.contacts,
+            phone: contactPhone,
+          },
+        };
+
+        const slaInfo = calculateConversationSla(convRowForSla, slaSettings);
+
+        return {
           id: c.id,
           status: c.status,
           canal: c.channel,
+          is_grupo: isGroup,
           contato: {
             id: c.contacts?.id,
             nome: c.contacts?.name,
             telefone: c.contacts?.phone,
+            origem: c.contacts?.source || null,
+            detalhes_origem: c.contacts?.source_details || null,
           },
           unidade: c.units?.name || "Geral",
           atendente: c.profiles?.name || (c.ai_active ? "IA Atendi" : "Não atribuído"),
           ultima_mensagem: c.last_message,
           data_ultima_mensagem: c.last_message_at,
           nao_lidas: c.unread_count || 0,
-        })),
+          sla: {
+            status: slaInfo.status,
+            aguardando_resposta: slaInfo.isWaiting,
+            minutos_espera: slaInfo.elapsedMinutes,
+            tempo_limite_minutos: slaInfo.limitMinutes,
+            minutos_restantes: slaInfo.remainingMinutes,
+            minutos_atraso: slaInfo.overdueMinutes,
+            rotulo: slaInfo.badgeLabel,
+          },
+        };
+      });
+
+      if (ignoreGroups) {
+        processed = processed.filter((c) => !c.is_grupo);
+      }
+
+      if (slaFilter === "breached") {
+        processed = processed.filter((c) => c.sla.status === "breached");
+      } else if (slaFilter === "warning") {
+        processed = processed.filter((c) => c.sla.status === "warning");
+      } else if (slaFilter === "ok") {
+        processed = processed.filter((c) => c.sla.status === "ok");
+      } else if (slaFilter === "waiting") {
+        processed = processed.filter((c) => c.sla.aguardando_resposta);
+      }
+
+      const finalResults = processed.slice(0, limit);
+
+      return {
+        total: finalResults.length,
+        conversas: finalResults,
       };
     },
   },
@@ -554,6 +639,62 @@ export const conversationsTools: McpToolDefinition[] = [
         mensagem: "Atendimento encerrado com sucesso!",
         conversa_id: convId,
         encerrado_em: resolvedAt,
+      };
+    },
+  },
+  {
+    name: "consultar_sla_atendimento",
+    description:
+      "Consulta a política e parâmetros de SLA de atendimento configurados na empresa (tempo limite de primeira resposta, tempo de resposta contínua, limite de resolução e horários comerciais).",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    handler: async (_args: any, context: McpContext) => {
+      const { data: company } = await supabaseAdmin
+        .from("companies")
+        .select("custom_variables")
+        .eq("id", context.companyId)
+        .single();
+
+      const customVars = (company?.custom_variables as Record<string, any>) || {};
+      const savedSla = (customVars.sla as Partial<SlaSettings>) || {};
+
+      const slaConfig: SlaSettings = {
+        enabled:
+          savedSla.enabled !== undefined ? Boolean(savedSla.enabled) : DEFAULT_SLA_SETTINGS.enabled,
+        first_response_limit_minutes:
+          typeof savedSla.first_response_limit_minutes === "number"
+            ? savedSla.first_response_limit_minutes
+            : DEFAULT_SLA_SETTINGS.first_response_limit_minutes,
+        response_limit_minutes:
+          typeof savedSla.response_limit_minutes === "number"
+            ? savedSla.response_limit_minutes
+            : DEFAULT_SLA_SETTINGS.response_limit_minutes,
+        resolution_limit_hours:
+          typeof savedSla.resolution_limit_hours === "number"
+            ? savedSla.resolution_limit_hours
+            : DEFAULT_SLA_SETTINGS.resolution_limit_hours,
+        warning_threshold_percent:
+          typeof savedSla.warning_threshold_percent === "number"
+            ? savedSla.warning_threshold_percent
+            : DEFAULT_SLA_SETTINGS.warning_threshold_percent,
+        count_business_hours_only:
+          savedSla.count_business_hours_only !== undefined
+            ? Boolean(savedSla.count_business_hours_only)
+            : DEFAULT_SLA_SETTINGS.count_business_hours_only,
+      };
+
+      return {
+        empresa: context.companyName,
+        sla_ativo: slaConfig.enabled,
+        configuracoes: {
+          tempo_limite_primeira_resposta_minutos: slaConfig.first_response_limit_minutes,
+          tempo_limite_resposta_continua_minutos: slaConfig.response_limit_minutes,
+          tempo_limite_resolucao_horas: slaConfig.resolution_limit_hours,
+          percentual_alerta_warning: slaConfig.warning_threshold_percent,
+          considerar_apenas_horario_comercial: slaConfig.count_business_hours_only,
+        },
       };
     },
   },

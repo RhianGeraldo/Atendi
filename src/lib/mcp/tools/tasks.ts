@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { McpContext, McpToolDefinition } from "../types";
 
@@ -10,7 +11,8 @@ export const tasksTools: McpToolDefinition[] = [
       properties: {
         status: {
           type: "string",
-          description: "Status das tarefas: 'all', 'pending' (pendente), 'completed' (concluída). Padrão: 'pending'.",
+          description:
+            "Status das tarefas: 'all', 'pending' (pendente), 'completed' (concluída). Padrão: 'pending'.",
           enum: ["all", "pending", "completed"],
           default: "pending",
         },
@@ -20,7 +22,8 @@ export const tasksTools: McpToolDefinition[] = [
         },
         unidade_id: {
           type: "string",
-          description: "Filtrar tarefas de uma unidade/filial específica. Opcional para chave Matriz.",
+          description:
+            "Filtrar tarefas de uma unidade/filial específica. Opcional para chave Matriz.",
         },
         limite: {
           type: "number",
@@ -36,7 +39,8 @@ export const tasksTools: McpToolDefinition[] = [
 
       let query = supabaseAdmin
         .from("tasks")
-        .select(`
+        .select(
+          `
           id,
           title,
           description,
@@ -49,7 +53,8 @@ export const tasksTools: McpToolDefinition[] = [
           contacts(id, name, phone),
           units(name, slug),
           profiles(name)
-        `)
+        `,
+        )
         .order("due_date", { ascending: true, nullsFirst: false })
         .limit(limit);
 
@@ -91,7 +96,9 @@ export const tasksTools: McpToolDefinition[] = [
           prioridade: t.priority,
           status: t.status,
           tipo: t.task_type,
-          contato: t.contacts ? { id: t.contacts.id, nome: t.contacts.name, telefone: t.contacts.phone } : null,
+          contato: t.contacts
+            ? { id: t.contacts.id, nome: t.contacts.name, telefone: t.contacts.phone }
+            : null,
           unidade: t.units?.name || "Geral",
           responsavel: t.profiles?.name || "Não atribuído",
         })),
@@ -100,13 +107,15 @@ export const tasksTools: McpToolDefinition[] = [
   },
   {
     name: "criar_tarefa",
-    description: "Cria uma nova tarefa ou follow-up vinculado a um contato, oportunidade ou filial.",
+    description:
+      "Cria uma nova tarefa ou follow-up vinculado a um contato, oportunidade ou filial.",
     inputSchema: {
       type: "object",
       properties: {
         titulo: {
           type: "string",
-          description: "Título da tarefa (ex: 'Ligar para confirmar avaliação', 'Enviar orçamento detalhado').",
+          description:
+            "Título da tarefa (ex: 'Ligar para confirmar avaliação', 'Enviar orçamento detalhado').",
         },
         descricao: {
           type: "string",
@@ -114,7 +123,8 @@ export const tasksTools: McpToolDefinition[] = [
         },
         data_vencimento: {
           type: "string",
-          description: "Data e hora prevista para a conclusão (formato ISO 8601 ou YYYY-MM-DD HH:mm).",
+          description:
+            "Data e hora prevista para a conclusão (formato ISO 8601 ou YYYY-MM-DD HH:mm).",
         },
         prioridade: {
           type: "string",
@@ -139,8 +149,35 @@ export const tasksTools: McpToolDefinition[] = [
     },
     handler: async (args: any, context: McpContext) => {
       const title = String(args.titulo).trim();
-      const targetUnitId = context.unitId || args.unidade_id || null;
+      let targetUnitId = context.unitId || args.unidade_id || null;
       const priority = args.prioridade || "medium";
+
+      if (!targetUnitId && args.contato_id) {
+        const { data: ct } = await supabaseAdmin
+          .from("contacts")
+          .select("unit_id")
+          .eq("id", args.contato_id)
+          .maybeSingle();
+        if (ct?.unit_id) targetUnitId = ct.unit_id;
+      }
+
+      if (!targetUnitId) {
+        const { data: u } = await supabaseAdmin
+          .from("units")
+          .select("id")
+          .eq("company_id", context.companyId)
+          .eq("active", true)
+          .order("name", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        targetUnitId = u?.id || null;
+      }
+
+      if (!targetUnitId) {
+        throw new Error(
+          "Não foi possível determinar a filial para esta tarefa. Informe 'unidade_id' ou vincule a um contato.",
+        );
+      }
 
       const { data: created, error } = await supabaseAdmin
         .from("tasks")
@@ -181,14 +218,29 @@ export const tasksTools: McpToolDefinition[] = [
       },
       required: ["tarefa_id"],
     },
-    handler: async (args: any, _context: McpContext) => {
+    handler: async (args: any, context: McpContext) => {
       const taskId = args.tarefa_id;
+
+      // Validar acesso da tarefa verificando a empresa da unidade
+      const { data: task, error: tErr } = await supabaseAdmin
+        .from("tasks")
+        .select("id, unit_id, units!inner(company_id)")
+        .eq("id", taskId)
+        .single();
+
+      if (tErr || !task || (task.units as any)?.company_id !== context.companyId) {
+        throw new Error("Tarefa não encontrada ou acesso negado.");
+      }
+
+      if (context.unitId && task.unit_id !== context.unitId) {
+        throw new Error("Acesso negado: a tarefa pertence a outra filial.");
+      }
 
       const { data: updated, error } = await supabaseAdmin
         .from("tasks")
         .update({ status: "completed" })
         .eq("id", taskId)
-        .select("*, contacts(name)")
+        .select("*, contacts(name), units(name)")
         .single();
 
       if (error || !updated) {

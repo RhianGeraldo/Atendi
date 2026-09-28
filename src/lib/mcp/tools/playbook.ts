@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getCompanyPlaybookSummary } from "@/lib/api/training.functions";
 import type { McpContext, McpToolDefinition } from "../types";
@@ -5,7 +6,8 @@ import type { McpContext, McpToolDefinition } from "../types";
 export const playbookTools: McpToolDefinition[] = [
   {
     name: "consultar_playbook",
-    description: "Retorna a base de conhecimento consolidada do Playbook Comercial da empresa (procedimentos, explicações técnicas, regras de preço e scripts de contorno de objeções).",
+    description:
+      "Retorna a base de conhecimento consolidada do Playbook Comercial da empresa (procedimentos, explicações técnicas, regras de preço e scripts de contorno de objeções).",
     inputSchema: {
       type: "object",
       properties: {},
@@ -14,19 +16,22 @@ export const playbookTools: McpToolDefinition[] = [
       const summary = await getCompanyPlaybookSummary(context.companyId);
       return {
         empresa: context.companyName,
-        playbook_resumo: summary || "Nenhum procedimento cadastrado no Playbook da empresa até o momento.",
+        playbook_resumo:
+          summary || "Nenhum procedimento cadastrado no Playbook da empresa até o momento.",
       };
     },
   },
   {
     name: "listar_procedimentos",
-    description: "Lista os procedimentos e conteúdos cadastrados no Playbook Comercial com filtros por categoria.",
+    description:
+      "Lista os procedimentos e conteúdos cadastrados no Playbook Comercial com filtros por categoria.",
     inputSchema: {
       type: "object",
       properties: {
         categoria: {
           type: "string",
-          description: "Categoria: 'all', 'procedure' (procedimentos/serviços), 'faq' (perguntas frequentes), 'pricing' (preços e condições), 'objection_script' (scripts de objeção), 'policy' (políticas).",
+          description:
+            "Categoria: 'all', 'procedure' (procedimentos/serviços), 'faq' (perguntas frequentes), 'pricing' (preços e condições), 'objection_script' (scripts de objeção), 'policy' (políticas).",
           enum: ["all", "procedure", "faq", "pricing", "objection_script", "policy"],
         },
         busca: {
@@ -64,17 +69,20 @@ export const playbookTools: McpToolDefinition[] = [
   },
   {
     name: "salvar_procedimento",
-    description: "Cadastra ou atualiza um procedimento, FAQ, regra de preço ou script comercial no Playbook Oficial da empresa.",
+    description:
+      "Cadastra ou atualiza um procedimento, FAQ, regra de preço ou script comercial no Playbook Oficial da empresa.",
     inputSchema: {
       type: "object",
       properties: {
         procedimento_id: {
           type: "string",
-          description: "ID do procedimento caso queira atualizar um existente. Deixe vazio para criar um novo.",
+          description:
+            "ID do procedimento caso queira atualizar um existente. Deixe vazio para criar um novo.",
         },
         titulo: {
           type: "string",
-          description: "Título do procedimento ou tópico (ex: 'Harmonização Facial', 'Formas de Pagamento e Parcelamento').",
+          description:
+            "Título do procedimento ou tópico (ex: 'Harmonização Facial', 'Formas de Pagamento e Parcelamento').",
         },
         conteudo: {
           type: "string",

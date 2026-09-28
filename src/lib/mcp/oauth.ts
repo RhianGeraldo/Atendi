@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, no-empty */
 import crypto from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
@@ -59,8 +60,11 @@ export async function handleOauthRegister(request: Request): Promise<Response> {
 
     if (!redirectUris.length) {
       return new Response(
-        JSON.stringify({ error: "invalid_client_metadata", error_description: "redirect_uris é obrigatório" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          error: "invalid_client_metadata",
+          error_description: "redirect_uris é obrigatório",
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
@@ -78,8 +82,11 @@ export async function handleOauthRegister(request: Request): Promise<Response> {
     if (error) {
       console.error("[OAuth] Erro ao cadastrar cliente:", error);
       return new Response(
-        JSON.stringify({ error: "server_error", error_description: "Não foi possível registrar o conector." }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          error: "server_error",
+          error_description: "Não foi possível registrar o conector.",
+        }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
@@ -94,12 +101,12 @@ export async function handleOauthRegister(request: Request): Promise<Response> {
         token_endpoint_auth_method: "client_secret_basic",
         client_type: "confidential",
       }),
-      { status: 201, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 201, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err: any) {
     return new Response(
       JSON.stringify({ error: "invalid_request", error_description: err.message }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 }
@@ -147,8 +154,11 @@ export async function handleOauthToken(request: Request): Promise<Response> {
     if (grantType === "authorization_code") {
       if (!code) {
         return new Response(
-          JSON.stringify({ error: "invalid_request", error_description: "Parâmetro 'code' ausente." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({
+            error: "invalid_request",
+            error_description: "Parâmetro 'code' ausente.",
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
 
@@ -162,8 +172,11 @@ export async function handleOauthToken(request: Request): Promise<Response> {
 
       if (codeErr || !codeRow) {
         return new Response(
-          JSON.stringify({ error: "invalid_grant", error_description: "Código de autorização inválido ou expirado." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({
+            error: "invalid_grant",
+            error_description: "Código de autorização inválido ou expirado.",
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
 
@@ -171,28 +184,34 @@ export async function handleOauthToken(request: Request): Promise<Response> {
       if (codeRow.code_challenge) {
         if (!codeVerifier) {
           return new Response(
-            JSON.stringify({ error: "invalid_grant", error_description: "code_verifier é obrigatório para PKCE." }),
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            JSON.stringify({
+              error: "invalid_grant",
+              error_description: "code_verifier é obrigatório para PKCE.",
+            }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
         }
 
         if (codeRow.code_challenge_method === "S256") {
-          const computedHash = crypto
-            .createHash("sha256")
-            .update(codeVerifier)
-            .digest("base64url");
+          const computedHash = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
 
           if (computedHash !== codeRow.code_challenge) {
             return new Response(
-              JSON.stringify({ error: "invalid_grant", error_description: "Falha na verificação PKCE (S256 mismatch)." }),
-              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              JSON.stringify({
+                error: "invalid_grant",
+                error_description: "Falha na verificação PKCE (S256 mismatch).",
+              }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
             );
           }
         } else if (codeRow.code_challenge_method === "plain") {
           if (codeVerifier !== codeRow.code_challenge) {
             return new Response(
-              JSON.stringify({ error: "invalid_grant", error_description: "Falha na verificação PKCE (plain mismatch)." }),
-              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              JSON.stringify({
+                error: "invalid_grant",
+                error_description: "Falha na verificação PKCE (plain mismatch).",
+              }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
             );
           }
         }
@@ -229,7 +248,7 @@ export async function handleOauthToken(request: Request): Promise<Response> {
           refresh_token: refreshToken,
           scope: codeRow.scope || "openid mcp:all",
         }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
@@ -237,8 +256,11 @@ export async function handleOauthToken(request: Request): Promise<Response> {
     if (grantType === "refresh_token") {
       if (!refreshTokenParam) {
         return new Response(
-          JSON.stringify({ error: "invalid_request", error_description: "Parâmetro 'refresh_token' ausente." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({
+            error: "invalid_request",
+            error_description: "Parâmetro 'refresh_token' ausente.",
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
 
@@ -251,7 +273,7 @@ export async function handleOauthToken(request: Request): Promise<Response> {
       if (tokenErr || !tokenRow) {
         return new Response(
           JSON.stringify({ error: "invalid_grant", error_description: "Refresh token inválido." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
 
@@ -277,20 +299,23 @@ export async function handleOauthToken(request: Request): Promise<Response> {
           refresh_token: newRefreshToken,
           scope: tokenRow.scope || "openid mcp:all",
         }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     return new Response(
-      JSON.stringify({ error: "unsupported_grant_type", error_description: "Tipo de concessão não suportado." }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({
+        error: "unsupported_grant_type",
+        error_description: "Tipo de concessão não suportado.",
+      }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err: any) {
     console.error("[OAuth] Erro no token endpoint:", err);
-    return new Response(
-      JSON.stringify({ error: "server_error", error_description: err.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ error: "server_error", error_description: err.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 }
 
@@ -645,7 +670,7 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
           return renderAuthErrorPage(
             "Sua sessão na plataforma expirou. Por favor, entre com e-mail e senha.",
             redirectUri,
-            state
+            state,
           );
         }
         userId = authUser.user.id;
@@ -660,7 +685,7 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
           return renderAuthErrorPage(
             "Credenciais inválidas. Verifique seu e-mail e senha da AtendiAI.",
             redirectUri,
-            state
+            state,
           );
         }
         userId = authData.user.id;
@@ -680,7 +705,7 @@ export async function handleOauthAuthorize(request: Request): Promise<Response> 
         return renderAuthErrorPage(
           "Nenhuma empresa associada a esta conta no AtendiAI.",
           redirectUri,
-          state
+          state,
         );
       }
 

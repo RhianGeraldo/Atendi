@@ -221,6 +221,19 @@ Você tem acesso a contatos, conversas do WhatsApp/Instagram, funis de vendas, t
                 "Resumo em tempo real de atendimentos, conversas iniciadas e tarefas pendentes.",
               mimeType: "application/json",
             },
+            {
+              uri: "atendi://sla",
+              name: "Políticas e Metas de SLA de Atendimento",
+              description:
+                "Regras e tempos limites de primeira resposta e resolução de atendimentos da empresa.",
+              mimeType: "text/markdown",
+            },
+            {
+              uri: "atendi://origens",
+              name: "Canais e Origens Homologadas de Contato",
+              description: "Lista oficial dos canais de captação de leads e clientes da empresa.",
+              mimeType: "application/json",
+            },
           ],
         },
       };
@@ -284,13 +297,13 @@ Você tem acesso a contatos, conversas do WhatsApp/Instagram, funis de vendas, t
         const [convsRes, tasksRes] = await Promise.all([
           supabaseAdmin
             .from("conversations")
-            .select("id", { count: "exact" })
+            .select("id, contacts!inner(company_id)", { count: "exact", head: true })
             .eq("contacts.company_id", context.companyId)
             .gte("created_at", todayIso),
           supabaseAdmin
             .from("tasks")
-            .select("id", { count: "exact" })
-            .eq("company_id", context.companyId)
+            .select("id, units!inner(company_id)", { count: "exact", head: true })
+            .eq("units.company_id", context.companyId)
             .gte("created_at", todayIso),
         ]);
 
@@ -311,6 +324,82 @@ Você tem acesso a contatos, conversas do WhatsApp/Instagram, funis de vendas, t
                 uri,
                 mimeType: "application/json",
                 text: JSON.stringify(metrics, null, 2),
+              },
+            ],
+          },
+        };
+      }
+
+      if (uri === "atendi://sla") {
+        const { data: comp } = await supabaseAdmin
+          .from("companies")
+          .select("custom_variables")
+          .eq("id", context.companyId)
+          .single();
+
+        const customVars = (comp?.custom_variables as Record<string, any>) || {};
+        const sla = customVars.sla || {};
+
+        const slaDoc = `# Política de SLA de Atendimento - ${context.companyName}
+
+- **Status do SLA**: ${sla.enabled !== false ? "Ativo" : "Desativado"}
+- **Tempo Limite de 1ª Resposta**: ${sla.first_response_limit_minutes || 10} minutos
+- **Tempo Limite de Resposta Contínua**: ${sla.response_limit_minutes || 5} minutos
+- **Tempo Limite de Resolução do Atendimento**: ${sla.resolution_limit_hours || 4} horas
+- **Gatilho de Alerta Visual (Warning)**: ${sla.warning_threshold_percent || 75}% do tempo limite
+- **Considera Apenas Horário Comercial**: ${sla.count_business_hours_only ? "Sim" : "Não (24h/dia)"}
+
+*Dica de Operação*: Conversas com situação 'breached' devem ser atendidas com prioridade máxima. Use 'listar_conversas' com 'filtro_sla: breached'.
+`;
+
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            contents: [
+              {
+                uri,
+                mimeType: "text/markdown",
+                text: slaDoc,
+              },
+            ],
+          },
+        };
+      }
+
+      if (uri === "atendi://origens") {
+        const { data: comp } = await supabaseAdmin
+          .from("companies")
+          .select("custom_variables")
+          .eq("id", context.companyId)
+          .single();
+
+        const customVars = (comp?.custom_variables as Record<string, any>) || {};
+        const sources =
+          Array.isArray(customVars.contact_sources) && customVars.contact_sources.length > 0
+            ? customVars.contact_sources
+            : [
+                "WhatsApp direto",
+                "Instagram",
+                "Site",
+                "Indicação",
+                "Google Ads",
+                "Meta Ads",
+                "Tráfego Pago",
+                "Prospecção Ativa",
+                "Presencial / Balcão",
+                "Outros",
+              ];
+
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            contents: [
+              {
+                uri,
+                mimeType: "application/json",
+                text: JSON.stringify({ empresa: context.companyName, origens: sources }, null, 2),
               },
             ],
           },
@@ -338,6 +427,30 @@ Você tem acesso a contatos, conversas do WhatsApp/Instagram, funis de vendas, t
                 {
                   name: "contato_id",
                   description: "ID (UUID) do contato no Atendi.",
+                  required: true,
+                },
+              ],
+            },
+            {
+              name: "responder_lead_sla",
+              description:
+                "Prioriza e formula mensagem personalizada para lead aguardando resposta com SLA crítico ou em atraso.",
+              arguments: [
+                {
+                  name: "conversa_id",
+                  description: "ID (UUID) da conversa com SLA crítico ou atrasado.",
+                  required: true,
+                },
+              ],
+            },
+            {
+              name: "qualificar_oportunidade",
+              description:
+                "Analisa os critérios de qualificação da etapa atual do CRM para uma oportunidade e preenche as respostas dos passos.",
+              arguments: [
+                {
+                  name: "oportunidade_id",
+                  description: "ID (UUID) da oportunidade no funil de vendas.",
                   required: true,
                 },
               ],
@@ -387,6 +500,44 @@ Você tem acesso a contatos, conversas do WhatsApp/Instagram, funis de vendas, t
                 content: {
                   type: "text",
                   text: `Por favor, consulte os dados do contato "${promptArgs.contato_id}" usando a ferramenta 'consultar_contato' e as notas em 'consultar_origem_anuncio_lead'. Com base no Playbook Comercial ('atendi://playbook'), formule as 3 melhores perguntas de qualificação para enviar ao cliente agora.`,
+                },
+              },
+            ],
+          },
+        };
+      }
+
+      if (promptName === "responder_lead_sla") {
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            description: "Atendimento Rápido de SLA Crítico",
+            messages: [
+              {
+                role: "user",
+                content: {
+                  type: "text",
+                  text: `A conversa "${promptArgs.conversa_id}" está com SLA de atendimento crítico ou estourado. Consulte o histórico recente com 'consultar_conversa' e, se aplicável, busque mensagens rápidas apropriadas com 'consultar_mensagem_rapida' para formular uma resposta imediata e cordial, sanando a dúvida do cliente e reestabelecendo a conformidade do atendimento.`,
+                },
+              },
+            ],
+          },
+        };
+      }
+
+      if (promptName === "qualificar_oportunidade") {
+        return {
+          jsonrpc: "2.0",
+          id: id ?? null,
+          result: {
+            description: "Qualificação de Passos da Oportunidade",
+            messages: [
+              {
+                role: "user",
+                content: {
+                  type: "text",
+                  text: `Consulte os critérios de qualificação da oportunidade "${promptArgs.oportunidade_id}" usando 'consultar_qualificacao_oportunidade'. Em seguida, examine o histórico da conversa ou dados do contato e preencha as respostas pendentes usando 'preencher_qualificacao_oportunidade'.`,
                 },
               },
             ],
