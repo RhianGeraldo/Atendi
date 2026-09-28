@@ -1,10 +1,10 @@
 import React, { memo } from "react";
 import { Users, Phone, Clock, AlertTriangle } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ContactAvatar } from "./contact-avatar";
 import { Badge } from "@/components/ui/badge";
 import { ChannelIcon } from "@/components/common/channel-icon";
 import { cn } from "@/lib/utils";
-import { formatConversationTime, initials } from "@/lib/format";
+import { formatConversationTime } from "@/lib/format";
 import { calculateConversationSla, type SlaSettings } from "@/lib/sla";
 import type { ConvRow } from "./conversation-types";
 
@@ -43,14 +43,12 @@ export const ConversationItem = memo(function ConversationItem({
         slaInfo.status === "warning" && "border-l-2 border-l-amber-500/70",
       )}
     >
-      <Avatar className="h-10 w-10">
-        {conv.contact?.avatar_url && (
-          <AvatarImage src={conv.contact.avatar_url} alt={contactName || ""} className="object-cover" referrerPolicy="no-referrer" />
-        )}
-        <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
-          {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
-        </AvatarFallback>
-      </Avatar>
+      <ContactAvatar
+        url={conv.contact?.avatar_url}
+        name={contactName}
+        isGroup={!!isGroup}
+        className="h-10 w-10 shrink-0"
+      />
       <div className="min-w-0 flex-1 grid">
         <div className="flex items-center gap-2 min-w-0">
           <ChannelIcon channel={conv.channel} className="h-4 w-4 shrink-0" />

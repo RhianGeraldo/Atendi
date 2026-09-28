@@ -75,6 +75,7 @@ import { TransferDialog } from "@/components/chat/transfer-dialog";
 import { PlaybookSheet } from "@/components/training/playbook-sheet";
 import { WhatsappTemplateSender } from "@/components/whatsapp/whatsapp-template-sender";
 import { MessageBubble } from "@/components/chat/message-bubble";
+import { ContactAvatar } from "@/components/chat/contact-avatar";
 import { ConvRow, MessageRow, fetchConversationMessages } from "@/components/chat/conversation-types";
 
 let ffmpegInstance: FFmpeg | null = null;
@@ -1007,14 +1008,12 @@ export function ChatPanel({
               </Button>
             )}
             <div className="relative shrink-0">
-              <Avatar className="h-10 w-10 ring-2 ring-primary/10 ring-offset-2">
-                {conv.contact?.avatar_url && (
-                  <AvatarImage src={conv.contact.avatar_url} alt={contactName || ""} className="object-cover" referrerPolicy="no-referrer" />
-                )}
-                <AvatarFallback className={cn("text-xs", isGroup ? "bg-primary/20 text-primary" : "bg-muted")}>
-                  {isGroup ? <Users className="h-4 w-4" /> : initials(conv.contact?.name)}
-                </AvatarFallback>
-              </Avatar>
+              <ContactAvatar
+                url={conv.contact?.avatar_url}
+                name={contactName}
+                isGroup={!!isGroup}
+                className="h-10 w-10 ring-2 ring-primary/10 ring-offset-2"
+              />
               <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-background bg-success" />
             </div>
             <div>

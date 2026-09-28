@@ -10,6 +10,7 @@ import { useUnit } from "@/lib/unit-context";
 import { cn } from "@/lib/utils";
 import { initials, formatPhone } from "@/lib/format";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { ContactAvatar } from "./contact-avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -41,6 +42,23 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
     },
     enabled: !!activeCompanyId
   });
+
+  const { data: contactLabels = [] } = useQuery({
+    queryKey: ["contact-labels", conv.contact?.id],
+    queryFn: async () => {
+      if (!conv.contact?.id) return [];
+      const { data, error } = await supabase
+        .from("contact_labels")
+        .select("labels(id, name, color)")
+        .eq("contact_id", conv.contact.id);
+      if (error) return [];
+      return (data || []) as { labels: { id: string; name: string; color: string | null } }[];
+    },
+    enabled: !!conv.contact?.id,
+    staleTime: 30 * 1000,
+  });
+
+  const effectiveLabels = contactLabels.length > 0 ? contactLabels : (conv.contact?.contact_labels || []);
 
   const { allSources, addSource, updateContactSource } = useContactSources();
   const [sourcePopoverOpen, setSourcePopoverOpen] = useState(false);
@@ -98,7 +116,7 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
       return res;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["contact-labels", conv.contact?.id] });
     },
     onError: (e) => toast.error(e.message)
   });
@@ -157,20 +175,13 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
             {/* Foto do perfil no canto esquerdo, Nome e Telefone na direita */}
             <div className="flex items-center gap-3">
               <div className="relative shrink-0 group">
-                <Avatar className="h-14 w-14 ring-2 ring-background shadow-md">
-                  {conv.contact?.avatar_url && !imageError && (
-                    <AvatarImage 
-                      src={conv.contact.avatar_url} 
-                      alt={contactName || ""} 
-                      className="h-full w-full object-cover" 
-                      referrerPolicy="no-referrer"
-                      onError={() => setImageError(true)}
-                    />
-                  )}
-                  <AvatarFallback className={cn("text-xl font-medium", isGroup ? "bg-primary/20 text-primary" : "bg-gradient-to-br from-primary/20 to-primary/5 text-primary")}>
-                    {isGroup ? <Users className="h-7 w-7 opacity-80" /> : initials(contactName || "?")}
-                  </AvatarFallback>
-                </Avatar>
+                <ContactAvatar
+                  url={conv.contact?.avatar_url}
+                  name={contactName}
+                  isGroup={!!isGroup}
+                  className="h-14 w-14 ring-2 ring-background shadow-md"
+                  fallbackClassName="text-xl font-medium"
+                />
                 {conv.contact && (
                   <Button 
                     variant="secondary" 
@@ -384,7 +395,7 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                         </CommandEmpty>
                         <CommandGroup>
                           {allLabels?.map(label => {
-                            const isSelected = conv.contact?.contact_labels?.some(cl => cl.labels?.id === label.id);
+                            const isSelected = effectiveLabels.some(cl => cl.labels?.id === label.id);
                             return (
                               <CommandItem
                                 key={label.id}
@@ -410,7 +421,7 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
               </div>
 
               <div className="flex flex-wrap gap-1.5">
-                {conv.contact?.contact_labels?.map((cl) => {
+                {effectiveLabels.map((cl) => {
                   const label = cl.labels;
                   if (!label) return null;
                   const hexColor = label.color || "#6b7280";
@@ -429,7 +440,7 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                     </Badge>
                   );
                 })}
-                {!conv.contact?.contact_labels?.length && (
+                {!effectiveLabels.length && (
                   <span className="text-xs text-muted-foreground/70 italic">Nenhuma etiqueta atribuída.</span>
                 )}
               </div>

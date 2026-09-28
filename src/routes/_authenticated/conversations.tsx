@@ -186,7 +186,7 @@ function ConversationsPage() {
       const to = from + PAGE_SIZE - 1;
 
       const selectString =
-        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
 
       let query = supabase
         .from("conversations")
@@ -393,7 +393,7 @@ function ConversationsPage() {
     queryFn: async () => {
       if (!selectedId) return null;
       const selectString =
-        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
       const { data, error } = await supabase
         .from("conversations")
         .select(selectString)
@@ -468,6 +468,8 @@ function ConversationsPage() {
       departmentFilter,
       agentFilter,
     ],
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       let selectString =
         "id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts!inner(id, phone, name, company_id, is_blocked), unit_id";
@@ -509,9 +511,6 @@ function ConversationsPage() {
         });
       }
 
-      const { data, error } = await query.order("last_message_at", { ascending: false });
-      if (error) throw error;
-
       const counts = {
         waiting: { total: 0, unread: 0 },
         active: { total: 0, unread: 0 },
@@ -519,9 +518,27 @@ function ConversationsPage() {
         groups: { total: 0, unread: 0 },
       };
 
-      const resolvedSeen = new Set<string>();
+      try {
+        const { data, error } = await query;
+        if (error) {
+          console.warn("[Conversations] unread-counts query warning:", error);
+          const cached = qc.getQueryData<typeof counts>([
+            "unread-counts",
+            activeCompanyId,
+            selectedUnitId,
+            profile?.id,
+            profile?.department_id,
+            instanceFilter,
+            debouncedSearch,
+            departmentFilter,
+            agentFilter,
+          ]);
+          return cached || counts;
+        }
 
-      data.forEach((c) => {
+        const resolvedSeen = new Set<string>();
+
+        (data || []).forEach((c) => {
         if (
           instanceFilter &&
           instanceFilter !== "all" &&
@@ -580,7 +597,11 @@ function ConversationsPage() {
         }
       });
 
-      return counts;
+        return counts;
+      } catch (err) {
+        console.warn("[Conversations] unread-counts query error:", err);
+        return counts;
+      }
     },
   });
 
@@ -620,10 +641,6 @@ function ConversationsPage() {
           : null;
 
       if (!effectiveConv) {
-        // Se não temos a conversa no cache e nem dados completos, invalida para recarregar
-        if (targetStatus) {
-          setTimeout(() => qc.invalidateQueries({ queryKey: ["conversations"] }), 0);
-        }
         return;
       }
 
@@ -717,7 +734,7 @@ function ConversationsPage() {
     async (convId: string, preferredStatus?: TabType) => {
       try {
         const selectString =
-          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,contact_labels(labels(id,name,color))), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
 
         const { data, error } = await supabase
           .from("conversations")
@@ -726,6 +743,14 @@ function ConversationsPage() {
           .maybeSingle();
 
         if (error || !data) return null;
+
+        if (
+          activeCompanyId &&
+          (data as any).contact?.company_id &&
+          (data as any).contact.company_id !== activeCompanyId
+        ) {
+          return null;
+        }
 
         const { data: lastMsg } = await supabase
           .from("messages")
@@ -902,7 +927,6 @@ function ConversationsPage() {
               } else {
                 // Conversa não estava no cache: busca de forma atômica e posiciona no topo
                 fetchAndInjectConversation(convId, updatedConv.status);
-                qc.invalidateQueries({ queryKey: ["unread-counts"] });
               }
             } else if (payload.eventType === "INSERT") {
               const newConv = payload.new as ConvRow;
