@@ -1389,6 +1389,15 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
               .maybeSingle();
 
             if (!existingAdLead) {
+              const adTitle = metadata.externalAdReply.title || metadata.externalAdReply.body || null;
+              await supabaseAdmin
+                .from("contacts")
+                .update({
+                  source: "Tráfego Pago",
+                  source_details: adTitle || `Anúncio ID: ${sourceId}`,
+                })
+                .eq("id", contactId);
+
               await supabaseAdmin.from("ad_leads").insert({
                 company_id: company_id,
                 unit_id: unit_id || null,

@@ -456,8 +456,8 @@ async function processIncomingMessage(params: any) {
     let sourceDetails = null;
 
     if (messageReferral && messageReferral.source_url) {
-      source = messageReferral.source_url.includes('ig.me') || messageReferral.source_url.includes('instagram') ? 'Instagram Ads' : 'Facebook Ads';
-      sourceDetails = messageReferral.headline || messageReferral.body || messageReferral.source_id;
+      source = 'Tráfego Pago';
+      sourceDetails = messageReferral.headline || messageReferral.body || (messageReferral.source_id ? `Anúncio ID: ${messageReferral.source_id}` : null);
     }
 
     const { data: newContact, error: contactError } = await supabaseAdmin
@@ -759,6 +759,15 @@ async function processIncomingMessage(params: any) {
           .maybeSingle();
 
         if (!existingAdLead) {
+          const adTitle = messageReferral.headline || messageReferral.body || null;
+          await supabaseAdmin
+            .from("contacts")
+            .update({
+              source: "Tráfego Pago",
+              source_details: adTitle || (sourceId ? `Anúncio ID: ${sourceId}` : null),
+            })
+            .eq("id", contact.id);
+
           await supabaseAdmin.from('ad_leads').insert({
             company_id: companyId,
             unit_id: unitId || null,

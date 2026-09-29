@@ -176,10 +176,11 @@ export function AutomationsTab() {
 
   const openCreateModal = () => {
     setEditingAutomation(null);
-    setName("Criar Oportunidade para Leads de Anúncios");
+    setName("Oportunidade e Etiqueta para Leads de Anúncios");
     setTriggerType("ad_lead_first_message");
-    setActionCategory("create_opportunity");
-    setSelectedLabelId(labels?.[0]?.id || "");
+    setActionCategory("both");
+    const trafegoPagoLabel = labels?.find((l) => l.name?.toLowerCase() === "tráfego pago");
+    setSelectedLabelId(trafegoPagoLabel ? trafegoPagoLabel.id : "source_traffic_label");
     const firstPipeline = pipelines?.[0]?.id || "";
     setSelectedPipelineId(firstPipeline);
     const firstStage = allStages?.find((s) => s.pipeline_id === firstPipeline)?.id || "";
@@ -207,9 +208,14 @@ export function AutomationsTab() {
     }
 
     if (addLabelAction) {
-      setSelectedLabelId(addLabelAction.params?.label_id || "");
+      if (addLabelAction.params?.use_source_label || addLabelAction.params?.label_id === "source_traffic_label") {
+        setSelectedLabelId("source_traffic_label");
+      } else {
+        setSelectedLabelId(addLabelAction.params?.label_id || "");
+      }
     } else {
-      setSelectedLabelId(labels?.[0]?.id || "");
+      const trafegoPagoLabel = labels?.find((l) => l.name?.toLowerCase() === "tráfego pago");
+      setSelectedLabelId(trafegoPagoLabel ? trafegoPagoLabel.id : "source_traffic_label");
     }
 
     if (createOppAction) {
@@ -246,6 +252,7 @@ export function AutomationsTab() {
           type: "add_label",
           params: {
             label_id: selectedLabelId,
+            use_source_label: selectedLabelId === "source_traffic_label",
           },
         });
       }
@@ -411,7 +418,12 @@ export function AutomationsTab() {
             const addLabelAction = auto.actions?.find((a) => a.type === "add_label");
             const createOppAction = auto.actions?.find((a) => a.type === "create_opportunity");
 
-            const labelInfo = addLabelAction ? getLabelInfo(addLabelAction.params?.label_id) : null;
+            const isSourceTrafficLabel =
+              addLabelAction?.params?.label_id === "source_traffic_label" ||
+              addLabelAction?.params?.use_source_label;
+            const labelInfo = isSourceTrafficLabel
+              ? { id: "source_traffic_label", name: "Origem: Tráfego Pago", color: "#8b5cf6" }
+              : (addLabelAction ? getLabelInfo(addLabelAction.params?.label_id) : null);
             const pipelineInfo = createOppAction ? getPipelineInfo(createOppAction.params?.pipeline_id) : null;
             const stageInfo = createOppAction ? getStageInfo(createOppAction.params?.stage_id) : null;
             const triggerInfo = TRIGGER_OPTIONS.find((t) => t.value === auto.trigger_type);
@@ -758,36 +770,41 @@ export function AutomationsTab() {
                   <span className="font-semibold text-sm">Ação: Anexar Etiqueta ao Contato</span>
                 </div>
 
-                {!labels?.length ? (
-                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
-                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                    <span>Você ainda não possui etiquetas cadastradas. Crie suas etiquetas na aba <b>Etiquetas</b>.</span>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="label-select" className="text-xs text-muted-foreground">
-                      Selecione qual etiqueta será anexada:
-                    </Label>
-                    <Select value={selectedLabelId} onValueChange={setSelectedLabelId}>
-                      <SelectTrigger id="label-select" className="bg-background">
-                        <SelectValue placeholder="Selecione uma etiqueta..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {labels.map((l) => (
-                          <SelectItem key={l.id} value={l.id}>
-                            <div className="flex items-center gap-2">
-                              <span 
-                                className="h-2.5 w-2.5 rounded-full shrink-0" 
-                                style={{ backgroundColor: l.color || '#6b7280' }} 
-                              />
-                              <span>{l.name}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+                <div className="space-y-1.5">
+                  <Label htmlFor="label-select" className="text-xs text-muted-foreground">
+                    Selecione qual etiqueta será anexada:
+                  </Label>
+                  <Select value={selectedLabelId} onValueChange={setSelectedLabelId}>
+                    <SelectTrigger id="label-select" className="bg-background">
+                      <SelectValue placeholder="Selecione uma etiqueta..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="source_traffic_label">
+                        <div className="flex items-center gap-2 py-0.5">
+                          <span className="h-2.5 w-2.5 rounded-full shrink-0 bg-[#8b5cf6]" />
+                          <span className="font-medium text-foreground">Origem: Tráfego Pago (Automático)</span>
+                          <Badge variant="outline" className="text-[10px] py-0 h-4 bg-purple-500/10 text-purple-600 border-purple-500/20 ml-1">
+                            Recomendado
+                          </Badge>
+                        </div>
+                      </SelectItem>
+                      {labels?.map((l) => (
+                        <SelectItem key={l.id} value={l.id}>
+                          <div className="flex items-center gap-2">
+                            <span 
+                              className="h-2.5 w-2.5 rounded-full shrink-0" 
+                              style={{ backgroundColor: l.color || '#6b7280' }} 
+                            />
+                            <span>{l.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    A etiqueta vincula a origem do lead automaticamente e fica visível nas conversas e no CRM.
+                  </p>
+                </div>
               </div>
             )}
           </div>

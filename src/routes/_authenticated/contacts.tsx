@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Search, Phone, Mail, User, UserPlus, Loader2, Building, RefreshCw, ShieldAlert, X, Link, ExternalLink, Image as ImageIcon, Calendar as CalendarIcon, Tag, CheckSquare, Megaphone, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Phone, Mail, User, UserPlus, Loader2, Building, RefreshCw, ShieldAlert, X, Link, ExternalLink, Image as ImageIcon, Calendar as CalendarIcon, Tag, CheckSquare, Megaphone, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
@@ -703,6 +703,18 @@ function ContactsPage() {
                                     </a>
                                   )}
                                 </div>
+                              </div>
+                            ) : contact.source ? (
+                              <div className="flex flex-col min-w-0">
+                                <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0.5 font-normal w-fit bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20">
+                                  <Sparkles className="h-3 w-3 text-purple-500" />
+                                  {contact.source}
+                                </Badge>
+                                {contact.source_details && (
+                                  <span className="text-[11px] text-muted-foreground truncate max-w-[180px] mt-0.5" title={contact.source_details}>
+                                    {contact.source_details}
+                                  </span>
+                                )}
                               </div>
                             ) : (contact.instagram_username || contact.instagram_id) ? (
                               <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0.5 font-normal w-fit bg-pink-500/5 text-pink-600 dark:text-pink-400 border-pink-500/20">

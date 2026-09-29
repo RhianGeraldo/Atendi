@@ -10,6 +10,93 @@ export interface AutomationTriggerEvent {
 }
 
 /**
+ * Ensures that an ad lead contact has their source recorded as "Tráfego Pago"
+ * and is tagged with the "Tráfego Pago" label (created automatically if missing).
+ */
+export async function ensureAdLeadSourceAndLabel({
+  companyId,
+  contactId,
+  adTitle,
+  sourceId,
+}: {
+  companyId: string;
+  contactId: string;
+  adTitle?: string | null;
+  sourceId?: string | null;
+}) {
+  try {
+    // 1. Atualiza origem e detalhes do contato na tabela contacts
+    const updatePayload: Record<string, any> = {
+      source: "Tráfego Pago",
+    };
+    if (adTitle && adTitle.trim()) {
+      updatePayload.source_details = adTitle.trim();
+    } else if (sourceId && sourceId.trim()) {
+      updatePayload.source_details = `Anúncio ID: ${sourceId.trim()}`;
+    }
+
+    const { error: contactErr } = await supabaseAdmin
+      .from("contacts")
+      .update(updatePayload)
+      .eq("id", contactId);
+
+    if (contactErr) {
+      console.error(`[automation-engine] Erro ao atualizar origem do contato ${contactId}:`, contactErr);
+    }
+
+    // 2. Busca ou cria a etiqueta "Tráfego Pago" para a empresa
+    let labelId: string | null = null;
+
+    const { data: existingLabels } = await supabaseAdmin
+      .from("labels")
+      .select("id, name")
+      .eq("company_id", companyId)
+      .ilike("name", "Tráfego Pago")
+      .limit(1);
+
+    if (existingLabels && existingLabels.length > 0) {
+      labelId = existingLabels[0].id;
+    } else {
+      // Cria a etiqueta "Tráfego Pago" automaticamente com badge roxo (#8b5cf6)
+      const { data: newLabel, error: labelErr } = await supabaseAdmin
+        .from("labels")
+        .insert({
+          company_id: companyId,
+          name: "Tráfego Pago",
+          color: "#8b5cf6",
+          external_id: crypto.randomUUID(),
+        })
+        .select("id")
+        .single();
+
+      if (labelErr) {
+        console.error(`[automation-engine] Erro ao criar etiqueta 'Tráfego Pago' para empresa ${companyId}:`, labelErr);
+      } else if (newLabel) {
+        labelId = newLabel.id;
+      }
+    }
+
+    // 3. Vincula a etiqueta ao contato (idempotente)
+    if (labelId) {
+      const { error: linkErr } = await supabaseAdmin
+        .from("contact_labels")
+        .upsert(
+          { contact_id: contactId, label_id: labelId },
+          { onConflict: "contact_id, label_id" }
+        );
+
+      if (linkErr) {
+        console.error(`[automation-engine] Erro ao vincular etiqueta 'Tráfego Pago' ao contato ${contactId}:`, linkErr);
+      } else {
+        console.log(`[automation-engine] Etiqueta 'Tráfego Pago' (${labelId}) vinculada com sucesso ao contato ${contactId}`);
+      }
+    }
+  } catch (err) {
+    console.error("[automation-engine] Falha inesperada em ensureAdLeadSourceAndLabel:", err);
+  }
+}
+
+/**
  * Dispatches an event to the automation engine.
  * Decoupled from webhooks and specific integrations.
  */
@@ -17,6 +104,25 @@ export async function dispatchAutomationEvent(event: AutomationTriggerEvent) {
   try {
     if (!event.companyId || !event.contactId || !event.triggerType) {
       return;
+    }
+
+    // Se o evento for de lead vindo de anúncio (CTWA / Meta Ads),
+    // garante automaticamente a origem 'Tráfego Pago' e a etiqueta correspondente
+    if (event.triggerType === "ad_lead_first_message") {
+      const adTitle =
+        event.metadata?.ad?.title ||
+        event.metadata?.ad?.body ||
+        event.metadata?.referral?.headline ||
+        event.metadata?.referral?.body ||
+        null;
+      const sourceId = event.metadata?.sourceId || null;
+
+      await ensureAdLeadSourceAndLabel({
+        companyId: event.companyId,
+        contactId: event.contactId,
+        adTitle,
+        sourceId,
+      });
     }
 
     // 1. Busca automações ativas para a empresa e tipo de gatilho
@@ -54,7 +160,34 @@ async function executeAction(action: any, event: AutomationTriggerEvent) {
   try {
     switch (action.type) {
       case 'add_label': {
-        const labelId = action.params?.label_id;
+        let labelId = action.params?.label_id;
+
+        // Se a ação for para a etiqueta de origem de tráfego pago
+        if (action.params?.use_source_label || labelId === "source_traffic_label" || labelId === "traffic_source") {
+          const { data: existingLabels } = await supabaseAdmin
+            .from("labels")
+            .select("id")
+            .eq("company_id", event.companyId)
+            .ilike("name", "Tráfego Pago")
+            .limit(1);
+
+          if (existingLabels && existingLabels.length > 0) {
+            labelId = existingLabels[0].id;
+          } else {
+            const { data: newLabel } = await supabaseAdmin
+              .from("labels")
+              .insert({
+                company_id: event.companyId,
+                name: "Tráfego Pago",
+                color: "#8b5cf6",
+                external_id: crypto.randomUUID(),
+              })
+              .select("id")
+              .single();
+            if (newLabel) labelId = newLabel.id;
+          }
+        }
+
         if (!labelId) break;
 
         // Vincula a etiqueta ao contato (idempotente)
