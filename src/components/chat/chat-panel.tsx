@@ -30,7 +30,8 @@ import {
   Clock,
   Check,
   ChevronRight,
-  Zap
+  Zap,
+  Play
 } from "lucide-react";
 import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
@@ -1506,22 +1507,40 @@ export function ChatPanel({
           )}
 
           {selectedFile && (
-            <div className="flex items-center gap-3 p-2 border border-border rounded-md bg-muted/50 w-fit relative pr-8">
+            <div className="flex items-center gap-3 p-2 border border-border rounded-md bg-muted/50 w-fit relative pr-8 shadow-2xs">
               <button 
                 onClick={() => setSelectedFile(null)} 
-                className="absolute top-1 right-1 p-0.5 rounded-full bg-background border border-border hover:bg-accent text-muted-foreground"
+                className="absolute top-1 right-1 p-0.5 rounded-full bg-background border border-border hover:bg-accent text-muted-foreground transition-colors cursor-pointer"
+                title="Remover anexo"
               >
                 <X className="h-3 w-3" />
               </button>
               {selectedFile.type === "image" ? (
-                <img src={selectedFile.base64} alt="preview" className="h-12 w-12 object-cover rounded-md" />
+                <img src={selectedFile.base64} alt="preview" className="h-12 w-12 object-cover rounded-md border border-border/40 bg-background" />
+              ) : selectedFile.type === "video" ? (
+                <div className="relative h-12 w-12 rounded-md overflow-hidden bg-black shrink-0 border border-border/40 flex items-center justify-center">
+                  <video 
+                    src={`${selectedFile.base64}#t=0.1`} 
+                    className="h-full w-full object-cover opacity-90" 
+                    muted 
+                    preload="metadata" 
+                    playsInline 
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/25 pointer-events-none">
+                    <Play className="h-4 w-4 text-white fill-white drop-shadow-sm" />
+                  </div>
+                </div>
               ) : (
-                <div className="h-12 w-12 bg-muted rounded-md flex items-center justify-center">
-                  <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                <div className="h-12 w-12 bg-muted rounded-md flex items-center justify-center border border-border/40">
+                  {selectedFile.type === "audio" ? (
+                    <Headphones className="h-5 w-5 text-emerald-500" />
+                  ) : (
+                    <Paperclip className="h-5 w-5 text-muted-foreground" />
+                  )}
                 </div>
               )}
-              <div className="text-xs truncate max-w-[150px]">
-                {selectedFile.file?.name || "Anexo"}
+              <div className="text-xs truncate max-w-[160px] font-medium">
+                {selectedFile.file?.name || (selectedFile.type === "image" ? "Imagem" : selectedFile.type === "video" ? "Vídeo" : selectedFile.type === "audio" ? "Áudio" : "Anexo")}
               </div>
             </div>
           )}
@@ -1904,6 +1923,7 @@ export function ChatPanel({
 
                       const { qm, index } = item;
                       const isSelected = index === quickMsgIndex;
+                      const hasVisualMedia = Boolean(qm.media_url && (qm.media_type === "image" || qm.media_type === "video"));
                       return (
                         <div
                           key={qm.id}
@@ -1918,31 +1938,70 @@ export function ChatPanel({
                           }}
                           onMouseEnter={() => setQuickMsgIndex(index)}
                           className={cn(
-                            "flex flex-col items-start gap-1 px-2.5 py-2 cursor-pointer rounded-lg transition-colors text-left w-full", 
+                            "flex items-center gap-2.5 px-2.5 py-2 cursor-pointer rounded-lg transition-colors text-left w-full group", 
                             isSelected 
                               ? "bg-primary/10 text-foreground border border-primary/20 shadow-2xs" 
                               : "hover:bg-muted/60 text-foreground border border-transparent"
                           )}
                         >
-                          <div className="flex items-center gap-2 w-full">
-                            <span className="font-semibold text-xs flex-1 truncate">{qm.name || "Mensagem rápida"}</span>
-                            <span className="font-mono text-[11px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md shrink-0 border border-primary/20">
-                              {qm.shortcut}
-                            </span>
-                            {qm.media_url && (
-                              <span className="shrink-0 text-muted-foreground ml-1" title={qm.media_type || "Mídia"}>
-                                {qm.media_type === "image" ? <ImageIcon className="h-3.5 w-3.5 text-blue-500" /> :
-                                 qm.media_type === "audio" ? <Headphones className="h-3.5 w-3.5 text-emerald-500" /> :
-                                 qm.media_type === "video" ? <Video className="h-3.5 w-3.5 text-purple-500" /> :
-                                 <Paperclip className="h-3.5 w-3.5 text-amber-500" />}
+                          {hasVisualMedia && (
+                            <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-muted/80 border border-border/60 shrink-0 flex items-center justify-center shadow-2xs">
+                              {qm.media_type === "image" ? (
+                                <>
+                                  <ImageIcon className="h-5 w-5 text-muted-foreground/30 absolute" />
+                                  <img
+                                    src={qm.media_url!}
+                                    alt={qm.name || "Imagem"}
+                                    className="w-full h-full object-cover relative z-1"
+                                    loading="lazy"
+                                    onError={(e) => {
+                                      (e.currentTarget as HTMLElement).style.opacity = "0";
+                                    }}
+                                  />
+                                </>
+                              ) : (
+                                <div className="relative w-full h-full bg-black/90 flex items-center justify-center">
+                                  <video
+                                    src={`${qm.media_url}#t=0.1`}
+                                    className="w-full h-full object-cover opacity-90"
+                                    preload="metadata"
+                                    muted
+                                    playsInline
+                                  />
+                                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
+                                    <Play className="h-4 w-4 text-white fill-white drop-shadow-sm" />
+                                  </div>
+                                  <span className="absolute bottom-0.5 right-0.5 bg-black/75 text-[8px] font-bold text-white px-1 py-0.2 rounded uppercase tracking-wider">
+                                    VÍDEO
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="flex flex-col items-start gap-1 flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 w-full">
+                              <span className="font-semibold text-xs truncate flex-1">{qm.name || "Mensagem rápida"}</span>
+                              <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded-md shrink-0 border border-primary/20">
+                                {qm.shortcut}
+                              </span>
+                              {!hasVisualMedia && qm.media_url && (
+                                <span className="shrink-0 text-muted-foreground ml-0.5" title={qm.media_type || "Mídia"}>
+                                  {qm.media_type === "audio" ? <Headphones className="h-3.5 w-3.5 text-emerald-500" /> :
+                                   <Paperclip className="h-3.5 w-3.5 text-amber-500" />}
+                                </span>
+                              )}
+                            </div>
+                            {qm.content ? (
+                              <span className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                                {qm.content}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground/70 italic">
+                                {qm.media_type === "image" ? "📷 Imagem anexada" : qm.media_type === "video" ? "🎥 Vídeo anexado" : "Arquivo anexado"}
                               </span>
                             )}
                           </div>
-                          {qm.content && (
-                            <span className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
-                              {qm.content}
-                            </span>
-                          )}
                         </div>
                       );
                     })}
