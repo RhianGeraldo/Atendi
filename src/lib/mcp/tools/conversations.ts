@@ -4,6 +4,54 @@ import { sendPlatformMessage } from "@/lib/server/message-sender";
 import { calculateConversationSla, DEFAULT_SLA_SETTINGS, type SlaSettings } from "@/lib/sla";
 import type { McpContext, McpToolDefinition } from "../types";
 
+function detectMediaType(url: string): "image" | "video" | "audio" | "document" {
+  const cleanUrl = url.split("?")[0].toLowerCase();
+  if (/\.(jpe?g|png|webp|gif|bmp|svg)$/.test(cleanUrl)) return "image";
+  if (/\.(mp4|mov|avi|mkv|webm)$/.test(cleanUrl)) return "video";
+  if (/\.(mp3|ogg|wav|m4a|aac|opus)$/.test(cleanUrl)) return "audio";
+  if (/\.(pdf|docx?|xlsx?|pptx?|csv|txt|zip)$/.test(cleanUrl)) return "document";
+  return "image";
+}
+
+function detectMediaTypeFromBase64(b64: string): "image" | "video" | "audio" | "document" {
+  if (b64.startsWith("data:")) {
+    const match = b64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);/);
+    if (match) {
+      const mime = match[1].toLowerCase();
+      if (mime.startsWith("image/")) return "image";
+      if (mime.startsWith("video/")) return "video";
+      if (mime.startsWith("audio/")) return "audio";
+      return "document";
+    }
+  }
+  return "image";
+}
+
+function formatMediaPayload(
+  mediaUrl?: string,
+  base64Input?: string,
+  mediaType: string = "image",
+): string {
+  if (mediaUrl && mediaUrl.trim()) {
+    return mediaUrl.trim();
+  }
+  if (base64Input && base64Input.trim()) {
+    const trimmed = base64Input.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      return trimmed;
+    }
+    if (trimmed.startsWith("data:")) {
+      return trimmed;
+    }
+    let mime = "image/jpeg";
+    if (mediaType === "video") mime = "video/mp4";
+    else if (mediaType === "audio") mime = "audio/ogg";
+    else if (mediaType === "document") mime = "application/pdf";
+    return `data:${mime};base64,${trimmed}`;
+  }
+  return "";
+}
+
 export const conversationsTools: McpToolDefinition[] = [
   {
     name: "listar_conversas",
@@ -279,7 +327,7 @@ export const conversationsTools: McpToolDefinition[] = [
   {
     name: "enviar_mensagem_whatsapp",
     description:
-      "Envia uma mensagem de texto real para o cliente pelo WhatsApp ou Instagram Direct da conversa selecionada.",
+      "Envia uma mensagem de texto ou mídia (imagem, vídeo, áudio, documento) para o cliente pelo WhatsApp ou Instagram Direct da conversa selecionada.",
     inputSchema: {
       type: "object",
       properties: {
@@ -289,18 +337,49 @@ export const conversationsTools: McpToolDefinition[] = [
         },
         mensagem: {
           type: "string",
-          description: "Texto da mensagem a ser enviada ao cliente.",
+          description:
+            "Texto da mensagem a ser enviada ao cliente ou legenda da mídia. Obrigatório se não enviar mídia.",
+        },
+        tipo_midia: {
+          type: "string",
+          description:
+            "Tipo da mídia a ser enviada: 'text' (apenas texto), 'image' (imagem/foto), 'video' (vídeo), 'audio' (áudio/mensagem de voz), 'document' (PDF, documento). Padrão: 'text'.",
+          enum: ["text", "image", "video", "audio", "document"],
+          default: "text",
+        },
+        url_midia: {
+          type: "string",
+          description:
+            "URL pública direta da imagem, vídeo, áudio ou documento (ex: https://meusite.com/foto.jpg ou link público do Supabase).",
+        },
+        arquivo_base64: {
+          type: "string",
+          description:
+            "Arquivo codificado em Base64 (com ou sem prefixo 'data:...;base64,'). Útil para enviar mídias geradas ou arquivos locais.",
         },
       },
-      required: ["conversa_id", "mensagem"],
+      required: ["conversa_id"],
     },
     handler: async (args: any, context: McpContext) => {
       const convId = args.conversa_id;
-      const text = String(args.mensagem).trim();
+      const text = args.mensagem ? String(args.mensagem).trim() : "";
+      let mediaType = args.tipo_midia || "text";
+      const mediaUrl = args.url_midia ? String(args.url_midia).trim() : "";
+      const base64Input = args.arquivo_base64 ? String(args.arquivo_base64).trim() : "";
 
-      if (!text) {
-        throw new Error("O texto da mensagem não pode ser vazio.");
+      if (mediaUrl || base64Input) {
+        if (mediaType === "text") {
+          mediaType = mediaUrl ? detectMediaType(mediaUrl) : detectMediaTypeFromBase64(base64Input);
+        }
       }
+
+      if (mediaType === "text" && !text) {
+        throw new Error(
+          "O texto da mensagem é obrigatório quando nenhuma mídia (url_midia ou arquivo_base64) for informada.",
+        );
+      }
+
+      const mediaPayload = formatMediaPayload(mediaUrl, base64Input, mediaType);
 
       const { data: conv, error: convErr } = await supabaseAdmin
         .from("conversations")
@@ -319,14 +398,106 @@ export const conversationsTools: McpToolDefinition[] = [
       // Enviar via sendPlatformMessage
       await sendPlatformMessage({
         conversationId: convId,
-        text,
+        text: text || undefined,
+        mediaType: mediaType !== "text" ? mediaType : undefined,
+        mediaBase64: mediaPayload || undefined,
         senderType: "agent",
       });
 
       return {
         sucesso: true,
-        mensagem: "Mensagem enviada com sucesso ao cliente!",
+        mensagem:
+          mediaType !== "text"
+            ? `Mídia (${mediaType}) enviada com sucesso ao cliente!`
+            : "Mensagem enviada com sucesso ao cliente!",
         conversa_id: convId,
+        tipo_midia: mediaType,
+      };
+    },
+  },
+  {
+    name: "enviar_midia_whatsapp",
+    description:
+      "Envia um arquivo de mídia (imagem, vídeo, áudio/mensagem de voz, documento/PDF) com legenda opcional para o cliente pelo WhatsApp ou Instagram Direct.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversa_id: {
+          type: "string",
+          description: "ID (UUID) da conversa ativa para onde a mídia será enviada.",
+        },
+        tipo_midia: {
+          type: "string",
+          description:
+            "Tipo da mídia a ser enviada: 'image' (fotos/imagens PNG/JPEG/WEBP), 'video' (vídeos MP4), 'audio' (áudios OGG/MP3), 'document' (PDFs, planilhas, arquivos).",
+          enum: ["image", "video", "audio", "document"],
+        },
+        url_midia: {
+          type: "string",
+          description:
+            "URL pública direta do arquivo na internet (ex: https://meusite.com/arquivo.pdf ou https://.../foto.jpg). Obrigatório se não enviar arquivo_base64.",
+        },
+        arquivo_base64: {
+          type: "string",
+          description:
+            "Conteúdo do arquivo codificado em Base64 (ex: 'data:image/png;base64,iVBORw...' ou string base64 pura). Obrigatório se não enviar url_midia.",
+        },
+        legenda: {
+          type: "string",
+          description:
+            "Texto de legenda/comentário que acompanhará a mídia enviada ao cliente.",
+        },
+      },
+      required: ["conversa_id", "tipo_midia"],
+    },
+    handler: async (args: any, context: McpContext) => {
+      const convId = args.conversa_id;
+      const mediaType = args.tipo_midia;
+      const caption = args.legenda ? String(args.legenda).trim() : "";
+      const mediaUrl = args.url_midia ? String(args.url_midia).trim() : "";
+      const base64Input = args.arquivo_base64 ? String(args.arquivo_base64).trim() : "";
+
+      if (!mediaUrl && !base64Input) {
+        throw new Error(
+          "É obrigatório informar 'url_midia' ou 'arquivo_base64' para enviar uma mídia.",
+        );
+      }
+
+      if (!["image", "video", "audio", "document"].includes(mediaType)) {
+        throw new Error(
+          "Tipo de mídia inválido. Escolha entre: 'image', 'video', 'audio', 'document'.",
+        );
+      }
+
+      const mediaPayload = formatMediaPayload(mediaUrl, base64Input, mediaType);
+
+      const { data: conv, error: convErr } = await supabaseAdmin
+        .from("conversations")
+        .select("id, unit_id, contacts!inner(company_id)")
+        .eq("id", convId)
+        .single();
+
+      if (convErr || !conv || conv.contacts?.company_id !== context.companyId) {
+        throw new Error("Conversa não encontrada ou acesso negado.");
+      }
+
+      if (context.unitId && conv.unit_id && conv.unit_id !== context.unitId) {
+        throw new Error("Acesso negado: a conversa pertence a outra filial.");
+      }
+
+      await sendPlatformMessage({
+        conversationId: convId,
+        text: caption || undefined,
+        mediaType,
+        mediaBase64: mediaPayload,
+        senderType: "agent",
+      });
+
+      return {
+        sucesso: true,
+        mensagem: `Arquivo de ${mediaType} enviado com sucesso ao cliente!`,
+        conversa_id: convId,
+        tipo_midia: mediaType,
       };
     },
   },

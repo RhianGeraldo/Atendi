@@ -59,6 +59,33 @@ export async function sendPlatformMessage({
   let participantJid = null;
   let mediaUrlToSend = mediaBase64;
 
+  // Se a mídia for enviada em base64 (data:...), faz o upload para o Supabase Storage
+  // garantindo uma URL pública acessível para todos os provedores (Meta Cloud API, EvoGo, Stevo, etc.)
+  if (mediaBase64 && mediaType !== 'text' && mediaBase64.startsWith('data:')) {
+    try {
+      const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+      if (match) {
+        const mimeType = match[1];
+        const base64Data = match[2];
+        const buffer = Buffer.from(base64Data, 'base64');
+        const ext = mimeType.split('/')[1] || 'bin';
+        const fileName = `${conversationId}/${Date.now()}.${ext}`;
+
+        const { data: uploadData, error: uploadError } = await supabaseAdmin
+          .storage
+          .from('media')
+          .upload(fileName, buffer, { contentType: mimeType, upsert: false, cacheControl: '31536000, must-revalidate' });
+
+        if (!uploadError && uploadData) {
+          const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
+          mediaUrlToSend = publicUrlData.publicUrl;
+        }
+      }
+    } catch (e) {
+      console.error('[message-sender] Failed to parse or upload base64 to Supabase', e);
+    }
+  }
+
   if (provider === 'zernio') {
     const { enviarMensagemZernio } = await import('../canais/zernio/adaptador');
 

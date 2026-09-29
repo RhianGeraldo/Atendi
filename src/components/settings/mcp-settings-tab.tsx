@@ -632,7 +632,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-amber-500" />
-            47 Ferramentas Nativas Disponíveis no Servidor MCP
+            48 Ferramentas Nativas Disponíveis no Servidor MCP
           </CardTitle>
           <CardDescription className="text-xs">
             Qualquer agente de IA ou cliente conectado tem acesso às seguintes funções do CRM em
@@ -659,7 +659,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               <span className="font-semibold text-foreground">💬 Atendimento, WhatsApp & SLA</span>
               <p className="text-muted-foreground text-[11px]">
                 listar_conversas (com SLA em tempo real), consultar_conversa,
-                consultar_sla_atendimento, enviar_mensagem_whatsapp, assumir_conversa,
+                consultar_sla_atendimento, enviar_mensagem_whatsapp, enviar_midia_whatsapp, assumir_conversa,
                 transferir_conversa, adicionar_nota_interna, listar_motivos_encerramento,
                 encerrar_atendimento
               </p>
