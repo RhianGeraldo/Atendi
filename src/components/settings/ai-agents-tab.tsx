@@ -219,6 +219,9 @@ export function AiAgentsTab() {
   const saveAgent = useMutation({
     mutationFn: async () => {
       if (!name || !aiType || !model) throw new Error("Nome, Tipo e Modelo são obrigatórios");
+      if (allowOpportunities && (!pipelineId || pipelineId === "none")) {
+        throw new Error("Selecione um Funil de CRM para o agente quando a criação de oportunidades estiver ativada.");
+      }
       
       const payload = {
         company_id: activeCompanyId!,
@@ -494,6 +497,18 @@ export function AiAgentsTab() {
                       className="min-h-[120px]"
                     />
                   </div>
+                  <div className="rounded-md bg-muted/40 p-2.5 text-[11px] text-muted-foreground border">
+                    <span className="font-semibold text-foreground">Variáveis dinâmicas suportadas nos prompts:</span>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <code className="bg-background px-1.5 py-0.5 rounded border text-[10px]">{"{{primeiro_nome}}"}</code>
+                      <code className="bg-background px-1.5 py-0.5 rounded border text-[10px]">{"{{nome_cliente}}"}</code>
+                      <code className="bg-background px-1.5 py-0.5 rounded border text-[10px]">{"{{unidade}}"}</code>
+                      <code className="bg-background px-1.5 py-0.5 rounded border text-[10px]">{"{{empresa}}"}</code>
+                      <code className="bg-background px-1.5 py-0.5 rounded border text-[10px]">{"{{telefone}}"}</code>
+                      <code className="bg-background px-1.5 py-0.5 rounded border text-[10px]">{"{{endereco}}"}</code>
+                      <code className="bg-background px-1.5 py-0.5 rounded border text-[10px]">{"{{horarios}}"}</code>
+                    </div>
+                  </div>
                 </div>
               </TabsContent>
 
@@ -670,21 +685,20 @@ export function AiAgentsTab() {
                       <div className="space-y-2 pt-2 border-t">
                         <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                           <CornerDownRight className="h-3 w-3" />
-                          Instrução de Transferência [TRANSFERIR]
+                          Instruções para Transferência Humana
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
                             </TooltipTrigger>
                             <TooltipContent className="max-w-xs space-y-2 text-xs">
-                              <p>Quando a IA não souber resolver, ela pode transferir para um humano ou enviar para uma fila.</p>
-                              <p><strong>Exemplo:</strong> Se não conseguir ajudar, encerre sua frase com <code>[TRANSFERIR: Precisa de suporte financeiro]</code>.</p>
-                              <p>Não confunda com <code>[TRANSFERIR_AGENTE]</code> (que envia para outra IA de forma autônoma).</p>
+                              <p>A IA transfere o atendimento nativamente para o departamento ou fila de espera.</p>
+                              <p>Instrua quando ela deve transferir (ex: <em>"Transfira apenas se o cliente pedir um atendente humano ou se o problema for financeiro"</em>).</p>
                             </TooltipContent>
                           </Tooltip>
                         </label>
                         <Textarea 
                           className="min-h-[120px] text-xs font-mono" 
-                          placeholder="Ex: Se não souber resolver, use a tag [TRANSFERIR: motivo]..." 
+                          placeholder="Ex: Se o cliente solicitar atendimento humano ou a solicitação for sobre cancelamento, transfira o atendimento..." 
                           value={promptHandoff} 
                           onChange={e => setPromptHandoff(e.target.value)} 
                         />
@@ -752,20 +766,20 @@ export function AiAgentsTab() {
                       <div className="space-y-2 pt-2 border-t">
                         <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                           <CornerDownRight className="h-3 w-3" />
-                          Instrução de Encerramento [ENCERRAR]
+                          Instruções para Encerramento de Atendimento
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
                             </TooltipTrigger>
                             <TooltipContent className="max-w-xs space-y-2 text-xs">
-                              <p>Usado quando a IA resolveu com sucesso e o ticket pode ser finalizado.</p>
-                              <p><strong>Exemplo:</strong> Quando todas as dúvidas forem sanadas, escreva <code>[ENCERRAR: Dúvidas tiradas com sucesso]</code>.</p>
+                              <p>A IA encerra o atendimento de forma nativa e segura.</p>
+                              <p>Oriente as condições em que o chamado deve ser finalizado (ex: <em>"Encerre apenas se o cliente confirmar que a dúvida foi resolvida ou se despedir"</em>).</p>
                             </TooltipContent>
                           </Tooltip>
                         </label>
                         <Textarea 
                           className="min-h-[120px] text-xs font-mono" 
-                          placeholder="Ex: Se o problema for resolvido, use a tag [ENCERRAR: resumo]..." 
+                          placeholder="Ex: Encerre o chamado se o cliente agradecer, se despedir ou confirmar que não possui mais dúvidas..." 
                           value={promptResolution} 
                           onChange={e => setPromptResolution(e.target.value)} 
                         />
@@ -792,20 +806,20 @@ export function AiAgentsTab() {
                       <div className="space-y-2 pt-2 border-t">
                         <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                           <CornerDownRight className="h-3 w-3" />
-                          Instrução de Tarefas [CRIAR_TAREFA]
+                          Instruções para Criação de Tarefas
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
                             </TooltipTrigger>
                             <TooltipContent className="max-w-xs space-y-2 text-xs">
-                              <p>Ensine a IA sobre como criar as tarefas.</p>
-                              <p><strong>Formato Obrigatório:</strong> <code>[CRIAR_TAREFA: Título | Descrição | YYYY-MM-DD HH:MM]</code>.</p>
+                              <p>A IA utiliza ferramenta nativa para agendar tarefas no CRM com datas flexíveis (ex: <em>"amanhã às 14h"</em>, <em>"em 2 dias"</em> ou <em>"2026-10-15 10:00"</em>).</p>
+                              <p>Aqui você pode orientar quando ela deve criar uma tarefa para a equipe comercial/suporte.</p>
                             </TooltipContent>
                           </Tooltip>
                         </label>
                         <Textarea 
                           className="min-h-[100px] text-xs font-mono" 
-                          placeholder="Ex: Para criar uma tarefa, use a tag [CRIAR_TAREFA: Título | Descrição | 2026-12-31 14:00]..." 
+                          placeholder="Ex: Quando o cliente pedir para ligar depois ou solicitar proposta formal, crie uma tarefa de retorno..." 
                           value={promptTasks} 
                           onChange={e => setPromptTasks(e.target.value)} 
                         />
@@ -837,7 +851,7 @@ export function AiAgentsTab() {
                               </TooltipTrigger>
                               <TooltipContent className="max-w-xs space-y-2 text-xs">
                                 <p>Selecione em qual Funil este agente irá operar.</p>
-                                <p>O agente receberá as etapas deste funil para usar nas tags.</p>
+                                <p>O agente receberá as etapas deste funil para usar nas ações de criação e movimentação de cards.</p>
                               </TooltipContent>
                             </Tooltip>
                           </label>
@@ -854,22 +868,20 @@ export function AiAgentsTab() {
                         <div className="space-y-2 pt-2 border-t">
                           <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                             <CornerDownRight className="h-3 w-3" />
-                            Instrução de Oportunidades
+                            Instruções de Oportunidades
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
                               </TooltipTrigger>
                               <TooltipContent className="max-w-xs space-y-2 text-xs">
-                                <p>Ensine a IA sobre como criar e gerenciar a oportunidade.</p>
-                                <p><strong>Formato Criação:</strong> <code>[CRIAR_OPORTUNIDADE: Título da Venda | Valor Numérico | etapa_id]</code>.</p>
-                                <p><strong>Formato Atualização:</strong> <code>[ATUALIZAR_OPORTUNIDADE: oportunidade_id | etapa_id | id_nova_etapa]</code>.</p>
-                                <p>A IA receberá os IDs de etapa automaticamente no contexto.</p>
+                                <p>A IA gerencia o funil de forma nativa e estruturada.</p>
+                                <p>Ela reconhece nomes das etapas (ex: <em>"Lead"</em>, <em>"Proposta"</em>, <em>"Fechamento"</em>) e valores monetários informados na conversa.</p>
                               </TooltipContent>
                             </Tooltip>
                           </label>
                           <Textarea 
                             className="min-h-[140px] text-xs font-mono" 
-                            placeholder="Ex: Quando um lead chegar, crie uma oportunidade usando [CRIAR_OPORTUNIDADE: Nome | 100 | etapa_id]..." 
+                            placeholder="Ex: Quando um lead demonstrar interesse ou pedir orçamento, crie uma oportunidade no funil na etapa inicial..." 
                             value={promptOpportunities} 
                             onChange={e => setPromptOpportunities(e.target.value)} 
                           />

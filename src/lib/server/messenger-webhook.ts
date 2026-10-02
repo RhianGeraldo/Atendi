@@ -267,9 +267,9 @@ async function processIncomingMessage(params: any) {
         last_message_preview: textContent?.substring(0, 50),
         remote_id: contactPsid,
         resolved_at: isFromMe ? new Date(timestamp).toISOString() : null,
-        ai_active: aiActive,
-        ai_followup_count: 0
+        ai_active: aiActive
       };
+      if (!isFromMe) updatePayload.ai_followup_count = 0;
       if (aiActive && defaultAgentId) updatePayload.ai_agent_id = defaultAgentId;
 
       await supabaseAdmin.from('conversations')

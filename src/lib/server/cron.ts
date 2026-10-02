@@ -128,7 +128,7 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
           await supabaseAdmin.from('conversations').update({ ai_followup_count: currentCount + 1, ai_last_followup_at: new Date().toISOString() } as any).eq('id', conv.id);
         } else if (currentCount >= maxAttempts) {
           systemInstruction = 'SYSTEM_RESOLVE_INACTIVE';
-          // Don't increment — AI will resolve the conversation in its response
+          await supabaseAdmin.from('conversations').update({ ai_followup_count: currentCount + 1, ai_last_followup_at: new Date().toISOString() } as any).eq('id', conv.id);
         }
 
         if (systemInstruction) {
@@ -142,9 +142,10 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
             is_internal: true
           }).select('id').single();
 
-          if (insertedMsg && conv.contacts?.company_id) {
+          const targetCompanyId = conv.contacts?.company_id;
+          if (insertedMsg && targetCompanyId) {
             // Trigger AI queue
-            enqueueAiMessage(conv.id, insertedMsg.id, conv.contacts.company_id);
+            enqueueAiMessage(conv.id, insertedMsg.id, targetCompanyId);
             processedCount++;
           }
         }

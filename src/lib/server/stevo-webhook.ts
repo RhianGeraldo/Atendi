@@ -978,9 +978,13 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
 
           if (existingMsg) {
             // Already saved - just update conversation timestamp
+            const existingUpdate: any = { last_message_at: new Date().toISOString() };
+            if (!isFromMe) {
+              existingUpdate.ai_followup_count = 0;
+            }
             await supabaseAdmin
               .from("conversations")
-              .update({ last_message_at: new Date().toISOString(), ai_followup_count: 0 })
+              .update(existingUpdate)
               .eq("id", conversationId);
 
             // Update metadata if the new payload has metadata that might have been missing initially
@@ -1001,9 +1005,11 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
 
         const updatePayload: any = {
           last_message_at: new Date().toISOString(),
-          ai_followup_count: 0,
           remote_id: extractedLid || phoneNumber,
         };
+        if (!isFromMe) {
+          updatePayload.ai_followup_count = 0;
+        }
 
         // Se a conversa estava resolvida, reabre ela como 'waiting' (ou 'active' se a IA for atender)
         if (conv.status === "resolved") {
@@ -1161,10 +1167,13 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
             );
             conversationId = racedConv.id;
             aiActive = racedConv.ai_active ?? false;
-            // Update last_message_at on the raced conversation
+            const racedUpdate: any = { last_message_at: new Date().toISOString() };
+            if (!isFromMe) {
+              racedUpdate.ai_followup_count = 0;
+            }
             await supabaseAdmin
               .from("conversations")
-              .update({ last_message_at: new Date().toISOString(), ai_followup_count: 0 })
+              .update(racedUpdate)
               .eq("id", conversationId);
           } else {
             throw convErr;
