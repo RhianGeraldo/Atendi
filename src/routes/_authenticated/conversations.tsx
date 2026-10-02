@@ -88,6 +88,7 @@ function ConversationsPage() {
 
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
+  const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
   const [dialerOpen, setDialerOpen] = useState(false);
   const [departmentFilter, setDepartmentFilter] = useState<string | null>(null);
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
@@ -198,6 +199,7 @@ function ConversationsPage() {
       instanceFilter,
       departmentFilter,
       agentFilter,
+      instances?.map((i: any) => i.id).join(","),
     ],
     initialPageParam: 0,
     queryFn: async ({ pageParam = 0 }) => {
@@ -222,8 +224,15 @@ function ConversationsPage() {
         query = query.eq("unit_id", selectedUnitId);
       }
 
+      const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
+
       if (instanceFilter && instanceFilter !== "all") {
         query = query.eq("whatsapp_instance_id", instanceFilter);
+      } else if (!isAdmin && instances && instances.length > 0) {
+        const allowedIds = instances.map((inst: any) => inst.id);
+        query = query.in("whatsapp_instance_id", allowedIds);
+      } else if (!isAdmin && instances && instances.length === 0) {
+        query = query.eq("whatsapp_instance_id", "00000000-0000-0000-0000-000000000000");
       }
 
       if (departmentFilter && departmentFilter !== "all") {
@@ -367,7 +376,7 @@ function ConversationsPage() {
     },
     getNextPageParam: (lastPage, allPages) =>
       lastPage.rawCount === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
-    enabled: !!profile,
+    enabled: !!profile && (isAdmin || instances !== undefined),
   });
 
   const conversations = useMemo(
@@ -486,6 +495,7 @@ function ConversationsPage() {
       debouncedSearch,
       departmentFilter,
       agentFilter,
+      instances?.map((i: any) => i.id).join(","),
     ],
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
@@ -508,8 +518,15 @@ function ConversationsPage() {
         query = query.eq("unit_id", selectedUnitId);
       }
 
+      const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
+
       if (instanceFilter && instanceFilter !== "all") {
         query = query.eq("whatsapp_instance_id", instanceFilter);
+      } else if (!isAdmin && instances && instances.length > 0) {
+        const allowedIds = instances.map((inst: any) => inst.id);
+        query = query.in("whatsapp_instance_id", allowedIds);
+      } else if (!isAdmin && instances && instances.length === 0) {
+        query = query.eq("whatsapp_instance_id", "00000000-0000-0000-0000-000000000000");
       }
 
       if (departmentFilter && departmentFilter !== "all") {
@@ -558,63 +575,72 @@ function ConversationsPage() {
         const resolvedSeen = new Set<string>();
 
         (data || []).forEach((c) => {
-        if (
-          instanceFilter &&
-          instanceFilter !== "all" &&
-          c.whatsapp_instance_id !== instanceFilter
-        ) {
-          return;
-        }
+          if (
+            instanceFilter &&
+            instanceFilter !== "all" &&
+            c.whatsapp_instance_id !== instanceFilter
+          ) {
+            return;
+          }
 
-        const isGroup =
-          c.contact?.phone &&
-          (c.contact.phone.startsWith("120363") ||
-            (c.contact.phone.includes("-") && c.contact.phone.length > 18));
-        if (isGroup) {
-          counts.groups.total++;
-          counts.groups.unread += c.unread_count || 0;
-        } else {
-          const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
-          const isManager = profile?.role === "manager";
-          const isMyDept = c.department_id === profile?.department_id;
-          const isGeneral = !c.department_id;
-          const isAssignedToMe = c.assigned_agent_id === profile?.id;
+          if (!isAdmin && instances) {
+            const allowedIds = instances.map((inst: any) => inst.id);
+            if (c.whatsapp_instance_id && !allowedIds.includes(c.whatsapp_instance_id)) {
+              return;
+            }
+          }
 
-          if (c.status === "waiting") {
-            const canSeeWaiting = isAdmin || isGeneral || isMyDept || isAssignedToMe;
-            if (canSeeWaiting) {
-              if (
+          const isGroup =
+            c.contact?.phone &&
+            (c.contact.phone.startsWith("120363") ||
+              (c.contact.phone.includes("-") && c.contact.phone.length > 18));
+          if (isGroup) {
+            counts.groups.total++;
+            counts.groups.unread += c.unread_count || 0;
+          } else {
+            const isManager = profile?.role === "manager";
+            const isMyDept = c.department_id === profile?.department_id;
+            const isGeneral = !c.department_id;
+            const isAssignedToMe = c.assigned_agent_id === profile?.id;
+
+            if (c.status === "waiting") {
+              const canSeeWaiting = isAdmin || isGeneral || isMyDept || isAssignedToMe;
+              if (canSeeWaiting) {
+                if (
+                  isAdmin ||
+                  isManager ||
+                  !c.assigned_agent_id ||
+                  c.assigned_agent_id === profile?.id
+                ) {
+                  counts.waiting.total++;
+                  counts.waiting.unread += c.unread_count || 0;
+                }
+              }
+            }
+            if (c.status === "active") {
+              const canSeeActive =
                 isAdmin ||
-                isManager ||
-                !c.assigned_agent_id ||
-                c.assigned_agent_id === profile?.id
-              ) {
-                counts.waiting.total++;
-                counts.waiting.unread += c.unread_count || 0;
+                (isManager && isMyDept) ||
+                isAssignedToMe ||
+                (!c.assigned_agent_id && (isMyDept || isGeneral));
+              if (canSeeActive) {
+                counts.active.total++;
+                counts.active.unread += c.unread_count || 0;
+              }
+            }
+            if (c.status === "resolved") {
+              const canSeeResolved = isAdmin || (isManager && isMyDept) || isAssignedToMe;
+              if (canSeeResolved) {
+                const key = `${(c.contact as any)?.id ?? "no-contact"}__${c.whatsapp_instance_id ?? "no-instance"}`;
+                if (!resolvedSeen.has(key)) {
+                  resolvedSeen.add(key);
+                  counts.resolved.total++;
+                  counts.resolved.unread += c.unread_count || 0;
+                }
               }
             }
           }
-          if (c.status === "active") {
-            const canSeeActive =
-              isAdmin || (isManager && isMyDept) || isAssignedToMe || !c.assigned_agent_id;
-            if (canSeeActive) {
-              counts.active.total++;
-              counts.active.unread += c.unread_count || 0;
-            }
-          }
-          if (c.status === "resolved") {
-            const canSeeResolved = isAdmin || (isManager && isMyDept) || isAssignedToMe;
-            if (canSeeResolved) {
-              const key = `${(c.contact as any)?.id ?? "no-contact"}__${c.whatsapp_instance_id ?? "no-instance"}`;
-              if (!resolvedSeen.has(key)) {
-                resolvedSeen.add(key);
-                counts.resolved.total++;
-                counts.resolved.unread += c.unread_count || 0;
-              }
-            }
-          }
-        }
-      });
+        });
 
         return counts;
       } catch (err) {
@@ -622,6 +648,7 @@ function ConversationsPage() {
         return counts;
       }
     },
+    enabled: !!profile && (isAdmin || instances !== undefined),
   });
 
   const updateConversationInCache = useCallback(
@@ -771,6 +798,43 @@ function ConversationsPage() {
           return null;
         }
 
+        // Permissão por instância
+        if (!isAdmin && instances) {
+          const allowedIds = instances.map((inst: any) => inst.id);
+          if (
+            (data as any).whatsapp_instance_id &&
+            !allowedIds.includes((data as any).whatsapp_instance_id)
+          ) {
+            return null;
+          }
+        }
+
+        // Permissão por departamento e atribuição
+        if (!isAdmin) {
+          const convDeptId = (data as any).department_id;
+          const assignedId = (data as any).assigned_agent_id;
+          const userDeptId = profile?.department_id;
+          const isAssignedToMe = assignedId === profile?.id;
+          const isMyDept = userDeptId && convDeptId === userDeptId;
+          const isGeneral = !convDeptId;
+
+          const isManager = profile?.role === "manager";
+          if (isManager) {
+            if (userDeptId && convDeptId !== userDeptId && !isAssignedToMe) {
+              return null;
+            }
+          } else {
+            const status = (data as any).status || "waiting";
+            if (status === "waiting") {
+              if (!isGeneral && !isMyDept && !isAssignedToMe) return null;
+            } else if (status === "active") {
+              if (!isAssignedToMe && (!isGeneral && !isMyDept)) return null;
+            } else if (status === "resolved") {
+              if (!isAssignedToMe) return null;
+            }
+          }
+        }
+
         const { data: lastMsg } = await supabase
           .from("messages")
           .select("sender_type, created_at, is_internal")
@@ -805,7 +869,7 @@ function ConversationsPage() {
         return null;
       }
     },
-    [updateConversationInCache],
+    [updateConversationInCache, activeCompanyId, isAdmin, instances, profile],
   );
 
   const updateUnreadCountsInCache = useCallback(
@@ -950,8 +1014,13 @@ function ConversationsPage() {
             } else if (payload.eventType === "INSERT") {
               const newConv = payload.new as ConvRow;
               if (newConv?.id) {
-                fetchAndInjectConversation(newConv.id, newConv.status || "waiting");
-                updateUnreadCountsInCache("waiting", 1, newConv.unread_count || 1);
+                fetchAndInjectConversation(newConv.id, newConv.status || "waiting").then(
+                  (injected) => {
+                    if (injected) {
+                      updateUnreadCountsInCache("waiting", 1, newConv.unread_count || 1);
+                    }
+                  },
+                );
               } else {
                 qc.invalidateQueries({ queryKey: ["conversations"] });
                 qc.invalidateQueries({ queryKey: ["unread-counts"] });
@@ -1151,6 +1220,40 @@ function ConversationsPage() {
 
   const filtered = useMemo(() => {
     let list = conversations.filter((c) => !!c?.id);
+
+    if (!isAdmin) {
+      if (instances) {
+        const allowedIds = instances.map((inst: any) => inst.id);
+        list = list.filter(
+          (c) => !c.whatsapp_instance_id || allowedIds.includes(c.whatsapp_instance_id),
+        );
+      }
+
+      const userDeptId = profile?.department_id;
+      const isManager = profile?.role === "manager";
+
+      list = list.filter((c) => {
+        const isAssignedToMe = c.assigned_agent_id === profile?.id;
+        const isMyDept = userDeptId && c.department_id === userDeptId;
+        const isGeneral = !c.department_id;
+
+        if (isManager) {
+          if (userDeptId && c.department_id !== userDeptId && !isAssignedToMe) return false;
+          return true;
+        }
+
+        // Atendente
+        if (tab === "waiting") {
+          return isGeneral || isMyDept || isAssignedToMe;
+        } else if (tab === "active") {
+          return isAssignedToMe || (!c.assigned_agent_id && (isMyDept || isGeneral));
+        } else if (tab === "resolved") {
+          return isAssignedToMe;
+        }
+        return true;
+      });
+    }
+
     if (slaFilter !== "all") {
       list = list.filter((c) => {
         const sla = calculateConversationSla(c, slaSettings);
@@ -1159,7 +1262,17 @@ function ConversationsPage() {
       });
     }
     return list;
-  }, [conversations, slaFilter, slaSettings]);
+  }, [
+    conversations,
+    slaFilter,
+    slaSettings,
+    isAdmin,
+    instances,
+    profile?.department_id,
+    profile?.id,
+    profile?.role,
+    tab,
+  ]);
 
   useEffect(() => {
     const current =
