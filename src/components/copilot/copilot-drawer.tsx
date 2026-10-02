@@ -25,7 +25,6 @@ import {
   Mic,
   MicOff,
   Square,
-  GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -392,177 +391,26 @@ export function CopilotFloatingChat() {
   const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
   const isManager = profile?.role === "manager";
 
-  // Posição arrastável do botão flutuante
-  const [btnPos, setBtnPos] = useState<{ x: number; y: number } | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<{
-    startX: number;
-    startY: number;
-    initialX: number;
-    initialY: number;
-    hasMoved: boolean;
-  }>({
-    startX: 0,
-    startY: 0,
-    initialX: 0,
-    initialY: 0,
-    hasMoved: false,
-  });
-
-  // Inicializar e escutar redimensionamento da janela
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const computeDefaultPos = () => {
-      const isDesktop = window.innerWidth >= 768;
-      // Posicionar no canto inferior esquerdo, ao lado da sidebar (longe dos botões de mensagem/áudio no canto direito)
-      const defaultX = isDesktop ? 260 : 16;
-      const defaultY = Math.max(10, window.innerHeight - 64);
-      return { x: defaultX, y: defaultY };
-    };
-
-    try {
-      const saved = localStorage.getItem("atendi_copilot_fab_pos");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (typeof parsed.x === "number" && typeof parsed.y === "number") {
-          const clampedX = Math.min(Math.max(12, parsed.x), window.innerWidth - 130);
-          const clampedY = Math.min(Math.max(12, parsed.y), window.innerHeight - 56);
-          setBtnPos({ x: clampedX, y: clampedY });
-          return;
-        }
-      }
-    } catch {
-      // Ignorar erros de parse do localStorage
-    }
-
-    setBtnPos(computeDefaultPos());
-
-    const handleResize = () => {
-      setBtnPos((prev) => {
-        if (!prev) return computeDefaultPos();
-        return {
-          x: Math.min(Math.max(12, prev.x), window.innerWidth - 130),
-          y: Math.min(Math.max(12, prev.y), window.innerHeight - 56),
-        };
-      });
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
-    // Apenas botão esquerdo ou toque
-    if (e.button !== 0) return;
-    const target = e.currentTarget;
-    const rect = target.getBoundingClientRect();
-
-    dragRef.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      initialX: rect.left,
-      initialY: rect.top,
-      hasMoved: false,
-    };
-
-    const handlePointerMove = (ev: PointerEvent) => {
-      const dx = ev.clientX - dragRef.current.startX;
-      const dy = ev.clientY - dragRef.current.startY;
-      if (!dragRef.current.hasMoved && Math.hypot(dx, dy) > 5) {
-        dragRef.current.hasMoved = true;
-        setIsDragging(true);
-      }
-
-      if (dragRef.current.hasMoved) {
-        const nextX = Math.min(Math.max(12, dragRef.current.initialX + dx), window.innerWidth - 130);
-        const nextY = Math.min(Math.max(12, dragRef.current.initialY + dy), window.innerHeight - 56);
-        setBtnPos({ x: nextX, y: nextY });
-      }
-    };
-
-    const handlePointerUp = () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-
-      if (dragRef.current.hasMoved) {
-        setBtnPos((current) => {
-          if (current) {
-            try {
-              localStorage.setItem("atendi_copilot_fab_pos", JSON.stringify(current));
-            } catch {
-              // Ignore
-            }
-          }
-          return current;
-        });
-        setTimeout(() => setIsDragging(false), 50);
-      }
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-  };
-
-  const handleButtonClick = () => {
-    if (dragRef.current.hasMoved || isDragging) return;
-    setIsOpen(true);
-  };
-
-  const isLeftAligned =
-    btnPos && typeof window !== "undefined"
-      ? btnPos.x < window.innerWidth / 2
-      : true;
+  // Não renderizar nada se o chat estiver fechado (abertura exclusivamente pelo botão no topo do cabeçalho ou Ctrl+J)
+  if (!isOpen) {
+    return null;
+  }
 
   return (
     <>
-      {/* Botão Flutuante (quando o chat estiver fechado / minimizado) - Arrastável para qualquer canto */}
-      {!isOpen && (
-        <button
-          onClick={handleButtonClick}
-          onPointerDown={handlePointerDown}
-          title="Abrir Atendi Copilot (Ctrl + J) • Arraste para mover"
-          style={
-            btnPos
-              ? { left: `${btnPos.x}px`, top: `${btnPos.y}px` }
-              : undefined
-          }
-          className={cn(
-            "fixed z-40 flex items-center gap-2 px-3.5 py-2.5 rounded-full bg-gradient-to-r from-primary via-indigo-600 to-primary text-white shadow-xl hover:shadow-2xl hover:shadow-primary/30 transition-transform active:scale-95 border border-white/20 group select-none touch-none",
-            isDragging ? "cursor-grabbing opacity-90 scale-105" : "cursor-grab",
-            !btnPos && "bottom-5 left-4 md:left-[260px]"
-          )}
-        >
-          <GripVertical className="h-3.5 w-3.5 text-white/50 group-hover:text-white/80 transition-colors -ml-1 cursor-grab" />
-          <div className="relative flex items-center justify-center">
-            <Bot className="h-5 w-5" />
-            <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-            </span>
-          </div>
-          <span className="text-xs font-semibold tracking-wide">Copilot</span>
-          <span className="hidden sm:inline text-[10px] bg-white/20 text-white px-1.5 py-0.5 rounded font-mono">
-            Ctrl+J
-          </span>
-        </button>
-      )}
-
       {/* Janela Flutuante do Chat (quando aberto) */}
-      {isOpen && (
-        <div
-          className={cn(
-            "fixed bottom-5 z-40 flex flex-col bg-background/95 backdrop-blur-xl border border-border shadow-2xl rounded-2xl overflow-hidden transition-all duration-200 animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-4",
-            isExpanded
-              ? "w-[95vw] sm:w-[680px] md:w-[720px] h-[85vh] max-h-[820px]"
-              : "w-[92vw] sm:w-[460px] md:w-[480px] h-[620px] max-h-[85vh]",
-            isLeftAligned ? "left-4 md:left-[260px]" : "right-5"
-          )}
-          style={{
-            boxShadow:
-              "0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1), 0 0 20px rgba(99, 102, 241, 0.15)",
-          }}
-        >
+      <div
+        className={cn(
+          "fixed bottom-5 right-5 z-50 flex flex-col bg-background/95 backdrop-blur-xl border border-border shadow-2xl rounded-2xl overflow-hidden transition-all duration-200 animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-4",
+          isExpanded
+            ? "w-[95vw] sm:w-[680px] md:w-[720px] h-[85vh] max-h-[820px]"
+            : "w-[92vw] sm:w-[460px] md:w-[480px] h-[620px] max-h-[85vh]"
+        )}
+        style={{
+          boxShadow:
+            "0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1), 0 0 20px rgba(99, 102, 241, 0.15)",
+        }}
+      >
           {/* Header do Chat Flutuante */}
           <div className="p-3.5 border-b bg-card/80 backdrop-blur flex items-center justify-between select-none">
             <div className="flex items-center gap-2.5">
@@ -888,7 +736,6 @@ export function CopilotFloatingChat() {
             </div>
           </div>
         </div>
-      )}
     </>
   );
 }
