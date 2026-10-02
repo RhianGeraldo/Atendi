@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { Copy, Trash2, Plus, ChevronsUpDown, Check, Pencil } from "lucide-react";
+import { Copy, Plus, ChevronsUpDown, Check, Pencil, UserX, UserCheck } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ALL_MENU_PERMISSIONS } from "@/lib/permissions";
 import { createClient } from "@supabase/supabase-js";
@@ -88,8 +88,10 @@ export function UsersTab() {
   const [editName, setEditName] = useState("");
   const [editDepartment, setEditDepartment] = useState<string>("none");
   const [editRoleValue, setEditRoleValue] = useState<string>("agent");
+  const [editActive, setEditActive] = useState<boolean>(true);
   const [editExtraMenus, setEditExtraMenus] = useState<string[]>([]);
   const [editUnits, setEditUnits] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("active");
   
   // Create User State
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -109,7 +111,7 @@ export function UsersTab() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, email, role, online, department_id, has_matriz_access, custom_role_id, allowed_menus, custom_role:company_roles(id, name, allowed_menus, base_role), departments!profiles_department_id_fkey(name), user_units(unit_id, role)")
+        .select("id, name, email, role, online, active, department_id, has_matriz_access, custom_role_id, allowed_menus, custom_role:company_roles(id, name, allowed_menus, base_role), departments!profiles_department_id_fkey(name), user_units(unit_id, role)")
         .eq("company_id", activeCompanyId!);
       if (error) throw error;
       return data;
@@ -130,6 +132,7 @@ export function UsersTab() {
     setEditName(u.name || "");
     setEditDepartment(u.department_id || "none");
     setEditRoleValue(u.custom_role_id || u.role);
+    setEditActive(u.active !== false);
     setEditExtraMenus(Array.isArray(u.allowed_menus) ? [...u.allowed_menus] : []);
     const userUnitIds = [
       ...(u.has_matriz_access ? ["matriz"] : []),
@@ -148,15 +151,21 @@ export function UsersTab() {
       const departmentId = editDepartment === "none" ? null : editDepartment;
       const hasMatrizAccess = editUnits.includes("matriz");
 
-      // 1. Atualizar profiles (nome, cargo, custom_role_id, allowed_menus, department_id, matriz)
-      const { error: profileErr } = await supabase.from("profiles").update({
+      // 1. Atualizar profiles (nome, cargo, custom_role_id, allowed_menus, department_id, matriz, active)
+      const updates: Record<string, any> = {
         name: editName.trim(),
         role: baseRole as any,
+        active: editActive,
         custom_role_id: customRoleId,
         allowed_menus: editExtraMenus.length > 0 ? editExtraMenus : null,
         department_id: departmentId,
         has_matriz_access: hasMatrizAccess
-      }).eq("id", editingUser.id);
+      };
+      if (!editActive) {
+        updates.online = false;
+      }
+
+      const { error: profileErr } = await supabase.from("profiles").update(updates).eq("id", editingUser.id);
       if (profileErr) throw profileErr;
 
       // 2. Sincronizar user_departments
@@ -214,16 +223,20 @@ export function UsersTab() {
     }
   });
 
-  const removeUser = useMutation({
-    mutationFn: async (userId: string) => {
-      const { error } = await supabase.rpc("remove_user_from_company", { p_user_id: userId });
+  const toggleUserActive = useMutation({
+    mutationFn: async ({ userId, active }: { userId: string; active: boolean }) => {
+      const updates: Record<string, any> = { active };
+      if (!active) {
+        updates.online = false;
+      }
+      const { error } = await supabase.from("profiles").update(updates).eq("id", userId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       qc.invalidateQueries({ queryKey: ["users"] });
-      toast.success("Usuário removido da empresa.");
+      toast.success(variables.active ? "Membro da equipe reativado com sucesso!" : "Membro da equipe desativado.");
     },
-    onError: (e) => toast.error("Erro ao remover usuário", { description: (e as Error).message })
+    onError: (e) => toast.error("Erro ao alterar status do usuário", { description: (e as Error).message })
   });
 
   const handleCopyLink = () => {
@@ -426,13 +439,38 @@ export function UsersTab() {
       )}
 
       <Card>
-        <CardHeader>
-          <CardTitle>Membros da Equipe</CardTitle>
-          <CardDescription>
-            {selectedUnitId 
-              ? "Gerencie quais funcionários da empresa possuem acesso a esta Unidade."
-              : "Lista de todos os usuários da empresa. Aqui você define os níveis globais de acesso."}
-          </CardDescription>
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <CardTitle>Membros da Equipe</CardTitle>
+            <CardDescription>
+              {selectedUnitId
+                ? "Gerencie quais funcionários da empresa possuem acesso a esta Unidade."
+                : "Lista de todos os usuários da empresa. Aqui você define os níveis de acesso e status de atividade."}
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-1 self-start sm:self-auto bg-muted/60 p-1 rounded-lg text-xs border">
+            <button
+              type="button"
+              onClick={() => setStatusFilter("active")}
+              className={cn("px-2.5 py-1 rounded-md transition-colors", statusFilter === "active" ? "bg-background text-foreground shadow-xs font-medium" : "text-muted-foreground hover:text-foreground")}
+            >
+              Ativos ({users?.filter(u => u.active !== false).length || 0})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("inactive")}
+              className={cn("px-2.5 py-1 rounded-md transition-colors", statusFilter === "inactive" ? "bg-background text-foreground shadow-xs font-medium" : "text-muted-foreground hover:text-foreground")}
+            >
+              Inativos ({users?.filter(u => u.active === false).length || 0})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("all")}
+              className={cn("px-2.5 py-1 rounded-md transition-colors", statusFilter === "all" ? "bg-background text-foreground shadow-xs font-medium" : "text-muted-foreground hover:text-foreground")}
+            >
+              Todos ({users?.length || 0})
+            </button>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -443,6 +481,7 @@ export function UsersTab() {
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="h-10 px-4 text-left font-medium min-w-[200px]">Nome / E-mail</th>
+                    <th className="h-10 px-4 text-left font-medium min-w-[100px]">Status</th>
                     <th className="h-10 px-4 text-left font-medium min-w-[150px]">Departamento</th>
                     <th className="h-10 px-4 text-left font-medium min-w-[160px]">Cargo</th>
                     <th className="h-10 px-4 text-left font-medium min-w-[180px]">Unidades</th>
@@ -450,28 +489,47 @@ export function UsersTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(selectedUnitId 
-                    ? users.filter(u => u.role === 'admin_company' || u.user_units.some((uu: any) => uu.unit_id === selectedUnitId))
-                    : users
-                  ).map(u => {
+                  {users
+                    .filter(u => {
+                      if (selectedUnitId) {
+                        const inUnit = u.role === 'admin_company' || u.user_units?.some((uu: any) => uu.unit_id === selectedUnitId);
+                        if (!inUnit) return false;
+                      }
+                      if (statusFilter === "active") return u.active !== false;
+                      if (statusFilter === "inactive") return u.active === false;
+                      return true;
+                    })
+                    .map(u => {
                     const isSelf = u.id === profile?.id;
+                    const isActive = u.active !== false;
 
                     return (
-                      <tr key={u.id} className="border-b last:border-0 hover:bg-muted/50">
+                      <tr key={u.id} className={cn("border-b last:border-0 hover:bg-muted/50 transition-colors", !isActive && "opacity-60 bg-muted/20")}>
                         <td className="p-4">
                           <div className="font-medium flex items-center gap-1.5">
                             <span
                               className={`h-2 w-2 rounded-full shrink-0 ${
-                                (u as any).online
+                                (u as any).online && isActive
                                   ? "bg-emerald-500 shadow-xs shadow-emerald-500/50"
                                   : "bg-muted-foreground/30"
                               }`}
-                              title={(u as any).online ? "Online" : "Offline"}
+                              title={(u as any).online && isActive ? "Online" : "Offline"}
                             />
                             <span>{u.name}</span>
                             {isSelf && <Badge variant="outline" className="ml-1 text-[10px]">Você</Badge>}
                           </div>
                           <div className="text-xs text-muted-foreground pl-3.5">{u.email}</div>
+                        </td>
+                        <td className="p-4">
+                          {isActive ? (
+                            <Badge variant="outline" className="text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/25 text-xs font-normal">
+                              Ativo
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-muted-foreground bg-muted/60 border-muted text-xs font-normal">
+                              Inativo
+                            </Badge>
+                          )}
                         </td>
                         <td className="p-4">
                           {u.departments?.name ? (
@@ -530,20 +588,37 @@ export function UsersTab() {
                                 <span>Editar</span>
                               </Button>
                               {isCompanyAdmin && (
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  disabled={isSelf || removeUser.isPending}
-                                  className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                  title="Remover usuário da empresa"
-                                  onClick={() => {
-                                    if (window.confirm(`Tem certeza que deseja remover ${u.name} da empresa?`)) {
-                                      removeUser.mutate(u.id);
-                                    }
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                                isActive ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    disabled={isSelf || toggleUserActive.isPending}
+                                    className="h-8 w-8 text-muted-foreground hover:text-amber-600 hover:bg-amber-500/10"
+                                    title="Desativar usuário (preserva histórico)"
+                                    onClick={() => {
+                                      if (window.confirm(`Tem certeza que deseja desativar o acesso de ${u.name}?\n\nO usuário não conseguirá mais entrar no sistema, mas todo o seu histórico de atendimentos, conversas e negócios continuará intacto.`)) {
+                                        toggleUserActive.mutate({ userId: u.id, active: false });
+                                      }
+                                    }}
+                                  >
+                                    <UserX className="h-4 w-4" />
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    disabled={toggleUserActive.isPending}
+                                    className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10"
+                                    title="Reativar usuário"
+                                    onClick={() => {
+                                      if (window.confirm(`Deseja reativar o acesso de ${u.name}?`)) {
+                                        toggleUserActive.mutate({ userId: u.id, active: true });
+                                      }
+                                    }}
+                                  >
+                                    <UserCheck className="h-4 w-4" />
+                                  </Button>
+                                )
                               )}
                             </div>
                           </td>
@@ -808,6 +883,34 @@ export function UsersTab() {
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* Status do Acesso (Ativo / Desativado) */}
+            {isCompanyAdmin && (
+              <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/20">
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-semibold">Status do Acesso</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {editActive
+                      ? "Conta ativa: o usuário tem acesso ao sistema e recebe atendimentos."
+                      : "Conta desativada: login bloqueado, histórico de conversas e negócios 100% preservado."}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className={editActive ? "text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/25" : "text-muted-foreground bg-muted"}>
+                    {editActive ? "Ativo" : "Inativo"}
+                  </Badge>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={editingUser?.id === profile?.id}
+                    onClick={() => setEditActive(!editActive)}
+                  >
+                    {editActive ? "Desativar" : "Reativar"}
+                  </Button>
                 </div>
               </div>
             )}

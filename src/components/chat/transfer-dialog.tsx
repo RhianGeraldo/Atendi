@@ -53,14 +53,16 @@ export function TransferDialog({ conv }: { conv: any }) {
       if (conv.unit_id) {
         const { data, error } = await supabase
           .from("user_units")
-          .select("user_id, profiles!inner(id, name, email, avatar_url, role, online, departments!profiles_department_id_fkey(name))")
-          .eq("unit_id", conv.unit_id);
+          .select("user_id, profiles!inner(id, name, email, avatar_url, role, online, active, departments!profiles_department_id_fkey(name))")
+          .eq("unit_id", conv.unit_id)
+          .eq("profiles.active", true);
         if (error) throw error;
         return data.map((d: any) => d.profiles);
       } else {
         const { data, error } = await supabase
           .from("profiles")
-          .select("id, name, email, avatar_url, role, online, departments!profiles_department_id_fkey(name)")
+          .select("id, name, email, avatar_url, role, online, active, departments!profiles_department_id_fkey(name)")
+          .eq("active", true)
           .or('has_matriz_access.eq.true,role.eq.admin_company');
         if (error) throw error;
         return data;

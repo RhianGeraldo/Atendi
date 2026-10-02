@@ -326,7 +326,7 @@ export function OpportunityDialog({
     queryFn: async () => {
       const { data } = await supabase
         .from("profiles")
-        .select("id, name, email")
+        .select("id, name, email, active")
         .eq("company_id", profile!.company_id!)
         .order("name");
       return data || [];
@@ -1240,9 +1240,9 @@ export function OpportunityDialog({
                           </div>
                         </SelectTrigger>
                         <SelectContent>
-                          {companyUsers?.map((u) => (
+                          {companyUsers?.filter(u => u.active !== false || u.id === ownerId).map((u) => (
                             <SelectItem key={u.id} value={u.id} className="cursor-pointer">
-                              {u.name || u.email}
+                              {u.name || u.email} {u.active === false ? "(Inativo)" : ""}
                             </SelectItem>
                           ))}
                         </SelectContent>

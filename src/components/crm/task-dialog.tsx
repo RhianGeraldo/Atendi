@@ -54,6 +54,7 @@ export function TaskDialog({
         .from("profiles")
         .select("id, name, email")
         .eq("company_id", activeCompanyId!)
+        .eq("active", true)
         .order("name");
       if (error) throw error;
       return data || [];

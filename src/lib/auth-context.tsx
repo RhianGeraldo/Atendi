@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export interface Profile {
   id: string;
@@ -8,6 +9,7 @@ export interface Profile {
   email: string;
   avatar_url: string | null;
   role: "super_admin" | "admin_company" | "manager" | "agent";
+  active?: boolean;
   company_id: string | null;
   has_matriz_access: boolean;
   department_id: string | null;
@@ -90,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase
         .from("profiles")
         .select(
-          "id,name,email,avatar_url,role,company_id,department_id,custom_role_id,allowed_menus,use_signature,custom_role:company_roles(id,name,allowed_menus,base_role)",
+          "id,name,email,avatar_url,role,active,company_id,department_id,custom_role_id,allowed_menus,use_signature,custom_role:company_roles(id,name,allowed_menus,base_role)",
         )
         .eq("id", userId)
         .maybeSingle();
@@ -98,6 +100,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.warn("[Auth] Erro ao carregar perfil:", error.message);
       }
       if (data) {
+        // Se a conta estiver inativa/desativada e não for super_admin, desloga
+        if (data.active === false && data.role !== "super_admin") {
+          console.warn("[Auth] Conta desativada:", data.email);
+          await supabase.from("profiles").update({ online: false }).eq("id", userId);
+          await supabase.auth.signOut();
+          setProfile(null);
+          toast.error("Acesso bloqueado", {
+            description: "Sua conta de usuário foi desativada pelo administrador. Entre em contato com a equipe.",
+            duration: 8000,
+          });
+          return;
+        }
+
         setProfile(data as unknown as Profile);
         // Atualiza status online no perfil
         supabase.from("profiles").update({ online: true }).eq("id", userId).then();
