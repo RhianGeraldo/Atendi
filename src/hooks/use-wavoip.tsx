@@ -110,14 +110,21 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
     }, 2000);
   }, []);
 
-  // Fetch tokens for the current unit
+  // Fetch tokens for the current unit and department
   const { data: instances } = useQuery({
-    queryKey: ["wavoip_instances_tokens", profile?.company_id, selectedUnitId],
+    queryKey: [
+      "wavoip_instances_tokens",
+      profile?.company_id,
+      selectedUnitId,
+      profile?.id,
+      profile?.role,
+      profile?.department_id,
+    ],
     enabled: !!profile?.company_id,
     queryFn: async () => {
       let q = supabase
         .from("whatsapp_instances")
-        .select("id, wavoip_token, name, unit_id")
+        .select("id, wavoip_token, name, unit_id, department_id")
         .eq("company_id", profile!.company_id!)
         .not("wavoip_token", "is", null);
 
@@ -125,6 +132,15 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         // Busca as instâncias da unidade selecionada OU as instâncias globais da empresa (Sede, unit_id null)
         // Isso garante que se o cliente ligar no número principal, o atendente consiga receber.
         q = q.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
+      }
+
+      const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
+      if (!isAdmin) {
+        if (profile?.department_id) {
+          q = q.or(`department_id.eq.${profile.department_id},department_id.is.null`);
+        } else {
+          q = q.is("department_id", null);
+        }
       }
 
       const { data, error } = await q;

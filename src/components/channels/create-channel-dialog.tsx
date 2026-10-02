@@ -62,6 +62,27 @@ export function CreateChannelDialog({
   const [channelType, setChannelType] = useState<ChannelType>("whatsapp");
   const [provider, setProvider] = useState<ProviderType>("zernio");
   const [channelName, setChannelName] = useState("");
+  const [departmentId, setDepartmentId] = useState<string>("all");
+
+  const { data: departments } = useQuery({
+    queryKey: ["departments_create_channel", companyId],
+    enabled: !!companyId && open,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("departments")
+        .select("id, name, unit_id")
+        .eq("company_id", companyId)
+        .eq("active", true)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const filteredDepartments = (departments ?? []).filter((dept) => {
+    if (!unitId) return true;
+    return !dept.unit_id || dept.unit_id === unitId;
+  });
 
   // 2. Estados específicos da Zernio
   const [selectedZernioAccountId, setSelectedZernioAccountId] = useState("");
@@ -161,6 +182,7 @@ export function CreateChannelDialog({
   useEffect(() => {
     if (!open) {
       setChannelName("");
+      setDepartmentId("all");
       setSelectedZernioAccountId("");
       setCustomHost("");
       setCustomApiKey("");
@@ -289,6 +311,7 @@ export function CreateChannelDialog({
         .insert({
           company_id: companyId,
           unit_id: unitId || null,
+          department_id: departmentId === "all" ? null : departmentId,
           name: channelName.trim(),
           instance_name: technicalName,
           provider,
@@ -505,10 +528,34 @@ export function CreateChannelDialog({
             </p>
           </div>
 
-          {/* PASSO 2: ESCOLHA DO PROVEDOR DE CONEXÃO */}
+          {/* DEPARTAMENTO RESPONSÁVEL */}
           <div className="space-y-2">
             <label className="text-sm font-semibold flex items-center justify-between">
-              <span>3. Provedor de Conexão</span>
+              <span>3. Departamento Responsável</span>
+              <span className="text-xs font-normal text-muted-foreground">Opcional</span>
+            </label>
+            <Select value={departmentId} onValueChange={setDepartmentId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione o departamento..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">🌐 Geral (Visível para todos os departamentos)</SelectItem>
+                {filteredDepartments.map((dept) => (
+                  <SelectItem key={dept.id} value={dept.id}>
+                    📁 {dept.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Selecione um departamento para que apenas seus membros vejam esta linha, ou deixe como Geral.
+            </p>
+          </div>
+
+          {/* PASSO 3: ESCOLHA DO PROVEDOR DE CONEXÃO */}
+          <div className="space-y-2">
+            <label className="text-sm font-semibold flex items-center justify-between">
+              <span>4. Provedor de Conexão</span>
               <span className="text-xs font-normal text-muted-foreground">
                 Tecnologia que conecta a conta
               </span>

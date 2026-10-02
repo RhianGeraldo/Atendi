@@ -95,16 +95,35 @@ function ConversationsPage() {
   const [slaFilter, setSlaFilter] = useState<"all" | "breached" | "warning" | "ok">("all");
 
   const { data: instances } = useQuery({
-    queryKey: ["whatsapp_instances_filter", activeCompanyId, selectedUnitId],
+    queryKey: [
+      "whatsapp_instances_filter",
+      activeCompanyId,
+      selectedUnitId,
+      profile?.id,
+      profile?.role,
+      profile?.department_id,
+    ],
     queryFn: async () => {
       if (!activeCompanyId) return [];
       let query = supabase
         .from("whatsapp_instances")
-        .select("id, name, instance_name, provider, network, unit_id, units(id, name, color)")
+        .select(
+          "id, name, instance_name, provider, network, unit_id, department_id, units(id, name, color), departments(id, name)",
+        )
         .eq("company_id", activeCompanyId);
 
       if (selectedUnitId && selectedUnitId !== "all") {
         query = query.eq("unit_id", selectedUnitId);
+      }
+
+      // Se não for super admin nem admin da empresa, restringe ao departamento do atendente ou gerais
+      const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
+      if (!isAdmin) {
+        if (profile?.department_id) {
+          query = query.or(`department_id.eq.${profile.department_id},department_id.is.null`);
+        } else {
+          query = query.is("department_id", null);
+        }
       }
 
       const { data, error } = await query;
@@ -1337,6 +1356,21 @@ function ConversationsPage() {
                                     className="text-[10px] px-1 py-0 h-4 font-normal text-muted-foreground bg-muted/30"
                                   >
                                     {unitName}
+                                  </Badge>
+                                )}
+                                {inst.departments?.name ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] px-1 py-0 h-4 font-normal text-primary bg-primary/10 border-primary/20"
+                                  >
+                                    {inst.departments.name}
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] px-1 py-0 h-4 font-normal text-muted-foreground bg-muted/20"
+                                  >
+                                    Geral
                                   </Badge>
                                 )}
                                 {instanceFilter === inst.id && (

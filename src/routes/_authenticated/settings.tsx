@@ -454,7 +454,10 @@ function SettingsPage() {
     queryKey: ["whatsapp-instances", activeCompanyId, selectedUnitId],
     enabled: !!activeCompanyId,
     queryFn: async () => {
-      let q = supabase.from("whatsapp_instances").select("*").eq("company_id", activeCompanyId!);
+      let q = supabase
+        .from("whatsapp_instances")
+        .select("*, departments(id, name)")
+        .eq("company_id", activeCompanyId!);
 
       if (selectedUnitId) q = q.eq("unit_id", selectedUnitId);
       else q = q.is("unit_id", null);
@@ -2466,6 +2469,22 @@ function InstanceRow({
                 StevoChat
               </Badge>
             ) : null}
+
+            {instance.departments?.name ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-2 py-0 bg-primary/10 text-primary border-primary/20"
+              >
+                📁 {instance.departments.name}
+              </Badge>
+            ) : (
+              <Badge
+                variant="secondary"
+                className="text-[10px] px-2 py-0 text-muted-foreground"
+              >
+                🌐 Geral (Todos)
+              </Badge>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

@@ -559,7 +559,7 @@ function UnitManagementSheet({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("whatsapp_instances")
-        .select("*")
+        .select("*, departments(id, name)")
         .eq("unit_id", unit.id)
         .order("created_at", { ascending: true });
       if (error) throw error;
@@ -818,6 +818,21 @@ function UnitManagementSheet({
                                   {inst.provider === "oficial" ? "API Oficial" : inst.provider}
                                 </Badge>
                               )}
+                            {inst.departments?.name ? (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] py-0 px-1.5 h-4 font-semibold text-primary border-primary/20 bg-primary/10"
+                              >
+                                📁 {inst.departments.name}
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] py-0 px-1.5 h-4 font-semibold text-muted-foreground bg-muted/30"
+                              >
+                                🌐 Geral
+                              </Badge>
+                            )}
                             {!["oficial", "instagram", "messenger", "facebook"].includes(
                               inst.provider,
                             ) && (

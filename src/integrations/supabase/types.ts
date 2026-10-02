@@ -1603,6 +1603,7 @@ export type Database = {
           oficial_phone_number_id: string | null
           oficial_access_token: string | null
           oficial_verify_token: string | null
+          department_id: string | null
         }
         Insert: {
           company_id: string
@@ -1621,6 +1622,7 @@ export type Database = {
           oficial_phone_number_id?: string | null
           oficial_access_token?: string | null
           oficial_verify_token?: string | null
+          department_id?: string | null
         }
         Update: {
           company_id?: string
@@ -1639,6 +1641,7 @@ export type Database = {
           oficial_phone_number_id?: string | null
           oficial_access_token?: string | null
           oficial_verify_token?: string | null
+          department_id?: string | null
         }
         Relationships: [
           {
@@ -1653,6 +1656,13 @@ export type Database = {
             columns: ["unit_id"]
             isOneToOne: false
             referencedRelation: "units"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_instances_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
             referencedColumns: ["id"]
           },
         ]

@@ -42,6 +42,7 @@ export function StartConversationDialog({
 
   const { selectedUnitId } = useUnit();
 
+  const { profile } = useAuth();
   const { data: company } = useQuery({
     queryKey: ["company_name", activeCompanyId],
     queryFn: async () => {
@@ -53,17 +54,35 @@ export function StartConversationDialog({
   });
 
   const { data: instances, isLoading: isLoadingInstances } = useQuery({
-    queryKey: ["whatsapp_instances", activeCompanyId, selectedUnitId],
+    queryKey: [
+      "whatsapp_instances",
+      activeCompanyId,
+      selectedUnitId,
+      profile?.id,
+      profile?.role,
+      profile?.department_id,
+    ],
     queryFn: async () => {
       if (!activeCompanyId) return [];
       let query = supabase
         .from("whatsapp_instances")
-        .select("id, name, instance_name, provider, network, unit_id, units(id, name, color)")
+        .select(
+          "id, name, instance_name, provider, network, unit_id, department_id, units(id, name, color), departments(id, name)",
+        )
         .eq("company_id", activeCompanyId)
         .order("name", { ascending: true });
       
       if (selectedUnitId && selectedUnitId !== "all") {
         query = query.eq("unit_id", selectedUnitId);
+      }
+
+      const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
+      if (!isAdmin) {
+        if (profile?.department_id) {
+          query = query.or(`department_id.eq.${profile.department_id},department_id.is.null`);
+        } else {
+          query = query.is("department_id", null);
+        }
       }
 
       const { data, error } = await query;
@@ -101,7 +120,6 @@ export function StartConversationDialog({
     return { matriz, byUnit };
   }, [instances]);
 
-  const { profile } = useAuth();
   const cleanPhone = phone.replace(/\D/g, "");
 
   // Avalia previamente com quem está a conversa nesta instância

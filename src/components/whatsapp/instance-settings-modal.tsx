@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Settings, Loader2, Save, Globe, Copy } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Settings, Loader2, Save, Globe, Copy, Building } from "lucide-react";
 import { toast } from "sonner";
 import { EvoGoClient } from "@/integrations/evogo/client";
 import { StevoClient } from "@/integrations/stevo/client";
@@ -14,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { WhatsappTemplatesTab } from "./whatsapp-templates-tab";
 
 interface InstanceSettingsModalProps {
-  instance: any; // { id, name, instance_name, evogo_api_key, evogo_instance_id, webhook_url }
+  instance: any; // { id, name, instance_name, evogo_api_key, evogo_instance_id, webhook_url, department_id }
   company: any; // { evogo_host, evogo_global_token }
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -32,10 +33,30 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const [oficialPhoneId, setOficialPhoneId] = useState("");
   const [oficialWabaId, setOficialWabaId] = useState("");
   const [oficialAccessToken, setOficialAccessToken] = useState("");
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(null);
   const [advSettings, setAdvSettings] = useState({
     rejectCall: false,
     readMessages: false,
     alwaysOnline: false
+  });
+
+  const { data: departments } = useQuery({
+    queryKey: ["departments_for_instance", instance?.company_id],
+    enabled: !!instance?.company_id && open,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("departments")
+        .select("id, name, unit_id")
+        .eq("company_id", instance.company_id)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const filteredDepartments = (departments ?? []).filter((dept) => {
+    if (!instance?.unit_id) return true;
+    return !dept.unit_id || dept.unit_id === instance.unit_id;
   });
 
   useEffect(() => {
@@ -70,6 +91,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     setOficialPhoneId(instance.oficial_phone_number_id || "");
     setOficialWabaId(instance.oficial_waba_id || "");
     setOficialAccessToken(instance.oficial_access_token || "");
+    setSelectedDepartmentId(instance.department_id || null);
     
     // Fetch advanced settings from EvoGo
     const fetchSettings = async () => {
@@ -130,6 +152,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           .update({ 
             webhook_url: webhookUrl,
             wavoip_token: wavoipToken || null,
+            department_id: selectedDepartmentId || null,
           })
           .eq("id", instance.id);
       } else if (isCloudAPI) {
@@ -140,6 +163,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
              oficial_phone_number_id: oficialPhoneId,
              oficial_waba_id: oficialWabaId,
              oficial_access_token: oficialAccessToken,
+             department_id: selectedDepartmentId || null,
           })
           .eq("id", instance.id);
       } else {
@@ -148,14 +172,26 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
         if (instance.provider === 'stevo') {
           const client = new StevoClient({ host: customHost || company.stevo_host, token: company.stevo_global_token });
           await client.connectInstance(webhookUrl, customApiKey || instance.stevo_api_key);
-          await supabase.from("whatsapp_instances").update({ webhook_url: webhookUrl, wavoip_token: wavoipToken || null, custom_host: customHost || null, stevo_api_key: customApiKey || instance.stevo_api_key }).eq("id", instance.id);
+          await supabase.from("whatsapp_instances").update({ 
+            webhook_url: webhookUrl, 
+            wavoip_token: wavoipToken || null, 
+            custom_host: customHost || null, 
+            stevo_api_key: customApiKey || instance.stevo_api_key,
+            department_id: selectedDepartmentId || null,
+          }).eq("id", instance.id);
           if (instance.stevo_instance_id) {
             await client.updateAdvancedSettings(instance.stevo_instance_id, advSettings, customApiKey || instance.stevo_api_key);
           }
         } else {
           const client = new EvoGoClient({ host: customHost || company.evogo_host, token: company.evogo_global_token });
           await client.connectInstance(webhookUrl, customApiKey || instance.evogo_api_key);
-          await supabase.from("whatsapp_instances").update({ webhook_url: webhookUrl, wavoip_token: wavoipToken || null, custom_host: customHost || null, evogo_api_key: customApiKey || instance.evogo_api_key }).eq("id", instance.id);
+          await supabase.from("whatsapp_instances").update({ 
+            webhook_url: webhookUrl, 
+            wavoip_token: wavoipToken || null, 
+            custom_host: customHost || null, 
+            evogo_api_key: customApiKey || instance.evogo_api_key,
+            department_id: selectedDepartmentId || null,
+          }).eq("id", instance.id);
           if (instance.evogo_instance_id) {
             await client.updateAdvancedSettings(instance.evogo_instance_id, advSettings, customApiKey || instance.evogo_api_key);
           }
@@ -164,6 +200,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
 
       toast.success("Configurações salvas com sucesso!");
       qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+      qc.invalidateQueries({ queryKey: ["whatsapp_instances_filter"] });
+      qc.invalidateQueries({ queryKey: ["whatsapp_instances"] });
       onOpenChange(false);
     } catch (e: any) {
       toast.error("Erro ao salvar", { description: e.message });
@@ -215,6 +253,9 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                     customHost={customHost} setCustomHost={setCustomHost}
                     customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
                     advSettings={advSettings} setAdvSettings={setAdvSettings}
+                    selectedDepartmentId={selectedDepartmentId}
+                    setSelectedDepartmentId={setSelectedDepartmentId}
+                    departments={filteredDepartments}
                     isOficial={isOficial}
                     isInstagram={isInstagram}
                     isMessenger={isMessenger}
@@ -245,6 +286,9 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                   customHost={customHost} setCustomHost={setCustomHost}
                   customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
                   advSettings={advSettings} setAdvSettings={setAdvSettings}
+                  selectedDepartmentId={selectedDepartmentId}
+                  setSelectedDepartmentId={setSelectedDepartmentId}
+                  departments={filteredDepartments}
                   isOficial={isOficial}
                   isInstagram={isInstagram}
                   isMessenger={isMessenger}
@@ -277,6 +321,8 @@ function SettingsFormContent({
   customHost, setCustomHost,
   customApiKey, setCustomApiKey,
   advSettings, setAdvSettings, 
+  selectedDepartmentId, setSelectedDepartmentId,
+  departments,
   isOficial, isInstagram, isMessenger, instance
 }: any) {
   const isZernio = instance?.provider === 'zernio';
@@ -284,6 +330,36 @@ function SettingsFormContent({
   
   return (
     <>
+      {/* Departamento Responsável */}
+      <div className="space-y-2 p-3.5 rounded-xl border bg-muted/30">
+        <div className="flex items-center gap-2">
+          <Building className="h-4 w-4 text-primary" />
+          <h4 className="text-sm font-semibold text-foreground">Departamento com Acesso</h4>
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Defina se este canal é de um departamento específico ou se todos os departamentos podem visualizar e atender por ele.
+        </p>
+        <div className="pt-1">
+          <Select
+            value={selectedDepartmentId || "all"}
+            onValueChange={(val) => setSelectedDepartmentId(val === "all" ? null : val)}
+          >
+            <SelectTrigger className="w-full bg-background">
+              <SelectValue placeholder="Selecione um departamento..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                🌐 Geral (Visível para todos os departamentos)
+              </SelectItem>
+              {departments?.map((dept: any) => (
+                <SelectItem key={dept.id} value={dept.id}>
+                  📁 {dept.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-muted-foreground" />
