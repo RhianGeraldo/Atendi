@@ -8,6 +8,10 @@ export const analyticsTools: McpToolDefinition[] = [
     name: "consultar_metricas_dashboard",
     description:
       "Retorna indicadores de desempenho de vendas, atendimento e conformidade de SLA (leads aguardando, conversas ativas, SLA estourado/alerta, valor total no funil e taxa de conversão), com visão consolidada da rede ou de uma filial específica.",
+    security: {
+      requiredMenu: "dashboard",
+      minRole: "manager",
+    },
     inputSchema: {
       type: "object",
       properties: {

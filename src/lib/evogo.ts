@@ -37,27 +37,43 @@ export async function sendEvogoText({
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/text`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      number,
-      text,
-      ...(delay > 0 ? { delay } : {}),
-      ...(quoted && { quoted }),
-    }),
-  });
+  let lastError: any = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'apikey': token,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          number,
+          text,
+          ...(delay > 0 ? { delay } : {}),
+          ...(quoted && { quoted }),
+        }),
+        signal: AbortSignal.timeout(35000),
+      });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('EvoGo API Error:', errorText);
-    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('EvoGo API Error:', errorText);
+        throw new Error(parseEvogoError(response.status, response.statusText, errorText));
+      }
+
+      return await response.json();
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = err?.cause?.message || err?.message || String(err);
+      console.warn(`[sendEvogoText] Tentativa ${attempt} falhou (${errMsg})...`);
+      if (attempt === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+    }
   }
 
-  return response.json();
+  const detail = lastError?.cause?.message || lastError?.message || "Conexão com WhatsApp expirou";
+  throw new Error(`Falha na comunicação com a instância WhatsApp: ${detail}`);
 }
 
 export async function sendEvogoLink({

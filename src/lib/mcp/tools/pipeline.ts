@@ -842,7 +842,7 @@ export const pipelineTools: McpToolDefinition[] = [
         sucesso: true,
         mensagem: "Resposta de qualificação registrada com sucesso!",
         item_id: itemId,
-        completado,
+        completado: completed,
         valor_salvo: formattedValue || null,
         avanco_automatico_etapa: avancouEtapa,
         nova_etapa: novaEtapaNome,

@@ -4,6 +4,8 @@ import { AppShell } from "@/components/layout/app-shell";
 import { useAuth } from "@/lib/auth-context";
 import { WavoipProvider } from "@/hooks/use-wavoip";
 import { WavoipCallOverlay } from "@/components/whatsapp/wavoip-call-overlay";
+import { CopilotProvider } from "@/hooks/use-copilot";
+import { CopilotDrawer } from "@/components/copilot/copilot-drawer";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -31,10 +33,13 @@ function AuthenticatedLayout() {
 
   return (
     <WavoipProvider>
-      <AppShell>
-        <Outlet />
-      </AppShell>
-      <WavoipCallOverlay />
+      <CopilotProvider>
+        <AppShell>
+          <Outlet />
+        </AppShell>
+        <WavoipCallOverlay />
+        <CopilotDrawer />
+      </CopilotProvider>
     </WavoipProvider>
   );
 }

@@ -1,6 +1,19 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Tipos para o protocolo MCP (Model Context Protocol - Versão 2024-11-05)
 
+export type McpRole = "agent" | "manager" | "admin_company" | "super_admin";
+
+export interface McpToolSecurity {
+  /** Menu da aplicação ao qual a ferramenta pertence (ex: "pipeline", "settings", "conversations", "contacts", "tasks", "training", "reports", "dashboard", "units") */
+  requiredMenu?: string;
+  /** Nível hierárquico mínimo exigido */
+  minRole?: McpRole;
+  /** Se representa uma ação de escrita ou alteração de configurações críticas */
+  isWriteAction?: boolean;
+  /** Se exige acesso irrestrito à Matriz/Visão Global */
+  requiresMatriz?: boolean;
+}
+
 export interface McpContext {
   keyId: string;
   companyId: string;
@@ -9,6 +22,13 @@ export interface McpContext {
   unitName?: string | null;
   keyName: string;
   permissions: string[];
+  userId?: string | null;
+  userName?: string | null;
+  userEmail?: string | null;
+  userRole?: McpRole | null;
+  allowedMenus?: string[] | null;
+  hasMatrizAccess?: boolean;
+  userUnitIds?: string[];
 }
 
 export interface McpToolInputSchema {
@@ -29,6 +49,7 @@ export interface McpToolInputSchema {
 export interface McpToolDefinition {
   name: string;
   description: string;
+  security?: McpToolSecurity;
   inputSchema: McpToolInputSchema;
   handler: (args: any, context: McpContext) => Promise<any>;
 }

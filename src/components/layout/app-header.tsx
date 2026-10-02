@@ -1,12 +1,13 @@
 import { useEffect } from "react";
 import { useRouterState, Link, useNavigate } from "@tanstack/react-router";
-import { Bell, Menu, CheckSquare, Clock, Info, MessageSquare } from "lucide-react";
+import { Bell, Menu, CheckSquare, Clock, Info, MessageSquare, Sparkles } from "lucide-react";
 import { ChannelIcon } from "@/components/common/channel-icon";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
+import { useCopilot } from "@/hooks/use-copilot";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -42,6 +43,7 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
 
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
+  const { toggleOpen } = useCopilot();
 
   const { data: tasks } = useQuery({
     queryKey: ["pending-tasks-notifications", activeCompanyId, profile?.id],
@@ -142,6 +144,19 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
         <h1 className="text-base font-semibold">{title}</h1>
       </div>
       <div className="flex items-center gap-2 md:gap-3">
+        {/* Botão Copilot IA */}
+        <button
+          onClick={toggleOpen}
+          title="Atendi Copilot IA (Ctrl + J)"
+          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium bg-gradient-to-r from-primary/10 via-primary/15 to-emerald-500/10 text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/20 transition-all shadow-sm group"
+        >
+          <Sparkles className="h-3.5 w-3.5 text-primary group-hover:scale-110 transition-transform" />
+          <span className="hidden sm:inline font-semibold">Copilot</span>
+          <span className="hidden md:inline text-[10px] bg-primary/10 px-1 py-0.5 rounded text-muted-foreground font-mono">
+            Ctrl+J
+          </span>
+        </button>
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="relative rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground outline-none">

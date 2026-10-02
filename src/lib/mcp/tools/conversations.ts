@@ -444,8 +444,7 @@ export const conversationsTools: McpToolDefinition[] = [
         },
         legenda: {
           type: "string",
-          description:
-            "Texto de legenda/comentário que acompanhará a mídia enviada ao cliente.",
+          description: "Texto de legenda/comentário que acompanhará a mídia enviada ao cliente.",
         },
       },
       required: ["conversa_id", "tipo_midia"],
@@ -817,6 +816,10 @@ export const conversationsTools: McpToolDefinition[] = [
     name: "consultar_sla_atendimento",
     description:
       "Consulta a política e parâmetros de SLA de atendimento configurados na empresa (tempo limite de primeira resposta, tempo de resposta contínua, limite de resolução e horários comerciais).",
+    security: {
+      requiredMenu: "reports",
+      minRole: "manager",
+    },
     inputSchema: {
       type: "object",
       properties: {},

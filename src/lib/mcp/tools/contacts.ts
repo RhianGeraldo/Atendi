@@ -396,7 +396,7 @@ export const contactsTools: McpToolDefinition[] = [
 
       return {
         sucesso: true,
-        nota,
+        nota: note,
       };
     },
   },
@@ -502,7 +502,10 @@ export const contactsTools: McpToolDefinition[] = [
       if (acao === "adicionar") {
         const { error } = await supabaseAdmin
           .from("contact_labels")
-          .upsert({ contact_id, label_id: targetLabelId }, { onConflict: "contact_id, label_id" });
+          .upsert(
+            { contact_id: contato_id, label_id: targetLabelId },
+            { onConflict: "contact_id, label_id" },
+          );
 
         if (error) throw new Error(`Erro ao vincular etiqueta: ${error.message}`);
         return {
@@ -515,7 +518,7 @@ export const contactsTools: McpToolDefinition[] = [
         const { error } = await supabaseAdmin
           .from("contact_labels")
           .delete()
-          .eq("contact_id", contact_id)
+          .eq("contact_id", contato_id)
           .eq("label_id", targetLabelId);
 
         if (error) throw new Error(`Erro ao desvincular etiqueta: ${error.message}`);
@@ -534,6 +537,11 @@ export const contactsTools: McpToolDefinition[] = [
     name: "bloquear_contato",
     description:
       "Bloqueia um contato/lead no Atendi informando o motivo de bloqueio (ex: spam, fraude, agressividade).",
+    security: {
+      requiredMenu: "contacts",
+      minRole: "manager",
+      isWriteAction: true,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -586,6 +594,11 @@ export const contactsTools: McpToolDefinition[] = [
   {
     name: "desbloquear_contato",
     description: "Remove o bloqueio de um contato no Atendi, permitindo novas conversas.",
+    security: {
+      requiredMenu: "contacts",
+      minRole: "manager",
+      isWriteAction: true,
+    },
     inputSchema: {
       type: "object",
       properties: {
@@ -660,7 +673,12 @@ export const contactsTools: McpToolDefinition[] = [
   {
     name: "gerenciar_origens_contato",
     description:
-      "Cadastra uma nova origem/canal de captação de leads na empresa ou remove uma origem existente.",
+      "Cadastra uma nova origem/canal de captação de leads na empresa ou remove uma origem existente. Exclusivo para administradores.",
+    security: {
+      requiredMenu: "settings",
+      minRole: "admin_company",
+      isWriteAction: true,
+    },
     inputSchema: {
       type: "object",
       properties: {

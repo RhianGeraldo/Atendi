@@ -70,7 +70,12 @@ export const playbookTools: McpToolDefinition[] = [
   {
     name: "salvar_procedimento",
     description:
-      "Cadastra ou atualiza um procedimento, FAQ, regra de preço ou script comercial no Playbook Oficial da empresa.",
+      "Cadastra ou atualiza um procedimento, FAQ, regra de preço ou script comercial no Playbook Oficial da empresa. Exclusivo para administradores.",
+    security: {
+      requiredMenu: "training",
+      minRole: "admin_company",
+      isWriteAction: true,
+    },
     inputSchema: {
       type: "object",
       properties: {
