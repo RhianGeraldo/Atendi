@@ -64,23 +64,26 @@ function ContactsPage() {
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
+      const isFilteredUnit = !!selectedUnitId && selectedUnitId !== "all";
+      const convRel = isFilteredUnit ? "conversations!inner(unit_id)" : "conversations(unit_id)";
+
       let qTotal = supabase
         .from("contacts")
-        .select("id", { count: "exact", head: true })
+        .select(`id, ${convRel}`, { count: "exact", head: true })
         .eq("company_id", activeCompanyId!)
         .eq("is_blocked", false)
         .is("merged_into_id", null);
 
       let qAds = supabase
         .from("contacts")
-        .select("id, ad_leads!inner(id)", { count: "exact", head: true })
+        .select(`id, ${convRel}, ad_leads!inner(id)`, { count: "exact", head: true })
         .eq("company_id", activeCompanyId!)
         .eq("is_blocked", false)
         .is("merged_into_id", null);
 
       let qNewThisMonth = supabase
         .from("contacts")
-        .select("id", { count: "exact", head: true })
+        .select(`id, ${convRel}`, { count: "exact", head: true })
         .eq("company_id", activeCompanyId!)
         .eq("is_blocked", false)
         .is("merged_into_id", null)
@@ -88,10 +91,17 @@ function ContactsPage() {
 
       let qBlocked = supabase
         .from("contacts")
-        .select("id", { count: "exact", head: true })
+        .select(`id, ${convRel}`, { count: "exact", head: true })
         .eq("company_id", activeCompanyId!)
         .eq("is_blocked", true)
         .is("merged_into_id", null);
+
+      if (isFilteredUnit) {
+        qTotal = qTotal.eq("conversations.unit_id", selectedUnitId);
+        qAds = qAds.eq("conversations.unit_id", selectedUnitId);
+        qNewThisMonth = qNewThisMonth.eq("conversations.unit_id", selectedUnitId);
+        qBlocked = qBlocked.eq("conversations.unit_id", selectedUnitId);
+      }
 
       if (dateRange?.from) {
         qTotal = qTotal.gte("created_at", dateRange.from.toISOString());
@@ -129,7 +139,8 @@ function ContactsPage() {
     queryKey: ["contacts", activeCompanyId, searchTerm, channelFilter, selectedUnitId, dateRange, activeTab, page],
     enabled: !!activeCompanyId,
     queryFn: async () => {
-      const relation = selectedUnitId ? 'conversations!inner' : 'conversations';
+      const isFilteredUnit = !!selectedUnitId && selectedUnitId !== "all";
+      const relation = isFilteredUnit ? 'conversations!inner' : 'conversations';
       const adRelation = activeTab === 'ads' ? 'ad_leads!inner' : 'ad_leads';
       
       let query = supabase
@@ -166,7 +177,7 @@ function ContactsPage() {
         query = query.eq("is_blocked", false);
       }
 
-      if (selectedUnitId) {
+      if (isFilteredUnit) {
         query = query.eq("conversations.unit_id", selectedUnitId);
       }
 
