@@ -14,9 +14,14 @@ import { formatRelative, initials } from "@/lib/format";
 import { useUnit } from "@/lib/unit-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { ChannelIcon } from "@/components/common/channel-icon";
+import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
-  component: DashboardPage,
+  component: () => (
+    <ProtectedMenuRoute menuKey="dashboard">
+      <DashboardPage />
+    </ProtectedMenuRoute>
+  ),
 });
 
 interface Metrics {

@@ -52,9 +52,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 
 export const Route = createFileRoute("/_authenticated/tasks")({
-  component: TasksPage,
+  component: () => (
+    <ProtectedMenuRoute menuKey="tasks">
+      <TasksPage />
+    </ProtectedMenuRoute>
+  ),
 });
 
 function TasksPage() {

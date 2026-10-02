@@ -108,21 +108,30 @@ import { AutomationsTab } from "@/components/settings/automations-tab";
 import { MetaCapiSettingsTab } from "@/components/settings/meta-capi-settings";
 import { SlaSettingsTab } from "@/components/settings/sla-settings";
 import { ContactSourcesTab } from "@/components/settings/contact-sources-tab";
+import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 
 export const Route = createFileRoute("/_authenticated/settings")({
-  component: SettingsPage,
   validateSearch: (search: Record<string, unknown>) => {
     return {
       tab: search.tab as string | undefined,
       subtab: search.subtab as string | undefined,
     };
   },
+  component: () => (
+    <ProtectedMenuRoute menuKey="settings">
+      <SettingsPage />
+    </ProtectedMenuRoute>
+  ),
 });
 
 function SettingsPage() {
   const { profile, user, refreshProfile } = useAuth();
   const { selectedUnitId } = useUnit();
   const { activeCompanyId } = useActiveCompany();
+  const isSuperAdmin = profile?.role === "super_admin";
+  const isCompanyAdmin = profile?.role === "admin_company" || isSuperAdmin;
+  const isManager = profile?.role === "manager";
+  const canManageTeam = isCompanyAdmin || isManager;
   const qc = useQueryClient();
   const [host, setHost] = useState("");
   const [stevoHost, setStevoHost] = useState("");
@@ -2170,27 +2179,33 @@ function SettingsPage() {
                 <User className="mr-2 h-4 w-4" />
                 Minha Conta
               </TabsTrigger>
-              <TabsTrigger
-                value="users"
-                className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
-              >
-                <Users className="mr-2 h-4 w-4" />
-                Membros
-              </TabsTrigger>
-              <TabsTrigger
-                value="departments"
-                className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
-              >
-                <Building2 className="mr-2 h-4 w-4" />
-                Departamentos
-              </TabsTrigger>
-              <TabsTrigger
-                value="roles"
-                className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
-              >
-                <Shield className="mr-2 h-4 w-4" />
-                Cargos & Permissões
-              </TabsTrigger>
+              {canManageTeam && (
+                <TabsTrigger
+                  value="users"
+                  className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
+                >
+                  <Users className="mr-2 h-4 w-4" />
+                  Membros
+                </TabsTrigger>
+              )}
+              {canManageTeam && (
+                <TabsTrigger
+                  value="departments"
+                  className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
+                >
+                  <Building2 className="mr-2 h-4 w-4" />
+                  Departamentos
+                </TabsTrigger>
+              )}
+              {isCompanyAdmin && (
+                <TabsTrigger
+                  value="roles"
+                  className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
+                >
+                  <Shield className="mr-2 h-4 w-4" />
+                  Cargos & Permissões
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <div className="flex-1 w-full min-w-0">
@@ -2277,17 +2292,23 @@ function SettingsPage() {
                 </Card>
               </TabsContent>
 
-              <TabsContent value="users" className="mt-0 border-none p-0">
-                <UsersTab />
-              </TabsContent>
+              {canManageTeam && (
+                <TabsContent value="users" className="mt-0 border-none p-0">
+                  <UsersTab />
+                </TabsContent>
+              )}
 
-              <TabsContent value="departments" className="mt-0 border-none p-0">
-                <DepartmentsTab />
-              </TabsContent>
+              {canManageTeam && (
+                <TabsContent value="departments" className="mt-0 border-none p-0">
+                  <DepartmentsTab />
+                </TabsContent>
+              )}
 
-              <TabsContent value="roles" className="mt-0 border-none p-0">
-                <RolesTab />
-              </TabsContent>
+              {isCompanyAdmin && (
+                <TabsContent value="roles" className="mt-0 border-none p-0">
+                  <RolesTab />
+                </TabsContent>
+              )}
             </div>
           </Tabs>
         </TabsContent>

@@ -44,9 +44,14 @@ import {
 import { transcribeCallAction } from "@/lib/api/chat.functions";
 import { toast } from "sonner";
 import { useState, useMemo } from "react";
+import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 
 export const Route = createFileRoute("/_authenticated/calls")({
-  component: CallsPage,
+  component: () => (
+    <ProtectedMenuRoute menuKey="calls">
+      <CallsPage />
+    </ProtectedMenuRoute>
+  ),
 });
 
 type CallLog = {

@@ -43,17 +43,22 @@ import { ChatPanel } from "@/components/chat/chat-panel";
 import { EmptyChat } from "@/components/chat/empty-chat";
 import { useSlaSettings } from "@/lib/use-sla";
 import { calculateConversationSla } from "@/lib/sla";
+import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 
 export type { ConvRow, MessageRow, Status, TabType };
 
 export const Route = createFileRoute("/_authenticated/conversations")({
-  component: ConversationsPage,
   validateSearch: (search: Record<string, unknown>) => {
     return {
       c: search.c as string | undefined,
       tab: search.tab as "waiting" | "active" | "resolved" | "groups" | undefined,
     };
   },
+  component: () => (
+    <ProtectedMenuRoute menuKey="conversations">
+      <ConversationsPage />
+    </ProtectedMenuRoute>
+  ),
 });
 
 function ConversationsPage() {

@@ -78,9 +78,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 
 export const Route = createFileRoute("/_authenticated/units")({
-  component: UnitsPage,
+  component: () => (
+    <ProtectedMenuRoute menuKey="units">
+      <UnitsPage />
+    </ProtectedMenuRoute>
+  ),
 });
 
 function slugify(s: string) {

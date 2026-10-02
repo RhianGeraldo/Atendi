@@ -33,9 +33,14 @@ import {
 } from "@/components/ui/dialog";
 import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
+import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 
 export const Route = createFileRoute("/_authenticated/contacts")({
-  component: ContactsPage,
+  component: () => (
+    <ProtectedMenuRoute menuKey="contacts">
+      <ContactsPage />
+    </ProtectedMenuRoute>
+  ),
 });
 
 function ContactsPage() {

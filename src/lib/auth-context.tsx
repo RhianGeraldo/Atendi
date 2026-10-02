@@ -97,11 +97,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) {
         console.warn("[Auth] Erro ao carregar perfil:", error.message);
       }
-      if (data) setProfile(data as unknown as Profile);
+      if (data) {
+        setProfile(data as unknown as Profile);
+        // Atualiza status online no perfil
+        supabase.from("profiles").update({ online: true }).eq("id", userId).then();
+      }
     } catch (err: any) {
       console.warn("[Auth] Exceção ao carregar perfil:", err?.message);
     }
   }
+
+  // Listener para marcar offline ao descarregar a janela/aba
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    const currentUserId = session.user.id;
+    const handleUnload = () => {
+      supabase.from("profiles").update({ online: false }).eq("id", currentUserId).then();
+    };
+    window.addEventListener("beforeunload", handleUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleUnload);
+    };
+  }, [session?.user?.id]);
 
   const value: AuthContextValue = {
     user: session?.user ?? null,
@@ -142,12 +159,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     async signOut() {
       try {
+        if (session?.user?.id) {
+          await supabase.from("profiles").update({ online: false }).eq("id", session.user.id);
+        }
         if (typeof window !== "undefined") {
           localStorage.removeItem("ATENDI_QUERY_CACHE");
           sessionStorage.removeItem("ATENDI_QUERY_CACHE");
         }
       } catch (e) {
-        console.warn("[Auth] Failed to clear query cache on sign out:", e);
+        console.warn("[Auth] Failed to clear query cache or update status on sign out:", e);
       }
       await supabase.auth.signOut();
     },

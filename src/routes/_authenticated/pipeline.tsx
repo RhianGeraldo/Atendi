@@ -24,6 +24,7 @@ import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { useNavigate } from "@tanstack/react-router";
 import { initials } from "@/lib/format";
+import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
   validateSearch: (search: Record<string, unknown>) => {
@@ -33,7 +34,11 @@ export const Route = createFileRoute("/_authenticated/pipeline")({
       status: search.status as string | undefined,
     };
   },
-  component: PipelinePage,
+  component: () => (
+    <ProtectedMenuRoute menuKey="pipeline">
+      <PipelinePage />
+    </ProtectedMenuRoute>
+  ),
 });
 
 function PipelinePage() {
