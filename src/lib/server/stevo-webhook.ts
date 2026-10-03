@@ -1171,10 +1171,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
             if (!isFromMe) {
               racedUpdate.ai_followup_count = 0;
             }
-            await supabaseAdmin
-              .from("conversations")
-              .update(racedUpdate)
-              .eq("id", conversationId);
+            await supabaseAdmin.from("conversations").update(racedUpdate).eq("id", conversationId);
           } else {
             throw convErr;
           }
@@ -1264,8 +1261,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
           quotedInternalId = quotedMsg.id;
           if (!quotedContent || quotedContent === "Anexo") {
             quotedContent =
-              quotedMsg.content ||
-              (quotedMsg.media_type ? `[${quotedMsg.media_type}]` : "Anexo");
+              quotedMsg.content || (quotedMsg.media_type ? `[${quotedMsg.media_type}]` : "Anexo");
           }
         }
       }
@@ -1286,6 +1282,62 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         participantJid = messageData.key.participant;
       } else if (!isFromMe) {
         participantJid = remoteJid;
+      }
+
+      // Prevenção de duplicidade: se a mensagem foi enviada pelo próprio número (isFromMe),
+      // verifica se ela já foi inserida no banco pelo envio do chat (sendMessageAction)
+      if (isFromMe) {
+        if (remoteMsgId) {
+          const { data: existingMsg } = await supabaseAdmin
+            .from("messages")
+            .select("id")
+            .eq("conversation_id", conversationId)
+            .eq("remote_msg_id", remoteMsgId)
+            .maybeSingle();
+
+          if (existingMsg) {
+            console.log(
+              `[stevo-webhook] Mensagem ${remoteMsgId} já gravada no banco. Ignorando duplicata.`,
+            );
+            return;
+          }
+        }
+
+        const thirtySecondsAgo = new Date(Date.now() - 30 * 1000).toISOString();
+        const { data: recentSentMsgs } = await supabaseAdmin
+          .from("messages")
+          .select("id, remote_msg_id, content, media_url")
+          .eq("conversation_id", conversationId)
+          .eq("sender_type", "agent")
+          .gte("created_at", thirtySecondsAgo)
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        const matchedMsg = recentSentMsgs?.find((m) => {
+          if (remoteMsgId && m.remote_msg_id === remoteMsgId) return true;
+          if (!m.remote_msg_id) {
+            if (textContent && m.content && m.content.trim() === textContent.trim()) return true;
+            if (mediaUrl && m.media_url && m.media_url === mediaUrl) return true;
+          }
+          return false;
+        });
+
+        if (matchedMsg) {
+          console.log(
+            `[stevo-webhook] Eco de mensagem enviada detectado (ID local: ${matchedMsg.id}). Vinculando remote_msg_id ${remoteMsgId} sem duplicar.`,
+          );
+          if (remoteMsgId && !matchedMsg.remote_msg_id) {
+            await supabaseAdmin
+              .from("messages")
+              .update({
+                remote_msg_id: remoteMsgId,
+                ...(participantJid ? { participant_jid: participantJid } : {}),
+                ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+              })
+              .eq("id", matchedMsg.id);
+          }
+          return;
+        }
       }
 
       const insertPayload: any = {
@@ -1373,7 +1425,8 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
               .maybeSingle();
 
             if (!existingAdLead) {
-              const adTitle = metadata.externalAdReply.title || metadata.externalAdReply.body || null;
+              const adTitle =
+                metadata.externalAdReply.title || metadata.externalAdReply.body || null;
               await supabaseAdmin
                 .from("contacts")
                 .update({

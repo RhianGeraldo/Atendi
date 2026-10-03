@@ -268,13 +268,12 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     // 3. User signature
     const userProfile = profileRes.data;
     let textToSend = data.text || "";
-    const shouldSign = !data.isInternal && (userProfile?.use_signature !== false) && !!userProfile?.name;
+    const shouldSign =
+      !data.isInternal && userProfile?.use_signature !== false && !!userProfile?.name;
     if (shouldSign) {
       const signaturePrefix = `*${userProfile.name}*:`;
       if (!textToSend.startsWith(signaturePrefix)) {
-        textToSend = textToSend.trim()
-          ? `${signaturePrefix}\n${textToSend}`
-          : signaturePrefix;
+        textToSend = textToSend.trim() ? `${signaturePrefix}\n${textToSend}` : signaturePrefix;
       }
     }
 
@@ -296,8 +295,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         quotedSenderType = qMsg.sender_type;
       }
       if (!quotedContent) {
-        quotedContent =
-          qMsg.content || (qMsg.media_type ? `[${qMsg.media_type}]` : undefined);
+        quotedContent = qMsg.content || (qMsg.media_type ? `[${qMsg.media_type}]` : undefined);
       }
       if (!data.quotedInternalId) {
         data.quotedInternalId = qMsg.id;
@@ -309,7 +307,11 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     // - In 1-on-1 chats: participant is ALWAYS the contact's canonical WhatsApp JID (phoneToSend, e.g. 554491529987@s.whatsapp.net)
     // - In group chats: participant is the specific member's JID (qMsg.participant_jid)
     if (quotedSenderType === "contact") {
-      if (qMsg?.participant_jid && qMsg.participant_jid.includes("@") && !qMsg.participant_jid.includes("@s.whatsapp.net")) {
+      if (
+        qMsg?.participant_jid &&
+        qMsg.participant_jid.includes("@") &&
+        !qMsg.participant_jid.includes("@s.whatsapp.net")
+      ) {
         finalParticipant = qMsg.participant_jid.replace(/:\d+@/, "@");
       } else {
         finalParticipant = phoneToSend.includes("@")
@@ -755,13 +757,11 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       userProfile?.role === "manager";
 
     let textToSend = data.text;
-    const shouldSign = (userProfile?.use_signature !== false) && !!userProfile?.name;
+    const shouldSign = userProfile?.use_signature !== false && !!userProfile?.name;
     if (textToSend && shouldSign) {
       const signaturePrefix = `*${userProfile.name}*:`;
       if (!textToSend.startsWith(signaturePrefix)) {
-        textToSend = textToSend.trim()
-          ? `${signaturePrefix}\n${textToSend}`
-          : signaturePrefix;
+        textToSend = textToSend.trim() ? `${signaturePrefix}\n${textToSend}` : signaturePrefix;
       }
     }
 
@@ -1175,7 +1175,6 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
         return { success: false };
       }
     }
-
   });
 
 export const reactToMessageAction = createServerFn({ method: "POST" })
@@ -1302,7 +1301,10 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
 
         const res = await fetch(endpoint, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${canal.contaToken}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${canal.contaToken}`,
+          },
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
@@ -1326,8 +1328,9 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
         });
 
         const fromMe = msg.sender_type !== "contact";
-        const isGroup = conv.channel === "whatsapp_group" || (conv.remote_id && conv.remote_id.includes("@g.us"));
-        const participant = isGroup ? (msg.participant_jid || undefined) : undefined;
+        const isGroup =
+          conv.channel === "whatsapp_group" || (conv.remote_id && conv.remote_id.includes("@g.us"));
+        const participant = isGroup ? msg.participant_jid || undefined : undefined;
         // In WhatsApp protocol, clearing a reaction is sending a space " "
         const reactionText = data.emoji.trim() ? data.emoji.trim() : " ";
 
@@ -1827,7 +1830,8 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
       (instance?.provider === "stevo"
         ? instance?.companies?.stevo_host
         : instance?.companies?.evogo_host);
-    const token = instance?.provider === "stevo" ? instance?.stevo_api_key : instance?.evogo_api_key;
+    const token =
+      instance?.provider === "stevo" ? instance?.stevo_api_key : instance?.evogo_api_key;
     const instanceName = instance?.instance_name;
 
     if (!host || !token || !instanceName) {
@@ -1971,44 +1975,57 @@ export const editMessageAction = createServerFn({ method: "POST" })
     // 1. Get conversation and message
     const { data: conv } = await supabaseAdmin
       .from("conversations")
-      .select("id, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid)")
+      .select(
+        "id, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, assigned_agent_id, contacts(phone, whatsapp_lid)",
+      )
       .eq("id", data.conversationId)
       .single();
 
     if (!conv) throw new Error("Conversa não encontrada.");
 
+    // 1. Get message
     const { data: msg } = await supabaseAdmin
       .from("messages")
-      .select("id, remote_msg_id, sender_type, sender_id, media_type, metadata, is_internal, content")
+      .select(
+        "id, remote_msg_id, sender_type, sender_id, media_type, metadata, is_internal, content, conversation_id",
+      )
       .eq("id", data.messageId)
       .single();
 
     if (!msg) throw new Error("Mensagem não encontrada.");
-    if (msg.sender_type !== "agent") throw new Error("Você só pode editar mensagens enviadas por um atendente.");
+    if (msg.sender_type !== "agent")
+      throw new Error("Você só pode editar mensagens enviadas por um atendente.");
     if (msg.media_type && msg.media_type !== "text")
       throw new Error("Apenas mensagens de texto podem ser editadas.");
 
-    // Check user permission (author or admin/manager)
+    // Check user permission (author, admin/manager, or assigned agent for webhook messages)
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("role, name, use_signature")
       .eq("id", userId)
       .single();
 
-    const isAdminOrManager = ["admin_company", "super_admin", "manager"].includes(profile?.role || "");
-    if (msg.sender_id !== userId && !isAdminOrManager) {
+    const isAdminOrManager = ["admin_company", "super_admin", "manager"].includes(
+      profile?.role || "",
+    );
+    const isAssignedAgent = Boolean(conv?.assigned_agent_id && conv.assigned_agent_id === userId);
+
+    const canEdit =
+      isAdminOrManager ||
+      msg.sender_id === userId ||
+      (isAssignedAgent && (msg.sender_id === null || !msg.sender_id));
+
+    if (!canEdit) {
       throw new Error("Você não tem permissão para editar esta mensagem.");
     }
 
     // 2. Format content with signature if enabled
     let textToSend = data.newContent;
-    const shouldSign = !msg.is_internal && (profile?.use_signature !== false) && !!profile?.name;
+    const shouldSign = !msg.is_internal && profile?.use_signature !== false && !!profile?.name;
     if (shouldSign) {
       const signaturePrefix = `*${profile.name}*:`;
       if (!textToSend.startsWith(signaturePrefix)) {
-        textToSend = textToSend.trim()
-          ? `${signaturePrefix}\n${textToSend}`
-          : signaturePrefix;
+        textToSend = textToSend.trim() ? `${signaturePrefix}\n${textToSend}` : signaturePrefix;
       }
     }
 
@@ -2125,15 +2142,29 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
       throw new Error("Mensagem não encontrada.");
     }
 
-    // Check permissions: sender or admin/manager
+    const conv = msg.conversations as any;
+    if (!conv) {
+      throw new Error("Conversa associada não encontrada.");
+    }
+
+    // Check permissions: sender, admin/manager, or assigned agent
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("role")
       .eq("id", userId)
       .single();
 
-    const isAdminOrManager = ["admin_company", "super_admin", "manager"].includes(profile?.role || "");
-    if (msg.sender_id !== userId && !isAdminOrManager) {
+    const isAdminOrManager = ["admin_company", "super_admin", "manager"].includes(
+      profile?.role || "",
+    );
+    const isAssignedAgent = Boolean(conv?.assigned_agent_id && conv.assigned_agent_id === userId);
+
+    const canDelete =
+      isAdminOrManager ||
+      msg.sender_id === userId ||
+      (isAssignedAgent && (msg.sender_id === null || !msg.sender_id));
+
+    if (!canDelete) {
       throw new Error("Você não tem permissão para apagar esta mensagem.");
     }
 
@@ -2151,11 +2182,6 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
         throw new Error("Falha ao apagar nota.");
       }
       return { success: true };
-    }
-
-    const conv = msg.conversations;
-    if (!conv) {
-      throw new Error("Conversa associada não encontrada.");
     }
 
     // 3. Resolve Canal and Credentials

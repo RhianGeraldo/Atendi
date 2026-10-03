@@ -100,6 +100,19 @@ function ConversationsPage() {
   const { slaSettings } = useSlaSettings();
   const [slaFilter, setSlaFilter] = useState<"all" | "breached" | "warning" | "ok">("all");
 
+  const { data: myUnits } = useQuery({
+    queryKey: ["my_units_filter", profile?.id],
+    queryFn: async () => {
+      if (!profile?.id) return [];
+      const { data } = await supabase
+        .from("user_units")
+        .select("unit_id")
+        .eq("user_id", profile.id);
+      return data?.map((u: any) => u.unit_id) || [];
+    },
+    enabled: !!profile?.id && !isAdmin,
+  });
+
   const { data: instances } = useQuery({
     queryKey: [
       "whatsapp_instances_filter",
@@ -108,6 +121,7 @@ function ConversationsPage() {
       profile?.id,
       profile?.role,
       profile?.department_id,
+      myUnits?.join(","),
     ],
     queryFn: async () => {
       if (!activeCompanyId) return [];
@@ -120,10 +134,16 @@ function ConversationsPage() {
 
       if (selectedUnitId && selectedUnitId !== "all") {
         query = query.eq("unit_id", selectedUnitId);
+      } else if (!isAdmin && !profile?.has_matriz_access) {
+        const allowedUnitIds = myUnits || [];
+        if (allowedUnitIds.length > 0) {
+          query = query.in("unit_id", allowedUnitIds);
+        } else {
+          query = query.eq("unit_id", "00000000-0000-0000-0000-000000000000");
+        }
       }
 
       // Se não for super admin nem admin da empresa, restringe ao departamento do atendente ou gerais
-      const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
       if (!isAdmin) {
         if (profile?.department_id) {
           query = query.or(`department_id.eq.${profile.department_id},department_id.is.null`);
@@ -205,6 +225,7 @@ function ConversationsPage() {
       departmentFilter,
       agentFilter,
       instances?.map((i: any) => i.id).join(","),
+      myUnits?.join(","),
     ],
     initialPageParam: 0,
     queryFn: async ({ pageParam = 0 }) => {
@@ -227,9 +248,14 @@ function ConversationsPage() {
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
+      } else if (!isAdmin && !profile?.has_matriz_access) {
+        const allowedUnitIds = myUnits || [];
+        if (allowedUnitIds.length > 0) {
+          query = query.in("unit_id", allowedUnitIds);
+        } else {
+          query = query.eq("unit_id", "00000000-0000-0000-0000-000000000000");
+        }
       }
-
-      const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
 
       if (instanceFilter && instanceFilter !== "all") {
         query = query.eq("whatsapp_instance_id", instanceFilter);
@@ -265,11 +291,7 @@ function ConversationsPage() {
       // Server-side status filter for non-group tabs
       if (tab === "waiting") {
         query = query.eq("status", "waiting");
-        if (
-          profile?.role !== "admin_company" &&
-          profile?.role !== "super_admin" &&
-          profile?.role !== "manager"
-        ) {
+        if (profile?.role !== "admin_company" && profile?.role !== "super_admin") {
           if (profile?.department_id) {
             query = query.or(
               `assigned_agent_id.eq.${profile.id},and(assigned_agent_id.is.null,or(department_id.eq.${profile.department_id},department_id.is.null))`,
@@ -501,6 +523,7 @@ function ConversationsPage() {
       departmentFilter,
       agentFilter,
       instances?.map((i: any) => i.id).join(","),
+      myUnits?.join(","),
     ],
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
@@ -521,9 +544,14 @@ function ConversationsPage() {
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
+      } else if (!isAdmin && !profile?.has_matriz_access) {
+        const allowedUnitIds = myUnits || [];
+        if (allowedUnitIds.length > 0) {
+          query = query.in("unit_id", allowedUnitIds);
+        } else {
+          query = query.eq("unit_id", "00000000-0000-0000-0000-000000000000");
+        }
       }
-
-      const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
 
       if (instanceFilter && instanceFilter !== "all") {
         query = query.eq("whatsapp_instance_id", instanceFilter);
@@ -833,7 +861,7 @@ function ConversationsPage() {
             if (status === "waiting") {
               if (!isGeneral && !isMyDept && !isAssignedToMe) return null;
             } else if (status === "active") {
-              if (!isAssignedToMe && (!isGeneral && !isMyDept)) return null;
+              if (!isAssignedToMe && !isGeneral && !isMyDept) return null;
             } else if (status === "resolved") {
               if (!isAssignedToMe) return null;
             }
