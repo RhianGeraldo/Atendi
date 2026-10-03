@@ -8,6 +8,8 @@ export interface SlaSettings {
   resolution_limit_hours: number;
   warning_threshold_percent: number; // ex: 75 para 75%
   count_business_hours_only: boolean;
+  auto_rotate_active_breached?: boolean;
+  auto_rotate_active_timeout_minutes?: number;
 }
 
 export const DEFAULT_SLA_SETTINGS: SlaSettings = {
@@ -17,6 +19,8 @@ export const DEFAULT_SLA_SETTINGS: SlaSettings = {
   resolution_limit_hours: 4,
   warning_threshold_percent: 75,
   count_business_hours_only: false,
+  auto_rotate_active_breached: false,
+  auto_rotate_active_timeout_minutes: 8,
 };
 
 export type SlaStatus = "ok" | "warning" | "breached" | "none";
@@ -59,10 +63,14 @@ export function formatMinutesFriendly(minutes: number): string {
 export function calculateConversationSla(
   conv: ConvRow,
   settings: SlaSettings = DEFAULT_SLA_SETTINGS,
-  overrideLastMessage?: { sender_type: string; created_at: string; is_internal?: boolean } | null
+  overrideLastMessage?: { sender_type: string; created_at: string; is_internal?: boolean } | null,
 ): ConversationSlaInfo {
   // Ignora se SLA desabilitado, se resolvido ou se for grupo do WhatsApp
-  const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith("120363") || (conv.contact.phone.includes("-") && conv.contact.phone.length > 18)));
+  const isGroup = !!(
+    conv.contact?.phone &&
+    (conv.contact.phone.startsWith("120363") ||
+      (conv.contact.phone.includes("-") && conv.contact.phone.length > 18))
+  );
 
   if (!settings.enabled || conv.status === "resolved" || isGroup) {
     return {
@@ -81,9 +89,10 @@ export function calculateConversationSla(
   }
 
   // Identifica a última mensagem externa (não interna)
-  const lastMsg = (overrideLastMessage !== undefined && overrideLastMessage !== null)
-    ? overrideLastMessage
-    : (conv.last_message?.find((m) => !m.is_internal) || conv.last_message?.[0]);
+  const lastMsg =
+    overrideLastMessage !== undefined && overrideLastMessage !== null
+      ? overrideLastMessage
+      : conv.last_message?.find((m) => !m.is_internal) || conv.last_message?.[0];
 
   // Se a última mensagem foi enviada pelo atendente/agente/sistema:
   // O cliente NUNCA está aguardando resposta (tanto na fila quanto em andamento)!
@@ -174,7 +183,7 @@ export function calculateConversationSla(
     : settings.response_limit_minutes || 5;
 
   const warningThreshold = Math.floor(
-    (limitMinutes * (settings.warning_threshold_percent || 75)) / 100
+    (limitMinutes * (settings.warning_threshold_percent || 75)) / 100,
   );
 
   const remainingMinutes = Math.max(0, limitMinutes - elapsedMinutes);

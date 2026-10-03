@@ -1,24 +1,39 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { 
-  Clock, 
-  ShieldCheck, 
-  AlertTriangle, 
-  Save, 
-  Loader2, 
-  Timer, 
-  CalendarClock
+import {
+  Clock,
+  ShieldCheck,
+  AlertTriangle,
+  Save,
+  Loader2,
+  Timer,
+  CalendarClock,
+  RotateCw,
+  UserCheck,
 } from "lucide-react";
 
 import { useActiveCompany } from "@/lib/active-company-context";
 import { getSlaSettingsAction, saveSlaSettingsAction } from "@/lib/api/sla.functions";
 import { DEFAULT_SLA_SETTINGS, type SlaSettings } from "@/lib/sla";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  CardFooter,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 
 export function SlaSettingsTab() {
@@ -26,11 +41,25 @@ export function SlaSettingsTab() {
   const qc = useQueryClient();
 
   const [enabled, setEnabled] = useState(DEFAULT_SLA_SETTINGS.enabled);
-  const [firstResponseMins, setFirstResponseMins] = useState(DEFAULT_SLA_SETTINGS.first_response_limit_minutes);
+  const [firstResponseMins, setFirstResponseMins] = useState(
+    DEFAULT_SLA_SETTINGS.first_response_limit_minutes,
+  );
   const [responseMins, setResponseMins] = useState(DEFAULT_SLA_SETTINGS.response_limit_minutes);
-  const [resolutionHours, setResolutionHours] = useState(DEFAULT_SLA_SETTINGS.resolution_limit_hours);
-  const [warningThreshold, setWarningThreshold] = useState(DEFAULT_SLA_SETTINGS.warning_threshold_percent);
-  const [countBusinessHoursOnly, setCountBusinessHoursOnly] = useState(DEFAULT_SLA_SETTINGS.count_business_hours_only);
+  const [resolutionHours, setResolutionHours] = useState(
+    DEFAULT_SLA_SETTINGS.resolution_limit_hours,
+  );
+  const [warningThreshold, setWarningThreshold] = useState(
+    DEFAULT_SLA_SETTINGS.warning_threshold_percent,
+  );
+  const [countBusinessHoursOnly, setCountBusinessHoursOnly] = useState(
+    DEFAULT_SLA_SETTINGS.count_business_hours_only,
+  );
+  const [autoRotateActive, setAutoRotateActive] = useState(
+    DEFAULT_SLA_SETTINGS.auto_rotate_active_breached ?? false,
+  );
+  const [autoRotateTimeoutMins, setAutoRotateTimeoutMins] = useState(
+    DEFAULT_SLA_SETTINGS.auto_rotate_active_timeout_minutes ?? 8,
+  );
 
   // Carrega configurações de SLA
   const { data: config, isLoading } = useQuery({
@@ -51,6 +80,8 @@ export function SlaSettingsTab() {
       setResolutionHours(config.resolution_limit_hours);
       setWarningThreshold(config.warning_threshold_percent);
       setCountBusinessHoursOnly(config.count_business_hours_only);
+      setAutoRotateActive(config.auto_rotate_active_breached ?? false);
+      setAutoRotateTimeoutMins(config.auto_rotate_active_timeout_minutes ?? 8);
     }
   }, [config]);
 
@@ -66,6 +97,8 @@ export function SlaSettingsTab() {
         resolution_limit_hours: Number(resolutionHours),
         warning_threshold_percent: Number(warningThreshold),
         count_business_hours_only: Boolean(countBusinessHoursOnly),
+        auto_rotate_active_breached: Boolean(autoRotateActive),
+        auto_rotate_active_timeout_minutes: Number(autoRotateTimeoutMins),
       };
 
       await saveSlaSettingsAction({
@@ -80,9 +113,10 @@ export function SlaSettingsTab() {
       qc.invalidateQueries({ queryKey: ["sla-settings", activeCompanyId] });
       qc.invalidateQueries({ queryKey: ["company", activeCompanyId] });
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
+      const e = err as Error;
       toast.error("Erro ao salvar configurações de SLA", {
-        description: err.message || "Tente novamente mais tarde.",
+        description: e?.message || "Tente novamente mais tarde.",
       });
     },
   });
@@ -100,18 +134,15 @@ export function SlaSettingsTab() {
                 <CardTitle className="text-lg">SLA de Atendimento (Nível de Serviço)</CardTitle>
               </div>
               <CardDescription>
-                Configure metas de tempo de resposta para que sua equipe atenda os clientes com máxima agilidade e sem atrasos.
+                Configure metas de tempo de resposta para que sua equipe atenda os clientes com
+                máxima agilidade e sem atrasos.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <Label htmlFor="sla-enabled" className="text-sm font-medium cursor-pointer">
                 {enabled ? "Ativo" : "Inativo"}
               </Label>
-              <Switch
-                id="sla-enabled"
-                checked={enabled}
-                onCheckedChange={setEnabled}
-              />
+              <Switch id="sla-enabled" checked={enabled} onCheckedChange={setEnabled} />
             </div>
           </div>
         </CardHeader>
@@ -143,7 +174,8 @@ export function SlaSettingsTab() {
                       </Badge>
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Tempo máximo para um atendente assumir e enviar a primeira resposta após a entrada do cliente na fila.
+                      Tempo máximo para um atendente assumir e enviar a primeira resposta após a
+                      entrada do cliente na fila.
                     </p>
                     <Select
                       value={String(firstResponseMins)}
@@ -176,7 +208,8 @@ export function SlaSettingsTab() {
                       </Badge>
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Tempo máximo de espera do cliente por uma resposta enquanto o atendimento já está ativo com um atendente.
+                      Tempo máximo de espera do cliente por uma resposta enquanto o atendimento já
+                      está ativo com um atendente.
                     </p>
                     <Select
                       value={String(responseMins)}
@@ -208,7 +241,8 @@ export function SlaSettingsTab() {
                       </Badge>
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Meta limite para resolver e encerrar completamente a conversa/sessão de atendimento.
+                      Meta limite para resolver e encerrar completamente a conversa/sessão de
+                      atendimento.
                     </p>
                     <Select
                       value={String(resolutionHours)}
@@ -240,7 +274,8 @@ export function SlaSettingsTab() {
                       </Badge>
                     </div>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Quando a espera atingir esta porcentagem da meta, o status mudará para amarelo avisando que está prestes a vencer.
+                      Quando a espera atingir esta porcentagem da meta, o status mudará para amarelo
+                      avisando que está prestes a vencer.
                     </p>
                     <Select
                       value={String(warningThreshold)}
@@ -271,11 +306,15 @@ export function SlaSettingsTab() {
 
                 <div className="flex items-center justify-between p-4 rounded-xl border border-border/60 bg-card">
                   <div className="space-y-1">
-                    <Label htmlFor="business-hours-only" className="text-xs sm:text-sm font-medium cursor-pointer">
+                    <Label
+                      htmlFor="business-hours-only"
+                      className="text-xs sm:text-sm font-medium cursor-pointer"
+                    >
                       Pausar SLA fora do Horário Comercial
                     </Label>
                     <p className="text-xs text-muted-foreground">
-                      Quando ativado, o SLA não é contabilizado nos fins de semana e fora do expediente cadastrado na empresa.
+                      Quando ativado, o SLA não é contabilizado nos fins de semana e fora do
+                      expediente cadastrado na empresa.
                     </p>
                   </div>
                   <Switch
@@ -284,6 +323,95 @@ export function SlaSettingsTab() {
                     onCheckedChange={setCountBusinessHoursOnly}
                     disabled={!enabled}
                   />
+                </div>
+              </div>
+
+              {/* Roleta de Transbordo no Andamento */}
+              <div className="space-y-4 pt-2">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground pb-1 border-b border-border/40">
+                  <RotateCw className="h-4 w-4 text-primary" />
+                  <span>Roleta no Andamento (Transbordo Automático por SLA)</span>
+                </div>
+
+                <div className="p-4 rounded-xl border border-border/60 bg-card space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1 pr-4">
+                      <div className="flex items-center gap-2">
+                        <Label
+                          htmlFor="auto-rotate-active"
+                          className="text-xs sm:text-sm font-semibold cursor-pointer"
+                        >
+                          Rotacionar para Atendente Online em caso de demora
+                        </Label>
+                        <Badge
+                          variant={autoRotateActive ? "default" : "secondary"}
+                          className="text-[10px]"
+                        >
+                          {autoRotateActive ? "Ativo" : "Inativo"}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Se uma consultora demorar para responder a mensagem de um cliente em um
+                        atendimento já em andamento, o sistema rotacionará automaticamente a
+                        conversa via roleta (Round Robin) para outro usuário que esteja{" "}
+                        <strong>ONLINE</strong> no mesmo setor.
+                      </p>
+                    </div>
+                    <Switch
+                      id="auto-rotate-active"
+                      checked={autoRotateActive}
+                      onCheckedChange={setAutoRotateActive}
+                      disabled={!enabled}
+                    />
+                  </div>
+
+                  {autoRotateActive && (
+                    <div className="pt-3 border-t border-border/40 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold text-foreground">
+                          Tempo Limite para Rotacionar (Inatividade)
+                        </Label>
+                        <p className="text-[11px] text-muted-foreground">
+                          Tempo máximo que a consultora atual pode levar para responder o cliente
+                          antes da rotação automática.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Select
+                          value={String(autoRotateTimeoutMins)}
+                          onValueChange={(v) => setAutoRotateTimeoutMins(Number(v))}
+                          disabled={!enabled || !autoRotateActive}
+                        >
+                          <SelectTrigger className="bg-background">
+                            <SelectValue placeholder="Selecione o tempo" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="3">3 minutos (Ultra Rápido)</SelectItem>
+                            <SelectItem value="5">5 minutos</SelectItem>
+                            <SelectItem value="8">8 minutos (Recomendado)</SelectItem>
+                            <SelectItem value="10">10 minutos</SelectItem>
+                            <SelectItem value="15">15 minutos</SelectItem>
+                            <SelectItem value="20">20 minutos</SelectItem>
+                            <SelectItem value="30">30 minutos</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Badge variant="outline" className="text-[10px] font-mono shrink-0">
+                          {autoRotateTimeoutMins} min
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-start gap-2 p-2.5 rounded-lg bg-muted/40 text-[11px] text-muted-foreground">
+                    <UserCheck className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Garantia de presença:</strong> Apenas atendentes com status{" "}
+                      <strong>Online</strong> no sistema e do mesmo departamento/filial são
+                      elegíveis para receber o transbordo. A ação é registrada com transparência no
+                      histórico da conversa.
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -296,7 +424,8 @@ export function SlaSettingsTab() {
 
                 <div className="p-4 rounded-xl border border-border/50 bg-muted/10 space-y-3">
                   <p className="text-xs text-muted-foreground">
-                    Os atendentes visualizarão os seguintes indicadores coloridos na lista de conversas e no cabeçalho do chat:
+                    Os atendentes visualizarão os seguintes indicadores coloridos na lista de
+                    conversas e no cabeçalho do chat:
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -306,7 +435,9 @@ export function SlaSettingsTab() {
                         <div className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 rounded">
                           <Clock className="h-2.5 w-2.5" /> ⏱️ 3m
                         </div>
-                        <p className="text-[10px] text-muted-foreground mt-1">Dentro do prazo estabelecido</p>
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          Dentro do prazo estabelecido
+                        </p>
                       </div>
                     </div>
 
@@ -316,7 +447,9 @@ export function SlaSettingsTab() {
                         <div className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 rounded">
                           <Clock className="h-2.5 w-2.5" /> ⚠️ 8m
                         </div>
-                        <p className="text-[10px] text-muted-foreground mt-1">Atenção (prestes a vencer)</p>
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          Atenção (prestes a vencer)
+                        </p>
                       </div>
                     </div>
 
@@ -326,7 +459,9 @@ export function SlaSettingsTab() {
                         <div className="inline-flex items-center gap-1 text-[11px] font-bold text-destructive bg-destructive/15 border border-destructive/30 px-1.5 py-0.5 rounded animate-pulse">
                           <AlertTriangle className="h-2.5 w-2.5" /> 🚨 +5m
                         </div>
-                        <p className="text-[10px] text-muted-foreground mt-1">SLA Estourado (Prioridade máxima)</p>
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          SLA Estourado (Prioridade máxima)
+                        </p>
                       </div>
                     </div>
                   </div>

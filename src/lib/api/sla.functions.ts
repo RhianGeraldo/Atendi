@@ -36,7 +36,8 @@ export const getSlaSettingsAction = createServerFn({ method: "POST" })
     }
 
     return {
-      enabled: savedSla.enabled !== undefined ? Boolean(savedSla.enabled) : DEFAULT_SLA_SETTINGS.enabled,
+      enabled:
+        savedSla.enabled !== undefined ? Boolean(savedSla.enabled) : DEFAULT_SLA_SETTINGS.enabled,
       first_response_limit_minutes:
         typeof savedSla.first_response_limit_minutes === "number"
           ? savedSla.first_response_limit_minutes
@@ -57,6 +58,14 @@ export const getSlaSettingsAction = createServerFn({ method: "POST" })
         savedSla.count_business_hours_only !== undefined
           ? Boolean(savedSla.count_business_hours_only)
           : DEFAULT_SLA_SETTINGS.count_business_hours_only,
+      auto_rotate_active_breached:
+        savedSla.auto_rotate_active_breached !== undefined
+          ? Boolean(savedSla.auto_rotate_active_breached)
+          : (DEFAULT_SLA_SETTINGS.auto_rotate_active_breached ?? false),
+      auto_rotate_active_timeout_minutes:
+        typeof savedSla.auto_rotate_active_timeout_minutes === "number"
+          ? savedSla.auto_rotate_active_timeout_minutes
+          : (DEFAULT_SLA_SETTINGS.auto_rotate_active_timeout_minutes ?? 8),
     };
   });
 
@@ -75,6 +84,8 @@ export const saveSlaSettingsAction = createServerFn({ method: "POST" })
         resolution_limit_hours: z.number().min(1).max(720),
         warning_threshold_percent: z.number().min(10).max(95),
         count_business_hours_only: z.boolean().default(false),
+        auto_rotate_active_breached: z.boolean().default(false),
+        auto_rotate_active_timeout_minutes: z.number().min(1).max(1440).default(8),
       }),
     }),
   )
