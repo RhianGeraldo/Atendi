@@ -51,12 +51,57 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
       startDate: z.string().optional(), // YYYY-MM-DD
       endDate: z.string().optional(),   // YYYY-MM-DD
       userId: z.string().uuid().optional(),
+      unitId: z.string().uuid().optional(),
     }),
   )
   .handler(async ({ data }) => {
-    const { companyId, startDate, endDate, userId } = data;
+    const { companyId, startDate, endDate, userId, unitId } = data;
 
-    let query = supabaseAdmin
+    // 1. Busca todos os usuários ativos da empresa
+    let profilesQuery = supabaseAdmin
+      .from("profiles")
+      .select(`
+        id,
+        name,
+        email,
+        avatar_url,
+        role,
+        active,
+        online,
+        current_status,
+        last_seen_at,
+        has_matriz_access,
+        user_units(unit_id)
+      `)
+      .eq("company_id", companyId)
+      .eq("active", true)
+      .order("name", { ascending: true });
+
+    if (userId) {
+      profilesQuery = profilesQuery.eq("id", userId);
+    }
+
+    const { data: allProfiles, error: profErr } = await profilesQuery;
+    if (profErr) {
+      console.error("[getUserActivityReportAction] Erro ao buscar perfis:", profErr);
+      throw new Error("Falha ao carregar colaboradores");
+    }
+
+    // Filtra por unidade se fornecido
+    const filteredProfiles = (allProfiles || []).filter((p: any) => {
+      if (!unitId) return true;
+      if (p.has_matriz_access || p.role === "admin_company" || p.role === "super_admin") return true;
+      const userUnitIds = (p.user_units || []).map((u: any) => u.unit_id);
+      return userUnitIds.includes(unitId);
+    });
+
+    const targetUserIds = filteredProfiles.map((p: any) => p.id);
+    if (targetUserIds.length === 0) {
+      return [];
+    }
+
+    // 2. Busca registros diários acumulados no período para os colaboradores
+    let actQuery = supabaseAdmin
       .from("user_daily_activity")
       .select(`
         id,
@@ -68,37 +113,83 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
         total_idle_seconds,
         total_background_seconds,
         current_status,
-        last_heartbeat_at,
-        profiles!user_daily_activity_user_id_fkey(id, name, email, avatar_url, role)
+        last_heartbeat_at
       `)
       .eq("company_id", companyId)
-      .order("date", { ascending: false });
+      .in("user_id", targetUserIds);
 
     if (startDate) {
-      query = query.gte("date", startDate);
+      actQuery = actQuery.gte("date", startDate);
     }
     if (endDate) {
-      query = query.lte("date", endDate);
-    }
-    if (userId) {
-      query = query.eq("user_id", userId);
+      actQuery = actQuery.lte("date", endDate);
     }
 
-    const { data: records, error } = await query;
-
-    if (error) {
-      console.error("[getUserActivityReportAction] Erro:", error);
+    const { data: actRecords, error: actErr } = await actQuery;
+    if (actErr) {
+      console.error("[getUserActivityReportAction] Erro ao buscar atividades:", actErr);
       throw new Error("Falha ao carregar relatório de atividades");
     }
 
-    return (records || []).map((r: any) => {
-      const logged = r.total_logged_seconds || 0;
-      const active = r.total_active_seconds || 0;
-      const activeRatio = logged > 0 ? Math.round((active / logged) * 100) : 0;
+    // 3. Agrega as atividades do período por colaborador
+    const activityMap = new Map<string, {
+      total_logged_seconds: number;
+      total_active_seconds: number;
+      total_idle_seconds: number;
+      total_background_seconds: number;
+      current_status: string;
+      last_heartbeat_at: string | null;
+    }>();
+
+    (actRecords || []).forEach((r: any) => {
+      if (!activityMap.has(r.user_id)) {
+        activityMap.set(r.user_id, {
+          total_logged_seconds: 0,
+          total_active_seconds: 0,
+          total_idle_seconds: 0,
+          total_background_seconds: 0,
+          current_status: r.current_status || "offline",
+          last_heartbeat_at: r.last_heartbeat_at,
+        });
+      }
+      const item = activityMap.get(r.user_id)!;
+      item.total_logged_seconds += r.total_logged_seconds || 0;
+      item.total_active_seconds += r.total_active_seconds || 0;
+      item.total_idle_seconds += r.total_idle_seconds || 0;
+      item.total_background_seconds += r.total_background_seconds || 0;
+      if (new Date(r.last_heartbeat_at) > new Date(item.last_heartbeat_at || 0)) {
+        item.current_status = r.current_status;
+        item.last_heartbeat_at = r.last_heartbeat_at;
+      }
+    });
+
+    // 4. Retorna a lista COMPLETA de colaboradores
+    return filteredProfiles.map((p: any) => {
+      const act = activityMap.get(p.id);
+      const totalLogged = act?.total_logged_seconds || 0;
+      const totalActive = act?.total_active_seconds || 0;
+      const totalIdle = act?.total_idle_seconds || 0;
+      const totalBackground = act?.total_background_seconds || 0;
+      const activeRatio = totalLogged > 0 ? Math.round((totalActive / totalLogged) * 100) : 0;
+      const status = p.current_status || (p.online ? "active" : "offline");
 
       return {
-        ...r,
+        user_id: p.id,
+        company_id: companyId,
+        total_logged_seconds: totalLogged,
+        total_active_seconds: totalActive,
+        total_idle_seconds: totalIdle,
+        total_background_seconds: totalBackground,
+        current_status: status,
+        last_heartbeat_at: p.last_seen_at || act?.last_heartbeat_at || null,
         active_ratio: activeRatio,
+        profiles: {
+          id: p.id,
+          name: p.name,
+          email: p.email,
+          avatar_url: p.avatar_url,
+          role: p.role,
+        },
       };
     });
   });

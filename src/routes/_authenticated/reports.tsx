@@ -392,12 +392,13 @@ function ReportsPage() {
 
   // Query 5: User Activity Data (Jornada & Foco dos Atendentes)
   const { data: activityData, isLoading: loadingActivity } = useQuery({
-    queryKey: ["reports-user-activity", activeCompanyId, fromStr, toStr],
+    queryKey: ["reports-user-activity", activeCompanyId, selectedUnitId, fromStr, toStr],
     enabled: !!activeCompanyId,
     queryFn: async () => {
       return await getUserActivityReportAction({
         data: {
           companyId: activeCompanyId!,
+          unitId: selectedUnitId || undefined,
           startDate: fromDate ? format(fromDate, "yyyy-MM-dd") : undefined,
           endDate: toDate ? format(toDate, "yyyy-MM-dd") : undefined,
         },
@@ -405,65 +406,41 @@ function ReportsPage() {
     },
   });
 
-  // Agrupa a atividade por atendente no período selecionado
+  // Lista todos os colaboradores com suas métricas consolidadas
   const userActivitySummaries = useMemo(() => {
     if (!activityData) return [];
-    const map = new Map<string, {
-      userId: string;
-      name: string;
-      email: string;
-      avatarUrl?: string;
-      totalLogged: number;
-      totalActive: number;
-      totalIdle: number;
-      totalBackground: number;
-      currentStatus: string;
-      lastHeartbeatAt: string;
-    }>();
+    return (activityData as any[])
+      .map((row: any) => {
+        const profile = row.profiles || {};
+        const totalLogged = row.total_logged_seconds || 0;
+        const totalActive = row.total_active_seconds || 0;
+        const totalIdle = row.total_idle_seconds || 0;
+        const totalBackground = row.total_background_seconds || 0;
+        const focusRatio = totalLogged > 0 ? Math.round((totalActive / totalLogged) * 100) : 0;
 
-    activityData.forEach((row: any) => {
-      const uId = row.user_id;
-      const profile = row.profiles || {};
-      const name = profile.name || "Usuário";
-      const email = profile.email || "";
-      const avatarUrl = profile.avatar_url;
-
-      if (!map.has(uId)) {
-        map.set(uId, {
-          userId: uId,
-          name,
-          email,
-          avatarUrl,
-          totalLogged: 0,
-          totalActive: 0,
-          totalIdle: 0,
-          totalBackground: 0,
+        return {
+          userId: row.user_id,
+          name: profile.name || "Usuário",
+          email: profile.email || "",
+          avatarUrl: profile.avatar_url,
+          totalLogged,
+          totalActive,
+          totalIdle,
+          totalBackground,
           currentStatus: row.current_status || "offline",
           lastHeartbeatAt: row.last_heartbeat_at,
-        });
-      }
-
-      const item = map.get(uId)!;
-      item.totalLogged += row.total_logged_seconds || 0;
-      item.totalActive += row.total_active_seconds || 0;
-      item.totalIdle += row.total_idle_seconds || 0;
-      item.totalBackground += row.total_background_seconds || 0;
-
-      if (new Date(row.last_heartbeat_at) > new Date(item.lastHeartbeatAt || 0)) {
-        item.currentStatus = row.current_status;
-        item.lastHeartbeatAt = row.last_heartbeat_at;
-      }
-    });
-
-    return Array.from(map.values())
-      .map((u) => {
-        const focusRatio = u.totalLogged > 0 ? Math.round((u.totalActive / u.totalLogged) * 100) : 0;
-        return {
-          ...u,
           focusRatio,
         };
       })
-      .sort((a, b) => b.totalActive - a.totalActive);
+      .sort((a, b) => {
+        // Prioriza quem teve tempo ativo no período
+        if (b.totalActive !== a.totalActive) return b.totalActive - a.totalActive;
+        // Depois quem está ativo no momento
+        if (a.currentStatus === "active" && b.currentStatus !== "active") return -1;
+        if (b.currentStatus === "active" && a.currentStatus !== "active") return 1;
+        // Ordem alfabética
+        return a.name.localeCompare(b.name);
+      });
   }, [activityData]);
 
   // --- KPI COMPUTATIONS ---
