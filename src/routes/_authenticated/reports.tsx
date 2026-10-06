@@ -129,6 +129,7 @@ function ReportsPage() {
 
   const [activeTab, setActiveTab] = useState("conversations");
   const [selectedUserDetail, setSelectedUserDetail] = useState<any | null>(null);
+  const [activityFilter, setActivityFilter] = useState<"active_only" | "all">("active_only");
 
   // Fetch Pipelines for dropdown
   const { data: pipelines } = useQuery({
@@ -475,6 +476,14 @@ function ReportsPage() {
         return a.name.localeCompare(b.name);
       });
   }, [activityData]);
+
+  // Filtra apenas os usuários que estão ativos no período por padrão
+  const displayedActivitySummaries = useMemo(() => {
+    if (activityFilter === "all") return userActivitySummaries;
+    return userActivitySummaries.filter(
+      (u) => u.totalLogged > 0 || u.firstLoginAt !== null || u.currentStatus !== "offline"
+    );
+  }, [userActivitySummaries, activityFilter]);
 
   // --- KPI COMPUTATIONS ---
   const convList: any[] = (conversations || []) as any[];
@@ -1106,7 +1115,7 @@ function ReportsPage() {
           {/* Card: Jornada e Produtividade dos Atendentes */}
           <Card>
             <CardHeader>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <CardTitle className="text-base font-semibold flex items-center gap-2">
                     <Activity className="h-4 w-4 text-emerald-500" />
@@ -1116,11 +1125,39 @@ function ReportsPage() {
                     Tempo real de uso: identificação de trabalho ativo, ociosidade e abas em segundo plano
                   </CardDescription>
                 </div>
-                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" /> Ativo</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500 inline-block" /> Ocioso</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500 inline-block" /> 2ª Aba</span>
-                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-zinc-400 inline-block" /> Offline</span>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setActivityFilter("active_only")}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer",
+                        activityFilter === "active_only"
+                          ? "bg-background text-foreground shadow-xs font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Apenas Ativos ({userActivitySummaries.filter((u) => u.totalLogged > 0 || u.firstLoginAt || u.currentStatus !== "offline").length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActivityFilter("all")}
+                      className={cn(
+                        "px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer",
+                        activityFilter === "all"
+                          ? "bg-background text-foreground shadow-xs font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Todos ({userActivitySummaries.length})
+                    </button>
+                  </div>
+                  <div className="hidden lg:flex items-center gap-3 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" /> Ativo</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500 inline-block" /> Ocioso</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500 inline-block" /> 2ª Aba</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-zinc-400 inline-block" /> Offline</span>
+                  </div>
                 </div>
               </div>
             </CardHeader>
@@ -1129,9 +1166,11 @@ function ReportsPage() {
                 <div className="flex py-10 items-center justify-center">
                   <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </div>
-              ) : userActivitySummaries.length === 0 ? (
+              ) : displayedActivitySummaries.length === 0 ? (
                 <div className="text-center py-8 text-xs text-muted-foreground">
-                  Nenhum registro de atividade capturado no período selecionado.
+                  {activityFilter === "active_only"
+                    ? "Nenhum usuário com atividade ou login registrado no período selecionado."
+                    : "Nenhum registro de atividade capturado no período selecionado."}
                 </div>
               ) : (
                 <Table>
@@ -1150,7 +1189,7 @@ function ReportsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {userActivitySummaries.map((u) => (
+                    {displayedActivitySummaries.map((u) => (
                       <TableRow key={u.userId}>
                         <TableCell className="font-medium text-xs flex items-center gap-2">
                           <Avatar className="h-6 w-6">
