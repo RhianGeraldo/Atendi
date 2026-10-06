@@ -139,6 +139,13 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
       total_background_seconds: number;
       current_status: string;
       last_heartbeat_at: string | null;
+      days: Array<{
+        date: string;
+        logged_seconds: number;
+        active_seconds: number;
+        idle_seconds: number;
+        background_seconds: number;
+      }>;
     }>();
 
     (actRecords || []).forEach((r: any) => {
@@ -150,6 +157,7 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
           total_background_seconds: 0,
           current_status: r.current_status || "offline",
           last_heartbeat_at: r.last_heartbeat_at,
+          days: [],
         });
       }
       const item = activityMap.get(r.user_id)!;
@@ -157,6 +165,13 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
       item.total_active_seconds += r.total_active_seconds || 0;
       item.total_idle_seconds += r.total_idle_seconds || 0;
       item.total_background_seconds += r.total_background_seconds || 0;
+      item.days.push({
+        date: r.date,
+        logged_seconds: r.total_logged_seconds || 0,
+        active_seconds: r.total_active_seconds || 0,
+        idle_seconds: r.total_idle_seconds || 0,
+        background_seconds: r.total_background_seconds || 0,
+      });
       if (new Date(r.last_heartbeat_at) > new Date(item.last_heartbeat_at || 0)) {
         item.current_status = r.current_status;
         item.last_heartbeat_at = r.last_heartbeat_at;
@@ -183,6 +198,7 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
         current_status: status,
         last_heartbeat_at: p.last_seen_at || act?.last_heartbeat_at || null,
         active_ratio: activeRatio,
+        days: (act?.days || []).sort((a, b) => b.date.localeCompare(a.date)),
         profiles: {
           id: p.id,
           name: p.name,

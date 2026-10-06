@@ -59,6 +59,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { DateRange } from "react-day-picker";
 import { formatBRL, initials } from "@/lib/format";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -110,6 +117,7 @@ function ReportsPage() {
   const { selectedUnitId } = useUnit();
 
   const [activeTab, setActiveTab] = useState("conversations");
+  const [selectedUserDetail, setSelectedUserDetail] = useState<any | null>(null);
 
   // Fetch Pipelines for dropdown
   const { data: pipelines } = useQuery({
@@ -154,6 +162,17 @@ function ReportsPage() {
   // Compute fromDate & toDate based on preset / URL search params
   const { fromDate, toDate, dateRange } = useMemo(() => {
     const today = new Date();
+    if (preset === "today") {
+      const from = startOfDay(today);
+      const to = endOfDay(today);
+      return { fromDate: from, toDate: to, dateRange: { from, to } };
+    }
+    if (preset === "yesterday") {
+      const y = subDays(today, 1);
+      const from = startOfDay(y);
+      const to = endOfDay(y);
+      return { fromDate: from, toDate: to, dateRange: { from, to } };
+    }
     if (preset === "7d") {
       const from = subDays(today, 6);
       return { fromDate: from, toDate: today, dateRange: { from, to: today } };
@@ -430,6 +449,7 @@ function ReportsPage() {
           currentStatus: row.current_status || "offline",
           lastHeartbeatAt: row.last_heartbeat_at,
           focusRatio,
+          days: row.days || [],
         };
       })
       .sort((a, b) => {
@@ -772,6 +792,8 @@ function ReportsPage() {
                 <SelectValue placeholder="Período" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="today">Hoje</SelectItem>
+                <SelectItem value="yesterday">Ontem</SelectItem>
                 <SelectItem value="7d">Últimos 7 dias</SelectItem>
                 <SelectItem value="30d">Últimos 30 dias</SelectItem>
                 <SelectItem value="month">Mês Atual</SelectItem>
@@ -1109,6 +1131,7 @@ function ReportsPage() {
                       <TableHead className="text-xs text-center">Aba Secundária</TableHead>
                       <TableHead className="text-xs text-center">Ocioso / Parado</TableHead>
                       <TableHead className="text-xs text-right">Taxa de Foco</TableHead>
+                      <TableHead className="text-xs text-center w-[90px]">Histórico</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1168,6 +1191,18 @@ function ReportsPage() {
                             </div>
                           </div>
                         </TableCell>
+                        <TableCell className="text-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-[11px] px-2 gap-1 font-normal hover:bg-primary/10 text-muted-foreground hover:text-primary cursor-pointer"
+                            onClick={() => setSelectedUserDetail(u)}
+                            title="Ver histórico dia a dia"
+                          >
+                            <CalendarClock className="h-3 w-3" />
+                            <span>Ver Dias</span>
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1175,6 +1210,107 @@ function ReportsPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Dialog: Detalhamento de Jornada Dia a Dia */}
+          <Dialog open={!!selectedUserDetail} onOpenChange={(open) => !open && setSelectedUserDetail(null)}>
+            <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+              <DialogHeader>
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarFallback className="text-sm font-semibold">{initials(selectedUserDetail?.name || "")}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <DialogTitle className="text-base flex items-center gap-2">
+                      <span>{selectedUserDetail?.name}</span>
+                      <Badge variant="outline" className="text-[11px] font-normal">
+                        {selectedUserDetail?.currentStatus === "active" ? "🟢 Ativo" : selectedUserDetail?.currentStatus === "idle" ? "🟡 Ocioso" : selectedUserDetail?.currentStatus === "background" ? "🟠 2ª Aba" : "⚪ Offline"}
+                      </Badge>
+                    </DialogTitle>
+                    <DialogDescription className="text-xs text-muted-foreground">
+                      Histórico detalhado dia a dia no período selecionado ({selectedUserDetail?.email})
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+
+              <div className="space-y-4 pt-2">
+                {/* Resumo do período */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 bg-muted/40 rounded-lg text-center text-xs">
+                  <div>
+                    <span className="text-[10px] text-muted-foreground block uppercase">Total Logado</span>
+                    <span className="font-semibold font-mono text-sm">{formatSecondsToHours(selectedUserDetail?.totalLogged || 0)}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block uppercase">Total Ativo</span>
+                    <span className="font-semibold font-mono text-sm text-emerald-600 dark:text-emerald-400">{formatSecondsToHours(selectedUserDetail?.totalActive || 0)}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-blue-600 dark:text-blue-400 block uppercase">2ª Aba</span>
+                    <span className="font-semibold font-mono text-sm text-blue-600 dark:text-blue-400">{formatSecondsToHours(selectedUserDetail?.totalBackground || 0)}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted-foreground block uppercase">Taxa de Foco</span>
+                    <span className="font-semibold text-sm">{selectedUserDetail?.focusRatio || 0}%</span>
+                  </div>
+                </div>
+
+                {/* Tabela dos dias */}
+                {(!selectedUserDetail?.days || selectedUserDetail.days.length === 0) ? (
+                  <div className="text-center py-6 text-xs text-muted-foreground border border-dashed rounded-lg">
+                    Nenhum registro de batimento capturado para este colaborador no período selecionado.
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-xs">Data / Dia</TableHead>
+                        <TableHead className="text-xs text-center">Tempo Logado</TableHead>
+                        <TableHead className="text-xs text-center">Tempo Ativo</TableHead>
+                        <TableHead className="text-xs text-center">2ª Aba</TableHead>
+                        <TableHead className="text-xs text-center">Ocioso</TableHead>
+                        <TableHead className="text-xs text-right">Foco %</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedUserDetail.days.map((d: any) => {
+                        const dayLogged = d.logged_seconds || 0;
+                        const dayActive = d.active_seconds || 0;
+                        const dayRatio = dayLogged > 0 ? Math.round((dayActive / dayLogged) * 100) : 0;
+                        const dateFormatted = format(new Date(d.date + "T12:00:00"), "dd/MM/yyyy (EEE)", { locale: ptBR });
+
+                        return (
+                          <TableRow key={d.date}>
+                            <TableCell className="text-xs font-medium capitalize">
+                              {dateFormatted}
+                            </TableCell>
+                            <TableCell className="text-xs text-center font-mono">
+                              {formatSecondsToHours(dayLogged)}
+                            </TableCell>
+                            <TableCell className="text-xs text-center text-emerald-600 dark:text-emerald-400 font-semibold font-mono">
+                              {formatSecondsToHours(dayActive)}
+                            </TableCell>
+                            <TableCell className="text-xs text-center text-blue-600 dark:text-blue-400 font-mono">
+                              {formatSecondsToHours(d.background_seconds || 0)}
+                            </TableCell>
+                            <TableCell className="text-xs text-center text-amber-600 dark:text-amber-400 font-mono">
+                              {formatSecondsToHours(d.idle_seconds || 0)}
+                            </TableCell>
+                            <TableCell className="text-xs text-right font-semibold">
+                              <span className={cn(
+                                dayRatio >= 70 ? "text-emerald-600 dark:text-emerald-400" : dayRatio >= 40 ? "text-amber-600 dark:text-amber-400" : "text-rose-500"
+                              )}>
+                                {dayRatio}%
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         {/* TAB 2: VENDAS & CRM */}
