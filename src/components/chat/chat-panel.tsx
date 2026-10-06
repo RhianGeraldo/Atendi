@@ -733,10 +733,7 @@ export function ChatPanel({
     }
   });
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const processFile = (file: File) => {
     let type = "document";
     if (file.type.startsWith("image/")) type = "image";
     else if (file.type.startsWith("video/")) type = "video";
@@ -746,15 +743,15 @@ export function ChatPanel({
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement("canvas");
-        const MAX_DIM = 800;
+        const MAX_DIM = 1200;
         let width = img.width;
         let height = img.height;
         
         if (width > height && width > MAX_DIM) {
-          height *= MAX_DIM / width;
+          height = Math.round(height * (MAX_DIM / width));
           width = MAX_DIM;
         } else if (height > MAX_DIM) {
-          width *= MAX_DIM / height;
+          width = Math.round(width * (MAX_DIM / height));
           height = MAX_DIM;
         }
         
@@ -765,7 +762,7 @@ export function ChatPanel({
           ctx.fillStyle = "#ffffff";
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(img, 0, 0, width, height);
-          const base64 = canvas.toDataURL("image/jpeg", 0.8);
+          const base64 = canvas.toDataURL("image/jpeg", 0.85);
           setSelectedFile({ file, base64, type });
         }
         URL.revokeObjectURL(img.src);
@@ -779,8 +776,52 @@ export function ChatPanel({
       };
       reader.readAsDataURL(file);
     }
-    
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processFile(file);
+    }
     e.target.value = "";
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
+
+    // 1. Checa items na área de transferência (prints, capturas de tela, imagens copiadas do navegador)
+    const items = clipboardData.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            processFile(file);
+            setTimeout(() => {
+              document.getElementById("chat-input")?.focus();
+            }, 50);
+            return;
+          }
+        }
+      }
+    }
+
+    // 2. Fallback para arquivos copiados pelo explorador de arquivos
+    const files = clipboardData.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.type.startsWith("image/")) {
+        e.preventDefault();
+        processFile(file);
+        setTimeout(() => {
+          document.getElementById("chat-input")?.focus();
+        }, 50);
+        return;
+      }
+    }
   };
 
   const startRecording = async () => {
@@ -1590,6 +1631,7 @@ export function ChatPanel({
                   <PopoverAnchor asChild>
                     <div 
                       id="chat-composer-container"
+                      onPaste={handlePaste}
                       className={cn(
                         "flex-1 flex items-end bg-muted/50 rounded-3xl border border-transparent shadow-sm px-1 py-1 focus-within:border-border transition-colors",
                         isInternalNote && "bg-amber-100/50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50"
@@ -1676,6 +1718,7 @@ export function ChatPanel({
                       setQuickMsgIndex(0);
                       setIsQuickMsgDismissed(false);
                     }}
+                    onPaste={handlePaste}
                     onKeyDown={(e) => {
                       if (isQuickMsgOpen) {
                         if (e.key === "Escape") {
