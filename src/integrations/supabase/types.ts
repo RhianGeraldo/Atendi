@@ -1193,6 +1193,8 @@ export type Database = {
           id: string
           name: string
           online: boolean
+          current_status?: string | null
+          last_seen_at?: string | null
           role: Database["public"]["Enums"]["app_role"]
           use_signature: boolean | null
         }
@@ -1207,6 +1209,8 @@ export type Database = {
           id: string
           name: string
           online?: boolean
+          current_status?: string | null
+          last_seen_at?: string | null
           role?: Database["public"]["Enums"]["app_role"]
           use_signature?: boolean | null
         }
@@ -1221,6 +1225,8 @@ export type Database = {
           id?: string
           name?: string
           online?: boolean
+          current_status?: string | null
+          last_seen_at?: string | null
           role?: Database["public"]["Enums"]["app_role"]
           use_signature?: boolean | null
         }
@@ -1518,6 +1524,66 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_daily_activity: {
+        Row: {
+          id: string
+          user_id: string
+          company_id: string
+          date: string
+          total_logged_seconds: number
+          total_active_seconds: number
+          total_idle_seconds: number
+          total_background_seconds: number
+          current_status: string
+          last_heartbeat_at: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          company_id: string
+          date?: string
+          total_logged_seconds?: number
+          total_active_seconds?: number
+          total_idle_seconds?: number
+          total_background_seconds?: number
+          current_status?: string
+          last_heartbeat_at?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          company_id?: string
+          date?: string
+          total_logged_seconds?: number
+          total_active_seconds?: number
+          total_idle_seconds?: number
+          total_background_seconds?: number
+          current_status?: string
+          last_heartbeat_at?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_daily_activity_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_daily_activity_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]

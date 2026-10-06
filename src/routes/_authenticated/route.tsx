@@ -6,6 +6,7 @@ import { WavoipProvider } from "@/hooks/use-wavoip";
 import { WavoipCallOverlay } from "@/components/whatsapp/wavoip-call-overlay";
 import { CopilotProvider } from "@/hooks/use-copilot";
 import { CopilotDrawer } from "@/components/copilot/copilot-drawer";
+import { useActivityTracker } from "@/lib/hooks/use-activity-tracker";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -15,6 +16,9 @@ export const Route = createFileRoute("/_authenticated")({
 function AuthenticatedLayout() {
   const { loading, session } = useAuth();
   const navigate = useNavigate();
+
+  // Rastreia a atividade real do usuário (ativo, ocioso, aba em segundo plano)
+  useActivityTracker();
 
   useEffect(() => {
     if (!loading && !session) {

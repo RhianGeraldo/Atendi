@@ -53,7 +53,7 @@ export function TransferDialog({ conv }: { conv: any }) {
       if (conv.unit_id) {
         const { data, error } = await supabase
           .from("user_units")
-          .select("user_id, profiles!inner(id, name, email, avatar_url, role, online, active, departments!profiles_department_id_fkey(name))")
+          .select("user_id, profiles!inner(id, name, email, avatar_url, role, online, current_status, active, departments!profiles_department_id_fkey(name))")
           .eq("unit_id", conv.unit_id)
           .eq("profiles.active", true);
         if (error) throw error;
@@ -61,7 +61,7 @@ export function TransferDialog({ conv }: { conv: any }) {
       } else {
         const { data, error } = await supabase
           .from("profiles")
-          .select("id, name, email, avatar_url, role, online, active, departments!profiles_department_id_fkey(name)")
+          .select("id, name, email, avatar_url, role, online, current_status, active, departments!profiles_department_id_fkey(name)")
           .eq("active", true)
           .or('has_matriz_access.eq.true,role.eq.admin_company');
         if (error) throw error;
@@ -175,9 +175,27 @@ export function TransferDialog({ conv }: { conv: any }) {
                           <span>{agent.name}</span>
                           <span
                             className={`h-2 w-2 rounded-full shrink-0 ${
-                              agent.online ? "bg-emerald-500 shadow-xs shadow-emerald-500/50" : "bg-muted-foreground/30"
+                              (agent as any).current_status === "active"
+                                ? "bg-emerald-500 shadow-xs shadow-emerald-500/50"
+                                : (agent as any).current_status === "idle"
+                                ? "bg-amber-500 shadow-xs shadow-amber-500/50"
+                                : (agent as any).current_status === "background"
+                                ? "bg-blue-500 shadow-xs shadow-blue-500/50"
+                                : agent.online
+                                ? "bg-emerald-500 shadow-xs shadow-emerald-500/50"
+                                : "bg-muted-foreground/30"
                             }`}
-                            title={agent.online ? "Online" : "Offline"}
+                            title={
+                              (agent as any).current_status === "active"
+                                ? "Ativo (movimentando na plataforma)"
+                                : (agent as any).current_status === "idle"
+                                ? "Ocioso (parado na tela)"
+                                : (agent as any).current_status === "background"
+                                ? "Em 2ª aba (aba secundária)"
+                                : agent.online
+                                ? "Online"
+                                : "Offline"
+                            }
                           />
                         </div>
                         <div className="text-xs text-muted-foreground truncate flex items-center gap-1">

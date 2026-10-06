@@ -42,7 +42,8 @@ import {
   BarChart3,
   PieChart as PieIcon,
   Percent,
-  Filter
+  Filter,
+  Activity
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -61,6 +62,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DateRange } from "react-day-picker";
 import { formatBRL, initials } from "@/lib/format";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
+import { getUserActivityReportAction } from "@/lib/api/activity.functions";
 
 export const Route = createFileRoute("/_authenticated/reports")({
   validateSearch: (search: Record<string, unknown>) => {
@@ -83,6 +86,15 @@ function formatTMA(minutes: number) {
   if (minutes < 60) return `${minutes}m`;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
+  return `${h}h ${m}m`;
+}
+
+function formatSecondsToHours(seconds: number) {
+  if (!seconds || seconds <= 0) return "0m";
+  const totalMin = Math.round(seconds / 60);
+  if (totalMin < 60) return `${totalMin}m`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
   return `${h}h ${m}m`;
 }
 
@@ -377,6 +389,82 @@ function ReportsPage() {
       return (data || []) as any[];
     },
   });
+
+  // Query 5: User Activity Data (Jornada & Foco dos Atendentes)
+  const { data: activityData, isLoading: loadingActivity } = useQuery({
+    queryKey: ["reports-user-activity", activeCompanyId, fromStr, toStr],
+    enabled: !!activeCompanyId,
+    queryFn: async () => {
+      return await getUserActivityReportAction({
+        data: {
+          companyId: activeCompanyId!,
+          startDate: fromDate ? format(fromDate, "yyyy-MM-dd") : undefined,
+          endDate: toDate ? format(toDate, "yyyy-MM-dd") : undefined,
+        },
+      });
+    },
+  });
+
+  // Agrupa a atividade por atendente no período selecionado
+  const userActivitySummaries = useMemo(() => {
+    if (!activityData) return [];
+    const map = new Map<string, {
+      userId: string;
+      name: string;
+      email: string;
+      avatarUrl?: string;
+      totalLogged: number;
+      totalActive: number;
+      totalIdle: number;
+      totalBackground: number;
+      currentStatus: string;
+      lastHeartbeatAt: string;
+    }>();
+
+    activityData.forEach((row: any) => {
+      const uId = row.user_id;
+      const profile = row.profiles || {};
+      const name = profile.name || "Usuário";
+      const email = profile.email || "";
+      const avatarUrl = profile.avatar_url;
+
+      if (!map.has(uId)) {
+        map.set(uId, {
+          userId: uId,
+          name,
+          email,
+          avatarUrl,
+          totalLogged: 0,
+          totalActive: 0,
+          totalIdle: 0,
+          totalBackground: 0,
+          currentStatus: row.current_status || "offline",
+          lastHeartbeatAt: row.last_heartbeat_at,
+        });
+      }
+
+      const item = map.get(uId)!;
+      item.totalLogged += row.total_logged_seconds || 0;
+      item.totalActive += row.total_active_seconds || 0;
+      item.totalIdle += row.total_idle_seconds || 0;
+      item.totalBackground += row.total_background_seconds || 0;
+
+      if (new Date(row.last_heartbeat_at) > new Date(item.lastHeartbeatAt || 0)) {
+        item.currentStatus = row.current_status;
+        item.lastHeartbeatAt = row.last_heartbeat_at;
+      }
+    });
+
+    return Array.from(map.values())
+      .map((u) => {
+        const focusRatio = u.totalLogged > 0 ? Math.round((u.totalActive / u.totalLogged) * 100) : 0;
+        return {
+          ...u,
+          focusRatio,
+        };
+      })
+      .sort((a, b) => b.totalActive - a.totalActive);
+  }, [activityData]);
 
   // --- KPI COMPUTATIONS ---
   const convList: any[] = (conversations || []) as any[];
@@ -1002,6 +1090,114 @@ function ReportsPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Card: Jornada e Produtividade dos Atendentes */}
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="text-base font-semibold flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-emerald-500" />
+                    Jornada & Foco dos Atendentes
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Tempo real de uso: identificação de trabalho ativo, ociosidade e abas em segundo plano
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" /> Ativo</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-500 inline-block" /> Ocioso</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500 inline-block" /> 2ª Aba</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-zinc-400 inline-block" /> Offline</span>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loadingActivity ? (
+                <div className="flex py-10 items-center justify-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                </div>
+              ) : userActivitySummaries.length === 0 ? (
+                <div className="text-center py-8 text-xs text-muted-foreground">
+                  Nenhum registro de atividade capturado no período selecionado.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Atendente</TableHead>
+                      <TableHead className="text-xs text-center">Status Atual</TableHead>
+                      <TableHead className="text-xs text-center">Tempo Logado</TableHead>
+                      <TableHead className="text-xs text-center">Tempo Ativo (Movimento)</TableHead>
+                      <TableHead className="text-xs text-center">Aba Secundária</TableHead>
+                      <TableHead className="text-xs text-center">Ocioso / Parado</TableHead>
+                      <TableHead className="text-xs text-right">Taxa de Foco</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {userActivitySummaries.map((u) => (
+                      <TableRow key={u.userId}>
+                        <TableCell className="font-medium text-xs flex items-center gap-2">
+                          <Avatar className="h-6 w-6">
+                            <AvatarFallback className="text-[10px]">{initials(u.name)}</AvatarFallback>
+                          </Avatar>
+                          <div className="flex flex-col">
+                            <span>{u.name}</span>
+                            <span className="text-[10px] text-muted-foreground">{u.email}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs text-center">
+                          {u.currentStatus === "active" ? (
+                            <Badge variant="outline" className="text-[11px] font-normal border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10">
+                              🟢 Ativo
+                            </Badge>
+                          ) : u.currentStatus === "idle" ? (
+                            <Badge variant="outline" className="text-[11px] font-normal border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/10">
+                              🟡 Ocioso
+                            </Badge>
+                          ) : u.currentStatus === "background" ? (
+                            <Badge variant="outline" className="text-[11px] font-normal border-blue-500/30 text-blue-600 dark:text-blue-400 bg-blue-500/10">
+                              🟠 2ª Aba
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[11px] font-normal border-border text-muted-foreground">
+                              ⚪ Offline
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs text-center font-mono">
+                          {formatSecondsToHours(u.totalLogged)}
+                        </TableCell>
+                        <TableCell className="text-xs text-center text-emerald-600 dark:text-emerald-400 font-semibold font-mono">
+                          {formatSecondsToHours(u.totalActive)}
+                        </TableCell>
+                        <TableCell className="text-xs text-center text-blue-600 dark:text-blue-400 font-mono">
+                          {formatSecondsToHours(u.totalBackground)}
+                        </TableCell>
+                        <TableCell className="text-xs text-center text-amber-600 dark:text-amber-400 font-mono">
+                          {formatSecondsToHours(u.totalIdle)}
+                        </TableCell>
+                        <TableCell className="text-xs text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <span className="font-semibold">{u.focusRatio}%</span>
+                            <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full transition-all",
+                                  u.focusRatio >= 70 ? "bg-emerald-500" : u.focusRatio >= 40 ? "bg-amber-500" : "bg-red-500"
+                                )}
+                                style={{ width: `${Math.min(100, u.focusRatio)}%` }}
+                              />
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* TAB 2: VENDAS & CRM */}

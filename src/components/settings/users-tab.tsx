@@ -111,7 +111,7 @@ export function UsersTab() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, email, role, online, active, department_id, has_matriz_access, custom_role_id, allowed_menus, custom_role:company_roles(id, name, allowed_menus, base_role), departments!profiles_department_id_fkey(name), user_units(unit_id, role)")
+        .select("id, name, email, role, online, current_status, active, department_id, has_matriz_access, custom_role_id, allowed_menus, custom_role:company_roles(id, name, allowed_menus, base_role), departments!profiles_department_id_fkey(name), user_units(unit_id, role)")
         .eq("company_id", activeCompanyId!);
       if (error) throw error;
       return data;
@@ -509,11 +509,27 @@ export function UsersTab() {
                           <div className="font-medium flex items-center gap-1.5">
                             <span
                               className={`h-2 w-2 rounded-full shrink-0 ${
-                                (u as any).online && isActive
+                                (u as any).current_status === "active"
+                                  ? "bg-emerald-500 shadow-xs shadow-emerald-500/50"
+                                  : (u as any).current_status === "idle"
+                                  ? "bg-amber-500 shadow-xs shadow-amber-500/50"
+                                  : (u as any).current_status === "background"
+                                  ? "bg-blue-500 shadow-xs shadow-blue-500/50"
+                                  : (u as any).online && isActive
                                   ? "bg-emerald-500 shadow-xs shadow-emerald-500/50"
                                   : "bg-muted-foreground/30"
                               }`}
-                              title={(u as any).online && isActive ? "Online" : "Offline"}
+                              title={
+                                (u as any).current_status === "active"
+                                  ? "Ativo (movimentando na plataforma)"
+                                  : (u as any).current_status === "idle"
+                                  ? "Ocioso (parado na tela)"
+                                  : (u as any).current_status === "background"
+                                  ? "Em 2ª aba (aba secundária)"
+                                  : (u as any).online && isActive
+                                  ? "Online"
+                                  : "Offline"
+                              }
                             />
                             <span>{u.name}</span>
                             {isSelf && <Badge variant="outline" className="ml-1 text-[10px]">Você</Badge>}
