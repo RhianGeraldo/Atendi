@@ -248,10 +248,18 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
       }
     });
 
-    // 4. Retorna a lista COMPLETA de colaboradores
-    return filteredProfiles.map((p: any) => {
-      const act = activityMap.get(p.id);
-      const totalLogged = act?.total_logged_seconds || 0;
+    // 4. Retorna somente colaboradores com registro de atividade/login no período ou atualmente online
+    return filteredProfiles
+      .filter((p: any) => {
+        const act = activityMap.get(p.id);
+        const hasActivity = (act?.total_logged_seconds || 0) > 0;
+        const hasLogin = !!act?.first_login_at;
+        const isOnline = p.online || (p.current_status && p.current_status !== "offline");
+        return hasActivity || hasLogin || isOnline;
+      })
+      .map((p: any) => {
+        const act = activityMap.get(p.id);
+        const totalLogged = act?.total_logged_seconds || 0;
       const totalActive = act?.total_active_seconds || 0;
       const totalIdle = act?.total_idle_seconds || 0;
       const totalBackground = act?.total_background_seconds || 0;
