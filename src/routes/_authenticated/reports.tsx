@@ -105,6 +105,17 @@ function formatSecondsToHours(seconds: number) {
   return `${h}h ${m}m`;
 }
 
+function formatTimeOnly(dateStr: string | null | undefined): string {
+  if (!dateStr) return "—";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "—";
+    return format(d, "HH:mm");
+  } catch {
+    return "—";
+  }
+}
+
 const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#64748b"];
 
 function ReportsPage() {
@@ -448,6 +459,8 @@ function ReportsPage() {
           totalBackground,
           currentStatus: row.current_status || "offline",
           lastHeartbeatAt: row.last_heartbeat_at,
+          firstLoginAt: row.first_login_at || null,
+          lastLogoutAt: row.last_logout_at || null,
           focusRatio,
           days: row.days || [],
         };
@@ -1126,6 +1139,8 @@ function ReportsPage() {
                     <TableRow>
                       <TableHead className="text-xs">Atendente</TableHead>
                       <TableHead className="text-xs text-center">Status Atual</TableHead>
+                      <TableHead className="text-xs text-center">Entrada</TableHead>
+                      <TableHead className="text-xs text-center">Saída</TableHead>
                       <TableHead className="text-xs text-center">Tempo Logado</TableHead>
                       <TableHead className="text-xs text-center">Tempo Ativo (Movimento)</TableHead>
                       <TableHead className="text-xs text-center">Aba Secundária</TableHead>
@@ -1164,6 +1179,12 @@ function ReportsPage() {
                               ⚪ Offline
                             </Badge>
                           )}
+                        </TableCell>
+                        <TableCell className="text-xs text-center font-mono text-muted-foreground">
+                          {formatTimeOnly(u.firstLoginAt)}
+                        </TableCell>
+                        <TableCell className="text-xs text-center font-mono text-muted-foreground">
+                          {formatTimeOnly(u.lastLogoutAt || (u.currentStatus === "offline" ? u.lastHeartbeatAt : null))}
                         </TableCell>
                         <TableCell className="text-xs text-center font-mono">
                           {formatSecondsToHours(u.totalLogged)}
@@ -1264,6 +1285,8 @@ function ReportsPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead className="text-xs">Data / Dia</TableHead>
+                        <TableHead className="text-xs text-center">Entrada</TableHead>
+                        <TableHead className="text-xs text-center">Saída</TableHead>
                         <TableHead className="text-xs text-center">Tempo Logado</TableHead>
                         <TableHead className="text-xs text-center">Tempo Ativo</TableHead>
                         <TableHead className="text-xs text-center">2ª Aba</TableHead>
@@ -1282,6 +1305,12 @@ function ReportsPage() {
                           <TableRow key={d.date}>
                             <TableCell className="text-xs font-medium capitalize">
                               {dateFormatted}
+                            </TableCell>
+                            <TableCell className="text-xs text-center font-mono text-muted-foreground">
+                              {formatTimeOnly(d.first_login_at)}
+                            </TableCell>
+                            <TableCell className="text-xs text-center font-mono text-muted-foreground">
+                              {formatTimeOnly(d.last_logout_at)}
                             </TableCell>
                             <TableCell className="text-xs text-center font-mono">
                               {formatSecondsToHours(dayLogged)}

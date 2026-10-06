@@ -2,6 +2,20 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { recordUserLoginAction, recordUserLogoutAction } from "@/lib/api/activity.functions";
+
+function getTodayLocalDate(): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().split("T")[0];
+  }
+}
 
 export interface Profile {
   id: string;
@@ -50,9 +64,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }, 8000);
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
       if (s?.user) {
+        const today = getTodayLocalDate();
+        const storedDate = typeof window !== "undefined" ? localStorage.getItem("ATENDI_SESSION_DATE") : null;
+
+        // Se o evento é SIGNED_IN (login realizado agora), assegura que a data de hoje está gravada
+        if (event === "SIGNED_IN") {
+          if (typeof window !== "undefined") {
+            localStorage.setItem("ATENDI_SESSION_DATE", today);
+          }
+          setSession(s);
+          setTimeout(() => loadProfile(s.user.id), 0);
+          return;
+        }
+
+        // Para tokens renovados ou reconexões automáticas, checa se é de um dia anterior
+        if (storedDate && storedDate !== today) {
+          // Reset diário: sessão de dia anterior é encerrada silenciosamente
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("ATENDI_SESSION_DATE");
+          }
+          await supabase.auth.signOut();
+          setSession(null);
+          setProfile(null);
+          return;
+        }
+
+        if (typeof window !== "undefined" && !storedDate) {
+          localStorage.setItem("ATENDI_SESSION_DATE", today);
+        }
+
+        setSession(s);
         // defer profile fetch
         setTimeout(() => loadProfile(s.user.id), 0);
       } else {
@@ -62,10 +105,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase.auth
       .getSession()
-      .then(({ data }) => {
-        setSession(data.session);
-        if (data.session?.user) {
-          loadProfile(data.session.user.id).finally(() => {
+      .then(async ({ data }) => {
+        const currentSession = data.session;
+        if (currentSession?.user) {
+          const today = getTodayLocalDate();
+          const storedDate = typeof window !== "undefined" ? localStorage.getItem("ATENDI_SESSION_DATE") : null;
+
+          // Se a sessão salva for de dia anterior, desloga silenciosamente
+          if (storedDate && storedDate !== today) {
+            if (typeof window !== "undefined") {
+              localStorage.removeItem("ATENDI_SESSION_DATE");
+            }
+            await supabase.auth.signOut();
+            setSession(null);
+            setProfile(null);
+            clearTimeout(timeoutId);
+            if (isMounted) setLoading(false);
+            return;
+          }
+
+          if (typeof window !== "undefined" && !storedDate) {
+            localStorage.setItem("ATENDI_SESSION_DATE", today);
+            recordUserLoginAction().catch(() => {});
+          }
+
+          setSession(currentSession);
+          loadProfile(currentSession.user.id).finally(() => {
             clearTimeout(timeoutId);
             if (isMounted) setLoading(false);
           });
@@ -135,6 +200,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [session?.user?.id]);
 
+  // Listener para detectar virada de dia em tempo real e deslogar para novo expediente
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const checkDayChange = () => {
+      const today = getTodayLocalDate();
+      const storedDate = typeof window !== "undefined" ? localStorage.getItem("ATENDI_SESSION_DATE") : null;
+      if (storedDate && storedDate !== today) {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("ATENDI_SESSION_DATE");
+        }
+        supabase.auth.signOut().then(() => {
+          setSession(null);
+          setProfile(null);
+        });
+      }
+    };
+
+    const intervalId = setInterval(checkDayChange, 60_000);
+    window.addEventListener("focus", checkDayChange);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener("focus", checkDayChange);
+    };
+  }, [session?.user?.id]);
+
   const value: AuthContextValue = {
     user: session?.user ?? null,
     session,
@@ -147,8 +239,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     async signIn(email, password) {
       try {
+        const today = getTodayLocalDate();
+        if (typeof window !== "undefined") {
+          localStorage.setItem("ATENDI_SESSION_DATE", today);
+        }
+
         const { error } = await supabase.auth.signInWithPassword({ email, password });
-        return { error: error?.message ?? null };
+        if (error) {
+          return { error: error.message };
+        }
+
+        // Registra o primeiro login do dia atômico
+        recordUserLoginAction().catch((err) => {
+          console.warn("[Auth] Falha ao registrar ponto de login:", err);
+        });
+
+        return { error: null };
       } catch (err: any) {
         console.error("[Auth] signIn error:", err);
         return { error: err?.message || "Erro ao realizar login. Tente novamente." };
@@ -175,9 +281,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async signOut() {
       try {
         if (session?.user?.id) {
+          recordUserLogoutAction().catch((e) => console.warn("[Auth] Falha ao registrar logout:", e));
           await supabase.from("profiles").update({ online: false }).eq("id", session.user.id);
         }
         if (typeof window !== "undefined") {
+          localStorage.removeItem("ATENDI_SESSION_DATE");
           localStorage.removeItem("ATENDI_QUERY_CACHE");
           sessionStorage.removeItem("ATENDI_QUERY_CACHE");
         }

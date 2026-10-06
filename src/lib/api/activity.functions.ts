@@ -43,6 +43,51 @@ export const recordActivityHeartbeatAction = createServerFn({ method: "POST" })
     return { success: true };
   });
 
+export const recordUserLoginAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { userId } = context;
+
+    const { data: profile, error: profErr } = await supabaseAdmin
+      .from("profiles")
+      .select("company_id")
+      .eq("id", userId)
+      .single();
+
+    if (profErr || !profile || !profile.company_id) {
+      return { success: false, error: "Perfil ou empresa não encontrados" };
+    }
+
+    const { error: rpcErr } = await (supabaseAdmin.rpc as any)("record_user_login", {
+      p_user_id: userId,
+      p_company_id: profile.company_id,
+    });
+
+    if (rpcErr) {
+      console.error("[recordUserLoginAction] Erro ao registrar login:", rpcErr);
+      return { success: false, error: rpcErr.message };
+    }
+
+    return { success: true };
+  });
+
+export const recordUserLogoutAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { userId } = context;
+
+    const { error: rpcErr } = await (supabaseAdmin.rpc as any)("record_user_logout", {
+      p_user_id: userId,
+    });
+
+    if (rpcErr) {
+      console.error("[recordUserLogoutAction] Erro ao registrar logout:", rpcErr);
+      return { success: false, error: rpcErr.message };
+    }
+
+    return { success: true };
+  });
+
 export const getUserActivityReportAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(
@@ -113,7 +158,9 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
         total_idle_seconds,
         total_background_seconds,
         current_status,
-        last_heartbeat_at
+        last_heartbeat_at,
+        first_login_at,
+        last_logout_at
       `)
       .eq("company_id", companyId)
       .in("user_id", targetUserIds);
@@ -139,12 +186,16 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
       total_background_seconds: number;
       current_status: string;
       last_heartbeat_at: string | null;
+      first_login_at: string | null;
+      last_logout_at: string | null;
       days: Array<{
         date: string;
         logged_seconds: number;
         active_seconds: number;
         idle_seconds: number;
         background_seconds: number;
+        first_login_at: string | null;
+        last_logout_at: string | null;
       }>;
     }>();
 
@@ -157,6 +208,8 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
           total_background_seconds: 0,
           current_status: r.current_status || "offline",
           last_heartbeat_at: r.last_heartbeat_at,
+          first_login_at: r.first_login_at,
+          last_logout_at: r.last_logout_at,
           days: [],
         });
       }
@@ -165,13 +218,30 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
       item.total_active_seconds += r.total_active_seconds || 0;
       item.total_idle_seconds += r.total_idle_seconds || 0;
       item.total_background_seconds += r.total_background_seconds || 0;
+      
+      // Mantém o primeiro login mais antigo do período
+      if (r.first_login_at) {
+        if (!item.first_login_at || new Date(r.first_login_at) < new Date(item.first_login_at)) {
+          item.first_login_at = r.first_login_at;
+        }
+      }
+      // Mantém o último logout mais recente
+      if (r.last_logout_at) {
+        if (!item.last_logout_at || new Date(r.last_logout_at) > new Date(item.last_logout_at)) {
+          item.last_logout_at = r.last_logout_at;
+        }
+      }
+
       item.days.push({
         date: r.date,
         logged_seconds: r.total_logged_seconds || 0,
         active_seconds: r.total_active_seconds || 0,
         idle_seconds: r.total_idle_seconds || 0,
         background_seconds: r.total_background_seconds || 0,
+        first_login_at: r.first_login_at || null,
+        last_logout_at: r.last_logout_at || null,
       });
+
       if (new Date(r.last_heartbeat_at) > new Date(item.last_heartbeat_at || 0)) {
         item.current_status = r.current_status;
         item.last_heartbeat_at = r.last_heartbeat_at;
@@ -197,6 +267,8 @@ export const getUserActivityReportAction = createServerFn({ method: "POST" })
         total_background_seconds: totalBackground,
         current_status: status,
         last_heartbeat_at: p.last_seen_at || act?.last_heartbeat_at || null,
+        first_login_at: act?.first_login_at || null,
+        last_logout_at: act?.last_logout_at || null,
         active_ratio: activeRatio,
         days: (act?.days || []).sort((a, b) => b.date.localeCompare(a.date)),
         profiles: {
