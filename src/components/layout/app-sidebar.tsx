@@ -335,25 +335,15 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
           {!collapsed && (
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{profile?.name ?? "—"}</div>
-              <div className="flex items-center gap-1 truncate text-xs text-sidebar-foreground/60">
-                <span className="shrink-0 font-medium">
-                  {profile?.custom_role?.name
-                    ? profile.custom_role.name
-                    : profile?.role === "super_admin"
-                      ? "Super Admin"
-                      : profile?.role === "admin_company"
-                        ? "Admin"
-                        : profile?.role === "manager"
-                          ? "Gerente"
-                          : "Agente"}
-                </span>
-                {departmentName && (
-                  <>
-                    <span>•</span>
-                    <span className="truncate">{departmentName}</span>
-                  </>
-                )}
-              </div>
+              {departmentName ? (
+                <div className="truncate text-xs text-sidebar-foreground/60">
+                  {departmentName}
+                </div>
+              ) : profile?.email ? (
+                <div className="truncate text-xs text-sidebar-foreground/60">
+                  {profile.email}
+                </div>
+              ) : null}
             </div>
           )}
           {!collapsed && (
