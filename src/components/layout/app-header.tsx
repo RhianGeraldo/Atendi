@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouterState, Link, useNavigate } from "@tanstack/react-router";
-import { Bell, Menu, CheckSquare, Clock, Info, MessageSquare, Sparkles } from "lucide-react";
+import { Bell, BellRing, Menu, CheckSquare, Clock, Info, MessageSquare, Sparkles } from "lucide-react";
 import { ChannelIcon } from "@/components/common/channel-icon";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
@@ -130,6 +131,30 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
   const sysNotificationsCount = systemNotifications?.length || 0;
   const totalNotifications = pendingTasksCount + sysNotificationsCount;
 
+  // Estado e permissão de Notificações do Navegador
+  const [browserPermission, setBrowserPermission] = useState<NotificationPermission>(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      return Notification.permission;
+    }
+    return "granted";
+  });
+
+  const requestBrowserPermission = async () => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      try {
+        const res = await Notification.requestPermission();
+        setBrowserPermission(res);
+        if (res === "granted") {
+          toast.success("Notificações de mensagens ativadas no navegador!");
+        } else if (res === "denied") {
+          toast.error("Notificações bloqueadas nas permissões do seu navegador.");
+        }
+      } catch (err) {
+        console.warn("Erro ao solicitar permissão:", err);
+      }
+    }
+  };
+
   return (
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card px-4 md:px-6">
       <div className="flex items-center gap-3">
@@ -144,6 +169,18 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
         <h1 className="text-base font-semibold">{title}</h1>
       </div>
       <div className="flex items-center gap-2 md:gap-3">
+        {/* Botão de Ativação de Notificações no Navegador se pendente */}
+        {browserPermission === "default" && (
+          <button
+            onClick={requestBrowserPermission}
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 transition-colors animate-pulse cursor-pointer shadow-xs"
+            title="Clique para ativar alertas sonoros e notificações de mensagens no seu computador"
+          >
+            <BellRing className="h-3.5 w-3.5 shrink-0" />
+            <span className="font-medium">Ativar Notificações</span>
+          </button>
+        )}
+
         {/* Botão Copilot IA */}
         <button
           onClick={toggleOpen}

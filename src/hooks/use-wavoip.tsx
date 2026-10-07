@@ -28,6 +28,75 @@ interface WavoipContextType {
 
 const WavoipContext = createContext<WavoipContextType | undefined>(undefined);
 
+// Garante compatibilidade com Web Audio API e MediaDevices em contextos HTTP (acesso via IP local)
+function ensureAudioContextCompatibility() {
+  if (typeof window === "undefined") return;
+
+  // 1. Shim para navigator.mediaDevices se não existir (HTTP via IP na rede)
+  if (typeof navigator !== "undefined" && !navigator.mediaDevices) {
+    try {
+      const dummyMediaDevices = {
+        enumerateDevices: async () => [],
+        getUserMedia: async () => {
+          throw new Error("O acesso ao microfone requer conexão segura (HTTPS ou localhost).");
+        },
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      };
+
+      try {
+        Object.defineProperty(navigator, "mediaDevices", {
+          value: dummyMediaDevices,
+          configurable: true,
+          writable: true,
+        });
+      } catch {
+        (navigator as any).mediaDevices = dummyMediaDevices;
+      }
+    } catch (e) {
+      console.warn("[Wavoip] Falha ao injetar shim de mediaDevices:", e);
+    }
+  }
+
+  // 2. Shim para AudioContext.audioWorklet se não existir
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  if (AudioContextClass) {
+    try {
+      const originalAudioContext = AudioContextClass;
+
+      class AudioContextProxy extends originalAudioContext {
+        constructor(options?: AudioContextOptions) {
+          super(options);
+          if (!this.audioWorklet) {
+            (this as any).audioWorklet = {
+              addModule: async () => Promise.resolve(),
+            };
+          }
+        }
+      }
+
+      (window as any).AudioContext = AudioContextProxy;
+      if ((window as any).webkitAudioContext) {
+        (window as any).webkitAudioContext = AudioContextProxy;
+      }
+    } catch (e) {
+      console.warn("[Wavoip] Falha ao configurar shim de AudioContext:", e);
+    }
+  } else {
+    try {
+      class DummyAudioContext {
+        audioWorklet = { addModule: async () => Promise.resolve() };
+        state = "suspended";
+        suspend = async () => {};
+        resume = async () => {};
+        close = async () => {};
+      }
+      (window as any).AudioContext = DummyAudioContext;
+    } catch {}
+  }
+}
+
 export function WavoipProvider({ children }: { children: React.ReactNode }) {
   const { profile } = useAuth();
   const { selectedUnitId } = useUnit();
@@ -159,16 +228,22 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
     const tokens = instances.map((i: any) => i.wavoip_token).filter(Boolean) as string[];
     if (tokens.length === 0) return;
 
-    const wavoipInstance = new Wavoip({ tokens, platform: "atendi-crm" });
-    setWavoip(wavoipInstance);
-    
-    wavoipInstance.getDevices().forEach((device: any) => {
-      device.onStatus((status: string) => {
-        console.log(`[Wavoip] Dispositivo ${device.token.substring(0, 8)}... status: ${status}`);
-      });
-    });
+    let unsubOffer: (() => void) | undefined;
+    let wavoipInstance: any = null;
 
-    const unsubOffer = wavoipInstance.on("offer", async (offer: any) => {
+    try {
+      ensureAudioContextCompatibility();
+
+      wavoipInstance = new Wavoip({ tokens, platform: "atendi-crm" });
+      setWavoip(wavoipInstance);
+      
+      wavoipInstance.getDevices().forEach((device: any) => {
+        device.onStatus((status: string) => {
+          console.log(`[Wavoip] Dispositivo ${device.token.substring(0, 8)}... status: ${status}`);
+        });
+      });
+
+      unsubOffer = wavoipInstance.on("offer", async (offer: any) => {
       console.log("Chamada recebida de", offer.peer.phone);
 
       try {
@@ -276,16 +351,29 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
       });
     });
 
-    Promise.all(wavoipInstance.wakeUpDevices()).then((results) => {
-      console.log("Wavoip devices awakened for incoming calls:", results);
-    }).catch(err => {
-      console.error("Failed to wake up Wavoip devices:", err);
-    });
+      Promise.all(wavoipInstance.wakeUpDevices()).then((results: any) => {
+        console.log("Wavoip devices awakened for incoming calls:", results);
+      }).catch((err: any) => {
+        console.error("Failed to wake up Wavoip devices:", err);
+      });
+    } catch (err: any) {
+      console.warn(
+        "[Wavoip] Inicialização do Wavoip suprimida (contexto de rede/áudio não suportado):",
+        err?.message || err
+      );
+      setWavoip(null);
+    }
 
     return () => {
-      unsubOffer();
-      const allTokens = wavoipInstance.getDevices().map((d: any) => d.token);
-      wavoipInstance.removeDevices(allTokens);
+      if (unsubOffer) unsubOffer();
+      if (wavoipInstance) {
+        try {
+          const allTokens = wavoipInstance.getDevices().map((d: any) => d.token);
+          wavoipInstance.removeDevices(allTokens);
+        } catch (e) {
+          console.warn("[Wavoip] Erro ao remover dispositivos no unmount:", e);
+        }
+      }
     };
   }, [instances]);
 

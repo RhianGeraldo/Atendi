@@ -7,6 +7,7 @@ import { WavoipCallOverlay } from "@/components/whatsapp/wavoip-call-overlay";
 import { CopilotProvider } from "@/hooks/use-copilot";
 import { CopilotDrawer } from "@/components/copilot/copilot-drawer";
 import { useActivityTracker } from "@/lib/hooks/use-activity-tracker";
+import { useGlobalNotifications } from "@/lib/hooks/use-global-notifications";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -19,6 +20,9 @@ function AuthenticatedLayout() {
 
   // Rastreia a atividade real do usuário (ativo, ocioso, aba em segundo plano)
   useActivityTracker();
+
+  // Gerenciador Global de Notificações (Sons iPhone/ICQ, Push Desktop, Título da aba e Toasts)
+  useGlobalNotifications();
 
   useEffect(() => {
     if (!loading && !session) {

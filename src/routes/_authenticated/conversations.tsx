@@ -44,6 +44,13 @@ import { EmptyChat } from "@/components/chat/empty-chat";
 import { useSlaSettings } from "@/lib/use-sla";
 import { calculateConversationSla } from "@/lib/sla";
 import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
+import { useTeamChat } from "@/components/team-chat/use-team-chat";
+import { TeamChannelsSidebar } from "@/components/team-chat/team-channels-sidebar";
+import { TeamChatPanel } from "@/components/team-chat/team-chat-panel";
+import { CreateChannelDialog } from "@/components/team-chat/create-channel-dialog";
+import { NewDirectChatDialog } from "@/components/team-chat/new-direct-chat-dialog";
+import { MessageSquare, Users } from "lucide-react";
+import { toast } from "sonner";
 
 export type { ConvRow, MessageRow, Status, TabType };
 
@@ -86,7 +93,12 @@ function ConversationsPage() {
     return () => clearTimeout(handler);
   }, [search]);
 
-  const [showSidebar, setShowSidebar] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(() => {
+    if (typeof window !== "undefined") {
+      return window.innerWidth >= 768;
+    }
+    return true;
+  });
   const { selectedUnitId } = useUnit();
   const [instanceFilter, setInstanceFilter] = useState<string | null>(null);
   const [lastSelectedConv, setLastSelectedConv] = useState<ConvRow | null>(null);
@@ -99,6 +111,33 @@ function ConversationsPage() {
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
   const { slaSettings } = useSlaSettings();
   const [slaFilter, setSlaFilter] = useState<"all" | "breached" | "warning" | "ok">("all");
+
+  // Estados do Chat da Equipe (Multiunidades)
+  const [chatMode, setChatMode] = useState<"clients" | "team">("clients");
+  const [selectedTeamChannelId, setSelectedTeamChannelId] = useState<string | null>(null);
+  const [createChannelOpen, setCreateChannelOpen] = useState(false);
+  const [newDirectChatOpen, setNewDirectChatOpen] = useState(false);
+
+  const teamChat = useTeamChat(selectedTeamChannelId, {
+    onSelectChannel: (cid) => {
+      setChatMode("team");
+      setSelectedTeamChannelId(cid);
+    },
+  });
+
+  // Seleciona o primeiro canal por padrão no desktop ao entrar no modo equipe
+  useEffect(() => {
+    if (isDesktop && chatMode === "team" && !selectedTeamChannelId && teamChat.channels.length > 0) {
+      setSelectedTeamChannelId(teamChat.channels[0].id);
+    }
+  }, [isDesktop, chatMode, selectedTeamChannelId, teamChat.channels]);
+
+  // Marca canal como lido ao selecionar
+  useEffect(() => {
+    if (selectedTeamChannelId) {
+      teamChat.markAsRead(selectedTeamChannelId);
+    }
+  }, [selectedTeamChannelId, teamChat.markAsRead]);
 
   const { data: myUnits } = useQuery({
     queryKey: ["my_units_filter", profile?.id],
@@ -474,7 +513,7 @@ function ConversationsPage() {
     staleTime: 30 * 1000,
   });
 
-  // Se a conversa aberta estiver em outra aba ou instância/departamento filtrado, sincroniza automaticamente ao abrir
+  // Sincroniza a aba apenas na carga inicial se o usuário abriu a página diretamente via link com parâmetro "c" e sem "tab"
   useEffect(() => {
     if (directSelectedConv && selectedId === directSelectedConv.id) {
       const isGroup = !!(
@@ -484,32 +523,11 @@ function ConversationsPage() {
             directSelectedConv.contact.phone.length > 18))
       );
       const convTab = isGroup ? "groups" : (directSelectedConv.status as TabType);
-      if (convTab && !searchTab) {
+      if (convTab && searchConvId && !searchTab) {
         setTab(convTab);
       }
-      if (
-        instanceFilter &&
-        instanceFilter !== "all" &&
-        directSelectedConv.whatsapp_instance_id !== instanceFilter
-      ) {
-        setInstanceFilter("all");
-      }
-      if (
-        departmentFilter &&
-        departmentFilter !== "all" &&
-        directSelectedConv.department_id !== departmentFilter
-      ) {
-        setDepartmentFilter("all");
-      }
-      if (agentFilter && agentFilter !== "all") {
-        if (agentFilter === "unassigned" && directSelectedConv.assigned_agent_id) {
-          setAgentFilter("all");
-        } else if (agentFilter !== directSelectedConv.assigned_agent_id) {
-          setAgentFilter("all");
-        }
-      }
     }
-  }, [directSelectedConv?.id, selectedId]);
+  }, [directSelectedConv?.id, selectedId, searchConvId, searchTab]);
 
   const { data: unreadCounts } = useQuery({
     queryKey: [
@@ -684,6 +702,109 @@ function ConversationsPage() {
     enabled: !!profile && (isAdmin || instances !== undefined),
   });
 
+  const checkConversationMatchesQuery = useCallback(
+    (
+      conv: ConvRow,
+      queryKey: unknown[],
+    ): boolean => {
+      if (!conv || !queryKey || queryKey[0] !== "conversations") return false;
+
+      const queryCompanyId = queryKey[1] as string | undefined;
+      const queryTab = queryKey[2] as TabType;
+      const queryUnitId = queryKey[3] as string | undefined;
+      const querySearch = queryKey[7] as string | undefined;
+      const queryInstanceFilter = queryKey[8] as string | null | undefined;
+      const queryDepartmentFilter = queryKey[9] as string | null | undefined;
+      const queryAgentFilter = queryKey[10] as string | null | undefined;
+
+      // 1. Empresa
+      if (queryCompanyId && conv.contact?.company_id && conv.contact.company_id !== queryCompanyId) {
+        return false;
+      }
+
+      // 2. Tab / Grupo / Status
+      const isGroup = !!(
+        conv.contact?.phone &&
+        (conv.contact.phone.startsWith("120363") ||
+          (conv.contact.phone.includes("-") && conv.contact.phone.length > 18))
+      );
+
+      if (queryTab === "groups") {
+        if (!isGroup) return false;
+      } else {
+        if (isGroup) return false;
+        if (conv.status !== queryTab) return false;
+      }
+
+      // 3. Unidade
+      if (queryUnitId && queryUnitId !== "all") {
+        if (conv.unit_id !== queryUnitId) return false;
+      }
+
+      // 4. Instância (filtro do usuário)
+      if (queryInstanceFilter && queryInstanceFilter !== "all") {
+        if (conv.whatsapp_instance_id !== queryInstanceFilter) return false;
+      }
+
+      // 5. Departamento (filtro do usuário)
+      if (queryDepartmentFilter && queryDepartmentFilter !== "all") {
+        if (conv.department_id !== queryDepartmentFilter) return false;
+      }
+
+      // 6. Atendente (filtro do usuário)
+      if (queryAgentFilter && queryAgentFilter !== "all") {
+        if (queryAgentFilter === "unassigned") {
+          if (conv.assigned_agent_id) return false;
+        } else {
+          if (conv.assigned_agent_id !== queryAgentFilter) return false;
+        }
+      }
+
+      // 7. Busca (filtro do usuário)
+      if (querySearch && querySearch.trim()) {
+        const term = querySearch.toLowerCase().trim();
+        const name = conv.contact?.name?.toLowerCase() || "";
+        const phone = conv.contact?.phone || "";
+        if (!name.includes(term) && !phone.includes(term)) return false;
+      }
+
+      // 8. Permissões de não-admin
+      if (!isAdmin && profile) {
+        if (instances && instances.length > 0) {
+          const allowedIds = instances.map((i: any) => i.id);
+          if (conv.whatsapp_instance_id && !allowedIds.includes(conv.whatsapp_instance_id)) {
+            return false;
+          }
+        }
+
+        const isManager = profile.role === "manager";
+        const userDeptId = profile.department_id;
+        const isAssignedToMe = conv.assigned_agent_id === profile.id;
+        const isMyDept = userDeptId && conv.department_id === userDeptId;
+        const isGeneral = !conv.department_id;
+
+        if (isManager) {
+          if (userDeptId && conv.department_id !== userDeptId && !isAssignedToMe) {
+            return false;
+          }
+        } else {
+          if (queryTab === "waiting") {
+            if (!isGeneral && !isMyDept && !isAssignedToMe) return false;
+          } else if (queryTab === "active") {
+            if (!isAssignedToMe && !(!conv.assigned_agent_id && (isMyDept || isGeneral))) {
+              return false;
+            }
+          } else if (queryTab === "resolved") {
+            if (!isAssignedToMe) return false;
+          }
+        }
+      }
+
+      return true;
+    },
+    [isAdmin, instances, profile],
+  );
+
   const updateConversationInCache = useCallback(
     (
       convId: string,
@@ -713,7 +834,7 @@ function ConversationsPage() {
         if (existingBaseConv) break;
       }
 
-      const effectiveConv: ConvRow | null = existingBaseConv
+      let effectiveConv: ConvRow | null = existingBaseConv
         ? ({ ...existingBaseConv, ...updates } as ConvRow)
         : updates.id && updates.contact
           ? (updates as ConvRow)
@@ -723,6 +844,10 @@ function ConversationsPage() {
         return;
       }
 
+      if (targetStatus && targetStatus !== "groups") {
+        effectiveConv = { ...effectiveConv, status: targetStatus };
+      }
+
       queries.forEach(
         ([queryKey, oldData]: [
           unknown,
@@ -730,25 +855,19 @@ function ConversationsPage() {
         ]) => {
           if (!oldData || !oldData.pages) return;
 
-          const queryTab = (queryKey as unknown[])[2] as TabType;
-
-          const isGroup = !!(
-            effectiveConv.contact?.phone &&
-            (effectiveConv.contact.phone.startsWith("120363") ||
-              (effectiveConv.contact.phone.includes("-") &&
-                effectiveConv.contact.phone.length > 18))
+          const belongsToThisQuery = checkConversationMatchesQuery(
+            effectiveConv!,
+            queryKey as unknown[],
           );
-          const convStatus = isGroup ? "groups" : targetStatus || effectiveConv.status || "active";
-          const belongsToThisTab = convStatus === queryTab;
 
           let foundInThisQuery = false;
 
           const updatedPages = oldData.pages.map((page) => {
             if (!page || !page.rows) return page;
 
-            // Se pertence a esta aba e é moveToTop, remove da posição anterior para recolocar no topo
-            // Se NÃO pertence a esta aba, remove de vez desta aba (ex: migrou de 'active' ou 'resolved' para 'waiting')
-            if (moveToTop || !belongsToThisTab) {
+            // Se pertence a esta query e é moveToTop, remove da posição anterior para recolocar no topo
+            // Se NÃO pertence a esta query (filtros não batem ou migrou de status), remove desta query
+            if (moveToTop || !belongsToThisQuery) {
               const filteredRows = page.rows.filter((c: ConvRow) => {
                 if (c.id === convId) {
                   foundInThisQuery = true;
@@ -758,11 +877,11 @@ function ConversationsPage() {
               });
               return { ...page, rows: filteredRows };
             } else {
-              // Atualiza em posição se pertencer a esta aba e não for moveToTop
+              // Atualiza em posição se pertencer a esta query e não for moveToTop
               const updatedRows = page.rows.map((c: ConvRow) => {
                 if (c.id === convId) {
                   foundInThisQuery = true;
-                  return effectiveConv;
+                  return effectiveConv!;
                 }
                 return c;
               });
@@ -772,15 +891,15 @@ function ConversationsPage() {
 
           let nextData = oldData;
 
-          if (belongsToThisTab) {
+          if (belongsToThisQuery) {
             if (moveToTop || !foundInThisQuery) {
-              // Adiciona ao topo da primeira página desta aba!
+              // Adiciona ao topo da primeira página desta query filtrada!
               if (updatedPages.length > 0 && updatedPages[0]) {
                 const firstPage = updatedPages[0];
                 const updatedFirstPage = {
                   ...firstPage,
                   rows: [
-                    effectiveConv,
+                    effectiveConv!,
                     ...(firstPage.rows || []).filter((r: ConvRow) => r.id !== convId),
                   ],
                 };
@@ -791,14 +910,14 @@ function ConversationsPage() {
               } else {
                 nextData = {
                   ...oldData,
-                  pages: [{ rows: [effectiveConv], rawCount: 1 }],
+                  pages: [{ rows: [effectiveConv!], rawCount: 1 }],
                 };
               }
             } else {
               nextData = { ...oldData, pages: updatedPages };
             }
           } else {
-            // Não pertence a esta aba: apenas garante que foi removido se estava aqui
+            // Não pertence a esta query: apenas garante que foi removido se estava aqui
             nextData = { ...oldData, pages: updatedPages };
           }
 
@@ -806,7 +925,7 @@ function ConversationsPage() {
         },
       );
     },
-    [qc],
+    [qc, checkConversationMatchesQuery],
   );
 
   const fetchAndInjectConversation = useCallback(
@@ -887,11 +1006,16 @@ function ConversationsPage() {
           (fullConv.contact.phone.startsWith("120363") ||
             (fullConv.contact.phone.includes("-") && fullConv.contact.phone.length > 18))
         );
-        const targetStatus: TabType = isGroup
-          ? "groups"
-          : preferredStatus || fullConv.status || "waiting";
+        let targetStatus: TabType = "waiting";
+        if (isGroup) {
+          targetStatus = "groups";
+        } else if (fullConv.status === "resolved" && preferredStatus === "waiting") {
+          targetStatus = "waiting";
+        } else {
+          targetStatus = (fullConv.status as TabType) || preferredStatus || "waiting";
+        }
 
-        updateConversationInCache(convId, fullConv, {
+        updateConversationInCache(convId, { ...fullConv, status: targetStatus as any }, {
           moveToTop: true,
           status: targetStatus,
         });
@@ -1181,6 +1305,18 @@ function ConversationsPage() {
             });
           }
         })
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "internal_messages" },
+          (payload) => {
+            const newMsg = payload.new as any;
+            // Invalida dados dos canais para atualizar contador de não lidas e prévia
+            qc.invalidateQueries({ queryKey: ["internal-channels"] });
+            if (newMsg?.channel_id) {
+              qc.invalidateQueries({ queryKey: ["internal-messages", newMsg.channel_id] });
+            }
+          },
+        )
         .subscribe((status) => {
           if (!isMounted) return;
 
@@ -1254,6 +1390,35 @@ function ConversationsPage() {
   const filtered = useMemo(() => {
     let list = conversations.filter((c) => !!c?.id);
 
+    // Filtro de Instância
+    if (instanceFilter && instanceFilter !== "all") {
+      list = list.filter((c) => c.whatsapp_instance_id === instanceFilter);
+    }
+
+    // Filtro de Departamento
+    if (departmentFilter && departmentFilter !== "all") {
+      list = list.filter((c) => c.department_id === departmentFilter);
+    }
+
+    // Filtro de Atendente
+    if (agentFilter && agentFilter !== "all") {
+      if (agentFilter === "unassigned") {
+        list = list.filter((c) => !c.assigned_agent_id);
+      } else {
+        list = list.filter((c) => c.assigned_agent_id === agentFilter);
+      }
+    }
+
+    // Filtro de Busca
+    if (debouncedSearch && debouncedSearch.trim()) {
+      const term = debouncedSearch.toLowerCase().trim();
+      list = list.filter((c) => {
+        const name = c.contact?.name?.toLowerCase() || "";
+        const phone = c.contact?.phone || "";
+        return name.includes(term) || phone.includes(term);
+      });
+    }
+
     if (!isAdmin) {
       if (instances) {
         const allowedIds = instances.map((inst: any) => inst.id);
@@ -1297,6 +1462,10 @@ function ConversationsPage() {
     return list;
   }, [
     conversations,
+    instanceFilter,
+    departmentFilter,
+    agentFilter,
+    debouncedSearch,
     slaFilter,
     slaSettings,
     isAdmin,
@@ -1332,38 +1501,88 @@ function ConversationsPage() {
       <aside
         className={cn(
           "flex w-full md:w-[360px] shrink-0 flex-col border-r border-border bg-card",
-          selectedId ? "hidden md:flex" : "flex",
+          (chatMode === "clients" ? selectedId : selectedTeamChannelId)
+            ? "hidden md:flex"
+            : "flex",
         )}
       >
-        {/* Loading bar */}
-        <div className="relative h-0.5 w-full overflow-hidden bg-transparent">
-          {isConvFetching && (
-            <div
-              className="absolute inset-0 bg-primary"
-              style={{
-                animation: "conv-loading-bar 1.2s ease-in-out infinite",
-              }}
-            />
-          )}
+        {/* Alternador de Modo: Clientes vs Equipe */}
+        <div className="p-2 border-b border-border bg-card">
+          <div className="grid grid-cols-2 gap-1 p-0.5 bg-muted/60 rounded-lg">
+            <button
+              onClick={() => setChatMode("clients")}
+              className={cn(
+                "flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-medium transition-all cursor-pointer",
+                chatMode === "clients"
+                  ? "bg-background text-foreground shadow-2xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Users className="h-3.5 w-3.5" />
+              <span>Clientes</span>
+            </button>
+            <button
+              onClick={() => setChatMode("team")}
+              className={cn(
+                "flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-medium transition-all relative cursor-pointer",
+                chatMode === "team"
+                  ? "bg-background text-foreground shadow-2xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>Equipe</span>
+              {teamChat.totalTeamUnread > 0 && (
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground shadow-2xs">
+                  {teamChat.totalTeamUnread > 99 ? "99+" : teamChat.totalTeamUnread}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
-        <style>{`
-          @keyframes conv-loading-bar {
-            0%   { transform: translateX(-100%); }
-            50%  { transform: translateX(0%); }
-            100% { transform: translateX(100%); }
-          }
-        `}</style>
-        <div className="border-b border-border p-3">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Buscar nome ou número"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-9 pl-8"
-              />
+
+        {chatMode === "team" ? (
+          <TeamChannelsSidebar
+            channels={teamChat.channels}
+            selectedChannelId={selectedTeamChannelId}
+            onSelectChannel={(cid) => setSelectedTeamChannelId(cid)}
+            onOpenCreateChannel={() => setCreateChannelOpen(true)}
+            onOpenNewDirectChat={() => setNewDirectChatOpen(true)}
+            onlineUserIds={teamChat.onlineUserIds}
+            notificationPermission={teamChat.notificationPermission}
+            onRequestNotificationPermission={teamChat.requestNotificationPermission}
+          />
+        ) : (
+          <>
+            {/* Loading bar */}
+            <div className="relative h-0.5 w-full overflow-hidden bg-transparent">
+              {isConvFetching && (
+                <div
+                  className="absolute inset-0 bg-primary"
+                  style={{
+                    animation: "conv-loading-bar 1.2s ease-in-out infinite",
+                  }}
+                />
+              )}
             </div>
+            <style>{`
+              @keyframes conv-loading-bar {
+                0%   { transform: translateX(-100%); }
+                50%  { transform: translateX(0%); }
+                100% { transform: translateX(100%); }
+              }
+            `}</style>
+            <div className="border-b border-border p-3">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar nome ou número"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="h-9 pl-8"
+                  />
+                </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -1729,29 +1948,78 @@ function ConversationsPage() {
               ))}
             </>
           )}
-          {hasNextPage && !isFetchingNextPage && (
-            <div className="flex justify-center p-3">
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full text-xs text-muted-foreground hover:text-foreground"
-                onClick={() => fetchNextPage()}
-              >
-                Carregar mais
-              </Button>
+              {hasNextPage && !isFetchingNextPage && (
+                <div className="flex justify-center p-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => fetchNextPage()}
+                  >
+                    Carregar mais
+                  </Button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </aside>
 
       {/* Chat */}
       <section
         className={cn(
           "flex min-w-0 flex-1 flex-col bg-background h-full min-h-0 overflow-hidden",
-          !selectedId ? "hidden md:flex" : "flex",
+          !(chatMode === "clients" ? selectedId : selectedTeamChannelId)
+            ? "hidden md:flex"
+            : "flex",
         )}
       >
-        {selected ? (
+        {chatMode === "team" ? (
+          (() => {
+            const currentTeamChannel = teamChat.channels.find(
+              (c) => c.id === selectedTeamChannelId,
+            );
+            return currentTeamChannel ? (
+              <TeamChatPanel
+                key={currentTeamChannel.id}
+                channel={currentTeamChannel}
+                messages={teamChat.messages}
+                isLoadingMessages={teamChat.isLoadingMessages}
+                onSendMessage={teamChat.sendMessage.mutate}
+                onUploadFile={teamChat.uploadFile}
+                onToggleReaction={teamChat.toggleReaction.mutate}
+                teamMembers={teamChat.teamMembers}
+                isSending={teamChat.sendMessage.isPending}
+                onBack={() => setSelectedTeamChannelId(null)}
+                onlineUserIds={teamChat.onlineUserIds}
+                typingUsers={teamChat.typingUserNames}
+                onTyping={teamChat.sendTyping}
+                onStopTyping={teamChat.sendStopTyping}
+                onTogglePinMessage={teamChat.togglePinMessage.mutate}
+                onEditMessage={teamChat.editMessage.mutate}
+                onDeleteMessage={teamChat.deleteMessage.mutate}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3 p-8 text-center">
+                <div className="p-4 rounded-full bg-primary/10 text-primary">
+                  <MessageSquare className="h-10 w-10" />
+                </div>
+                <h3 className="text-base font-semibold text-foreground">Chat da Equipe</h3>
+                <p className="text-xs max-w-sm">
+                  Selecione um canal da empresa, da sua unidade ou converse diretamente com um colega de trabalho.
+                </p>
+                <div className="flex gap-2 mt-2">
+                  <Button size="sm" variant="outline" onClick={() => setNewDirectChatOpen(true)}>
+                    Conversar com Colega
+                  </Button>
+                  <Button size="sm" onClick={() => setCreateChannelOpen(true)}>
+                    Criar Canal
+                  </Button>
+                </div>
+              </div>
+            );
+          })()
+        ) : selected ? (
           <ChatPanel
             key={selected.id}
             conv={selected}
@@ -1771,15 +2039,15 @@ function ConversationsPage() {
         )}
       </section>
 
-      {/* Contact Info Sidebar - Desktop */}
-      {selected && showSidebar && (
+      {/* Contact Info Sidebar - Desktop (Apenas Clientes) */}
+      {chatMode === "clients" && selected && showSidebar && (
         <aside className="hidden w-[320px] shrink-0 flex-col border-l border-border bg-card md:flex xl:w-[380px] 2xl:w-[420px] overflow-hidden">
           <ContactSidebar conv={selected} onClose={() => setShowSidebar(false)} />
         </aside>
       )}
 
-      {/* Contact Info Sidebar - Mobile */}
-      {selected && !isDesktop && (
+      {/* Contact Info Sidebar - Mobile (Apenas Clientes) */}
+      {chatMode === "clients" && selected && !isDesktop && (
         <Sheet open={showSidebar} onOpenChange={setShowSidebar}>
           <SheetContent className="w-full sm:w-[400px] p-0 flex flex-col md:hidden">
             <SheetTitle className="sr-only">Informações do Contato</SheetTitle>
@@ -1790,6 +2058,33 @@ function ConversationsPage() {
           </SheetContent>
         </Sheet>
       )}
+
+      {/* Modais do Chat da Equipe */}
+      <CreateChannelDialog
+        open={createChannelOpen}
+        onOpenChange={setCreateChannelOpen}
+        onCreateChannel={async (data) => {
+          const cid = await teamChat.createChannel(data);
+          if (cid) setSelectedTeamChannelId(cid);
+        }}
+      />
+      <NewDirectChatDialog
+        open={newDirectChatOpen}
+        onOpenChange={setNewDirectChatOpen}
+        teamMembers={teamChat.teamMembers}
+        onSelectMember={async (uid) => {
+          try {
+            const cid = await teamChat.getOrCreateDirectChannel(uid);
+            if (cid) {
+              setSelectedTeamChannelId(cid);
+              setChatMode("team");
+            }
+          } catch (err: any) {
+            console.error("Erro ao abrir chat direto:", err);
+            toast.error(err?.message || "Não foi possível abrir conversa com o colega.");
+          }
+        }}
+      />
     </div>
   );
 }

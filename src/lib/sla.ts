@@ -136,10 +136,10 @@ export function calculateConversationSla(
   let waitingDateStr: string | null = null;
 
   if (conv.status === "waiting") {
-    // Na fila de espera: o cliente aguarda o primeiro atendimento
+    // Na fila de espera: o cliente aguarda o primeiro atendimento desde que entrou na fila
     isWaiting = true;
     isFirstResponse = true;
-    waitingDateStr = lastMsg?.created_at || conv.last_message_at || conv.started_at;
+    waitingDateStr = conv.started_at || conv.last_message_at || lastMsg?.created_at;
   } else if (conv.status === "active") {
     // Em andamento:
     // 1. Se temos informação da última mensagem e foi do contato:

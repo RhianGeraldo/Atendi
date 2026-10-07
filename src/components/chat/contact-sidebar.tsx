@@ -32,18 +32,19 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const [searchLabel, setSearchLabel] = useState("");
+  const [labelPopoverOpen, setLabelPopoverOpen] = useState(false);
 
   const { data: allLabels } = useQuery({
     queryKey: ["labels", activeCompanyId],
     queryFn: async () => {
       if (!activeCompanyId) return [];
-      const { data } = await supabase.from('labels').select('*').eq('company_id', activeCompanyId);
+      const { data } = await supabase.from('labels').select('*').eq('company_id', activeCompanyId).order("name");
       return data || [];
     },
     enabled: !!activeCompanyId
   });
 
-  const { data: contactLabels = [] } = useQuery({
+  const { data: contactLabels, isLoading: isLoadingContactLabels } = useQuery({
     queryKey: ["contact-labels", conv.contact?.id],
     queryFn: async () => {
       if (!conv.contact?.id) return [];
@@ -55,10 +56,12 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
       return (data || []) as { labels: { id: string; name: string; color: string | null } }[];
     },
     enabled: !!conv.contact?.id,
-    staleTime: 30 * 1000,
+    staleTime: 5 * 1000,
   });
 
-  const effectiveLabels = contactLabels.length > 0 ? contactLabels : (conv.contact?.contact_labels || []);
+  const effectiveLabels = !isLoadingContactLabels && contactLabels !== undefined
+    ? contactLabels
+    : (conv.contact?.contact_labels || []);
 
   const { allSources, addSource, updateContactSource } = useContactSources();
   const [sourcePopoverOpen, setSourcePopoverOpen] = useState(false);
@@ -110,34 +113,52 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
 
   const toggleLabel = useMutation({
     mutationFn: async ({ labelId, action }: { labelId: string, action: "add" | "remove" }) => {
-      if (!selectedUnitId || !conv.contact?.id) return;
-      const res = await toggleContactLabelAction({ data: { unitId: selectedUnitId, contactId: conv.contact?.id, labelId, action } });
-      if (!res?.success) throw new Error("Falha na API do WhatsApp. O EvoGo rejeitou a ação.");
+      if (!conv.contact?.id) throw new Error("Contato não identificado");
+      const unitId = selectedUnitId || conv.unit_id || null;
+      const res = await toggleContactLabelAction({ 
+        data: { 
+          unitId, 
+          contactId: conv.contact.id, 
+          labelId, 
+          action 
+        } 
+      });
+      if (!res?.success) throw new Error(res?.error || "Erro ao atualizar etiqueta");
       return res;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contact-labels", conv.contact?.id] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
     },
-    onError: (e) => toast.error(e.message)
+    onError: (e: any) => toast.error(e.message || "Erro ao atualizar etiqueta")
   });
 
   const createLabel = useMutation({
     mutationFn: async (name: string) => {
-      if (!selectedUnitId) return;
-      const res = await createLabelAction({ data: { unitId: selectedUnitId, name } });
+      const trimmedName = name.trim();
+      if (!trimmedName) throw new Error("O nome da etiqueta é obrigatório");
+      const unitId = selectedUnitId || conv.unit_id || null;
+      const res = await createLabelAction({ 
+        data: { 
+          unitId, 
+          companyId: activeCompanyId, 
+          name: trimmedName 
+        } 
+      });
       if (!res?.success || !res.label) throw new Error(res?.error || "Falha ao criar etiqueta");
       return res.label;
     },
     onSuccess: async (label) => {
       qc.invalidateQueries({ queryKey: ["labels", activeCompanyId] });
       // Auto assign the newly created label
-      if (conv.contact?.id && selectedUnitId) {
+      if (conv.contact?.id) {
         toggleLabel.mutate({ labelId: label.id, action: "add" });
       }
       setSearchLabel("");
       toast.success("Etiqueta criada!");
     },
-    onError: (e) => toast.error((e as Error).message)
+    onError: (e: any) => toast.error(e.message || "Falha ao criar etiqueta")
   });
 
   const updateContact = useMutation({
@@ -366,32 +387,35 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                   <Tag className="h-3.5 w-3.5 text-muted-foreground" /> 
                   Etiquetas
                 </h4>
-                <Popover>
+                <Popover open={labelPopoverOpen} onOpenChange={setLabelPopoverOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full text-muted-foreground hover:text-primary">
+                    <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full text-muted-foreground hover:text-primary cursor-pointer">
                       <Plus className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="p-0 w-56" align="end">
+                  <PopoverContent className="p-0 w-60" align="end">
                     <Command>
                       <CommandInput 
-                        placeholder="Buscar etiqueta..." 
+                        placeholder="Buscar ou criar etiqueta..." 
                         className="h-8 text-xs" 
                         value={searchLabel}
                         onValueChange={setSearchLabel}
                       />
                       <CommandList>
                         <CommandEmpty>
-                          {searchLabel.length > 0 ? (
+                          {searchLabel.trim().length > 0 ? (
                             <Button 
                               variant="ghost" 
-                              className="w-full justify-start text-xs h-8 font-normal"
-                              onClick={() => createLabel.mutate(searchLabel)}
+                              className="w-full justify-start text-xs h-8 font-normal cursor-pointer text-primary hover:text-primary"
+                              onClick={() => createLabel.mutate(searchLabel.trim())}
                               disabled={createLabel.isPending}
                             >
-                              Criar "{searchLabel}"
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Criar "{searchLabel.trim()}"
                             </Button>
-                          ) : "Nenhuma etiqueta encontrada."}
+                          ) : (
+                            "Nenhuma etiqueta encontrada."
+                          )}
                         </CommandEmpty>
                         <CommandGroup>
                           {allLabels?.map(label => {
@@ -402,18 +426,35 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                                 onSelect={() => {
                                   toggleLabel.mutate({ labelId: label.id, action: isSelected ? "remove" : "add" });
                                 }}
-                                className="text-xs"
+                                className="text-xs cursor-pointer flex items-center justify-between py-1.5"
                               >
-                                <div 
-                                  className="w-2 h-2 rounded-full mr-2" 
-                                  style={{ backgroundColor: label.color || "#6b7280" }}
-                                />
-                                <span className="flex-1">{label.name}</span>
-                                {isSelected && <Square className="h-3 w-3 opacity-50 bg-primary/20" />}
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  <div 
+                                    className="w-2.5 h-2.5 rounded-full shrink-0" 
+                                    style={{ backgroundColor: label.color || "#6b7280" }}
+                                  />
+                                  <span className="truncate">{label.name}</span>
+                                </div>
+                                {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
                               </CommandItem>
                             );
                           })}
                         </CommandGroup>
+                        {searchLabel.trim().length > 0 && 
+                         !allLabels?.some(l => l.name.toLowerCase() === searchLabel.trim().toLowerCase()) && (
+                          <div className="p-1 border-t border-border/50">
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              className="w-full justify-start text-xs h-8 font-normal text-primary hover:text-primary hover:bg-primary/10 cursor-pointer"
+                              onClick={() => createLabel.mutate(searchLabel.trim())}
+                              disabled={createLabel.isPending}
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Criar "{searchLabel.trim()}"
+                            </Button>
+                          </div>
+                        )}
                       </CommandList>
                     </Command>
                   </PopoverContent>
@@ -429,14 +470,25 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                     <Badge 
                       key={label.id} 
                       variant="outline" 
-                      className="font-normal text-[10px] px-2 py-0 h-5"
+                      className="font-normal text-[10px] pl-2 pr-1 py-0 h-5 flex items-center gap-1 group/badge"
                       style={{ 
                         backgroundColor: `${hexColor}15`, 
                         color: hexColor, 
                         borderColor: `${hexColor}30` 
                       }}
                     >
-                      {label.name}
+                      <span>{label.name}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleLabel.mutate({ labelId: label.id, action: "remove" });
+                        }}
+                        className="h-3.5 w-3.5 rounded-full hover:bg-black/10 dark:hover:bg-white/10 flex items-center justify-center cursor-pointer opacity-70 hover:opacity-100 transition-opacity"
+                        title={`Remover etiqueta ${label.name}`}
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
                     </Badge>
                   );
                 })}

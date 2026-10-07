@@ -1101,29 +1101,55 @@ export const createLabelAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(
     z.object({
-      unitId: z.string().uuid(),
+      unitId: z.string().uuid().optional().nullable(),
+      companyId: z.string().uuid().optional().nullable(),
       name: z.string().min(1),
       color: z.string().optional(),
     }),
   )
   .handler(async ({ data, context }) => {
-    const { supabase } = context;
+    let targetCompanyId = data.companyId;
 
-    const { data: instance } = await supabaseAdmin
-      .from("whatsapp_instances")
-      .select("company_id")
-      .eq("unit_id", data.unitId)
-      .limit(1)
-      .maybeSingle();
+    if (!targetCompanyId && data.unitId) {
+      const { data: unit } = await supabaseAdmin
+        .from("units")
+        .select("company_id")
+        .eq("id", data.unitId)
+        .maybeSingle();
+      if (unit?.company_id) {
+        targetCompanyId = unit.company_id;
+      }
+    }
 
-    if (!instance?.company_id) return { success: false, error: "Empresa não encontrada" };
+    if (!targetCompanyId && data.unitId) {
+      const { data: instance } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("company_id")
+        .eq("unit_id", data.unitId)
+        .limit(1)
+        .maybeSingle();
+      if (instance?.company_id) {
+        targetCompanyId = instance.company_id;
+      }
+    }
+
+    if (!targetCompanyId) {
+      const { data: userProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("company_id")
+        .eq("id", context.user.id)
+        .maybeSingle();
+      targetCompanyId = userProfile?.company_id;
+    }
+
+    if (!targetCompanyId) return { success: false, error: "Empresa não encontrada" };
 
     const randomColor = `#${Math.floor(Math.random() * 16777215)
       .toString(16)
       .padStart(6, "0")}`;
     const newLabel = {
-      company_id: instance.company_id,
-      name: data.name,
+      company_id: targetCompanyId,
+      name: data.name.trim(),
       color: data.color || randomColor,
       external_id: crypto.randomUUID(), // using local UUID as external_id for consistency
     };
@@ -1135,7 +1161,7 @@ export const createLabelAction = createServerFn({ method: "POST" })
       .single();
     if (error) {
       console.error("Failed to create label:", error);
-      return { success: false, error: "Falha ao criar etiqueta" };
+      return { success: false, error: "Falha ao criar etiqueta: " + error.message };
     }
 
     return { success: true, label };
@@ -1145,7 +1171,7 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(
     z.object({
-      unitId: z.string().uuid(),
+      unitId: z.string().uuid().optional().nullable(),
       contactId: z.string().uuid(),
       labelId: z.string().uuid(),
       action: z.enum(["add", "remove"]),
@@ -1162,8 +1188,9 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
         );
       if (error) {
         console.error("Failed to insert contact_label locally:", error);
-        return { success: false };
+        return { success: false, error: error.message };
       }
+      return { success: true };
     } else {
       const { error } = await supabaseAdmin
         .from("contact_labels")
@@ -1172,8 +1199,9 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
         .eq("label_id", data.labelId);
       if (error) {
         console.error("Failed to delete contact_label locally:", error);
-        return { success: false };
+        return { success: false, error: error.message };
       }
+      return { success: true };
     }
   });
 
@@ -3164,3 +3192,4 @@ export const unblockContactAction = createServerFn({ method: "POST" })
 
     return { success: true };
   });
+

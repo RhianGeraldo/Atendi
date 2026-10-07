@@ -9,7 +9,6 @@ import {
   ChevronLeft, 
   ChevronUp, 
   ChevronDown, 
-  PanelRight, 
   Users, 
   Bot, 
   BookOpen, 
@@ -36,8 +35,8 @@ import {
 import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
-import TextareaAutosize from "react-textarea-autosize";
 import EmojiPicker from "emoji-picker-react";
+import { markMessageAsSentByMe } from "@/lib/hooks/use-global-notifications";
 
 import { supabase } from "@/integrations/supabase/client";
 import { 
@@ -570,6 +569,7 @@ export function ChatPanel({
         profiles: profile?.name ? { name: profile.name } : undefined
       };
 
+      markMessageAsSentByMe(optimisticMsg.id);
       qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
       
       if (!payload.isInternal) {
@@ -608,6 +608,8 @@ export function ChatPanel({
     },
     onSuccess: (result) => {
       if (result?.message) {
+        if (result.message.id) markMessageAsSentByMe(result.message.id);
+        if (result.message.remote_msg_id) markMessageAsSentByMe(result.message.remote_msg_id);
         qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
           if (!old) return old;
           return old.map(m =>
@@ -1383,13 +1385,6 @@ export function ChatPanel({
                 </Dialog>
               </>
             )}
-            <button 
-              className={cn("rounded-md p-2 text-muted-foreground hover:bg-accent transition-colors ml-1", showSidebar && "bg-accent text-foreground")}
-              onClick={onToggleSidebar}
-              title="Informações do Contato"
-            >
-              <PanelRight className="h-4.5 w-4.5" />
-            </button>
           </div>
         </header>
 
