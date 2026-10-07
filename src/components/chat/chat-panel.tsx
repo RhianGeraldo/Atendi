@@ -35,6 +35,7 @@ import {
 import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
+import TextareaAutosize from "react-textarea-autosize";
 import EmojiPicker from "emoji-picker-react";
 import { markMessageAsSentByMe } from "@/lib/hooks/use-global-notifications";
 
