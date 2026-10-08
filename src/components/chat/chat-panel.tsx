@@ -133,6 +133,7 @@ export function ChatPanel({
   const [text, setText] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
   const [isAdminNoteMode, setIsAdminNoteMode] = useState(false);
+  const [isLocallyAssigned, setIsLocallyAssigned] = useState(false);
   const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
   const isManagerOrAdmin = isAdmin || profile?.role === "manager";
   const [selectedFile, setSelectedFile] = useState<{ file: File | null; base64: string; type: string } | null>(null);
@@ -161,6 +162,7 @@ export function ChatPanel({
     setQuickMsgIndex(0);
     setIsAdminNoteMode(false);
     setIsInternalNote(false);
+    setIsLocallyAssigned(false);
   }, [conv.id]);
 
   const targetCompanyId = activeCompanyId || conv.contact?.company_id || profile?.company_id;
@@ -1141,14 +1143,61 @@ export function ChatPanel({
   const assignConv = useMutation({
     mutationFn: async () => {
       await assignConversationAction({ data: { conversationId: conv.id } });
-      await supabase.from("conversations").update({ ai_active: false }).eq("id", conv.id);
+    },
+    onMutate: async () => {
+      // Liberação otimista imediata do chat
+      setIsLocallyAssigned(true);
+
+      // Atualiza no cache do direct-conversation se existir
+      qc.setQueryData(["direct-conversation", conv.id], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          status: "active",
+          assigned_agent_id: profile?.id,
+          ai_active: false,
+          assigned_agent: profile ? { name: profile.name } : old.assigned_agent,
+        };
+      });
+
+      // Atualiza no cache da lista de conversas
+      qc.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
+        if (!oldData) return oldData;
+        if (oldData.pages) {
+          return {
+            ...oldData,
+            pages: oldData.pages.map((page: any) => {
+              if (!page || !page.rows) return page;
+              return {
+                ...page,
+                rows: page.rows.map((r: any) =>
+                  r.id === conv.id
+                    ? {
+                        ...r,
+                        status: "active",
+                        assigned_agent_id: profile?.id,
+                        ai_active: false,
+                        assigned_agent: profile ? { name: profile.name } : r.assigned_agent,
+                      }
+                    : r
+                ),
+              };
+            }),
+          };
+        }
+        return oldData;
+      });
     },
     onSuccess: () => {
+      setIsLocallyAssigned(true);
       toast.success("Atendimento puxado para você.");
       qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["direct-conversation", conv.id] });
+      qc.invalidateQueries({ queryKey: ["unread-counts"] });
       onAssigned?.();
     },
     onError: (e) => {
+      setIsLocallyAssigned(false);
       toast.error("Erro ao puxar atendimento", { description: (e as Error).message });
     }
   });
@@ -1556,7 +1605,7 @@ export function ChatPanel({
 
         {/* Input / Composer */}
         <div className="border-t border-border bg-card p-3 flex flex-col gap-2 relative">
-          {((conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup) && (
+          {(!isGroup && !isLocallyAssigned && (conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id))))) && (
             !isAdminNoteMode ? (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card gap-2">
                 {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || isManagerOrAdmin) ? (
@@ -1608,7 +1657,7 @@ export function ChatPanel({
           )}
 
           {/* Banner de Modo Nota Interna para Administrador */}
-          {((conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && isAdminNoteMode) && (
+          {(!isGroup && !isLocallyAssigned && isAdminNoteMode && (conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id))))) && (
             <div className="flex items-center justify-between gap-2 px-3 py-2 bg-amber-500/15 border border-amber-500/30 text-amber-900 dark:text-amber-100 rounded-lg text-xs animate-in fade-in duration-200">
               <div className="flex items-center gap-2 truncate">
                 <FileText className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />

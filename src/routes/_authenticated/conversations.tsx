@@ -2152,7 +2152,28 @@ function ConversationsPage() {
             conv={selected}
             showSidebar={showSidebar}
             onToggleSidebar={() => setShowSidebar(!showSidebar)}
-            onAssigned={() => setTab("active")}
+            onAssigned={() => {
+              setTab("active");
+              if (selectedId) {
+                setLastSelectedConv((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        status: "active",
+                        assigned_agent_id: profile?.id,
+                        ai_active: false,
+                        assigned_agent: profile
+                          ? ({
+                              id: profile.id,
+                              name: profile.name,
+                              avatar_url: profile.avatar_url,
+                            } as any)
+                          : prev.assigned_agent,
+                      }
+                    : null,
+                );
+              }
+            }}
             onBack={handleCloseChat}
             onClose={handleCloseChat}
           />

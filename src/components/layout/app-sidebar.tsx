@@ -19,6 +19,7 @@ import {
   ChevronsUpDown,
   MapPin,
   GraduationCap,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
@@ -43,6 +44,7 @@ const items = [
   { key: "contacts", to: "/contacts", label: "Contatos", icon: Users },
   { key: "pipeline", to: "/pipeline", label: "Funil de Vendas", icon: KanbanSquare },
   { key: "tasks", to: "/tasks", label: "Tarefas", icon: CheckSquare },
+  { key: "todoo", to: "/todoo", label: "Meu Todoo", icon: Target },
   { key: "campaigns", to: "/campaigns", label: "Campanhas", icon: Megaphone },
   { key: "reports", to: "/reports", label: "Relatórios", icon: BarChart3 },
   { key: "training", to: "/training", label: "Treinamento & IA", icon: GraduationCap },

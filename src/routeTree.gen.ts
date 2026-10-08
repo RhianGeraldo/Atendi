@@ -26,6 +26,7 @@ import { Route as AuthenticatedPipelineRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
+import { Route as AuthenticatedTodooRouteImport } from './routes/_authenticated/todoo'
 import { Route as AuthenticatedTrainingRouteImport } from './routes/_authenticated/training'
 import { Route as AuthenticatedUnitsRouteImport } from './routes/_authenticated/units'
 
@@ -114,6 +115,11 @@ const AuthenticatedTasksRoute = AuthenticatedTasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedTodooRoute = AuthenticatedTodooRouteImport.update({
+  id: '/todoo',
+  path: '/todoo',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedTrainingRoute = AuthenticatedTrainingRouteImport.update({
   id: '/training',
   path: '/training',
@@ -142,6 +148,7 @@ export interface FileRoutesByFullPath {
   '/reports': typeof AuthenticatedReportsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/tasks': typeof AuthenticatedTasksRoute
+  '/todoo': typeof AuthenticatedTodooRoute
   '/training': typeof AuthenticatedTrainingRoute
   '/units': typeof AuthenticatedUnitsRoute
 }
@@ -162,6 +169,7 @@ export interface FileRoutesByTo {
   '/reports': typeof AuthenticatedReportsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/tasks': typeof AuthenticatedTasksRoute
+  '/todoo': typeof AuthenticatedTodooRoute
   '/training': typeof AuthenticatedTrainingRoute
   '/units': typeof AuthenticatedUnitsRoute
 }
@@ -184,6 +192,7 @@ export interface FileRoutesById {
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
+  '/_authenticated/todoo': typeof AuthenticatedTodooRoute
   '/_authenticated/training': typeof AuthenticatedTrainingRoute
   '/_authenticated/units': typeof AuthenticatedUnitsRoute
 }
@@ -206,6 +215,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/settings'
     | '/tasks'
+    | '/todoo'
     | '/training'
     | '/units'
   fileRoutesByTo: FileRoutesByTo
@@ -226,6 +236,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/settings'
     | '/tasks'
+    | '/todoo'
     | '/training'
     | '/units'
   id:
@@ -247,6 +258,7 @@ export interface FileRouteTypes {
     | '/_authenticated/reports'
     | '/_authenticated/settings'
     | '/_authenticated/tasks'
+    | '/_authenticated/todoo'
     | '/_authenticated/training'
     | '/_authenticated/units'
   fileRoutesById: FileRoutesById
@@ -382,6 +394,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTasksRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/todoo': {
+      id: '/_authenticated/todoo'
+      path: '/todoo'
+      fullPath: '/todoo'
+      preLoaderRoute: typeof AuthenticatedTodooRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/training': {
       id: '/_authenticated/training'
       path: '/training'
@@ -410,6 +429,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
+  AuthenticatedTodooRoute: typeof AuthenticatedTodooRoute
   AuthenticatedTrainingRoute: typeof AuthenticatedTrainingRoute
   AuthenticatedUnitsRoute: typeof AuthenticatedUnitsRoute
 }
@@ -425,6 +445,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedReportsRoute: AuthenticatedReportsRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedTasksRoute: AuthenticatedTasksRoute,
+  AuthenticatedTodooRoute: AuthenticatedTodooRoute,
   AuthenticatedTrainingRoute: AuthenticatedTrainingRoute,
   AuthenticatedUnitsRoute: AuthenticatedUnitsRoute,
 }

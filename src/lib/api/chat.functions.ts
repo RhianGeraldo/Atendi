@@ -1428,7 +1428,14 @@ export const assignConversationAction = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
-    // 1. Get the user's main department
+    // 1. Get current conversation to preserve existing department
+    const { data: currentConv } = await supabaseAdmin
+      .from("conversations")
+      .select("department_id")
+      .eq("id", data.conversationId)
+      .maybeSingle();
+
+    // 2. Get the user's main department
     const { data: userProfile } = await supabaseAdmin
       .from("profiles")
       .select("department_id")
@@ -1436,13 +1443,14 @@ export const assignConversationAction = createServerFn({ method: "POST" })
       .limit(1)
       .maybeSingle();
 
-    // We don't strictly require a department, but we'll assign it if found.
     const updateData: any = {
       assigned_agent_id: userId,
       status: "active",
+      ai_active: false,
     };
 
-    if (userProfile?.department_id) {
+    // Só preenche departamento caso a conversa ainda não tenha um atribuído
+    if (!currentConv?.department_id && userProfile?.department_id) {
       updateData.department_id = userProfile.department_id;
     }
 
