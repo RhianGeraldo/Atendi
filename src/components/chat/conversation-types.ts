@@ -37,7 +37,7 @@ export interface ConvRow {
   whatsapp_instance_id: string | null;
   unit?: { name: string; color?: string | null; custom_variables?: any } | null;
   whatsapp_instance?: { name: string } | null;
-  last_message?: { sender_type: string; created_at: string; is_internal?: boolean }[];
+  last_message?: { sender_type: string; created_at: string; is_internal?: boolean; waiting_since?: string }[];
 }
 
 export interface MessageRow {

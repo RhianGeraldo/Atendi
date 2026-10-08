@@ -13,12 +13,12 @@ import {
   FileText,
   Image as ImageIcon,
   Mic,
-  Download,
   FolderOpen,
 } from "lucide-react";
 import { InternalChannel, InternalMessage } from "./team-chat-types";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { PdfViewer } from "@/components/chat/message-bubble";
 
 interface TeamChatMediaDrawerProps {
   channel: InternalChannel;
@@ -36,6 +36,7 @@ export function TeamChatMediaDrawer({
   onSelectMessage,
 }: TeamChatMediaDrawerProps) {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedDoc, setSelectedDoc] = useState<{ url: string; fileName: string } | null>(null);
 
   // Filtra itens de mídia ativos (não apagados)
   const images = messages.filter(
@@ -136,13 +137,15 @@ export function TeamChatMediaDrawer({
                 docs.map((doc) => (
                   <div
                     key={doc.id}
-                    className="flex items-center gap-3 p-2.5 rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors"
+                    onClick={() => setSelectedDoc({ url: doc.media_url!, fileName: doc.file_name || "Documento" })}
+                    className="flex items-center gap-3 p-2.5 rounded-lg border border-border bg-card hover:bg-muted/60 transition-colors cursor-pointer group select-none"
+                    title="Clique para visualizar o documento dentro do Atendi"
                   >
-                    <div className="h-9 w-9 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <div className="h-9 w-9 rounded-md bg-red-500/10 text-red-500 flex items-center justify-center shrink-0">
                       <FileText className="h-4 w-4" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-foreground truncate">
+                      <p className="text-xs font-medium text-foreground truncate group-hover:underline">
                         {doc.file_name || "Documento sem nome"}
                       </p>
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
@@ -155,16 +158,6 @@ export function TeamChatMediaDrawer({
                         </span>
                       </div>
                     </div>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 text-muted-foreground hover:text-primary shrink-0"
-                      asChild
-                    >
-                      <a href={doc.media_url!} target="_blank" rel="noreferrer" download>
-                        <Download className="h-4 w-4" />
-                      </a>
-                    </Button>
                   </div>
                 ))
               )}
@@ -216,6 +209,22 @@ export function TeamChatMediaDrawer({
               className="max-h-[85vh] max-w-full rounded-lg shadow-2xl object-contain bg-background/90"
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Visualização de documento / PDF dentro da plataforma */}
+      <Dialog open={Boolean(selectedDoc)} onOpenChange={(open) => !open && setSelectedDoc(null)}>
+        <DialogContent className="max-w-4xl p-0 bg-white dark:bg-zinc-900 border border-border shadow-2xl flex flex-col h-[85vh] overflow-hidden">
+          <DialogTitle className="sr-only">Visualizar Documento</DialogTitle>
+          <div className="flex justify-between items-center px-4 py-3 border-b bg-muted/40">
+            <h2 className="text-sm font-semibold truncate pr-4 flex items-center gap-2 text-foreground">
+              <FileText className="h-4 w-4 text-red-500 shrink-0" />
+              <span className="truncate">{selectedDoc?.fileName || "Documento"}</span>
+            </h2>
+          </div>
+          <div className="flex-1 w-full relative bg-muted/20 overflow-hidden">
+            {selectedDoc?.url && <PdfViewer url={selectedDoc.url} />}
+          </div>
         </DialogContent>
       </Dialog>
     </>

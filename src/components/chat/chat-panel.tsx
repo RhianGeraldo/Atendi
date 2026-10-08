@@ -132,6 +132,9 @@ export function ChatPanel({
   const { selectedUnitId } = useUnit();
   const [text, setText] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
+  const [isAdminNoteMode, setIsAdminNoteMode] = useState(false);
+  const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
+  const isManagerOrAdmin = isAdmin || profile?.role === "manager";
   const [selectedFile, setSelectedFile] = useState<{ file: File | null; base64: string; type: string } | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
   const [isCoaching, setIsCoaching] = useState(false);
@@ -156,6 +159,8 @@ export function ChatPanel({
     setNewMessagesBelow(0);
     setIsQuickMsgDismissed(false);
     setQuickMsgIndex(0);
+    setIsAdminNoteMode(false);
+    setIsInternalNote(false);
   }, [conv.id]);
 
   const targetCompanyId = activeCompanyId || conv.contact?.company_id || profile?.company_id;
@@ -328,21 +333,71 @@ export function ChatPanel({
   }, [conv.id, qc]);
 
   const { slaSettings } = useSlaSettings();
-  const lastExternalMsg = useMemo(() => {
+  const { lastExternalMsg, waitingSinceDate } = useMemo(() => {
     if (!messages || messages.length === 0) {
-      return conv.last_message?.find((m) => !m.is_internal) || conv.last_message?.[0] || null;
+      const lm = conv.last_message?.find((m) => !m.is_internal) || conv.last_message?.[0] || null;
+      return { 
+        lastExternalMsg: lm, 
+        waitingSinceDate: lm?.waiting_since || (conv.status === "waiting" ? conv.started_at : null)
+      };
     }
+
+    // Procura a última mensagem externa (não interna)
+    let lastExt: MessageRow | null = null;
+    let lastExtIndex = -1;
     for (let i = messages.length - 1; i >= 0; i--) {
       if (!messages[i].is_internal) {
-        return messages[i];
+        lastExt = messages[i];
+        lastExtIndex = i;
+        break;
       }
     }
-    return null;
-  }, [messages, conv.last_message]);
+
+    if (!lastExt || lastExt.sender_type !== "contact") {
+      return { lastExternalMsg: lastExt, waitingSinceDate: null };
+    }
+
+    // Se a última mensagem for do contato, retrocedemos para encontrar
+    // a PRIMEIRA mensagem do contato nesta sequência ininterrupta sem resposta do atendente
+    let oldestContactMsg = lastExt;
+    let foundAgent = false;
+    for (let i = lastExtIndex - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.is_internal) continue;
+      if (m.sender_type === "contact") {
+        oldestContactMsg = m;
+      } else {
+        foundAgent = true;
+        break;
+      }
+    }
+
+    let startWaiting = oldestContactMsg.created_at;
+    if (!foundAgent && conv.started_at && new Date(conv.started_at) < new Date(startWaiting)) {
+      startWaiting = conv.started_at;
+    }
+
+    return {
+      lastExternalMsg: {
+        ...lastExt,
+        waiting_since: startWaiting,
+      },
+      waitingSinceDate: startWaiting,
+    };
+  }, [messages, conv.last_message, conv.started_at, conv.status]);
+
+  const [slaTick, setSlaTick] = useState(0);
+  useEffect(() => {
+    if (!slaSettings?.enabled || conv.status === "resolved") return;
+    const interval = setInterval(() => {
+      setSlaTick((t) => t + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [slaSettings?.enabled, conv.status]);
 
   const slaInfo = useMemo(() => {
-    return calculateConversationSla(conv, slaSettings, lastExternalMsg);
-  }, [conv, slaSettings, lastExternalMsg]);
+    return calculateConversationSla(conv, slaSettings, lastExternalMsg, waitingSinceDate);
+  }, [conv, slaSettings, lastExternalMsg, waitingSinceDate, slaTick]);
 
   // Função para buscar mensagens mais antigas (paginação infinita para cima)
   const loadOlderMessages = async () => {
@@ -595,7 +650,11 @@ export function ChatPanel({
       setText("");
       setSelectedFile(null);
       setReplyingTo(null);
-      setIsInternalNote(false);
+      if (isAdminNoteMode) {
+        toast.success("Nota interna adicionada aos bastidores!");
+      } else {
+        setIsInternalNote(false);
+      }
       
       isNearBottomRef.current = true;
       setShowScrollBottomBtn(false);
@@ -1012,10 +1071,12 @@ export function ChatPanel({
       quotedContent: replyingTo.content || (replyingTo.media_type !== "text" ? `[${replyingTo.media_type}]` : "Anexo"),
     } : {};
 
+    const sendIsInternal = isAdminNoteMode ? true : isInternalNote;
+
     if (selectedFile) {
-      send.mutate({ content: text.trim(), isInternal: isInternalNote, mediaType: selectedFile.type as any, mediaBase64: selectedFile.base64, ...quotedPayload });
+      send.mutate({ content: text.trim(), isInternal: sendIsInternal, mediaType: selectedFile.type as any, mediaBase64: selectedFile.base64, ...quotedPayload });
     } else if (text.trim()) {
-      send.mutate({ content: text.trim(), isInternal: isInternalNote, ...quotedPayload });
+      send.mutate({ content: text.trim(), isInternal: sendIsInternal, ...quotedPayload });
     }
   };
 
@@ -1495,33 +1556,93 @@ export function ChatPanel({
 
         {/* Input / Composer */}
         <div className="border-t border-border bg-card p-3 flex flex-col gap-2 relative">
-          {(conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card gap-2">
-              {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager") ? (
-                <>
-                  <p className="text-sm font-medium text-muted-foreground text-center px-4">
-                    {!conv.assigned_agent_id
-                      ? (conv.status === "waiting" 
-                          ? "Esta conversa está na fila e aguardando um agente." 
-                          : "Esta conversa está em andamento sem atendente atribuído.")
-                      : conv.assigned_agent_id === profile?.id 
-                        ? "Esta conversa foi transferida para você." 
-                        : conv.status === "active"
-                          ? `Esta conversa está sendo atendida por ${conv.ai_active ? `🤖 ${conv.ai_agent?.name || "IA"}` : conv.assigned_agent?.name || "outro agente"}.`
-                          : `Esta conversa foi transferida para ${conv.assigned_agent?.name || "outro agente"}.`}
+          {((conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup) && (
+            !isAdminNoteMode ? (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card gap-2">
+                {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || isManagerOrAdmin) ? (
+                  <>
+                    <p className="text-sm font-medium text-muted-foreground text-center px-4">
+                      {!conv.assigned_agent_id
+                        ? (conv.status === "waiting" 
+                            ? "Esta conversa está na fila e aguardando um agente." 
+                            : "Esta conversa está em andamento sem atendente atribuído.")
+                        : conv.assigned_agent_id === profile?.id 
+                          ? "Esta conversa foi transferida para você." 
+                          : conv.status === "active"
+                            ? `Esta conversa está sendo atendida por ${conv.ai_active ? `🤖 ${conv.ai_agent?.name || "IA"}` : conv.assigned_agent?.name || "outro agente"}.`
+                            : `Esta conversa foi transferida para ${conv.assigned_agent?.name || "outro agente"}.`}
+                    </p>
+                    <div className="flex items-center gap-2 flex-wrap justify-center">
+                      <Button onClick={() => assignConv.mutate()} disabled={assignConv.isPending}>
+                        {assignConv.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        {!conv.assigned_agent_id ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
+                      </Button>
+                      {isAdmin && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setIsInternalNote(true);
+                            setIsAdminNoteMode(true);
+                            setTimeout(() => {
+                              document.getElementById("chat-input")?.focus();
+                            }, 50);
+                          }}
+                          className="border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/60"
+                        >
+                          <FileText className="mr-2 h-4 w-4 text-amber-500" />
+                          Adicionar Nota Interna
+                        </Button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {conv.status === "active" 
+                      ? `Em atendimento por ${conv.ai_active ? `🤖 ${conv.ai_agent?.name || "IA"}` : conv.assigned_agent?.name || "outro agente"}.` 
+                      : `Aguardando aceite de ${conv.assigned_agent?.name || "outro agente"}.`}
                   </p>
-                  <Button onClick={() => assignConv.mutate()} disabled={assignConv.isPending}>
-                    {assignConv.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {!conv.assigned_agent_id ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
-                  </Button>
-                </>
-              ) : (
-                <p className="text-sm font-medium text-muted-foreground">
-                  {conv.status === "active" 
-                    ? `Em atendimento por ${conv.ai_active ? `🤖 ${conv.ai_agent?.name || "IA"}` : conv.assigned_agent?.name || "outro agente"}.` 
-                    : `Aguardando aceite de ${conv.assigned_agent?.name || "outro agente"}.`}
-                </p>
-              )}
+                )}
+              </div>
+            ) : null
+          )}
+
+          {/* Banner de Modo Nota Interna para Administrador */}
+          {((conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id)))) && !isGroup && isAdminNoteMode) && (
+            <div className="flex items-center justify-between gap-2 px-3 py-2 bg-amber-500/15 border border-amber-500/30 text-amber-900 dark:text-amber-100 rounded-lg text-xs animate-in fade-in duration-200">
+              <div className="flex items-center gap-2 truncate">
+                <FileText className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span className="truncate">
+                  <strong>Nota Interna (Administrador):</strong> Visível apenas internamente. O atendimento permanece com{" "}
+                  <span className="font-semibold underline">
+                    {conv.assigned_agent?.name || (conv.status === "waiting" ? "a fila de espera" : "o atendente atual")}
+                  </span>.
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 text-xs px-2 hover:bg-amber-500/20 text-amber-900 dark:text-amber-100"
+                  onClick={() => {
+                    setIsAdminNoteMode(false);
+                    setIsInternalNote(false);
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-6 text-xs px-2"
+                  onClick={() => assignConv.mutate()}
+                  disabled={assignConv.isPending}
+                >
+                  {assignConv.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                  Assumir Conversa
+                </Button>
+              </div>
             </div>
           )}
 
@@ -1749,7 +1870,13 @@ export function ChatPanel({
                         handleSend();
                       }
                     }}
-                    placeholder="Mensagem"
+                    placeholder={
+                      isAdminNoteMode
+                        ? "Adicionar nota interna como administrador..."
+                        : isInternalNote
+                          ? "Adicionar nota interna..."
+                          : "Mensagem"
+                    }
                     minRows={1}
                     maxRows={6}
                     className={cn(
@@ -1800,7 +1927,7 @@ export function ChatPanel({
                         Mensagens Rápidas
                       </DropdownMenuItem>
                       
-                      {conv.channel === "whatsapp" && (
+                      {conv.channel === "whatsapp" && !isAdminNoteMode && (
                         <DropdownMenuItem onClick={() => setTemplateDialogOpen(true)}>
                           <LayoutTemplate className="mr-2 h-4 w-4 text-emerald-500" />
                           Enviar Template
@@ -1809,9 +1936,20 @@ export function ChatPanel({
                       
                       <DropdownMenuSeparator />
                       
-                      <DropdownMenuItem onClick={() => setIsInternalNote(!isInternalNote)}>
+                      <DropdownMenuItem 
+                        onClick={() => {
+                          if (!isAdminNoteMode) {
+                            setIsInternalNote(!isInternalNote);
+                          }
+                        }}
+                        disabled={isAdminNoteMode}
+                      >
                         <FileText className="mr-2 h-4 w-4 text-amber-500" />
-                        {isInternalNote ? "Desativar Nota Interna" : "Nota Interna"}
+                        {isAdminNoteMode
+                          ? "Nota Interna (Obrigatória)"
+                          : isInternalNote
+                            ? "Desativar Nota Interna"
+                            : "Nota Interna"}
                       </DropdownMenuItem>
                       
                       <DropdownMenuItem 

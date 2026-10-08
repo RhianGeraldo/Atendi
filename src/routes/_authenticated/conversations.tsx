@@ -114,6 +114,16 @@ function ConversationsPage() {
   const { slaSettings } = useSlaSettings();
   const [slaFilter, setSlaFilter] = useState<"all" | "breached" | "warning" | "ok">("all");
 
+  // Ciclo de atualização de 30s para re-calcular SLA ao vivo
+  const [slaTick, setSlaTick] = useState(0);
+  useEffect(() => {
+    if (!slaSettings?.enabled) return;
+    const interval = setInterval(() => {
+      setSlaTick((t) => t + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [slaSettings?.enabled]);
+
   // Estados do Chat da Equipe (Multiunidades)
   const [chatMode, setChatMode] = useState<"clients" | "team">(
     searchMode === "team" || searchChannelId ? "team" : "clients"
@@ -438,27 +448,61 @@ function ConversationsPage() {
           .order("created_at", { ascending: false })
           .limit(convIds.length * 5);
 
-        const map = new Map<
+        // Agrupa mensagens por conversa para identificar o turno contínuo sem resposta
+        const msgsByConv = new Map<
           string,
-          { sender_type: string; created_at: string; is_internal?: boolean }
+          Array<{ sender_type: string; created_at: string }>
         >();
         if (recentMsgs) {
           for (const msg of recentMsgs) {
-            if (msg.conversation_id && !map.has(msg.conversation_id)) {
-              map.set(msg.conversation_id, {
-                sender_type: msg.sender_type,
-                created_at: msg.created_at,
-                is_internal: msg.is_internal,
-              });
+            if (!msg.conversation_id) continue;
+            const arr = msgsByConv.get(msg.conversation_id);
+            if (!arr) {
+              msgsByConv.set(msg.conversation_id, [{ sender_type: msg.sender_type, created_at: msg.created_at }]);
+            } else {
+              arr.push({ sender_type: msg.sender_type, created_at: msg.created_at });
             }
           }
         }
 
         rows = rows.map((c) => {
-          const lm = map.get(c.id);
+          const convMsgs = msgsByConv.get(c.id);
+          if (!convMsgs || convMsgs.length === 0) {
+            return {
+              ...c,
+              last_message: [],
+            };
+          }
+
+          const newest = convMsgs[0];
+          let waitingSince = newest.created_at;
+          if (newest.sender_type === "contact") {
+            let oldestInTurn = newest;
+            let foundAgent = false;
+            for (let i = 1; i < convMsgs.length; i++) {
+              const msg = convMsgs[i];
+              if (msg.sender_type === "contact") {
+                oldestInTurn = msg;
+              } else {
+                foundAgent = true;
+                break;
+              }
+            }
+            waitingSince = oldestInTurn.created_at;
+            if (!foundAgent && c.started_at && new Date(c.started_at) < new Date(waitingSince)) {
+              waitingSince = c.started_at;
+            }
+          }
+
           return {
             ...c,
-            last_message: lm ? [lm] : [],
+            last_message: [
+              {
+                sender_type: newest.sender_type,
+                created_at: newest.created_at,
+                waiting_since: waitingSince,
+              },
+            ],
           };
         });
       }
@@ -521,18 +565,44 @@ function ConversationsPage() {
 
       if (error || !data) return null;
 
-      const { data: lastMsg } = await supabase
+      const { data: recentDirectMsgs } = await supabase
         .from("messages")
         .select("sender_type, created_at, is_internal")
         .eq("conversation_id", selectedId)
         .eq("is_internal", false)
         .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(5);
+
+      let lastMsgFormatted: { sender_type: string; created_at: string; waiting_since?: string } | null = null;
+      if (recentDirectMsgs && recentDirectMsgs.length > 0) {
+        const newest = recentDirectMsgs[0];
+        let waitingSince = newest.created_at;
+        if (newest.sender_type === "contact") {
+          let oldestInTurn = newest;
+          let foundAgent = false;
+          for (let i = 1; i < recentDirectMsgs.length; i++) {
+            if (recentDirectMsgs[i].sender_type === "contact") {
+              oldestInTurn = recentDirectMsgs[i];
+            } else {
+              foundAgent = true;
+              break;
+            }
+          }
+          waitingSince = oldestInTurn.created_at;
+          if (!foundAgent && data.started_at && new Date(data.started_at) < new Date(waitingSince)) {
+            waitingSince = data.started_at;
+          }
+        }
+        lastMsgFormatted = {
+          sender_type: newest.sender_type,
+          created_at: newest.created_at,
+          waiting_since: waitingSince,
+        };
+      }
 
       return {
         ...data,
-        last_message: lastMsg ? [lastMsg] : [],
+        last_message: lastMsgFormatted ? [lastMsgFormatted] : [],
       } as unknown as ConvRow;
     },
     staleTime: 30 * 1000,
@@ -1281,6 +1351,16 @@ function ConversationsPage() {
                 );
               }
 
+              let currentWaitingSince = newMsg.created_at;
+              if (isFromContact) {
+                const prevLast = (existingConv as ConvRow).last_message?.[0];
+                if (prevLast && prevLast.sender_type === "contact") {
+                  currentWaitingSince = prevLast.waiting_since || prevLast.created_at;
+                } else if ((existingConv as ConvRow).status === "waiting" && (existingConv as ConvRow).started_at) {
+                  currentWaitingSince = (existingConv as ConvRow).started_at;
+                }
+              }
+
               updateConversationInCache(
                 convId,
                 {
@@ -1294,6 +1374,7 @@ function ConversationsPage() {
                       sender_type: newMsg.sender_type,
                       created_at: newMsg.created_at,
                       is_internal: newMsg.is_internal,
+                      waiting_since: isFromContact ? currentWaitingSince : undefined,
                     },
                   ],
                 },
@@ -1493,6 +1574,7 @@ function ConversationsPage() {
     debouncedSearch,
     slaFilter,
     slaSettings,
+    slaTick,
     isAdmin,
     instances,
     profile?.department_id,

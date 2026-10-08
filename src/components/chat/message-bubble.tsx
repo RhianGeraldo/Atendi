@@ -235,7 +235,7 @@ export function MessageBubble({
           "max-w-[70%] flex flex-col rounded-2xl px-3.5 py-2 text-sm shadow-sm relative group cursor-pointer lg:cursor-default",
           mine
             ? (isInternal ? "rounded-br-sm bg-amber-100 dark:bg-amber-900/30 text-amber-900 dark:text-amber-100 border border-amber-200 dark:border-amber-800/50" : "rounded-br-sm bg-primary text-primary-foreground")
-            : "rounded-bl-sm bg-card text-foreground border border-border",
+            : (isInternal ? "rounded-bl-sm bg-amber-50 dark:bg-amber-950/40 text-amber-950 dark:text-amber-100 border border-amber-200/80 dark:border-amber-800/50" : "rounded-bl-sm bg-card text-foreground border border-border"),
           m.is_deleted && "opacity-60",
           m.isOptimistic && "opacity-70"
         )}
@@ -249,7 +249,7 @@ export function MessageBubble({
         {senderName && (
           <div className={cn(
             "mb-1 text-xs font-bold",
-            mine ? (isInternal ? "text-amber-700 dark:text-amber-300" : "text-primary-foreground/90") : "text-primary/80 dark:text-primary/90"
+            mine ? (isInternal ? "text-amber-700 dark:text-amber-300" : "text-primary-foreground/90") : (isInternal ? "text-amber-700 dark:text-amber-400" : "text-primary/80 dark:text-primary/90")
           )}>
             {senderName}
           </div>

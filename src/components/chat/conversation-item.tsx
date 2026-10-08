@@ -1,4 +1,4 @@
-import React, { memo, useMemo } from "react";
+import React, { memo, useMemo, useState, useEffect } from "react";
 import { Users, Phone, Clock, AlertTriangle } from "lucide-react";
 import { ContactAvatar } from "./contact-avatar";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +28,15 @@ export const ConversationItem = memo(function ConversationItem({
   showUnitInfo,
   slaSettings,
 }: ConversationItemProps) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!slaSettings?.enabled || conv.status === "resolved") return;
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [slaSettings?.enabled, conv.status]);
+
   const isGroup =
     conv.contact?.phone &&
     (conv.contact.phone.startsWith("120363") ||

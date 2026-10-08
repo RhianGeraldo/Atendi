@@ -15,7 +15,6 @@ import {
   Mic,
   Square,
   FileText,
-  Download,
   Image as ImageIcon,
   AtSign,
   Plus,
@@ -61,6 +60,7 @@ import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { InternalChannel, InternalMessage, TeamMember } from "./team-chat-types";
 import { TeamChatMediaDrawer } from "./team-chat-media-drawer";
+import { PdfViewer } from "@/components/chat/message-bubble";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🚀", "👀", "✅"];
 
@@ -122,6 +122,7 @@ export function TeamChatPanel({
   const [highlightedMsgId, setHighlightedMsgId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<{ url: string; fileName: string } | null>(null);
   const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
 
   // Estados do Pilar 5: Busca, Galeria de Mídias & Resumo IA
@@ -1126,24 +1127,27 @@ export function TeamChatPanel({
 
                       {/* Documento / PDF anexado */}
                       {msg.media_type === "document" && msg.media_url && (
-                        <a
-                          href={msg.media_url}
-                          target="_blank"
-                          rel="noreferrer"
+                        <div
+                          onClick={() => setPreviewDoc({ url: msg.media_url!, fileName: msg.file_name || "Documento" })}
                           className={cn(
-                            "flex items-center gap-2.5 p-2 mb-2 rounded-lg transition-colors border",
+                            "flex items-center gap-2.5 p-2 mb-2 rounded-lg transition-all border cursor-pointer group/doc select-none",
                             isMe
                               ? "bg-primary-foreground/10 border-primary-foreground/20 hover:bg-primary-foreground/20 text-primary-foreground"
-                              : "bg-background border-border hover:bg-muted text-foreground"
+                              : "bg-background border-border hover:bg-muted/80 hover:border-primary/40 text-foreground"
                           )}
+                          title="Clique para visualizar o documento dentro do Atendi"
                         >
-                          <FileText className="h-6 w-6 text-primary shrink-0" />
+                          <div className={cn(
+                            "h-9 w-9 rounded-md flex items-center justify-center shrink-0 transition-colors",
+                            isMe ? "bg-white/15 text-white" : "bg-red-500/10 text-red-500 group-hover/doc:bg-red-500/20"
+                          )}>
+                            <FileText className="h-5 w-5" />
+                          </div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-medium truncate">{msg.file_name || "Documento"}</p>
+                            <p className="font-medium text-xs truncate group-hover/doc:underline">{msg.file_name || "Documento"}</p>
                             <p className="text-[10px] opacity-75">{formatFileSize(msg.file_size)}</p>
                           </div>
-                          <Download className="h-4 w-4 shrink-0 opacity-80" />
-                        </a>
+                        </div>
                       )}
 
                       {/* Conteúdo textual */}
@@ -1611,6 +1615,22 @@ export function TeamChatPanel({
               className="max-h-[85vh] max-w-full rounded-lg shadow-2xl object-contain bg-background/90"
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Visualização de Documento / PDF dentro da plataforma */}
+      <Dialog open={Boolean(previewDoc)} onOpenChange={(open) => !open && setPreviewDoc(null)}>
+        <DialogContent className="max-w-4xl p-0 bg-white dark:bg-zinc-900 border border-border shadow-2xl flex flex-col h-[85vh] overflow-hidden">
+          <DialogTitle className="sr-only">Visualizar Documento</DialogTitle>
+          <div className="flex justify-between items-center px-4 py-3 border-b bg-muted/40">
+            <h2 className="text-sm font-semibold truncate pr-4 flex items-center gap-2 text-foreground">
+              <FileText className="h-4 w-4 text-red-500 shrink-0" />
+              <span className="truncate">{previewDoc?.fileName || "Documento"}</span>
+            </h2>
+          </div>
+          <div className="flex-1 w-full relative bg-muted/20 overflow-hidden">
+            {previewDoc?.url && <PdfViewer url={previewDoc.url} />}
+          </div>
         </DialogContent>
       </Dialog>
 

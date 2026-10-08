@@ -14,10 +14,10 @@ export interface SlaSettings {
 
 export const DEFAULT_SLA_SETTINGS: SlaSettings = {
   enabled: true,
-  first_response_limit_minutes: 10,
+  first_response_limit_minutes: 5,
   response_limit_minutes: 5,
   resolution_limit_hours: 4,
-  warning_threshold_percent: 75,
+  warning_threshold_percent: 60, // 3 min = 60% de 5 min (0-2m verde, 3-5m atenção)
   count_business_hours_only: false,
   auto_rotate_active_breached: false,
   auto_rotate_active_timeout_minutes: 8,
@@ -58,12 +58,17 @@ export function formatMinutesFriendly(minutes: number): string {
 }
 
 /**
- * Calcula o status de SLA para uma conversa
+ * Calcula o status de SLA para uma conversa de forma contínua:
+ * 0 a 2 min: Verde (ok / no prazo)
+ * 3 a 5 min: Atenção (warning / âmbar)
+ * > 5 min: Vermelho (breached / estourado)
+ * Badge contínuo: 0m, 1m, 2m, 3m, 4m, 5m, 6m, 7m... (nunca reinicia por nova mensagem do cliente)
  */
 export function calculateConversationSla(
   conv: ConvRow,
   settings: SlaSettings = DEFAULT_SLA_SETTINGS,
-  overrideLastMessage?: { sender_type: string; created_at: string; is_internal?: boolean } | null,
+  overrideLastMessage?: { sender_type: string; created_at: string; is_internal?: boolean; waiting_since?: string } | null,
+  overrideWaitingSince?: string | null,
 ): ConversationSlaInfo {
   // Ignora se SLA desabilitado, se resolvido ou se for grupo do WhatsApp
   const isGroup = !!(
@@ -94,9 +99,9 @@ export function calculateConversationSla(
       ? overrideLastMessage
       : conv.last_message?.find((m) => !m.is_internal) || conv.last_message?.[0];
 
-  // Se a última mensagem foi enviada pelo atendente/agente/sistema:
-  // O cliente NUNCA está aguardando resposta (tanto na fila quanto em andamento)!
-  if (lastMsg && lastMsg.sender_type !== "contact") {
+  // Se a última mensagem externa foi enviada por um atendente/agente (humano ou IA):
+  // O cliente foi respondido e NÃO está aguardando resposta!
+  if (lastMsg && lastMsg.sender_type === "agent") {
     return {
       isWaiting: false,
       isFirstResponse: false,
@@ -130,31 +135,38 @@ export function calculateConversationSla(
     };
   }
 
-  // Verifica se o cliente está aguardando resposta
+  // Determina quando o cliente começou a aguardar (waitingSinceDate)
+  // REGRA DE CONTINUIDADE:
+  // A espera NUNCA reinicia quando o cliente envia mensagens adicionais.
+  // Começa na primeira mensagem sem resposta deste turno (ou na criação da conversa se nunca foi respondida).
   let isWaiting = false;
   let isFirstResponse = false;
   let waitingDateStr: string | null = null;
 
-  if (conv.status === "waiting") {
-    // Na fila de espera: o cliente aguarda o primeiro atendimento desde que entrou na fila
+  if (overrideWaitingSince) {
+    isWaiting = true;
+    isFirstResponse = conv.status === "waiting";
+    waitingDateStr = overrideWaitingSince;
+  } else if (lastMsg?.waiting_since) {
+    isWaiting = true;
+    isFirstResponse = conv.status === "waiting";
+    waitingDateStr = lastMsg.waiting_since;
+  } else if (conv.status === "waiting") {
+    // Na fila de espera: aguarda primeiro atendimento
     isWaiting = true;
     isFirstResponse = true;
-    waitingDateStr = conv.started_at || conv.last_message_at || lastMsg?.created_at;
+    waitingDateStr = conv.started_at || lastMsg?.created_at || conv.last_message_at;
   } else if (conv.status === "active") {
     // Em andamento:
-    // 1. Se temos informação da última mensagem e foi do contato:
-    if (lastMsg) {
-      if (lastMsg.sender_type === "contact") {
-        isWaiting = true;
-        isFirstResponse = false;
-        waitingDateStr = lastMsg.created_at || conv.last_message_at;
-      }
-    } else {
-      // 2. Fallback caso lastMsg não tenha sido carregado individualmente ainda:
-      // Se não há indicativo de envio por atendente no preview, consideramos aguardando retorno
+    if (lastMsg && lastMsg.sender_type === "contact") {
       isWaiting = true;
       isFirstResponse = false;
-      waitingDateStr = conv.last_message_at;
+      waitingDateStr = lastMsg.waiting_since || lastMsg.created_at || conv.last_message_at;
+    } else if (!lastMsg) {
+      // Fallback caso lastMsg não tenha sido carregado individualmente ainda
+      isWaiting = true;
+      isFirstResponse = false;
+      waitingDateStr = conv.started_at || conv.last_message_at;
     }
   }
 
@@ -175,44 +187,61 @@ export function calculateConversationSla(
   }
 
   const waitingSince = new Date(waitingDateStr);
+  if (isNaN(waitingSince.getTime())) {
+    return {
+      isWaiting: false,
+      isFirstResponse,
+      waitingSince: null,
+      elapsedMinutes: 0,
+      limitMinutes: 0,
+      status: "none",
+      percentage: 0,
+      remainingMinutes: 0,
+      overdueMinutes: 0,
+      badgeLabel: "",
+      tooltipText: "",
+    };
+  }
+
   const now = new Date();
   const elapsedMinutes = Math.max(0, differenceInMinutes(now, waitingSince));
 
-  const limitMinutes = isFirstResponse
-    ? settings.first_response_limit_minutes || 10
-    : settings.response_limit_minutes || 5;
+  // Régua Contínua Solicitada:
+  // 0 a 2 min: Verde (ok / no prazo)
+  // 3 a 5 min: Atenção (warning / âmbar)
+  // > 5 min: Vermelho (breached / estourado)
+  const limitMinutes = settings.response_limit_minutes || 5;
+  const warningMinutes = 3;
 
-  const warningThreshold = Math.floor(
-    (limitMinutes * (settings.warning_threshold_percent || 75)) / 100,
-  );
+  let status: SlaStatus = "ok";
+  if (elapsedMinutes > limitMinutes) {
+    status = "breached";
+  } else if (elapsedMinutes >= warningMinutes) {
+    status = "warning";
+  } else {
+    status = "ok";
+  }
 
   const remainingMinutes = Math.max(0, limitMinutes - elapsedMinutes);
   const overdueMinutes = Math.max(0, elapsedMinutes - limitMinutes);
   const percentage = Math.round((elapsedMinutes / limitMinutes) * 100);
-
-  let status: SlaStatus = "ok";
-  let badgeLabel = "";
-  let tooltipText = "";
 
   const formattedElapsed = formatMinutesFriendly(elapsedMinutes);
   const formattedLimit = formatMinutesFriendly(limitMinutes);
   const formattedOverdue = formatMinutesFriendly(overdueMinutes);
   const formattedRemaining = formatMinutesFriendly(remainingMinutes);
 
-  const contextLabel = isFirstResponse ? "1ª Resposta" : "Retorno";
+  // Badge contínuo: SEMPRE o tempo decorrido total (0m, 1m, 2m, 3m, 4m, 5m, 6m, 7m...)
+  // NUNCA "+1m", "+2m"
+  const badgeLabel = formattedElapsed;
 
-  if (elapsedMinutes >= limitMinutes) {
-    status = "breached";
-    badgeLabel = overdueMinutes > 0 ? `+${formattedOverdue}` : formattedElapsed;
-    tooltipText = `SLA Estourado (${contextLabel}): Limite de ${formattedLimit} excedido por ${formattedOverdue}. Aguardando há ${formattedElapsed}.`;
-  } else if (elapsedMinutes >= warningThreshold) {
-    status = "warning";
-    badgeLabel = formattedElapsed;
-    tooltipText = `SLA Atenção (${contextLabel}): Faltam ${formattedRemaining} para o limite de ${formattedLimit}. Aguardando há ${formattedElapsed}.`;
+  let tooltipText = "";
+  if (status === "breached") {
+    tooltipText = `SLA Estourado: Aguardando resposta há ${formattedElapsed} (Limite de ${formattedLimit} excedido por ${formattedOverdue}).`;
+  } else if (status === "warning") {
+    tooltipText = `SLA Atenção: Aguardando resposta há ${formattedElapsed} (Faltam ${formattedRemaining} para o limite de ${formattedLimit}).`;
   } else {
-    status = "ok";
-    badgeLabel = formattedElapsed;
-    tooltipText = `SLA no Prazo (${contextLabel}): Aguardando há ${formattedElapsed} (Limite: ${formattedLimit}).`;
+    tooltipText = `SLA no Prazo: Aguardando resposta há ${formattedElapsed} (Limite: ${formattedLimit}).`;
   }
 
   return {

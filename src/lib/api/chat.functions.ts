@@ -179,7 +179,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
     const profilePromise = supabase
       .from("profiles")
-      .select("name, use_signature")
+      .select("name, use_signature, role")
       .eq("id", userId)
       .single();
 
@@ -208,15 +208,32 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       throw new Error("Conversation not found or access denied.");
     }
 
-    if (
-      !data.isInternal &&
-      conv.status === "active" &&
-      conv.assigned_agent_id &&
-      conv.assigned_agent_id !== userId
-    ) {
-      throw new Error(
-        "Esta conversa está em atendimento por outro atendente. Assuma o atendimento antes de enviar mensagens.",
-      );
+    const userProfile = profileRes.data;
+    const isAdmin =
+      userProfile?.role === "admin_company" ||
+      userProfile?.role === "super_admin";
+
+    if (!data.isInternal) {
+      if (
+        conv.status === "active" &&
+        conv.assigned_agent_id &&
+        conv.assigned_agent_id !== userId
+      ) {
+        throw new Error(
+          "Esta conversa está em atendimento por outro atendente. Assuma o atendimento antes de enviar mensagens.",
+        );
+      }
+    } else {
+      // Se for nota interna em conversa já atribuída a outro atendente, apenas administradores ou o próprio atendente podem registrar
+      if (
+        conv.assigned_agent_id &&
+        conv.assigned_agent_id !== userId &&
+        !isAdmin
+      ) {
+        throw new Error(
+          "Apenas administradores ou o atendente responsável podem adicionar notas internas nesta conversa.",
+        );
+      }
     }
 
     // 2. O canal, e só então o destinatário.
@@ -266,7 +283,6 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     }
 
     // 3. User signature
-    const userProfile = profileRes.data;
     let textToSend = data.text || "";
     const shouldSign =
       !data.isInternal && userProfile?.use_signature !== false && !!userProfile?.name;
@@ -683,13 +699,15 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
     // 5. Save message in DB and update conversation in parallel
     const convUpdate: any = { last_message_at: new Date().toISOString() };
-    if (conv.status === "resolved") {
-      convUpdate.status = "active";
-      convUpdate.assigned_agent_id = userId;
-      convUpdate.resolved_at = null;
-    } else if (conv.status === "waiting") {
-      convUpdate.status = "active";
-      convUpdate.assigned_agent_id = userId;
+    if (!data.isInternal) {
+      if (conv.status === "resolved") {
+        convUpdate.status = "active";
+        convUpdate.assigned_agent_id = userId;
+        convUpdate.resolved_at = null;
+      } else if (conv.status === "waiting") {
+        convUpdate.status = "active";
+        convUpdate.assigned_agent_id = userId;
+      }
     }
 
     const [msgRes] = await Promise.all([
