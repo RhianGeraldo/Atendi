@@ -5,6 +5,7 @@ import { useActiveCompany } from "@/lib/active-company-context";
 import { supabase } from "@/integrations/supabase/client";
 import { playClientMessageSound, playTeamMessageSound } from "@/lib/sounds";
 import { toast } from "sonner";
+import { showStackedMessageToast } from "@/components/common/stacked-message-toast";
 
 interface CachedConversation {
   companyId: string;
@@ -342,24 +343,27 @@ export function useGlobalNotifications() {
             onClick: () => {
               navigate({
                 to: "/conversations",
-                search: { c: convId } as any,
+                search: { mode: "clients", c: convId } as any,
               });
             },
           });
 
-          // 4. Se o usuário estiver navegando em outra página (ex: Dashboard, Funil), exibe Toast in-app
-          if (currentPath !== "/conversations") {
-            toast.info(`💬 ${contactName}`, {
-              description: previewText || "Nova mensagem recebida",
-              duration: 7000,
-              action: {
-                label: "Abrir",
-                onClick: () => {
-                  navigate({
-                    to: "/conversations",
-                    search: { c: convId } as any,
-                  });
-                },
+          // 4. Se o usuário estiver navegando em outra página ou em outro chat, exibe Card customizado in-app
+          if (currentPath !== "/conversations" || currentSearch !== convId) {
+            showStackedMessageToast({
+              key: `client-${convId}`,
+              messageId: String(newMsg.id),
+              type: "client",
+              senderName: contactName,
+              avatarUrl: convDetail?.contact?.profile_picture_url,
+              channel: convDetail?.channel as any,
+              badgeLabel: isWaiting ? "Aguardando" : "Em atendimento",
+              previewText: previewText || "Nova mensagem recebida",
+              onOpen: () => {
+                navigate({
+                  to: "/conversations",
+                  search: { mode: "clients", c: convId } as any,
+                });
               },
             });
           }
@@ -477,6 +481,7 @@ export function useGlobalNotifications() {
           const currentSearch = searchRef.current as any;
           const isViewingThisTeamChannel =
             currentPath === "/conversations" &&
+            currentSearch?.mode === "team" &&
             currentSearch?.channelId === channelId &&
             typeof document !== "undefined" &&
             !document.hidden &&
@@ -505,24 +510,28 @@ export function useGlobalNotifications() {
             onClick: () => {
               navigate({
                 to: "/conversations",
-                search: { tab: "team", channelId } as any,
+                search: { mode: "team", channelId } as any,
               });
             },
           });
 
-          // 4. Toast in-app se estiver em outra página ou fora do chat da equipe
-          if (currentPath !== "/conversations" || currentSearch?.tab !== "team") {
-            toast.info(`👥 ${channelTitle}`, {
-              description: previewText || "Nova mensagem da equipe",
-              duration: 7000,
-              action: {
-                label: "Ver",
-                onClick: () => {
-                  navigate({
-                    to: "/conversations",
-                    search: { tab: "team", channelId } as any,
-                  });
-                },
+          // 4. Toast in-app se estiver em outra página, outro modo ou outro canal
+          if (currentPath !== "/conversations" || currentSearch?.mode !== "team" || currentSearch?.channelId !== channelId) {
+            const isDirect = channelData?.type === "direct";
+            const basePreview = previewText || "Nova mensagem da equipe";
+            showStackedMessageToast({
+              key: `team-${channelId}`,
+              messageId: String(newMsg.id),
+              type: "team",
+              senderName: isDirect ? senderName : `#${channelData?.name || "Canal"}`,
+              avatarUrl: isDirect ? senderData?.avatarUrl : null,
+              badgeLabel: isDirect ? "Conversa direta" : "Canal da equipe",
+              previewText: isDirect ? basePreview : `${senderName}: ${basePreview}`,
+              onOpen: () => {
+                navigate({
+                  to: "/conversations",
+                  search: { mode: "team", channelId } as any,
+                });
               },
             });
           }

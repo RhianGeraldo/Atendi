@@ -5,8 +5,10 @@ import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { toast } from "sonner";
+import { useNavigate } from "@tanstack/react-router";
 import { InternalChannel, InternalMessage, TeamMember } from "./team-chat-types";
 import { markMessageAsSentByMe } from "@/lib/hooks/use-global-notifications";
+import { showStackedMessageToast } from "@/components/common/stacked-message-toast";
 
 // Disparador de Notificação Nativa do Navegador (Web Notification API)
 function notifyBrowser({
@@ -54,6 +56,7 @@ export function useTeamChat(
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const companyId = activeCompanyId || profile?.company_id;
   const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
@@ -1094,6 +1097,10 @@ export function useTeamChat(
                 icon: enrichedMsg.sender?.avatar_url || "/favicon.ico",
                 onClick: () => {
                   optionsRef.current?.onSelectChannel?.(newMsg.channel_id);
+                  navigate({
+                    to: "/conversations",
+                    search: { mode: "team", channelId: newMsg.channel_id } as any,
+                  });
                 },
               });
             }
@@ -1101,9 +1108,25 @@ export function useTeamChat(
 
           if (mentionsMe) {
             const senderName = enrichedMsg.sender?.name || "Colega de equipe";
-            toast.info(`🔔 ${senderName} mencionou você`, {
-              description: newMsg.content || "Enviou uma mensagem",
-              duration: 6000,
+            const channelObj = channelsRef.current?.find((c) => c.id === newMsg.channel_id);
+            const isDirect = channelObj?.type === "direct";
+            const basePreview = newMsg.content || "Mencionou você em uma mensagem";
+            showStackedMessageToast({
+              key: `team-${newMsg.channel_id}`,
+              messageId: String(newMsg.id),
+              type: "team",
+              senderName: isDirect ? senderName : `#${channelObj?.name || "Canal"}`,
+              avatarUrl: isDirect ? enrichedMsg.sender?.avatar_url : null,
+              isMention: true,
+              badgeLabel: isDirect ? "Conversa direta" : "Canal da equipe",
+              previewText: isDirect ? basePreview : `${senderName}: ${basePreview}`,
+              onOpen: () => {
+                optionsRef.current?.onSelectChannel?.(newMsg.channel_id);
+                navigate({
+                  to: "/conversations",
+                  search: { mode: "team", channelId: newMsg.channel_id } as any,
+                });
+              },
             });
           }
 

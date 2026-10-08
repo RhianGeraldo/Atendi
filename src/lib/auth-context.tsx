@@ -75,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.setItem("ATENDI_SESSION_DATE", today);
           }
           setSession(s);
-          setTimeout(() => loadProfile(s.user.id), 0);
+          loadProfile(s.user.id);
           return;
         }
 
@@ -99,7 +99,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // defer profile fetch
         setTimeout(() => loadProfile(s.user.id), 0);
       } else {
+        setSession(null);
         setProfile(null);
+        setLoading(false);
       }
     });
 
@@ -214,6 +216,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         supabase.auth.signOut().then(() => {
           setSession(null);
           setProfile(null);
+          if (typeof window !== "undefined") {
+            window.location.href = "/auth";
+          }
         });
       }
     };
@@ -244,9 +249,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.setItem("ATENDI_SESSION_DATE", today);
         }
 
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
           return { error: error.message };
+        }
+
+        if (data?.session) {
+          setSession(data.session);
+          if (data.session.user) {
+            await loadProfile(data.session.user.id);
+          }
         }
 
         // Registra o primeiro login do dia atômico
@@ -287,12 +299,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (typeof window !== "undefined") {
           localStorage.removeItem("ATENDI_SESSION_DATE");
           localStorage.removeItem("ATENDI_QUERY_CACHE");
+          localStorage.removeItem("atendiai_selected_unit_id");
+          localStorage.removeItem("omni_selected_unit_id");
+          localStorage.removeItem("atendiai_selected_company_id");
+          localStorage.removeItem("omni_selected_company_id");
           sessionStorage.removeItem("ATENDI_QUERY_CACHE");
         }
       } catch (e) {
         console.warn("[Auth] Failed to clear query cache or update status on sign out:", e);
       }
+      setSession(null);
+      setProfile(null);
       await supabase.auth.signOut();
+      if (typeof window !== "undefined") {
+        window.location.href = "/auth";
+      }
     },
   };
 

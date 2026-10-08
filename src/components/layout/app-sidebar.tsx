@@ -346,10 +346,18 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
               ) : null}
             </div>
           )}
-          {!collapsed && (
+          {!collapsed ? (
             <button
               onClick={() => signOut()}
-              className="rounded p-1 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              className="rounded p-1 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer transition-colors"
+              title="Sair"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          ) : (
+            <button
+              onClick={() => signOut()}
+              className="rounded p-1 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer transition-colors"
               title="Sair"
             >
               <LogOut className="h-4 w-4" />

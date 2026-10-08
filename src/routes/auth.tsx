@@ -47,6 +47,7 @@ function AuthPage() {
       } else {
         toast.success("Bem-vindo!");
         playLoginSound();
+        navigate({ to: "/dashboard", replace: true });
       }
     }
   }

@@ -134,3 +134,16 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+/* Remove container retangular/borda padrão do Sonner por trás de toasts customizados */
+[data-sonner-toast][data-styled='false'],
+[data-sonner-toast]:has([data-message-notification-toast]),
+[data-sonner-toast].sonner-custom-toast {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}

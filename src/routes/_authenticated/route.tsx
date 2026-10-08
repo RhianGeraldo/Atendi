@@ -15,7 +15,7 @@ export const Route = createFileRoute("/_authenticated")({
 });
 
 function AuthenticatedLayout() {
-  const { loading, session } = useAuth();
+  const { loading, session, profile } = useAuth();
   const navigate = useNavigate();
 
   // Rastreia a atividade real do usuário (ativo, ocioso, aba em segundo plano)
@@ -30,7 +30,7 @@ function AuthenticatedLayout() {
     }
   }, [loading, session, navigate]);
 
-  if (loading || !session) {
+  if (loading || !session || !profile) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-background gap-3">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />

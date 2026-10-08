@@ -59,6 +59,8 @@ export const Route = createFileRoute("/_authenticated/conversations")({
     return {
       c: search.c as string | undefined,
       tab: search.tab as "waiting" | "active" | "resolved" | "groups" | undefined,
+      mode: search.mode as "clients" | "team" | undefined,
+      channelId: search.channelId as string | undefined,
     };
   },
   component: () => (
@@ -69,7 +71,7 @@ export const Route = createFileRoute("/_authenticated/conversations")({
 });
 
 function ConversationsPage() {
-  const { c: searchConvId, tab: searchTab } = Route.useSearch();
+  const { c: searchConvId, tab: searchTab, mode: searchMode, channelId: searchChannelId } = Route.useSearch();
   const navigate = Route.useNavigate();
   const qc = useQueryClient();
   const isDesktop = useMediaQuery("(min-width: 768px)");
@@ -113,24 +115,47 @@ function ConversationsPage() {
   const [slaFilter, setSlaFilter] = useState<"all" | "breached" | "warning" | "ok">("all");
 
   // Estados do Chat da Equipe (Multiunidades)
-  const [chatMode, setChatMode] = useState<"clients" | "team">("clients");
-  const [selectedTeamChannelId, setSelectedTeamChannelId] = useState<string | null>(null);
+  const [chatMode, setChatMode] = useState<"clients" | "team">(
+    searchMode === "team" || searchChannelId ? "team" : "clients"
+  );
+  const [selectedTeamChannelId, setSelectedTeamChannelId] = useState<string | null>(
+    searchChannelId || null
+  );
   const [createChannelOpen, setCreateChannelOpen] = useState(false);
   const [newDirectChatOpen, setNewDirectChatOpen] = useState(false);
+
+  // Sincroniza o modo de chat e canal quando a URL mudar (ex: clique em notificações de clientes ou equipe)
+  useEffect(() => {
+    if (searchMode === "team" || searchChannelId) {
+      setChatMode("team");
+      if (searchChannelId && searchChannelId !== selectedTeamChannelId) {
+        setSelectedTeamChannelId(searchChannelId);
+      }
+    } else if (searchMode === "clients" || searchConvId) {
+      setChatMode("clients");
+    }
+  }, [searchMode, searchChannelId, searchConvId, selectedTeamChannelId]);
 
   const teamChat = useTeamChat(selectedTeamChannelId, {
     onSelectChannel: (cid) => {
       setChatMode("team");
       setSelectedTeamChannelId(cid);
+      navigate({
+        search: (prev: any) => ({ ...prev, mode: "team", channelId: cid, c: undefined }),
+      });
     },
   });
 
   // Seleciona o primeiro canal por padrão no desktop ao entrar no modo equipe
   useEffect(() => {
     if (isDesktop && chatMode === "team" && !selectedTeamChannelId && teamChat.channels.length > 0) {
-      setSelectedTeamChannelId(teamChat.channels[0].id);
+      const firstChannelId = teamChat.channels[0].id;
+      setSelectedTeamChannelId(firstChannelId);
+      navigate({
+        search: (prev: any) => ({ ...prev, mode: "team", channelId: firstChannelId }),
+      });
     }
-  }, [isDesktop, chatMode, selectedTeamChannelId, teamChat.channels]);
+  }, [isDesktop, chatMode, selectedTeamChannelId, teamChat.channels, navigate]);
 
   // Marca canal como lido ao selecionar
   useEffect(() => {
@@ -1510,7 +1535,12 @@ function ConversationsPage() {
         <div className="p-2 border-b border-border bg-card">
           <div className="grid grid-cols-2 gap-1 p-0.5 bg-muted/60 rounded-lg">
             <button
-              onClick={() => setChatMode("clients")}
+              onClick={() => {
+                setChatMode("clients");
+                navigate({
+                  search: (prev: any) => ({ ...prev, mode: "clients", channelId: undefined }),
+                });
+              }}
               className={cn(
                 "flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-medium transition-all cursor-pointer",
                 chatMode === "clients"
@@ -1522,7 +1552,12 @@ function ConversationsPage() {
               <span>Clientes</span>
             </button>
             <button
-              onClick={() => setChatMode("team")}
+              onClick={() => {
+                setChatMode("team");
+                navigate({
+                  search: (prev: any) => ({ ...prev, mode: "team", c: undefined }),
+                });
+              }}
               className={cn(
                 "flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-md text-xs font-medium transition-all relative cursor-pointer",
                 chatMode === "team"
@@ -1545,7 +1580,12 @@ function ConversationsPage() {
           <TeamChannelsSidebar
             channels={teamChat.channels}
             selectedChannelId={selectedTeamChannelId}
-            onSelectChannel={(cid) => setSelectedTeamChannelId(cid)}
+            onSelectChannel={(cid) => {
+              setSelectedTeamChannelId(cid);
+              navigate({
+                search: (prev: any) => ({ ...prev, mode: "team", channelId: cid, c: undefined }),
+              });
+            }}
             onOpenCreateChannel={() => setCreateChannelOpen(true)}
             onOpenNewDirectChat={() => setNewDirectChatOpen(true)}
             onlineUserIds={teamChat.onlineUserIds}
@@ -1990,7 +2030,12 @@ function ConversationsPage() {
                 onToggleReaction={teamChat.toggleReaction.mutate}
                 teamMembers={teamChat.teamMembers}
                 isSending={teamChat.sendMessage.isPending}
-                onBack={() => setSelectedTeamChannelId(null)}
+                onBack={() => {
+                  setSelectedTeamChannelId(null);
+                  navigate({
+                    search: (prev: any) => ({ ...prev, channelId: undefined }),
+                  });
+                }}
                 onlineUserIds={teamChat.onlineUserIds}
                 typingUsers={teamChat.typingUserNames}
                 onTyping={teamChat.sendTyping}
@@ -2065,7 +2110,13 @@ function ConversationsPage() {
         onOpenChange={setCreateChannelOpen}
         onCreateChannel={async (data) => {
           const cid = await teamChat.createChannel(data);
-          if (cid) setSelectedTeamChannelId(cid);
+          if (cid) {
+            setSelectedTeamChannelId(cid);
+            setChatMode("team");
+            navigate({
+              search: (prev: any) => ({ ...prev, mode: "team", channelId: cid, c: undefined }),
+            });
+          }
         }}
       />
       <NewDirectChatDialog
@@ -2078,6 +2129,9 @@ function ConversationsPage() {
             if (cid) {
               setSelectedTeamChannelId(cid);
               setChatMode("team");
+              navigate({
+                search: (prev: any) => ({ ...prev, mode: "team", channelId: cid, c: undefined }),
+              });
             }
           } catch (err: any) {
             console.error("Erro ao abrir chat direto:", err);
