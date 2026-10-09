@@ -508,7 +508,12 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
           return;
         }
 
-        phoneNumber = remoteJid ? remoteJid.split("@")[0] : null;
+        if (remoteJid.includes("@lid")) {
+          extractedLid = remoteJid.split("@")[0];
+          phoneNumber = null;
+        } else {
+          phoneNumber = remoteJid ? remoteJid.split("@")[0] : null;
+        }
         remoteMsgId = messageData.key?.id || null;
 
         const msgType = messageData.message;
@@ -774,28 +779,6 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         return;
       }
 
-      // Trava final: grupos, broadcasts, canais e IDs de grupo jamais abrem atendimento
-      if (
-        remoteJid.includes("@g.us") ||
-        remoteJid.includes("@broadcast") ||
-        remoteJid.includes("@newsletter") ||
-        phoneNumber.includes("-") ||
-        phoneNumber.startsWith("120363")
-      ) {
-        console.log(
-          `[stevo-webhook] Trava de segurança: ignorando grupo/broadcast (${remoteJid || phoneNumber})`,
-        );
-        return;
-      }
-
-      if (!phoneNumber) {
-        return;
-      }
-
-      if (!textContent) {
-        textContent = "[Mídia/Mensagem não suportada]";
-      }
-
       // 1. Find the instance in the DB
       const queryOr = instanceName ? `instance_name.eq.${instanceName}` : "";
       const queryOrId = instanceId
@@ -805,7 +788,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
 
       const { data: instances, error: instanceErr } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("id, unit_id, company_id")
+        .select("id, unit_id, company_id, department_id")
         .or(finalOr)
         .limit(1);
 
@@ -816,29 +799,78 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         return;
       }
 
-      const { id: instance_id, company_id, unit_id } = instance;
-      // Se não tem unit_id, significa que é da Empresa Mãe (Matriz), o que é perfeitamente válido.
-      // Mantemos unit_id como null ou undefined.
+      const { id: instance_id, company_id, unit_id, department_id: instanceDepartmentId } = instance;
+
+      // Se phoneNumber for nulo mas houver extractedLid, resolve via contato existente na empresa
+      if (!phoneNumber && extractedLid) {
+        const { data: contactByLid } = await supabaseAdmin
+          .from("contacts")
+          .select("id, phone, name")
+          .eq("company_id", company_id)
+          .eq("whatsapp_lid", extractedLid)
+          .maybeSingle();
+
+        if (contactByLid?.phone) {
+          phoneNumber = contactByLid.phone;
+          console.log(`[stevo-webhook] Telefone resolvido pelo whatsapp_lid ${extractedLid}: ${phoneNumber}`);
+        } else {
+          // Se ainda não tem telefone cadastrado, usa o LID provisório como identificador para não perder a mensagem
+          phoneNumber = extractedLid;
+          console.log(`[stevo-webhook] Usando LID temporário como número de contato: ${extractedLid}`);
+        }
+      }
+
+      // Trava final: grupos, broadcasts, canais e IDs de grupo jamais abrem atendimento
+      if (
+        remoteJid.includes("@g.us") ||
+        remoteJid.includes("@broadcast") ||
+        remoteJid.includes("@newsletter") ||
+        Boolean(phoneNumber?.includes("-")) ||
+        Boolean(phoneNumber?.startsWith("120363"))
+      ) {
+        console.log(
+          `[stevo-webhook] Trava de segurança: ignorando grupo/broadcast (${remoteJid || phoneNumber})`,
+        );
+        return;
+      }
+
+      if (!phoneNumber) {
+        console.log(`[stevo-webhook] Mensagem ignorada: sem telefone nem LID (${remoteJid})`);
+        return;
+      }
+
+      if (!textContent) {
+        textContent = "[Mídia/Mensagem não suportada]";
+      }
 
       // 2. Find or create Contact
       let contactId;
       let activeConv = null;
 
-      const phoneVariants = getPhoneVariants(phoneNumber || "");
-      const { data: existingContacts } = await supabaseAdmin
+      const phoneVariants = phoneNumber ? getPhoneVariants(phoneNumber) : [];
+      let contactQuery = supabaseAdmin
         .from("contacts")
         .select("id, name, whatsapp_lid, merged_into_id")
-        .eq("company_id", company_id)
-        .or(
-          `phone.in.(${phoneVariants.join(",")})${extractedLid ? `,whatsapp_lid.eq.${extractedLid}` : ""}`,
+        .eq("company_id", company_id);
+
+      if (extractedLid && phoneVariants.length > 0) {
+        contactQuery = contactQuery.or(
+          `phone.in.(${phoneVariants.join(",")}),whatsapp_lid.eq.${extractedLid}`,
         );
+      } else if (phoneVariants.length > 0) {
+        contactQuery = contactQuery.or(`phone.in.(${phoneVariants.join(",")})`);
+      } else if (extractedLid) {
+        contactQuery = contactQuery.eq("whatsapp_lid", extractedLid);
+      }
+
+      const { data: existingContacts } = await contactQuery;
 
       if (existingContacts && existingContacts.length > 0) {
         // Find if ANY of these contacts has an active conversation
         const contactIds = existingContacts.map((c) => c.merged_into_id || c.id);
         const { data: convs } = await supabaseAdmin
           .from("conversations")
-          .select("id, status, ai_active, ai_agent_id, contact_id")
+          .select("id, status, ai_active, ai_agent_id, contact_id, unread_count")
           .in("contact_id", contactIds)
           .eq("whatsapp_instance_id", instance_id)
           .in("status", ["waiting", "active"])
@@ -922,7 +954,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
       if (!activeConv) {
         const convQuery = supabaseAdmin
           .from("conversations")
-          .select("id, status, ai_active, ai_agent_id")
+          .select("id, status, ai_active, ai_agent_id, unread_count")
           .eq("contact_id", contactId)
           .eq("whatsapp_instance_id", instance_id)
           .order("started_at", { ascending: false })
@@ -1005,10 +1037,12 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
 
         const updatePayload: any = {
           last_message_at: new Date().toISOString(),
+          last_message_preview: textContent ? textContent.slice(0, 150) : null,
           remote_id: extractedLid || phoneNumber,
         };
         if (!isFromMe) {
           updatePayload.ai_followup_count = 0;
+          updatePayload.unread_count = (conv.unread_count || 0) + 1;
         }
 
         // Se a conversa estava resolvida, reabre ela como 'waiting' (ou 'active' se a IA for atender)
@@ -1038,6 +1072,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
           updatePayload.ai_agent_id = resolvedAgentId;
           updatePayload.assigned_agent_id = null;
           updatePayload.resolved_at = null;
+          updatePayload.unread_count = 1;
 
           aiActive = previouslyAiActive;
 
@@ -1131,11 +1166,14 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
           .insert({
             unit_id: unit_id,
             whatsapp_instance_id: instance_id,
+            department_id: instanceDepartmentId || null,
             contact_id: contactId,
             channel: "whatsapp",
             remote_id: extractedLid || phoneNumber,
             status: isFromMe ? "resolved" : isActiveByDefault ? "active" : "waiting",
             last_message_at: new Date().toISOString(),
+            last_message_preview: textContent ? textContent.slice(0, 150) : null,
+            unread_count: isFromMe ? 0 : 1,
             resolved_at: isFromMe ? new Date().toISOString() : null,
             ai_active: isActiveByDefault,
             ai_agent_id: defaultAgentId,

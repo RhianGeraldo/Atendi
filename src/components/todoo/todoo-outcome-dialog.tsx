@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -30,15 +30,25 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  initialType?: TodooOutcomeType;
 }
 
-export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess }: Props) {
+export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initialType = "won" }: Props) {
   const { profile } = useAuth();
-  const [outcomeType, setOutcomeType] = useState<TodooOutcomeType>("won");
+  const [outcomeType, setOutcomeType] = useState<TodooOutcomeType>(initialType);
   const [outcomeValue, setOutcomeValue] = useState<string>("");
   const [outcomeNotes, setOutcomeNotes] = useState<string>("");
   const [callbackDate, setCallbackDate] = useState<string>("");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setOutcomeType(initialType || "won");
+      setOutcomeValue("");
+      setOutcomeNotes("");
+      setCallbackDate("");
+    }
+  }, [open, initialType]);
 
   if (!lead) return null;
 

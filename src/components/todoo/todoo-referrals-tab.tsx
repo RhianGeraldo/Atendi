@@ -26,6 +26,7 @@ import { useActiveCompany } from "@/lib/active-company-context";
 import { TodooReferral, TodooGoal } from "@/types/todoo";
 import { TodooCreateReferralDialog } from "./todoo-create-referral-dialog";
 import { TodooGoalsDialog } from "./todoo-goals-dialog";
+import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import { toast } from "sonner";
 
 export function TodooReferralsTab() {
@@ -319,19 +320,20 @@ export function TodooReferralsTab() {
                       </span>
                     )}
 
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        const clean = ref.referred_phone.replace(/\D/g, "");
-                        const full = clean.startsWith("55") ? clean : `55${clean}`;
-                        window.open(`https://wa.me/${full}`, "_blank");
-                      }}
-                      title="Chamar no WhatsApp"
-                      className="h-8 w-8 p-0"
-                    >
-                      <MessageSquare className="h-4 w-4 text-emerald-600" />
-                    </Button>
+                    <StartConversationDialog
+                      initialPhone={ref.referred_phone}
+                      contactName={ref.referred_name}
+                      trigger={
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title="Iniciar atendimento no Atendi"
+                          className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                        </Button>
+                      }
+                    />
                   </div>
                 </CardContent>
               </Card>

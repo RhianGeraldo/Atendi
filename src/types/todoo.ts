@@ -90,6 +90,11 @@ export interface TodooLead {
     message_template?: string | null;
     offer_details?: string | null;
   } | null;
+  unit?: {
+    id: string;
+    name: string;
+    color?: string | null;
+  } | null;
 }
 
 export interface TodooEvent {

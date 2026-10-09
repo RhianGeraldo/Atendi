@@ -648,7 +648,10 @@ function ConversationsPage() {
         selectString = selectString.replace("contact:contacts(", "contact:contacts!inner(");
       }
 
-      let query = supabase.from("conversations").select(selectString);
+      let query = supabase
+        .from("conversations")
+        .select(selectString)
+        .order("last_message_at", { ascending: false });
 
       if (activeCompanyId) {
         query = query.eq("contact.company_id", activeCompanyId);

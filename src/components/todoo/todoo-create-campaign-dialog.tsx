@@ -132,6 +132,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
   const [crmInactivityDays, setCrmInactivityDays] = useState("30");
   const [crmStatusFilter, setCrmStatusFilter] = useState("resolved");
   const [crmSelectedReason, setCrmSelectedReason] = useState<string>("all");
+  const [crmUnitId, setCrmUnitId] = useState<string>("all");
   const [crmMatchedCount, setCrmMatchedCount] = useState<number | null>(null);
   const [crmLoadingCount, setCrmLoadingCount] = useState(false);
   const [crmLeadsData, setCrmLeadsData] = useState<any[]>([]);
@@ -141,6 +142,8 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
   const [columnHeaders, setColumnHeaders] = useState<string[]>([]);
   const [colName, setColName] = useState<string>("");
   const [colPhone, setColPhone] = useState<string>("");
+  const [colUnit, setColUnit] = useState<string>("");
+  const [defaultUnitId, setDefaultUnitId] = useState<string>("all");
   const [colSaldo, setColSaldo] = useState<string>("");
   const [colZona, setColZona] = useState<string>("");
   const [colUltimaSessao, setColUltimaSessao] = useState<string>("");
@@ -149,18 +152,36 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // Busca consultoras/atendentes da empresa
+  // Busca unidades da empresa
+  const { data: companyUnits = [] } = useQuery({
+    queryKey: ["todoo-company-units", activeCompanyId],
+    enabled: !!activeCompanyId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("units")
+        .select("id, name, color")
+        .eq("company_id", activeCompanyId!)
+        .order("name");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Busca consultoras/atendentes da empresa com suas unidades vinculadas
   const { data: teamMembers = [] } = useQuery({
-    queryKey: ["todoo-team-members", activeCompanyId],
+    queryKey: ["todoo-team-members-units", activeCompanyId],
     enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, avatar_url, role")
-        .eq("company_id", activeCompanyId)
+        .select("id, name, avatar_url, role, has_matriz_access, user_units(unit_id)")
+        .eq("company_id", activeCompanyId!)
         .order("name");
       if (error) throw error;
-      return data || [];
+      return (data || []).map((m: any) => ({
+        ...m,
+        unitIds: (m.user_units || []).map((u: any) => u.unit_id),
+      }));
     },
   });
 
@@ -172,7 +193,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
       const { data, error } = await supabase
         .from("resolution_reasons")
         .select("id, label")
-        .eq("company_id", activeCompanyId)
+        .eq("company_id", activeCompanyId!)
         .order("order");
       if (error) throw error;
       return data || [];
@@ -199,12 +220,17 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
         .from("conversations")
         .select(`
           id,
+          unit_id,
           last_message_at,
           status,
           resolution_reason_id,
           contact:contacts!inner(id, name, phone, tags, company_id)
         `)
         .eq("contact.company_id", activeCompanyId);
+
+      if (crmUnitId && crmUnitId !== "all") {
+        query = query.eq("unit_id", crmUnitId);
+      }
 
       if (crmStatusFilter === "resolved") {
         query = query.eq("status", "resolved");
@@ -231,6 +257,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
           contact_id: c.contact.id,
           name: c.contact.name || "Cliente",
           phone: c.contact.phone,
+          unit_id: c.unit_id || null,
           tags: c.contact.tags || [],
           last_message_at: c.last_message_at,
         }));
@@ -316,6 +343,8 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
         setColName(h);
       } else if (n.includes("tel") || n.includes("cel") || n.includes("whats") || n.includes("fone")) {
         setColPhone(h);
+      } else if (n.includes("unid") || n.includes("filial") || n.includes("loja") || n.includes("polo") || n.includes("clinica")) {
+        setColUnit(h);
       } else if (n.includes("saldo") || n.includes("sess")) {
         setColSaldo(h);
       } else if (n.includes("zona") || n.includes("area") || n.includes("regiao") || n.includes("proc")) {
@@ -326,7 +355,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
     });
   };
 
-  // Submissão Final e Distribuição Round-Robin
+  // Submissão Final e Distribuição Round-Robin Inteligente por Unidade
   const handleCreateCampaign = async () => {
     if (!profile || !activeCompanyId) return;
     setSubmitting(true);
@@ -337,6 +366,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
         name: string;
         phone: string;
         contact_id?: string;
+        unit_id?: string | null;
         custom_fields: Record<string, any>;
       }> = [];
 
@@ -348,6 +378,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
           name: c.name,
           phone: c.phone,
           contact_id: c.contact_id,
+          unit_id: c.unit_id || (defaultUnitId !== "all" ? defaultUnitId : null),
           custom_fields: {
             tags: c.tags,
             last_message_at: c.last_message_at,
@@ -357,15 +388,35 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
         if (!colName || !colPhone || importedRows.length === 0) {
           throw new Error("Por favor, selecione as colunas de Nome e Telefone da planilha.");
         }
-        finalLeads = importedRows.map((row) => ({
-          name: String(row[colName] || "Cliente").trim(),
-          phone: String(row[colPhone] || "").replace(/\D/g, ""),
-          custom_fields: {
-            saldo: colSaldo ? row[colSaldo] : undefined,
-            zona: colZona ? row[colZona] : undefined,
-            ultima_sessao: colUltimaSessao ? row[colUltimaSessao] : undefined,
-          },
-        })).filter((l) => l.phone.length >= 8);
+        finalLeads = importedRows
+          .map((row) => {
+            let matchedUnitId: string | null = null;
+            if (colUnit && row[colUnit]) {
+              const rawUnitStr = String(row[colUnit]).trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+              const found = companyUnits.find((u: any) => {
+                const uNorm = u.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                return rawUnitStr.includes(uNorm) || uNorm.includes(rawUnitStr);
+              });
+              if (found) matchedUnitId = found.id;
+            }
+
+            if (!matchedUnitId && defaultUnitId && defaultUnitId !== "all") {
+              matchedUnitId = defaultUnitId;
+            }
+
+            return {
+              name: String(row[colName] || "Cliente").trim(),
+              phone: String(row[colPhone] || "").replace(/\D/g, ""),
+              unit_id: matchedUnitId,
+              custom_fields: {
+                unidade_planilha: colUnit && row[colUnit] ? String(row[colUnit]).trim() : undefined,
+                saldo: colSaldo ? row[colSaldo] : undefined,
+                zona: colZona ? row[colZona] : undefined,
+                ultima_sessao: colUltimaSessao ? row[colUltimaSessao] : undefined,
+              },
+            };
+          })
+          .filter((l) => l.phone.length >= 8);
       }
 
       if (finalLeads.length === 0) {
@@ -395,25 +446,49 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
 
       if (campaignErr) throw campaignErr;
 
-      // 3. Distribuição Round-Robin entre as consultoras selecionadas
-      const assignedConsultants = selectedUserIds.length > 0 ? selectedUserIds : [profile.id];
+      // 3. Distribuição Round-Robin Inteligente por Unidade
+      const selectedConsultants = teamMembers.filter((m: any) =>
+        selectedUserIds.length > 0 ? selectedUserIds.includes(m.id) : m.id === profile.id
+      );
+
       const now = new Date();
       const slaDeadline = new Date(now.getTime() + slaHours * 60 * 60 * 1000).toISOString();
 
-      const leadsToInsert = finalLeads.map((lead, idx) => {
-        const assignedUserId = assignedConsultants[idx % assignedConsultants.length];
-        return {
-          campaign_id: campaignData.id,
-          company_id: activeCompanyId,
-          contact_id: lead.contact_id || null,
-          contact_name: lead.name,
-          contact_phone: lead.phone,
-          assigned_user_id: assignedUserId,
-          assigned_at: now.toISOString(),
-          sla_deadline: slaDeadline,
-          status: "pending",
-          custom_fields: lead.custom_fields,
-        };
+      // Agrupa leads por unidade
+      const leadsByUnit = new Map<string, typeof finalLeads>();
+      finalLeads.forEach((lead) => {
+        const uKey = lead.unit_id || "general";
+        if (!leadsByUnit.has(uKey)) leadsByUnit.set(uKey, []);
+        leadsByUnit.get(uKey)!.push(lead);
+      });
+
+      const leadsToInsert: any[] = [];
+
+      leadsByUnit.forEach((unitLeads, uKey) => {
+        // Encontra consultoras aptas para esta unidade
+        const unitConsultants = selectedConsultants.filter((c: any) => {
+          if (uKey === "general") return true;
+          return c.has_matriz_access || c.role === "admin_company" || c.role === "super_admin" || (c.unitIds && c.unitIds.includes(uKey));
+        });
+
+        const pool = unitConsultants.length > 0 ? unitConsultants : selectedConsultants;
+
+        unitLeads.forEach((lead, idx) => {
+          const assignedUser = pool[idx % pool.length];
+          leadsToInsert.push({
+            campaign_id: campaignData.id,
+            company_id: activeCompanyId,
+            unit_id: lead.unit_id || null,
+            contact_id: lead.contact_id || null,
+            contact_name: lead.name,
+            contact_phone: lead.phone,
+            assigned_user_id: assignedUser?.id || profile.id,
+            assigned_at: now.toISOString(),
+            sla_deadline: slaDeadline,
+            status: "pending",
+            custom_fields: lead.custom_fields,
+          });
+        });
       });
 
       // Insere em lotes de 100 para alta performance
@@ -424,7 +499,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
         if (insertErr) throw insertErr;
       }
 
-      toast.success(`Ação Comercial "${title}" criada com ${finalLeads.length} leads distribuídos!`);
+      toast.success(`Ação Comercial "${title}" criada com ${finalLeads.length} leads segmentados por unidade!`);
       onOpenChange(false);
       onSuccess();
     } catch (err: any) {
@@ -563,9 +638,26 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
                   <h4 className="text-xs font-semibold">Filtros Inteligentes de Atendimentos</h4>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <Label className="text-xs">Dias de Inatividade (sem contato)</Label>
+                    <Label className="text-xs">Unidade do Atendi</Label>
+                    <Select value={crmUnitId} onValueChange={setCrmUnitId}>
+                      <SelectTrigger className="mt-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas as Unidades</SelectItem>
+                        {companyUnits.map((u: any) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs">Dias de Inatividade</Label>
                     <Select value={crmInactivityDays} onValueChange={setCrmInactivityDays}>
                       <SelectTrigger className="mt-1">
                         <SelectValue />
@@ -655,13 +747,19 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
                 </label>
 
                 {columnHeaders.length > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-border">
-                    <Label className="text-xs font-semibold">Mapeamento de Colunas:</Label>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="space-y-3 pt-2 border-t border-border">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold">Mapeamento de Colunas:</Label>
+                      <span className="text-[11px] text-muted-foreground">
+                        Reconhecimento automático de colunas ativo
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
                       <div>
-                        <span className="text-muted-foreground">Coluna de Nome: *</span>
+                        <span className="text-muted-foreground font-medium">Nome do Cliente: *</span>
                         <Select value={colName} onValueChange={setColName}>
-                          <SelectTrigger className="mt-1">
+                          <SelectTrigger className="mt-1 h-8">
                             <SelectValue placeholder="Selecione" />
                           </SelectTrigger>
                           <SelectContent>
@@ -675,15 +773,49 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
                       </div>
 
                       <div>
-                        <span className="text-muted-foreground">Coluna de WhatsApp/Telefone: *</span>
+                        <span className="text-muted-foreground font-medium">WhatsApp / Telefone: *</span>
                         <Select value={colPhone} onValueChange={setColPhone}>
-                          <SelectTrigger className="mt-1">
+                          <SelectTrigger className="mt-1 h-8">
                             <SelectValue placeholder="Selecione" />
                           </SelectTrigger>
                           <SelectContent>
                             {columnHeaders.map((h) => (
                               <SelectItem key={h} value={h}>
                                 {h}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <span className="text-muted-foreground font-medium">Coluna de Unidade:</span>
+                        <Select value={colUnit || "__none__"} onValueChange={(v) => setColUnit(v === "__none__" ? "" : v)}>
+                          <SelectTrigger className="mt-1 h-8">
+                            <SelectValue placeholder="Selecione se houver" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Não possui coluna de unidade</SelectItem>
+                            {columnHeaders.map((h) => (
+                              <SelectItem key={h} value={h}>
+                                {h}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <span className="text-muted-foreground font-medium">Unidade Padrão:</span>
+                        <Select value={defaultUnitId} onValueChange={setDefaultUnitId}>
+                          <SelectTrigger className="mt-1 h-8">
+                            <SelectValue placeholder="Todas as Unidades" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">Todas as Unidades (Geral)</SelectItem>
+                            {companyUnits.map((u: any) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.name}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -692,12 +824,12 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
 
                       <div>
                         <span className="text-muted-foreground">Saldo de Sessões (Opcional):</span>
-                        <Select value={colSaldo} onValueChange={setColSaldo}>
-                          <SelectTrigger className="mt-1">
+                        <Select value={colSaldo || "__none__"} onValueChange={(v) => setColSaldo(v === "__none__" ? "" : v)}>
+                          <SelectTrigger className="mt-1 h-8">
                             <SelectValue placeholder="Ignorar" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">Nenhum</SelectItem>
+                            <SelectItem value="__none__">Nenhum</SelectItem>
                             {columnHeaders.map((h) => (
                               <SelectItem key={h} value={h}>
                                 {h}
@@ -709,12 +841,12 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
 
                       <div>
                         <span className="text-muted-foreground">Área/Procedimento (Opcional):</span>
-                        <Select value={colZona} onValueChange={setColZona}>
-                          <SelectTrigger className="mt-1">
+                        <Select value={colZona || "__none__"} onValueChange={(v) => setColZona(v === "__none__" ? "" : v)}>
+                          <SelectTrigger className="mt-1 h-8">
                             <SelectValue placeholder="Ignorar" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">Nenhum</SelectItem>
+                            <SelectItem value="__none__">Nenhum</SelectItem>
                             {columnHeaders.map((h) => (
                               <SelectItem key={h} value={h}>
                                 {h}
@@ -724,6 +856,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
                         </Select>
                       </div>
                     </div>
+
                     <p className="text-[11px] text-emerald-600 font-medium">
                       ✓ {importedRows.length} clientes carregados da planilha
                     </p>
@@ -810,13 +943,28 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
                           }
                         }}
                       />
-                      <span className="truncate">{member.name}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="truncate font-medium">{member.name}</span>
+                          {member.has_matriz_access || member.role === "admin_company" ? (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 border-blue-500/30 text-blue-600">
+                              Todas as Unidades
+                            </Badge>
+                          ) : member.unitIds?.length > 0 ? (
+                            <span className="text-[10px] text-muted-foreground truncate">
+                              ({companyUnits.filter((u: any) => member.unitIds.includes(u.id)).map((u: any) => u.name).join(", ")})
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">(Sem unidade)</span>
+                          )}
+                        </div>
+                      </div>
                     </label>
                   );
                 })}
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Os leads serão distribuídos igualmente (Round-Robin) entre as pessoas marcadas.
+                <strong>Distribuição Inteligente por Unidade:</strong> Os contatos de cada unidade serão entregues para as consultoras daquela respectiva unidade.
               </p>
             </div>
 

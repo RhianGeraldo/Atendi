@@ -58,6 +58,7 @@ import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { useWavoip } from "@/hooks/use-wavoip";
 import { cn } from "@/lib/utils";
+import { TodooConversationBanner } from "@/components/todoo/todoo-conversation-banner";
 import { initials } from "@/lib/format";
 import { useSlaSettings } from "@/lib/use-sla";
 import { calculateConversationSla } from "@/lib/sla";
@@ -1498,6 +1499,9 @@ export function ChatPanel({
             )}
           </div>
         </header>
+
+        {/* Banner Inteligente do Todoo (se o cliente estiver em campanha ativa) */}
+        <TodooConversationBanner conv={conv} />
 
         {/* Messages History */}
         {loadingMessages && (!messages || messages.length === 0) ? (
