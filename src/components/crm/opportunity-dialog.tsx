@@ -625,6 +625,7 @@ export function OpportunityDialog({
           action_type,
           description,
           created_at,
+          user_id,
           profiles (
             name,
             email
@@ -698,23 +699,41 @@ export function OpportunityDialog({
       color?: string;
     }> = [];
 
-    // 1. Opportunity Creation event
-    if (opportunity?.created_at) {
+    // 1. Dedicated Opportunity History (Stage Changes, Status Changes, Notes & Creation)
+    const hasCreationInHistory = historyList?.some((h: any) => h.action_type === "created" || h.action_type === "creation");
+
+    // Fallback: Apenas adiciona evento manual de criação se não houver registro formal no opportunity_history
+    if (!hasCreationInHistory && opportunity?.created_at) {
       events.push({
         id: `create-${opportunity.id}`,
         type: 'creation',
         timestamp: opportunity.created_at,
         title: "Oportunidade Criada",
         description: `Oportunidade "${opportunity.title}" foi iniciada no funil.`,
-        user: currentOwnerName || profile?.name || profile?.email || "Usuário",
+        user: currentOwnerName || "Sistema",
         color: "bg-primary/15 text-primary border-primary/30"
       });
     }
 
-    // 2. Dedicated Opportunity History (Stage Changes, Status Changes & Creation)
     if (historyList && historyList.length > 0) {
       historyList.forEach((h: any) => {
-        const histUserName = h.profiles?.name || h.profiles?.email || profile?.name || "Usuário";
+        // Detecção refinada do autor (Integração / MCP / IA / Usuário)
+        let histUserName: string;
+        const descLower = (h.description || "").toLowerCase();
+
+        if (descLower.includes("via mcp") || descLower.includes("belle copilot") || descLower.includes("cabine")) {
+          histUserName = "Integração / MCP";
+        } else if (descLower.includes("ia") || descLower.includes("copilot") || descLower.includes("automacao")) {
+          histUserName = "Integração / IA";
+        } else if (h.profiles?.name) {
+          histUserName = h.profiles.name;
+        } else if (h.profiles?.email) {
+          histUserName = h.profiles.email;
+        } else if (!h.user_id) {
+          histUserName = "Sistema / Integração";
+        } else {
+          histUserName = profile?.name || "Usuário";
+        }
 
         if (h.action_type === "stage_change") {
           events.push({
@@ -741,6 +760,16 @@ export function OpportunityDialog({
               : isLost 
                 ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
                 : "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30"
+          });
+        } else if (h.action_type === "notes_change") {
+          events.push({
+            id: `hist-${h.id}`,
+            type: 'note',
+            timestamp: h.created_at,
+            title: "Observação Atualizada 📝",
+            description: h.description,
+            user: histUserName,
+            color: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
           });
         } else {
           events.push({
@@ -797,7 +826,7 @@ export function OpportunityDialog({
       <DialogTrigger asChild>
         {children}
       </DialogTrigger>
-      <DialogContent className={cn("p-0 overflow-hidden flex flex-col gap-0 border-border/80 shadow-xl", opportunity ? "sm:max-w-[780px] h-[85vh] max-h-[660px]" : "sm:max-w-[540px] max-h-[90vh]")}>
+      <DialogContent className={cn("p-0 overflow-hidden flex flex-col gap-0 border-border/80 shadow-xl", opportunity ? "sm:max-w-[800px] h-[90vh] max-h-[740px]" : "sm:max-w-[540px] max-h-[90vh]")}>
         
         {/* Header Bar */}
         <DialogHeader className="px-6 py-4 border-b shrink-0 bg-muted/15">
@@ -988,19 +1017,20 @@ export function OpportunityDialog({
             </div>
 
             {/* Tab Contents */}
-            <div className="flex-1 overflow-y-auto p-5 bg-background space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 bg-background">
               {/* TAB: DETALHES */}
-              <TabsContent value="details" className="m-0 space-y-4">
+              <TabsContent value="details" className="m-0 h-full flex flex-col space-y-3">
                 
-                {/* Section 1: Informações Principais */}
-                <div className="space-y-3 p-4 rounded-xl border border-border/50 bg-card">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-foreground pb-2 border-b border-border/40">
-                    <Target className="h-4 w-4 text-primary" />
+                {/* Section 1: Informações Principais da Negociação */}
+                <div className="space-y-2.5 p-3.5 rounded-xl border border-border/50 bg-card shrink-0">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-foreground pb-1.5 border-b border-border/40">
+                    <Target className="h-3.5 w-3.5 text-primary" />
                     <span>Informações Principais</span>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium text-muted-foreground">Título da Oportunidade</Label>
+                  {/* Título */}
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-medium text-muted-foreground">Título da Oportunidade</Label>
                     <Input 
                       placeholder="Ex: Projeto Comercial / Consultoria" 
                       value={title} 
@@ -1011,15 +1041,16 @@ export function OpportunityDialog({
                           scheduleDebouncedAutoSave({ title: newTitle });
                         }
                       }} 
-                      className="font-medium bg-background"
+                      className="h-8 text-xs font-medium bg-background"
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-medium text-muted-foreground">Valor (R$)</Label>
+                  {/* Valor e Previsão de Fechamento */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-medium text-muted-foreground">Valor (R$)</Label>
                       <div className="relative">
-                        <span className="absolute left-3 top-2.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 select-none">
+                        <span className="absolute left-2.5 top-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 select-none">
                           R$
                         </span>
                         <Input 
@@ -1034,23 +1065,23 @@ export function OpportunityDialog({
                               scheduleDebouncedAutoSave({ value: newVal });
                             }
                           }} 
-                          className="pl-9 font-semibold text-emerald-600 dark:text-emerald-400 bg-background"
+                          className="h-8 pl-8 text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-background"
                         />
                       </div>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-medium text-muted-foreground">Previsão de Fechamento</Label>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-medium text-muted-foreground">Previsão de Fechamento</Label>
                       <Popover>
                         <PopoverTrigger asChild>
                           <Button
                             variant={"outline"}
                             className={cn(
-                              "w-full justify-start text-left font-normal cursor-pointer bg-background",
+                              "w-full h-8 justify-start text-left font-normal cursor-pointer bg-background text-xs",
                               !expectedCloseDate && "text-muted-foreground"
                             )}
                           >
-                            <CalendarIcon className="mr-2 h-4 w-4 text-muted-foreground" />
+                            <CalendarIcon className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
                             {expectedCloseDate ? formatDateSafe(expectedCloseDate + 'T12:00:00', "dd/MM/yyyy") : <span>Selecione uma data...</span>}
                           </Button>
                         </PopoverTrigger>
@@ -1119,20 +1150,80 @@ export function OpportunityDialog({
                       </Popover>
                     </div>
                   </div>
+
+                  {/* Funil e Etapa */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-medium text-muted-foreground">Funil de Vendas</Label>
+                      <Select 
+                        value={pipelineId} 
+                        onValueChange={async (v) => { 
+                          setPipelineId(v); 
+                          const { data: pStages } = await supabase
+                            .from("pipeline_stages")
+                            .select("id, name")
+                            .eq("pipeline_id", v)
+                            .order("order")
+                            .limit(1);
+                          const firstStage = pStages?.[0]?.id || "";
+                          setStageId(firstStage);
+                          if (opportunity && firstStage) {
+                            flushAutoSave({ stageId: firstStage });
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-xs cursor-pointer bg-background">
+                          <SelectValue placeholder="Selecione o funil..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {pipelines?.map(p => (
+                            <SelectItem key={p.id} value={p.id} className="cursor-pointer text-xs">
+                              {p.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-medium text-muted-foreground">Etapa do Funil</Label>
+                      <Select 
+                        value={stageId} 
+                        onValueChange={(v) => {
+                          setStageId(v);
+                          if (opportunity) {
+                            flushAutoSave({ stageId: v });
+                          }
+                        }} 
+                        disabled={!pipelineId}
+                      >
+                        <SelectTrigger className="h-8 text-xs cursor-pointer bg-background">
+                          <SelectValue placeholder="Selecione a etapa..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {stages?.map(s => (
+                            <SelectItem key={s.id} value={s.id} className="cursor-pointer text-xs">
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Section 2: Cliente, Responsável & Funil */}
-                <div className="space-y-3 p-4 rounded-xl border border-border/50 bg-card">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-foreground pb-2 border-b border-border/40">
-                    <User className="h-4 w-4 text-primary" />
-                    <span>Cliente & Atendente Responsável</span>
+                {/* Section 2: Cliente & Atendimento */}
+                <div className="space-y-2.5 p-3.5 rounded-xl border border-border/50 bg-card shrink-0">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-foreground pb-1.5 border-b border-border/40">
+                    <User className="h-3.5 w-3.5 text-primary" />
+                    <span>Cliente & Atendimento</span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-3">
                     {/* Contato Selecionado */}
-                    <div className="space-y-1.5">
+                    <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                        <Label className="text-xs font-medium text-muted-foreground">Contato Vinculado (Cliente)</Label>
+                        <Label className="text-[11px] font-medium text-muted-foreground">Contato Vinculado</Label>
                         {contactId && (
                           <ContactChatButton
                             contactId={contactId}
@@ -1144,10 +1235,10 @@ export function OpportunityDialog({
                             trigger={
                               <button
                                 type="button"
-                                className="text-[11px] font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 flex items-center gap-1 cursor-pointer hover:underline"
+                                className="text-[10px] font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 flex items-center gap-1 cursor-pointer hover:underline"
                                 title="Abrir conversa do cliente no Chat"
                               >
-                                <MessageCircle className="h-3 w-3" />
+                                <MessageCircle className="h-2.5 w-2.5" />
                                 <span>Abrir no Chat</span>
                               </button>
                             }
@@ -1160,17 +1251,17 @@ export function OpportunityDialog({
                             variant="outline"
                             role="combobox"
                             aria-expanded={contactComboboxOpen}
-                            className="w-full justify-between font-normal cursor-pointer bg-background"
+                            className="w-full h-8 text-xs justify-between font-normal cursor-pointer bg-background"
                           >
                             <div className="flex items-center gap-2 truncate">
-                              <User className="h-4 w-4 text-primary shrink-0" />
+                              <User className="h-3.5 w-3.5 text-primary shrink-0" />
                               <span className="truncate">
                                 {contactId
                                   ? contacts?.find((c) => c.id === contactId)?.name || opportunity?.contacts?.name || "Contato selecionado"
                                   : "Selecione um contato..."}
                               </span>
                             </div>
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-[320px] p-0" align="start">
@@ -1224,8 +1315,8 @@ export function OpportunityDialog({
                     </div>
 
                     {/* Atendente Responsável */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-medium text-muted-foreground">Atendente Responsável</Label>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-medium text-muted-foreground">Atendente Responsável</Label>
                       <Select 
                         value={ownerId} 
                         onValueChange={(val) => {
@@ -1235,15 +1326,15 @@ export function OpportunityDialog({
                           }
                         }}
                       >
-                        <SelectTrigger className="cursor-pointer bg-background">
+                        <SelectTrigger className="h-8 text-xs cursor-pointer bg-background">
                           <div className="flex items-center gap-2 truncate">
-                            <UserCheck className="h-4 w-4 text-primary shrink-0" />
+                            <UserCheck className="h-3.5 w-3.5 text-primary shrink-0" />
                             <SelectValue placeholder="Selecione o atendente..." />
                           </div>
                         </SelectTrigger>
                         <SelectContent>
                           {companyUsers?.filter(u => u.active !== false || u.id === ownerId).map((u) => (
-                            <SelectItem key={u.id} value={u.id} className="cursor-pointer">
+                            <SelectItem key={u.id} value={u.id} className="cursor-pointer text-xs">
                               {u.name || u.email} {u.active === false ? "(Inativo)" : ""}
                             </SelectItem>
                           ))}
@@ -1251,65 +1342,19 @@ export function OpportunityDialog({
                       </Select>
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4 pt-1">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-medium text-muted-foreground">Funil de Vendas</Label>
-                      <Select 
-                        value={pipelineId} 
-                        onValueChange={async (v) => { 
-                          setPipelineId(v); 
-                          const { data: pStages } = await supabase
-                            .from("pipeline_stages")
-                            .select("id, name")
-                            .eq("pipeline_id", v)
-                            .order("order")
-                            .limit(1);
-                          const firstStage = pStages?.[0]?.id || "";
-                          setStageId(firstStage);
-                          if (opportunity && firstStage) {
-                            flushAutoSave({ stageId: firstStage });
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="cursor-pointer bg-background"><SelectValue placeholder="Selecione o funil..." /></SelectTrigger>
-                        <SelectContent>
-                          {pipelines?.map(p => <SelectItem key={p.id} value={p.id} className="cursor-pointer">{p.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-medium text-muted-foreground">Etapa do Funil</Label>
-                      <Select 
-                        value={stageId} 
-                        onValueChange={(v) => {
-                          setStageId(v);
-                          if (opportunity) {
-                            flushAutoSave({ stageId: v });
-                          }
-                        }} 
-                        disabled={!pipelineId}
-                      >
-                        <SelectTrigger className="cursor-pointer bg-background"><SelectValue placeholder="Selecione a etapa..." /></SelectTrigger>
-                        <SelectContent>
-                          {stages?.map(s => <SelectItem key={s.id} value={s.id} className="cursor-pointer">{s.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
                 </div>
 
-                {/* Section 3: Observações da Oportunidade */}
-                <div className="space-y-2 p-4 rounded-xl border border-border/50 bg-card">
-                  <div className="flex items-center justify-between pb-2 border-b border-border/40">
+                {/* Section 3: Observações da Oportunidade (Expandindo até o bottom) */}
+                <div className="p-3.5 rounded-xl border border-border/50 bg-card flex-1 flex flex-col min-h-[140px] space-y-2">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-border/40 shrink-0">
                     <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                      <FileText className="h-4 w-4 text-primary" />
+                      <FileText className="h-3.5 w-3.5 text-primary" />
                       <span>Observações da Oportunidade</span>
                     </div>
-                    <span className="text-[11px] text-muted-foreground">Visível para toda a equipe</span>
+                    <span className="text-[10px] text-muted-foreground">Visível para toda a equipe</span>
                   </div>
                   <Textarea
-                    placeholder="Adicione observações importantes sobre esta oportunidade (ex: preferências, particularidades da negociação, restrições)..."
+                    placeholder="Adicione observações importantes sobre esta oportunidade..."
                     value={notes}
                     onChange={(e) => {
                       const newNotes = e.target.value;
@@ -1318,36 +1363,32 @@ export function OpportunityDialog({
                         scheduleDebouncedAutoSave({ notes: newNotes });
                       }
                     }}
-                    rows={4}
-                    className="resize-y min-h-[90px] text-xs bg-background leading-relaxed"
+                    className="resize-none flex-1 w-full text-xs bg-background leading-relaxed"
                   />
                 </div>
 
-                {/* Auto-Save Status Bar */}
-                <div className="pt-3 border-t border-border/40 flex items-center justify-between text-xs mt-2">
-                  <div className="flex items-center gap-2">
-                    {saveStatus === "saving" ? (
-                      <span className="flex items-center gap-1.5 text-primary font-medium">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Salvando alterações...
-                      </span>
-                    ) : saveStatus === "saved" ? (
-                      <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
-                        <Check className="h-3.5 w-3.5" />
-                        Salvo automaticamente
-                      </span>
-                    ) : saveStatus === "error" ? (
-                      <span className="flex items-center gap-1.5 text-rose-500 font-medium">
-                        Erro ao salvar alterações
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground flex items-center gap-1.5">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground/60" />
-                        Todas as alterações são salvas automaticamente
-                      </span>
-                    )}
+                {/* Auto-Save Status Feedback (Exibido apenas durante salvamento/erro) */}
+                {saveStatus !== "idle" && (
+                  <div className="pt-1.5 flex items-center justify-between text-[11px] shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      {saveStatus === "saving" ? (
+                        <span className="flex items-center gap-1.5 text-primary font-medium">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Salvando alterações...
+                        </span>
+                      ) : saveStatus === "saved" ? (
+                        <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+                          <Check className="h-3 w-3" />
+                          Salvo automaticamente
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1.5 text-rose-500 font-medium">
+                          Erro ao salvar alterações
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
               </TabsContent>
 
               {/* TAB: PASSOS DA ETAPA / QUALIFICAÇÃO */}
