@@ -52,6 +52,7 @@ export interface InternalChannelMember {
     avatar_url?: string | null;
     role?: string | null;
     online?: boolean;
+    active?: boolean;
   } | null;
 }
 

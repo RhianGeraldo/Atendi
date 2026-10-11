@@ -233,9 +233,9 @@ export function useTeamChat(
       const { data, error } = await (supabase as any)
         .from("internal_channels")
         .select(
-          `id, company_id, unit_id, department_id, name, description, type, scope, avatar_url, created_by, is_announcement, last_message_preview, last_message_at, created_at, updated_at,
-           unit:units(id, name, color),
-           members:internal_channel_members(id, channel_id, user_id, role, last_read_at, unread_count, is_muted, profile:profiles(id, name, role, avatar_url, online, last_seen_at))`
+           `id, company_id, unit_id, department_id, name, description, type, scope, avatar_url, created_by, is_announcement, last_message_preview, last_message_at, created_at, updated_at,
+            unit:units(id, name, color),
+            members:internal_channel_members(id, channel_id, user_id, role, last_read_at, unread_count, is_muted, profile:profiles(id, name, role, avatar_url, online, active, last_seen_at))`
         )
         .eq("company_id", companyId!)
         .order("last_message_at", { ascending: false });
@@ -252,22 +252,45 @@ export function useTeamChat(
         allowedUnits = uData?.map((u: any) => u.unit_id) || [];
       }
 
+      // Obtém IDs dos usuários ativos da empresa diretamente no momento da busca de canais
+      const { data: activeProfilesData } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("company_id", companyId!)
+        .eq("active", true);
+
+      const activeUserIdsSet = new Set((activeProfilesData || []).map((p: any) => p.id));
+
       let list = (data || []) as unknown as InternalChannel[];
 
-      // Formata DMs (identifica o outro usuário) e calcula não lidas para o usuário logado
+      // Formata canais, remove membros inativos e calcula não lidas
       list = list.map((ch) => {
-        const myMemberInfo = ch.members?.find((m) => m.user_id === profile?.id);
+        let members = (ch.members || []).filter((m) => {
+          // Se o perfil tiver active explicitamente false, exclui
+          if (m.profile && m.profile.active === false) return false;
+          // Se não estiver no conjunto de perfis ativos da empresa, exclui
+          if (!activeUserIdsSet.has(m.user_id)) return false;
+          return true;
+        });
+
+        const myMemberInfo = members.find((m) => m.user_id === profile?.id);
         const unreadCount = myMemberInfo?.unread_count || 0;
 
         let otherUser = null;
         if (ch.type === "direct") {
           const otherMember =
-            ch.members?.find((m) => m.user_id !== profile?.id) ||
-            ch.members?.find((m) => m.user_id === profile?.id);
+            members.find((m) => m.user_id !== profile?.id) ||
+            members.find((m) => m.user_id === profile?.id);
 
           if (otherMember?.profile) {
             const memberMeta = teamMembers?.find((tm) => tm.id === otherMember.user_id);
             const isSelf = otherMember.user_id === profile?.id;
+            const rawOnline = Boolean((otherMember.profile as any)?.online || memberMeta?.online);
+            const lastSeen = (otherMember.profile as any)?.last_seen_at || memberMeta?.last_seen_at;
+            const isRecent = lastSeen
+              ? Date.now() - new Date(lastSeen).getTime() < 3 * 60 * 1000
+              : false;
+
             otherUser = {
               id: otherMember.profile.id,
               name: otherMember.profile.name,
@@ -276,24 +299,44 @@ export function useTeamChat(
               unit_name: memberMeta?.units?.[0]?.name || null,
               online: isSelf
                 ? true
-                : Boolean((otherMember.profile as any).online || memberMeta?.online),
+                : presenceOnlineIds.includes(otherMember.user_id) || (rawOnline && isRecent),
             };
           }
         }
 
         return {
           ...ch,
+          members,
           unread_count: unreadCount,
           other_user: otherUser,
         };
       });
 
-      // Filtra por permissão se o usuário não for admin
+      // 1. Para conversas diretas (1:1), apenas os participantes envolvidos devem ver a conversa (mesmo para administradores)
+      list = list.filter((ch) => {
+        if (ch.type === "direct") {
+          return ch.members?.some((m) => m.user_id === profile?.id);
+        }
+        return true;
+      });
+
+      // 2. Remove conversas diretas cujo outro usuário está desativado (ou não tem perfil ativo)
+      list = list.filter((ch) => {
+        if (ch.type === "direct") {
+          const otherMember = ch.members?.find((m) => m.user_id !== profile?.id);
+          if (otherMember && !activeUserIdsSet.has(otherMember.user_id)) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      // 3. Filtra canais por permissão se o usuário não for admin
       if (!isAdmin && !profile?.has_matriz_access) {
         list = list.filter((ch) => {
           if (ch.scope === "company") return true;
           if (ch.scope === "unit" && ch.unit_id && allowedUnits.includes(ch.unit_id)) return true;
-          // Se for custom ou direct, deve ser membro explícito
+          // Se for custom, deve ser membro explícito
           return ch.members?.some((m) => m.user_id === profile?.id);
         });
       }
@@ -329,23 +372,36 @@ export function useTeamChat(
     },
   });
 
-  // Lista consolidada de IDs de usuários online (Realtime Presence + Colaboradores logados no CRM)
+  // Lista consolidada de IDs de usuários online (Realtime Presence + Heartbeat recente nos últimos 3 minutos)
   const onlineUserIds = useMemo(() => {
     const set = new Set<string>(presenceOnlineIds);
     // Usuário logado sempre está online
     if (profile?.id) set.add(profile.id);
 
-    // Membros com online: true no CRM
+    const isRecentlyActive = (online?: boolean | null, lastSeenAt?: string | null) => {
+      if (!online || !lastSeenAt) return false;
+      const diff = Date.now() - new Date(lastSeenAt).getTime();
+      return diff >= 0 && diff < 3 * 60 * 1000;
+    };
+
+    // Membros com online recente no CRM
     teamMembers?.forEach((tm) => {
-      if ((tm as any).online) set.add(tm.id);
+      if (isRecentlyActive(tm.online, tm.last_seen_at)) {
+        set.add(tm.id);
+      }
     });
 
     // Membros dos canais
     channels?.forEach((ch) => {
       ch.members?.forEach((m) => {
-        if ((m.profile as any)?.online) set.add(m.user_id);
+        if (isRecentlyActive(m.profile?.online, m.profile?.last_seen_at)) {
+          set.add(m.user_id);
+        }
       });
-      if (ch.other_user?.online && ch.other_user.id) {
+      if (
+        ch.other_user?.id &&
+        isRecentlyActive(ch.other_user.online, (ch.other_user as any)?.last_seen_at)
+      ) {
         set.add(ch.other_user.id);
       }
     });
@@ -402,8 +458,8 @@ export function useTeamChat(
       if (!profile?.id || !channelId) return;
 
       // Zera no cache imediatamente
-      qc.setQueryData<InternalChannel[]>(
-        ["internal-channels", companyId, profile?.id, selectedUnitId],
+      qc.setQueriesData<InternalChannel[]>(
+        { queryKey: ["internal-channels"] },
         (old) => {
           if (!old) return old;
           return old.map((ch) =>
@@ -511,8 +567,8 @@ export function useTeamChat(
       );
 
       // Atualiza prévia do canal e reordena para o topo
-      qc.setQueryData<InternalChannel[]>(
-        ["internal-channels", companyId, profile?.id, selectedUnitId],
+      qc.setQueriesData<InternalChannel[]>(
+        { queryKey: ["internal-channels"] },
         (old) => {
           if (!old) return old;
           const updated = old.map((ch) =>
@@ -883,8 +939,25 @@ export function useTeamChat(
       { channel_id: newChannel.id, user_id: profile.id, role: "admin" },
     ];
 
-    if (memberIds && memberIds.length > 0) {
-      memberIds.forEach((uid) => {
+    let effectiveMemberIds = memberIds || [];
+    if (effectiveMemberIds.length === 0 && teamMembers) {
+      if (scope === "company") {
+        effectiveMemberIds = teamMembers
+          .map((m) => m.id)
+          .filter((id) => id !== profile.id);
+      } else if (scope === "unit" && unitId) {
+        effectiveMemberIds = teamMembers
+          .filter((m) => {
+            const belongsToUnit = m.units?.some((u) => u.id === unitId);
+            const isCompanyAdmin = m.role === "admin_company" || m.role === "super_admin";
+            return (belongsToUnit || isCompanyAdmin) && m.id !== profile.id;
+          })
+          .map((m) => m.id);
+      }
+    }
+
+    if (effectiveMemberIds && effectiveMemberIds.length > 0) {
+      effectiveMemberIds.forEach((uid) => {
         if (uid !== profile.id) {
           membersToInsert.push({
             channel_id: newChannel.id,
@@ -901,6 +974,287 @@ export function useTeamChat(
 
     await qc.invalidateQueries({ queryKey: ["internal-channels"] });
     return newChannel.id;
+  };
+
+  // 12. Adicionar Membros ao Canal
+  const addChannelMembers = async (channelId: string, userIds: string[]) => {
+    if (!profile?.id || !companyId || !channelId || userIds.length === 0) return;
+
+    // Atualização otimista imediata na cache do React Query
+    qc.setQueriesData<InternalChannel[]>({ queryKey: ["internal-channels"] }, (old) => {
+      if (!old) return old;
+      return old.map((ch) => {
+        if (ch.id === channelId) {
+          const currentMembers = ch.members || [];
+          const existingUserIds = new Set(currentMembers.map((m) => m.user_id));
+          const newMembersToAdd = userIds
+            .filter((uid) => !existingUserIds.has(uid))
+            .map((uid) => {
+              const tm = teamMembers?.find((m) => m.id === uid);
+              return {
+                id: `temp-${uid}-${Date.now()}`,
+                channel_id: channelId,
+                user_id: uid,
+                role: "member" as const,
+                last_read_at: null,
+                unread_count: 0,
+                is_muted: false,
+                profile: tm
+                  ? {
+                      id: tm.id,
+                      name: tm.name,
+                      role: tm.role,
+                      avatar_url: tm.avatar_url,
+                      online: Boolean(tm.online),
+                      active: tm.active ?? true,
+                    }
+                  : null,
+              };
+            });
+          return {
+            ...ch,
+            members: [...currentMembers, ...newMembersToAdd],
+          };
+        }
+        return ch;
+      });
+    });
+
+    const inserts = userIds.map((uid) => ({
+      channel_id: channelId,
+      user_id: uid,
+      role: "member",
+    }));
+
+    const { error } = await (supabase as any)
+      .from("internal_channel_members")
+      .upsert(inserts, { onConflict: "channel_id,user_id" });
+
+    if (error) {
+      console.error("[addChannelMembers] Erro ao adicionar membros:", error);
+      toast.error("Erro ao adicionar membros ao grupo.");
+      await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+      throw error;
+    }
+
+    toast.success(
+      `${userIds.length} ${userIds.length === 1 ? "membro adicionado" : "membros adicionados"} ao grupo!`
+    );
+    await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+  };
+
+  // 13. Remover Membro do Canal
+  const removeChannelMember = async (channelId: string, userId: string) => {
+    if (!profile?.id || !companyId || !channelId) return;
+
+    // Atualização otimista imediata na cache do React Query
+    qc.setQueriesData<InternalChannel[]>({ queryKey: ["internal-channels"] }, (old) => {
+      if (!old) return old;
+      return old.map((ch) => {
+        if (ch.id === channelId && ch.members) {
+          return {
+            ...ch,
+            members: ch.members.filter((m) => m.user_id !== userId),
+          };
+        }
+        return ch;
+      });
+    });
+
+    const { error } = await (supabase as any)
+      .from("internal_channel_members")
+      .delete()
+      .eq("channel_id", channelId)
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("[removeChannelMember] Erro ao remover membro:", error);
+      toast.error("Erro ao remover membro do grupo.");
+      await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+      throw error;
+    }
+
+    toast.success("Membro removido do grupo.");
+    await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+  };
+
+  // 14. Atualizar Cargo/Papel do Membro no Canal
+  const updateMemberRole = async (
+    channelId: string,
+    userId: string,
+    role: "admin" | "member"
+  ) => {
+    if (!profile?.id || !companyId || !channelId) return;
+
+    qc.setQueriesData<InternalChannel[]>({ queryKey: ["internal-channels"] }, (old) => {
+      if (!old) return old;
+      return old.map((ch) => {
+        if (ch.id === channelId && ch.members) {
+          return {
+            ...ch,
+            members: ch.members.map((m) => (m.user_id === userId ? { ...m, role } : m)),
+          };
+        }
+        return ch;
+      });
+    });
+
+    const { error } = await (supabase as any)
+      .from("internal_channel_members")
+      .update({ role })
+      .eq("channel_id", channelId)
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("[updateMemberRole] Erro ao atualizar privilégio:", error);
+      toast.error("Erro ao alterar privilégio do membro.");
+      await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+      throw error;
+    }
+
+    toast.success(
+      role === "admin"
+        ? "Membro promovido a administrador do grupo!"
+        : "Privilégio de administrador removido."
+    );
+    await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+  };
+
+  // 15. Sair do Canal
+  const leaveChannel = async (channelId: string) => {
+    if (!profile?.id || !channelId) return;
+
+    qc.setQueriesData<InternalChannel[]>({ queryKey: ["internal-channels"] }, (old) => {
+      if (!old) return old;
+      return old.map((ch) => {
+        if (ch.id === channelId && ch.members) {
+          return {
+            ...ch,
+            members: ch.members.filter((m) => m.user_id !== profile.id),
+          };
+        }
+        return ch;
+      });
+    });
+
+    // Se o usuário saiu do canal que estava visualizando no momento, redireciona para outro canal da lista
+    if (activeChannelIdRef.current === channelId) {
+      const remaining = (channelsRef.current || []).filter((c) => c.id !== channelId);
+      const nextId = remaining.length > 0 ? remaining[0].id : "";
+      optionsRef.current?.onSelectChannel?.(nextId);
+    }
+
+    const { error } = await (supabase as any)
+      .from("internal_channel_members")
+      .delete()
+      .eq("channel_id", channelId)
+      .eq("user_id", profile.id);
+
+    if (error) {
+      console.error("[leaveChannel] Erro ao sair do grupo:", error);
+      toast.error("Erro ao sair do grupo.");
+      await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+      throw error;
+    }
+
+    toast.success("Você saiu do grupo.");
+    await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+  };
+
+  // 16. Atualizar Informações do Canal
+  const updateChannel = async (
+    channelId: string,
+    data: { name?: string; description?: string; isAnnouncement?: boolean }
+  ) => {
+    if (!profile?.id || !companyId || !channelId) return;
+
+    const updatePayload: any = {};
+    if (data.name !== undefined) updatePayload.name = data.name.trim();
+    if (data.description !== undefined)
+      updatePayload.description = data.description.trim() || null;
+    if (data.isAnnouncement !== undefined)
+      updatePayload.is_announcement = data.isAnnouncement;
+    updatePayload.updated_at = new Date().toISOString();
+
+    const { error } = await (supabase as any)
+      .from("internal_channels")
+      .update(updatePayload)
+      .eq("id", channelId);
+
+    if (error) {
+      console.error("[updateChannel] Erro ao atualizar canal:", error);
+      toast.error("Erro ao atualizar grupo.");
+      throw error;
+    }
+
+    toast.success("Grupo atualizado com sucesso!");
+    await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+  };
+
+  // 17. Silenciar ou Ativar Notificações do Canal
+  const toggleMuteChannel = async (channelId: string, isMuted: boolean) => {
+    if (!profile?.id || !companyId || !channelId) return;
+
+    // Atualização otimista no cache do canal
+    qc.setQueriesData<InternalChannel[]>(
+      { queryKey: ["internal-channels"] },
+      (old) => {
+        if (!old) return old;
+        return old.map((ch) => {
+          if (ch.id === channelId) {
+            const updatedMembers = (ch.members || []).map((m) =>
+              m.user_id === profile.id ? { ...m, is_muted: isMuted } : m
+            );
+            return { ...ch, members: updatedMembers };
+          }
+          return ch;
+        });
+      }
+    );
+
+    const { data: existing } = await (supabase as any)
+      .from("internal_channel_members")
+      .select("id")
+      .eq("channel_id", channelId)
+      .eq("user_id", profile.id)
+      .maybeSingle();
+
+    if (existing?.id) {
+      const { error } = await (supabase as any)
+        .from("internal_channel_members")
+        .update({ is_muted: isMuted })
+        .eq("id", existing.id);
+
+      if (error) {
+        console.error("[toggleMuteChannel] Erro ao atualizar notificações:", error);
+        toast.error("Erro ao alterar notificações do grupo.");
+        await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+        throw error;
+      }
+    } else {
+      const { error } = await (supabase as any)
+        .from("internal_channel_members")
+        .insert({
+          channel_id: channelId,
+          user_id: profile.id,
+          role: "member",
+          is_muted: isMuted,
+        });
+
+      if (error) {
+        console.error("[toggleMuteChannel] Erro ao registrar filiação e silenciar:", error);
+        toast.error("Erro ao alterar notificações do grupo.");
+        await qc.invalidateQueries({ queryKey: ["internal-channels"] });
+        throw error;
+      }
+    }
+
+    toast.success(
+      isMuted
+        ? "Notificações do grupo silenciadas."
+        : "Notificações do grupo ativadas!"
+    );
+    await qc.invalidateQueries({ queryKey: ["internal-channels"] });
   };
 
   // Refs de sincronização para garantir canal de Realtime 100% estável e persistente
@@ -963,6 +1317,13 @@ export function useTeamChat(
         (payload) => {
           const updated = payload.new as any;
           if (updated?.id) {
+            // Se o colaborador foi desativado, invalida as queries para reprocessar membros e DMs imediatamente
+            if (updated.active === false) {
+              qc.invalidateQueries({ queryKey: ["team-members"] });
+              qc.invalidateQueries({ queryKey: ["internal-channels"] });
+              return;
+            }
+
             qc.setQueryData<TeamMember[]>(["team-members", companyId], (old) => {
               if (!old) return old;
               return old.map((m) =>
@@ -971,8 +1332,8 @@ export function useTeamChat(
                   : m
               );
             });
-            qc.setQueryData<InternalChannel[]>(
-              ["internal-channels", companyId, profile?.id, selectedUnitId],
+            qc.setQueriesData<InternalChannel[]>(
+              { queryKey: ["internal-channels"] },
               (old) => {
                 if (!old) return old;
                 return old.map((ch) => ({
@@ -982,7 +1343,7 @@ export function useTeamChat(
                       ? {
                           ...mem,
                           profile: mem.profile
-                            ? { ...mem.profile, online: Boolean(updated.online) }
+                            ? { ...mem.profile, online: Boolean(updated.online), last_seen_at: updated.last_seen_at }
                             : mem.profile,
                         }
                       : mem
@@ -1073,8 +1434,13 @@ export function useTeamChat(
                 newMsg.content?.toLowerCase().includes(`@${profile.name.toLowerCase()}`)) ||
               newMsg.content?.toLowerCase().includes("@todos"));
 
-          // Dispara Notificação Push no navegador se em segundo plano ou em outro canal
-          if (!isFromMe) {
+          // Verifica se o canal está silenciado pelo usuário
+          const isChannelMuted = targetChannel?.members?.some(
+            (m) => m.user_id === profile?.id && m.is_muted
+          );
+
+          // Dispara Notificação Push no navegador se em segundo plano ou em outro canal (respeitando se o canal foi silenciado, a não ser que tenha menção direta)
+          if (!isFromMe && (!isChannelMuted || mentionsMe)) {
             const isHidden = typeof document !== "undefined" && document.hidden;
             const isDifferentChannel = newMsg.channel_id !== activeChannelIdRef.current;
 
@@ -1159,8 +1525,8 @@ export function useTeamChat(
 
           // Atualiza o card e prévia do canal na barra lateral para todas as mensagens
           let found = false;
-          qc.setQueryData<InternalChannel[]>(
-            ["internal-channels", companyId, profile?.id, selectedUnitIdRef.current],
+          qc.setQueriesData<InternalChannel[]>(
+            { queryKey: ["internal-channels"] },
             (old) => {
               if (!old) return old;
               const isCurrentActive = newMsg.channel_id === activeChannelIdRef.current;
@@ -1242,6 +1608,13 @@ export function useTeamChat(
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "internal_channel_members" },
+        () => {
+          qc.invalidateQueries({ queryKey: ["internal-channels"] });
+        }
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "internal_message_reactions" },
         () => {
           if (activeChannelIdRef.current) {
@@ -1291,6 +1664,12 @@ export function useTeamChat(
     teamMembers: teamMembers || [],
     getOrCreateDirectChannel,
     createChannel,
+    addChannelMembers,
+    removeChannelMember,
+    updateMemberRole,
+    leaveChannel,
+    updateChannel,
+    toggleMuteChannel,
     // Pilar 3: Presença, Digitando e Notificações
     onlineUserIds,
     typingUserNames,

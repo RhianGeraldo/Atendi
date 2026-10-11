@@ -123,6 +123,7 @@ export const pipelineTools: McpToolDefinition[] = [
           title,
           value,
           status,
+          notes,
           created_at,
           stage_id,
           unit_id,
@@ -161,6 +162,7 @@ export const pipelineTools: McpToolDefinition[] = [
           titulo: o.title,
           valor: o.value,
           status: o.status,
+          observacoes: o.notes || null,
           etapa: o.pipeline_stages?.name || "Sem etapa",
           etapa_id: o.stage_id,
           contato: {
@@ -204,6 +206,10 @@ export const pipelineTools: McpToolDefinition[] = [
           description:
             "ID da unidade responsável pela oportunidade (opcional para chave restrita).",
         },
+        observacoes: {
+          type: "string",
+          description: "Observações ou anotações gerais da oportunidade (opcional).",
+        },
       },
       required: ["contato_id", "titulo"],
     },
@@ -246,6 +252,7 @@ export const pipelineTools: McpToolDefinition[] = [
           stage_id: stageId,
           unit_id: targetUnitId || contact.unit_id || null,
           status: "open",
+          notes: args.observacoes ? String(args.observacoes).trim() : null,
         })
         .select("*, pipeline_stages(name), units(name)")
         .single();
@@ -258,7 +265,7 @@ export const pipelineTools: McpToolDefinition[] = [
       await supabaseAdmin.from("opportunity_history").insert({
         opportunity_id: created.id,
         action_type: "created",
-        description: `Oportunidade criada via MCP com o título "${title}" e valor R$ ${value}`,
+        description: `Oportunidade criada via MCP com o título "${title}" e valor R$ ${value}${args.observacoes ? ` | Observações: "${args.observacoes}"` : ""}`,
       });
 
       return {
@@ -390,6 +397,10 @@ export const pipelineTools: McpToolDefinition[] = [
           type: "string",
           description: "Novo título.",
         },
+        observacoes: {
+          type: "string",
+          description: "Nova observação da oportunidade.",
+        },
       },
       required: ["oportunidade_id"],
     },
@@ -400,6 +411,9 @@ export const pipelineTools: McpToolDefinition[] = [
       if (args.status) updateData.status = args.status;
       if (args.valor !== undefined) updateData.value = Number(args.valor);
       if (args.titulo) updateData.title = String(args.titulo).trim();
+      if (args.observacoes !== undefined) {
+        updateData.notes = args.observacoes ? String(args.observacoes).trim() : null;
+      }
 
       const { data: opp, error: oppErr } = await supabaseAdmin
         .from("opportunities")
@@ -424,6 +438,16 @@ export const pipelineTools: McpToolDefinition[] = [
 
       if (error) {
         throw new Error(`Erro ao atualizar oportunidade: ${error.message}`);
+      }
+
+      if (args.observacoes !== undefined) {
+        await supabaseAdmin.from("opportunity_history").insert({
+          opportunity_id: oppId,
+          action_type: "notes_change",
+          description: args.observacoes
+            ? `Observação atualizada: "${args.observacoes}"`
+            : "Observação removida",
+        });
       }
 
       if (args.status) {

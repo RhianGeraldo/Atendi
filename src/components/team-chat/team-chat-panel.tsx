@@ -29,7 +29,8 @@ import {
   Search,
   FolderOpen,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  Info
 } from "lucide-react";
 import TextareaAutosize from "react-textarea-autosize";
 import EmojiPicker from "emoji-picker-react";
@@ -59,7 +60,6 @@ import { initials } from "@/lib/format";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { InternalChannel, InternalMessage, TeamMember } from "./team-chat-types";
-import { TeamChatMediaDrawer } from "./team-chat-media-drawer";
 import { PdfViewer } from "@/components/chat/message-bubble";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🚀", "👀", "✅"];
@@ -95,6 +95,21 @@ interface TeamChatPanelProps {
   onTogglePinMessage?: (payload: { messageId: string; isPinned: boolean }) => void;
   onEditMessage?: (payload: { messageId: string; content: string }) => void;
   onDeleteMessage?: (payload: { messageId: string }) => void;
+  showSidebar?: boolean;
+  onToggleSidebar?: () => void;
+  // Gestão de Membros e Grupo
+  onAddMembers?: (channelId: string, userIds: string[]) => Promise<void>;
+  onRemoveMember?: (channelId: string, userId: string) => Promise<void>;
+  onUpdateMemberRole?: (
+    channelId: string,
+    userId: string,
+    role: "admin" | "member"
+  ) => Promise<void>;
+  onLeaveChannel?: (channelId: string) => Promise<void>;
+  onUpdateChannel?: (
+    channelId: string,
+    data: { name?: string; description?: string; isAnnouncement?: boolean }
+  ) => Promise<void>;
 }
 
 export function TeamChatPanel({
@@ -114,6 +129,13 @@ export function TeamChatPanel({
   onTogglePinMessage,
   onEditMessage,
   onDeleteMessage,
+  showSidebar,
+  onToggleSidebar,
+  onAddMembers,
+  onRemoveMember,
+  onUpdateMemberRole,
+  onLeaveChannel,
+  onUpdateChannel,
 }: TeamChatPanelProps) {
   const { profile } = useAuth();
   const [text, setText] = useState("");
@@ -125,13 +147,11 @@ export function TeamChatPanel({
   const [previewDoc, setPreviewDoc] = useState<{ url: string; fileName: string } | null>(null);
   const [messageToDelete, setMessageToDelete] = useState<string | null>(null);
 
-  // Estados do Pilar 5: Busca, Galeria de Mídias & Resumo IA
+  // Estados do Pilar 5: Busca & Resumo IA
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
-
-  const [mediaDrawerOpen, setMediaDrawerOpen] = useState(false);
 
   // Busca textual no histórico do canal ativo
   const searchMatches = useMemo(() => {
@@ -273,9 +293,9 @@ export function TeamChatPanel({
   const mentionableMembers = useMemo(() => {
     const map = new Map<string, { id: string; name: string; avatar_url?: string | null; role?: string | null }>();
     
-    // Membros da equipe
+    // Membros da equipe (apenas ativos)
     teamMembers.forEach((m) => {
-      if (m.id !== profile?.id) {
+      if (m.id !== profile?.id && m.active !== false) {
         map.set(m.id, {
           id: m.id,
           name: m.name,
@@ -285,10 +305,15 @@ export function TeamChatPanel({
       }
     });
 
-    // Membros do próprio canal (se houver adicionais)
+    // Membros do próprio canal (se houver adicionais e apenas ativos)
     if (channel.members) {
       channel.members.forEach((m) => {
-        if (m.user_id !== profile?.id && m.profile && !map.has(m.user_id)) {
+        if (
+          m.user_id !== profile?.id &&
+          m.profile &&
+          m.profile.active !== false &&
+          !map.has(m.user_id)
+        ) {
           map.set(m.user_id, {
             id: m.user_id,
             name: m.profile.name,
@@ -720,15 +745,12 @@ export function TeamChatPanel({
   const isSelfChat = channel.type === "direct" && (!otherUser || otherUser.id === profile?.id);
   const isOtherUserOnline = isSelfChat
     ? true
-    : Boolean(
-        (otherUser?.id && onlineUserIds.includes(otherUser.id)) ||
-        otherUser?.online
-      );
+    : Boolean(otherUser?.id && onlineUserIds.includes(otherUser.id));
 
   const onlineGroupMembersCount = useMemo(() => {
     if (channel.type !== "group" || !channel.members) return 0;
     return channel.members.filter(
-      (m) => onlineUserIds.includes(m.user_id) || (m.profile as any)?.online
+      (m) => onlineUserIds.includes(m.user_id)
     ).length;
   }, [channel.type, channel.members, onlineUserIds]);
 
@@ -736,13 +758,20 @@ export function TeamChatPanel({
     <div className="flex flex-col h-full bg-background min-h-0 overflow-hidden">
       {/* Header do Chat Interno */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card/60 backdrop-blur-sm px-4">
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div 
+          className="flex items-center gap-2.5 min-w-0 cursor-pointer hover:opacity-85 transition-opacity"
+          onClick={onToggleSidebar}
+          title={channel.type === "group" ? "Ver participantes e configurações do grupo" : "Ver informações do colega"}
+        >
           {onBack && (
             <Button
               size="icon"
               variant="ghost"
               className="h-8 w-8 -ml-2 md:hidden text-muted-foreground"
-              onClick={onBack}
+              onClick={(e) => {
+                e.stopPropagation();
+                onBack();
+              }}
             >
               <ChevronLeft className="h-5 w-5" />
             </Button>
@@ -823,25 +852,6 @@ export function TeamChatPanel({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          {channel.type === "group" && (
-            <div className="hidden lg:flex items-center gap-2 text-xs text-muted-foreground mr-2">
-              <Users className="h-3.5 w-3.5" />
-              <span>{channel.members?.length || 1} membros</span>
-              {onlineGroupMembersCount > 0 && (
-                <>
-                  <span>•</span>
-                  <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                    </span>
-                    {onlineGroupMembersCount} online
-                  </span>
-                </>
-              )}
-            </div>
-          )}
-
           {/* Botão de Busca */}
           <Button
             size="icon"
@@ -855,15 +865,17 @@ export function TeamChatPanel({
             <Search className="h-4 w-4" />
           </Button>
 
-          {/* Botão de Arquivos & Mídias */}
+          {/* Botão de Dados do Grupo / Contato */}
           <Button
             size="icon"
             variant="ghost"
-            onClick={() => setMediaDrawerOpen(true)}
-            className="h-8 w-8 text-muted-foreground hover:text-foreground cursor-pointer"
-            title="Arquivos e Mídias compartilhadas"
+            onClick={onToggleSidebar}
+            className={`h-8 w-8 text-muted-foreground hover:text-foreground cursor-pointer ${
+              showSidebar ? "bg-muted text-primary" : ""
+            }`}
+            title={channel.type === "group" ? "Dados do grupo" : "Dados do contato"}
           >
-            <FolderOpen className="h-4 w-4" />
+            <Info className="h-4 w-4" />
           </Button>
         </div>
       </header>
@@ -1664,15 +1676,6 @@ export function TeamChatPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Gaveta de Arquivos & Mídias Compartilhadas */}
-      <TeamChatMediaDrawer
-        channel={channel}
-        messages={messages}
-        isOpen={mediaDrawerOpen}
-        onClose={() => setMediaDrawerOpen(false)}
-        onSelectMessage={(msgId) => scrollToMessage(msgId)}
-      />
     </div>
   );
 }

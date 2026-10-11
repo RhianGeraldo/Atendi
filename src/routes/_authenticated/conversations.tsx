@@ -47,6 +47,7 @@ import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 import { useTeamChat } from "@/components/team-chat/use-team-chat";
 import { TeamChannelsSidebar } from "@/components/team-chat/team-channels-sidebar";
 import { TeamChatPanel } from "@/components/team-chat/team-chat-panel";
+import { ChannelMembersSidebar } from "@/components/team-chat/channel-members-sidebar";
 import { CreateChannelDialog } from "@/components/team-chat/create-channel-dialog";
 import { NewDirectChatDialog } from "@/components/team-chat/new-direct-chat-dialog";
 import { MessageSquare, Users } from "lucide-react";
@@ -101,6 +102,7 @@ function ConversationsPage() {
     }
     return true;
   });
+  const [showTeamSidebar, setShowTeamSidebar] = useState(false);
   const { selectedUnitId } = useUnit();
   const [instanceFilter, setInstanceFilter] = useState<string | null>(null);
   const [lastSelectedConv, setLastSelectedConv] = useState<ConvRow | null>(null);
@@ -173,6 +175,10 @@ function ConversationsPage() {
       teamChat.markAsRead(selectedTeamChannelId);
     }
   }, [selectedTeamChannelId, teamChat.markAsRead]);
+
+  const currentTeamChannel = useMemo(() => {
+    return teamChat.channels.find((c) => c.id === selectedTeamChannelId) || null;
+  }, [teamChat.channels, selectedTeamChannelId]);
 
   const { data: myUnits } = useQuery({
     queryKey: ["my_units_filter", profile?.id],
@@ -2100,55 +2106,57 @@ function ConversationsPage() {
         )}
       >
         {chatMode === "team" ? (
-          (() => {
-            const currentTeamChannel = teamChat.channels.find(
-              (c) => c.id === selectedTeamChannelId,
-            );
-            return currentTeamChannel ? (
-              <TeamChatPanel
-                key={currentTeamChannel.id}
-                channel={currentTeamChannel}
-                messages={teamChat.messages}
-                isLoadingMessages={teamChat.isLoadingMessages}
-                onSendMessage={teamChat.sendMessage.mutate}
-                onUploadFile={teamChat.uploadFile}
-                onToggleReaction={teamChat.toggleReaction.mutate}
-                teamMembers={teamChat.teamMembers}
-                isSending={teamChat.sendMessage.isPending}
-                onBack={() => {
-                  setSelectedTeamChannelId(null);
-                  navigate({
-                    search: (prev: any) => ({ ...prev, channelId: undefined }),
-                  });
-                }}
-                onlineUserIds={teamChat.onlineUserIds}
-                typingUsers={teamChat.typingUserNames}
-                onTyping={teamChat.sendTyping}
-                onStopTyping={teamChat.sendStopTyping}
-                onTogglePinMessage={teamChat.togglePinMessage.mutate}
-                onEditMessage={teamChat.editMessage.mutate}
-                onDeleteMessage={teamChat.deleteMessage.mutate}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3 p-8 text-center">
-                <div className="p-4 rounded-full bg-primary/10 text-primary">
-                  <MessageSquare className="h-10 w-10" />
-                </div>
-                <h3 className="text-base font-semibold text-foreground">Chat da Equipe</h3>
-                <p className="text-xs max-w-sm">
-                  Selecione um canal da empresa, da sua unidade ou converse diretamente com um colega de trabalho.
-                </p>
-                <div className="flex gap-2 mt-2">
-                  <Button size="sm" variant="outline" onClick={() => setNewDirectChatOpen(true)}>
-                    Conversar com Colega
-                  </Button>
-                  <Button size="sm" onClick={() => setCreateChannelOpen(true)}>
-                    Criar Canal
-                  </Button>
-                </div>
+          currentTeamChannel ? (
+            <TeamChatPanel
+              key={currentTeamChannel.id}
+              channel={currentTeamChannel}
+              messages={teamChat.messages}
+              isLoadingMessages={teamChat.isLoadingMessages}
+              onSendMessage={teamChat.sendMessage.mutate}
+              onUploadFile={teamChat.uploadFile}
+              onToggleReaction={teamChat.toggleReaction.mutate}
+              teamMembers={teamChat.teamMembers}
+              isSending={teamChat.sendMessage.isPending}
+              onBack={() => {
+                setSelectedTeamChannelId(null);
+                navigate({
+                  search: (prev: any) => ({ ...prev, channelId: undefined }),
+                });
+              }}
+              onlineUserIds={teamChat.onlineUserIds}
+              typingUsers={teamChat.typingUserNames}
+              onTyping={teamChat.sendTyping}
+              onStopTyping={teamChat.sendStopTyping}
+              onTogglePinMessage={teamChat.togglePinMessage.mutate}
+              onEditMessage={teamChat.editMessage.mutate}
+              onDeleteMessage={teamChat.deleteMessage.mutate}
+              showSidebar={showTeamSidebar}
+              onToggleSidebar={() => setShowTeamSidebar(!showTeamSidebar)}
+              onAddMembers={teamChat.addChannelMembers}
+              onRemoveMember={teamChat.removeChannelMember}
+              onUpdateMemberRole={teamChat.updateMemberRole}
+              onLeaveChannel={teamChat.leaveChannel}
+              onUpdateChannel={teamChat.updateChannel}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3 p-8 text-center">
+              <div className="p-4 rounded-full bg-primary/10 text-primary">
+                <MessageSquare className="h-10 w-10" />
               </div>
-            );
-          })()
+              <h3 className="text-base font-semibold text-foreground">Chat da Equipe</h3>
+              <p className="text-xs max-w-sm">
+                Selecione um canal da empresa, da sua unidade ou converse diretamente com um colega de trabalho.
+              </p>
+              <div className="flex gap-2 mt-2">
+                <Button size="sm" variant="outline" onClick={() => setNewDirectChatOpen(true)}>
+                  Conversar com Colega
+                </Button>
+                <Button size="sm" onClick={() => setCreateChannelOpen(true)}>
+                  Criar Canal
+                </Button>
+              </div>
+            </div>
+          )
         ) : selected ? (
           <ChatPanel
             key={selected.id}
@@ -2210,10 +2218,67 @@ function ConversationsPage() {
         </Sheet>
       )}
 
+      {/* Team Channel Info Sidebar - Desktop (Apenas Equipe) */}
+      {chatMode === "team" && currentTeamChannel && showTeamSidebar && (
+        <aside className="hidden w-[320px] shrink-0 flex-col border-l border-border bg-card md:flex xl:w-[380px] 2xl:w-[420px] overflow-hidden">
+          <ChannelMembersSidebar
+            channel={currentTeamChannel}
+            messages={teamChat.messages}
+            teamMembers={teamChat.teamMembers}
+            onlineUserIds={teamChat.onlineUserIds}
+            currentUserId={profile?.id}
+            isCurrentUserAdminOrManager={
+              profile?.role === "admin_company" ||
+              profile?.role === "super_admin" ||
+              profile?.role === "manager"
+            }
+            onAddMembers={teamChat.addChannelMembers}
+            onRemoveMember={teamChat.removeChannelMember}
+            onUpdateMemberRole={teamChat.updateMemberRole}
+            onLeaveChannel={teamChat.leaveChannel}
+            onUpdateChannel={teamChat.updateChannel}
+            onToggleMuteChannel={teamChat.toggleMuteChannel}
+            onClose={() => setShowTeamSidebar(false)}
+          />
+        </aside>
+      )}
+
+      {/* Team Channel Info Sidebar - Mobile (Apenas Equipe) */}
+      {chatMode === "team" && currentTeamChannel && !isDesktop && (
+        <Sheet open={showTeamSidebar} onOpenChange={setShowTeamSidebar}>
+          <SheetContent className="w-full sm:w-[400px] p-0 flex flex-col md:hidden [&>button]:hidden">
+            <SheetTitle className="sr-only">Dados do Grupo</SheetTitle>
+            <SheetDescription className="sr-only">
+              Participantes, mídias e opções do grupo da equipe
+            </SheetDescription>
+            <ChannelMembersSidebar
+              channel={currentTeamChannel}
+              messages={teamChat.messages}
+              teamMembers={teamChat.teamMembers}
+              onlineUserIds={teamChat.onlineUserIds}
+              currentUserId={profile?.id}
+              isCurrentUserAdminOrManager={
+                profile?.role === "admin_company" ||
+                profile?.role === "super_admin" ||
+                profile?.role === "manager"
+              }
+              onAddMembers={teamChat.addChannelMembers}
+              onRemoveMember={teamChat.removeChannelMember}
+              onUpdateMemberRole={teamChat.updateMemberRole}
+              onLeaveChannel={teamChat.leaveChannel}
+              onUpdateChannel={teamChat.updateChannel}
+              onToggleMuteChannel={teamChat.toggleMuteChannel}
+              onClose={() => setShowTeamSidebar(false)}
+            />
+          </SheetContent>
+        </Sheet>
+      )}
+
       {/* Modais do Chat da Equipe */}
       <CreateChannelDialog
         open={createChannelOpen}
         onOpenChange={setCreateChannelOpen}
+        teamMembers={teamChat.teamMembers}
         onCreateChannel={async (data) => {
           const cid = await teamChat.createChannel(data);
           if (cid) {

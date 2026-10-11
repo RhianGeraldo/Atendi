@@ -33,8 +33,8 @@ export function NewDirectChatDialog({
   const [loadingUserId, setLoadingUserId] = useState<string | null>(null);
 
   const filteredMembers = useMemo(() => {
-    // Não lista o próprio usuário
-    const others = teamMembers.filter((m) => m.id !== profile?.id);
+    // Não lista o próprio usuário nem colaboradores desativados
+    const others = teamMembers.filter((m) => m.id !== profile?.id && m.active !== false);
     if (!search.trim()) return others;
     const term = search.toLowerCase().trim();
     return others.filter((m) => {

@@ -9,6 +9,7 @@ import {
   Search, 
   UserPlus,
   Bell,
+  BellOff,
   Megaphone
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -205,8 +206,7 @@ export function TeamChannelsSidebar({
             isSelected={selectedChannelId === channel.id}
             onSelect={() => onSelectChannel(channel.id)}
             isOnline={Boolean(
-              (channel.other_user?.id && onlineUserIds.includes(channel.other_user.id)) ||
-              channel.other_user?.online
+              channel.other_user?.id && onlineUserIds.includes(channel.other_user.id)
             )}
           />
         ))}
@@ -246,6 +246,8 @@ function TeamConversationCard({
   const isDirect = channel.type === "direct";
   const otherUser = channel.other_user;
   const hasUnread = (channel.unread_count || 0) > 0;
+  const myMember = channel.members?.find((m) => m.user_id === profile?.id);
+  const isMuted = Boolean(myMember?.is_muted);
 
   // Verifica se a última mensagem foi enviada pelo próprio usuário logado
   const isFromMe = Boolean(
@@ -345,19 +347,24 @@ function TeamConversationCard({
           >
             {name}
           </span>
-          <span
-            className={cn(
-              "whitespace-nowrap shrink-0 text-[11px]",
-              hasUnread ? "font-bold text-success" : "text-muted-foreground"
+          <div className="flex items-center gap-1.5 shrink-0">
+            {isMuted && (
+              <BellOff className="h-3 w-3 text-muted-foreground/60 shrink-0" title="Notificações silenciadas" />
             )}
-            title={
-              channel.last_message_at
-                ? new Date(channel.last_message_at).toLocaleString("pt-BR")
-                : undefined
-            }
-          >
-            {formatConversationTime(channel.last_message_at)}
-          </span>
+            <span
+              className={cn(
+                "whitespace-nowrap shrink-0 text-[11px]",
+                hasUnread ? "font-bold text-success" : "text-muted-foreground"
+              )}
+              title={
+                channel.last_message_at
+                  ? new Date(channel.last_message_at).toLocaleString("pt-BR")
+                  : undefined
+              }
+            >
+              {formatConversationTime(channel.last_message_at)}
+            </span>
+          </div>
         </div>
 
         {/* Linha 2: Prévia da última mensagem com Você: */}

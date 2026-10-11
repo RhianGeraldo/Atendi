@@ -21,12 +21,16 @@ import {
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import { formatRelative } from "@/lib/format";
 import { toast } from "sonner";
+import { useActiveCompany } from "@/lib/active-company-context";
+import { useQueryClient } from "@tanstack/react-query";
+import { sendProactiveMessageAction } from "@/lib/api/chat.functions";
 
 interface ContactChatButtonProps {
   contactId?: string | null;
   contactName?: string | null;
   phone?: string | null;
   conversationId?: string | null;
+  unitId?: string | null;
   trigger?: React.ReactNode;
   onOpen?: () => void;
   onNavigate?: () => void;
@@ -47,6 +51,7 @@ export function ContactChatButton({
   contactName,
   phone,
   conversationId,
+  unitId,
   trigger,
   onOpen,
   onNavigate,
@@ -54,10 +59,15 @@ export function ContactChatButton({
   tooltipText = "Ir para conversa",
 }: ContactChatButtonProps) {
   const navigate = useNavigate();
+  const { activeCompanyId } = useActiveCompany();
+  const qc = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [instanceOptions, setInstanceOptions] = useState<InstanceOption[]>([]);
   const [startConvOpen, setStartConvOpen] = useState(false);
+  const [resolvedPhone, setResolvedPhone] = useState<string>(phone || "");
+  const [resolvedContactName, setResolvedContactName] = useState<string>(contactName || "");
+  const [resolvedUnitId, setResolvedUnitId] = useState<string | null>(unitId || null);
 
   const getTabForStatus = (status?: string): "waiting" | "active" | "resolved" => {
     if (status === "resolved") return "resolved";
@@ -85,6 +95,50 @@ export function ContactChatButton({
 
     try {
       setIsLoading(true);
+
+      let effectivePhone = phone;
+      let effectiveContactName = contactName;
+      let effectiveUnitId = unitId;
+
+      // Busca informações atualizadas do contato para garantir a unidade onde está cadastrado
+      if (contactId) {
+        const { data: cData } = await supabase
+          .from("contacts")
+          .select("name, phone, unit_id")
+          .eq("id", contactId)
+          .maybeSingle();
+
+        if (cData) {
+          if (cData.phone) effectivePhone = cData.phone;
+          if (cData.name) effectiveContactName = cData.name;
+          if (cData.unit_id) effectiveUnitId = cData.unit_id;
+        }
+      } else if (!effectiveUnitId && effectivePhone) {
+        const cleanP = effectivePhone.replace(/\D/g, "");
+        const rawPhone = cleanP.startsWith("55") ? cleanP : "55" + cleanP;
+        const phoneVariants = [
+          rawPhone,
+          rawPhone.slice(2),
+          ...(rawPhone.length === 13 ? [rawPhone.slice(0, 4) + rawPhone.slice(5)] : []),
+          ...(rawPhone.length === 12 ? [rawPhone.slice(0, 4) + '9' + rawPhone.slice(4)] : []),
+        ];
+        const { data: cPhoneData } = await supabase
+          .from("contacts")
+          .select("id, name, unit_id")
+          .in("phone", phoneVariants)
+          .not("unit_id", "is", null)
+          .limit(1)
+          .maybeSingle();
+
+        if (cPhoneData) {
+          if (cPhoneData.unit_id) effectiveUnitId = cPhoneData.unit_id;
+          if (!effectiveContactName && cPhoneData.name) effectiveContactName = cPhoneData.name;
+        }
+      }
+
+      setResolvedPhone(effectivePhone || "");
+      setResolvedContactName(effectiveContactName || "");
+      setResolvedUnitId(effectiveUnitId || null);
 
       let convList: any[] = [];
 
@@ -117,8 +171,9 @@ export function ContactChatButton({
       }
 
       // 2. Se não encontrou por contactId mas tem telefone, busca contatos com variações do número
-      if ((!convList || convList.length === 0) && phone) {
-        const clean = phone.replace(/\D/g, "");
+      const phoneToSearch = effectivePhone || phone;
+      if ((!convList || convList.length === 0) && phoneToSearch) {
+        const clean = phoneToSearch.replace(/\D/g, "");
         if (clean.length >= 10) {
           const rawPhone = clean.startsWith("55") ? clean : "55" + clean;
           const phoneVariants = [
@@ -172,7 +227,56 @@ export function ContactChatButton({
           return;
         }
 
-        // Nenhuma conversa existente: abre diálogo para iniciar novo atendimento
+        // Nenhuma conversa existente:
+        // Verifica as instâncias da unidade onde o contato está cadastrado
+        const targetUnitId = effectiveUnitId || unitId;
+        if (activeCompanyId) {
+          let instQuery = supabase
+            .from("whatsapp_instances")
+            .select("id, name, instance_name, provider, network, unit_id")
+            .eq("company_id", activeCompanyId)
+            .order("name", { ascending: true });
+
+          if (targetUnitId) {
+            instQuery = instQuery.eq("unit_id", targetUnitId);
+          }
+
+          const { data: instData } = await instQuery;
+          const whatsAppInsts = (instData ?? []).filter(
+            (inst: any) => (!inst.network || inst.network === "whatsapp") && inst.provider !== "instagram" && inst.provider !== "messenger"
+          );
+
+          // Se a unidade possui apenas UMA instância e já temos o telefone do contato:
+          // Não precisa mostrar modal, apenas cria/abre diretamente a conversa e redireciona!
+          if (whatsAppInsts.length === 1 && effectivePhone) {
+            try {
+              const res = await sendProactiveMessageAction({
+                data: {
+                  phone: effectivePhone,
+                  text: "",
+                  instanceName: whatsAppInsts[0].instance_name,
+                  companyId: activeCompanyId,
+                },
+              });
+
+              qc.invalidateQueries({ queryKey: ["conversations"] });
+              if (res.conversationId) {
+                setIsLoading(false);
+                if (onNavigate) onNavigate();
+                if (onOpen) onOpen();
+                toast.success("Chat aberto com sucesso!");
+                executeNavigation(res.conversationId, "active");
+                return;
+              }
+            } catch (err: any) {
+              console.warn("Abertura direta não concluída:", err);
+              // Se deu erro (ex: bloqueado por outro atendente), abre o modal que já lida com o alerta/permissão
+            }
+          }
+        }
+
+        // Se tem mais de uma instância (ou não foi possível abrir direto):
+        // Abre diálogo para selecionar a instância
         setIsLoading(false);
         setStartConvOpen(true);
         return;
@@ -337,18 +441,20 @@ export function ContactChatButton({
         </DialogContent>
       </Dialog>
 
-      {/* Fallback caso não haja nenhuma conversa criada ainda */}
-      {startConvOpen && (
-        <StartConversationDialog
-          initialPhone={phone || ""}
-          contactName={contactName || ""}
-          onCreated={(id) => {
-            setStartConvOpen(false);
-            navigate({ to: "/conversations", search: { c: id, tab: "active" } as any });
-          }}
-          trigger={<span className="hidden" />}
-        />
-      )}
+      {/* Diálogo para iniciar novo atendimento quando não há conversa prévia */}
+      <StartConversationDialog
+        open={startConvOpen}
+        onOpenChange={setStartConvOpen}
+        initialPhone={resolvedPhone || phone || ""}
+        contactName={resolvedContactName || contactName || ""}
+        unitId={resolvedUnitId || unitId}
+        onCreated={(id) => {
+          setStartConvOpen(false);
+          if (onNavigate) onNavigate();
+          if (onOpen) onOpen();
+          navigate({ to: "/conversations", search: { c: id, tab: "active" } as any });
+        }}
+      />
     </>
   );
 }

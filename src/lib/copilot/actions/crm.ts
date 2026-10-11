@@ -179,7 +179,7 @@ export const crmActions: CopilotAction[] = [
       let baseQuery = supabaseAdmin
         .from("opportunities")
         .select(
-          "id, title, value, status, created_at, unit_id, stage_id, stage:pipeline_stages(id, name), contact:contacts!inner(id, name, phone, company_id), unit:units(name)",
+          "id, title, value, status, notes, created_at, unit_id, stage_id, stage:pipeline_stages(id, name), contact:contacts!inner(id, name, phone, company_id), unit:units(name)",
         )
         .eq("contact.company_id", context.companyId);
 
@@ -229,6 +229,7 @@ export const crmActions: CopilotAction[] = [
             titulo: o.title,
             valor: Number(o.value) || 0,
             status: o.status,
+            observacao: o.notes || null,
             etapa: (o.stage as any)?.name || null,
             contato: (o.contact as any)?.name || null,
             telefone: (o.contact as any)?.phone || null,
@@ -259,6 +260,7 @@ export const crmActions: CopilotAction[] = [
         },
         etapa_id: { type: "string", description: "ID da etapa do funil onde será criada." },
         valor: { type: "number", description: "Valor estimado da oportunidade (R$)." },
+        observacao: { type: "string", description: "Observações ou detalhes da oportunidade (opcional)." },
       },
       required: ["titulo", "contato_id"],
     },
@@ -340,6 +342,7 @@ export const crmActions: CopilotAction[] = [
           owner_id: context.userId,
           value: params.valor !== undefined ? Number(params.valor) : null,
           status: "open",
+          notes: params.observacao ? String(params.observacao).trim() : null,
         })
         .select("id, title, value, status")
         .single();

@@ -22,27 +22,76 @@ export function StartConversationDialog({
   initialPhone = "",
   contactName,
   onCreated,
-  trigger
+  trigger,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  unitId,
 }: {
   initialPhone?: string;
   contactName?: string;
   onCreated?: (id: string) => void;
   trigger?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  unitId?: string | null;
 }) {
   const qc = useQueryClient();
   const { activeCompanyId } = useActiveCompany();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? Boolean(controlledOpen) : internalOpen;
+  const setOpen = (newOpen: boolean) => {
+    if (!isControlled) {
+      setInternalOpen(newOpen);
+    }
+    controlledOnOpenChange?.(newOpen);
+  };
+
   const [phone, setPhone] = useState(initialPhone || "");
   const [text, setText] = useState("");
   const [instanceName, setInstanceName] = useState("");
 
   useEffect(() => {
-    if (open && initialPhone) setPhone(initialPhone);
+    if (open) {
+      if (initialPhone) setPhone(initialPhone);
+    } else {
+      setText("");
+      setInstanceName("");
+    }
   }, [open, initialPhone]);
 
   const { selectedUnitId } = useUnit();
-
   const { profile } = useAuth();
+
+  const cleanPhone = phone.replace(/\D/g, "");
+
+  // Se não foi fornecido unitId explicitamente via prop, mas temos o telefone, busca a unidade onde o contato está cadastrado
+  const { data: detectedContactUnitId } = useQuery({
+    queryKey: ["contact_unit_by_phone", activeCompanyId, cleanPhone],
+    queryFn: async () => {
+      if (!activeCompanyId || cleanPhone.length < 10) return null;
+      const rawPhone = cleanPhone.startsWith("55") ? cleanPhone : "55" + cleanPhone;
+      const phoneVariants = [
+        rawPhone,
+        rawPhone.slice(2),
+        ...(rawPhone.length === 13 ? [rawPhone.slice(0, 4) + rawPhone.slice(5)] : []),
+        ...(rawPhone.length === 12 ? [rawPhone.slice(0, 4) + '9' + rawPhone.slice(4)] : []),
+      ];
+      const { data } = await supabase
+        .from("contacts")
+        .select("unit_id")
+        .eq("company_id", activeCompanyId)
+        .in("phone", phoneVariants)
+        .not("unit_id", "is", null)
+        .limit(1)
+        .maybeSingle();
+      return data?.unit_id || null;
+    },
+    enabled: !unitId && open && !!activeCompanyId && cleanPhone.length >= 10,
+  });
+
+  const effectiveUnitId = unitId || detectedContactUnitId || null;
+
   const { data: company } = useQuery({
     queryKey: ["company_name", activeCompanyId],
     queryFn: async () => {
@@ -53,11 +102,14 @@ export function StartConversationDialog({
     enabled: !!activeCompanyId && open,
   });
 
+  const isManagement = profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager";
+
   const { data: instances, isLoading: isLoadingInstances } = useQuery({
     queryKey: [
       "whatsapp_instances",
       activeCompanyId,
       selectedUnitId,
+      effectiveUnitId,
       profile?.id,
       profile?.role,
       profile?.department_id,
@@ -72,12 +124,15 @@ export function StartConversationDialog({
         .eq("company_id", activeCompanyId)
         .order("name", { ascending: true });
       
-      if (selectedUnitId && selectedUnitId !== "all") {
+      // Se houver unidade específica onde o contato está cadastrado, filtra ESTRITAMENTE por ela!
+      if (effectiveUnitId) {
+        query = query.eq("unit_id", effectiveUnitId);
+      } else if (selectedUnitId && selectedUnitId !== "all") {
         query = query.eq("unit_id", selectedUnitId);
       }
 
-      const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
-      if (!isAdmin) {
+      // Se NÃO for filtrado por unidade do contato e o usuário não for da gestão, aplica filtro departamental
+      if (!effectiveUnitId && !isManagement) {
         if (profile?.department_id) {
           query = query.or(`department_id.eq.${profile.department_id},department_id.is.null`);
         } else {
@@ -95,6 +150,36 @@ export function StartConversationDialog({
     },
     enabled: !!activeCompanyId && open,
   });
+
+  // Auto-seleciona a instância adequada ao abrir o diálogo
+  useEffect(() => {
+    if (open && instances && instances.length > 0) {
+      // Se a instância atualmente selecionada já é válida entre as opções retornadas, mantém
+      const isCurrentValid = instanceName && instances.some((i) => i.instance_name === instanceName);
+      if (isCurrentValid) return;
+
+      // 1. Se tem unidade específica onde o contato está cadastrado, seleciona a primeira da unidade
+      if (effectiveUnitId) {
+        const matchingUnitInst = instances.find((i) => i.unit_id === effectiveUnitId);
+        if (matchingUnitInst) {
+          setInstanceName(matchingUnitInst.instance_name);
+          return;
+        }
+      }
+      // 2. Se tem selectedUnitId do filtro global
+      if (selectedUnitId && selectedUnitId !== "all") {
+        const matchingUnitInst = instances.find((i) => i.unit_id === selectedUnitId);
+        if (matchingUnitInst) {
+          setInstanceName(matchingUnitInst.instance_name);
+          return;
+        }
+      }
+      // 3. Fallback: seleciona a primeira instância disponível
+      setInstanceName(instances[0].instance_name);
+    } else if (open && instances && instances.length === 0 && instanceName) {
+      setInstanceName("");
+    }
+  }, [open, instances, effectiveUnitId, selectedUnitId, instanceName]);
 
   // Agrupa as instâncias: Sede (Empresa Mãe) e por Unidade
   const groupedInstances = useMemo(() => {
@@ -120,7 +205,9 @@ export function StartConversationDialog({
     return { matriz, byUnit };
   }, [instances]);
 
-  const cleanPhone = phone.replace(/\D/g, "");
+  const selectedInstance = useMemo(() => {
+    return instances?.find((i) => i.instance_name === instanceName);
+  }, [instances, instanceName]);
 
   // Avalia previamente com quem está a conversa nesta instância
   const { data: existingConvInfo } = useQuery({
@@ -203,14 +290,16 @@ export function StartConversationDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {trigger || (
+      {trigger ? (
+        <DialogTrigger asChild>{trigger}</DialogTrigger>
+      ) : !isControlled ? (
+        <DialogTrigger asChild>
           <Button size="icon" variant="outline" className="h-9 w-9 shrink-0">
             <MessageSquarePlus className="h-4 w-4" />
           </Button>
-        )}
-      </DialogTrigger>
-      <DialogContent>
+        </DialogTrigger>
+      ) : null}
+      <DialogContent className="z-[70] sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>Nova Conversa {contactName ? `com ${contactName}` : ""}</DialogTitle>
           <DialogDescription>
@@ -222,9 +311,25 @@ export function StartConversationDialog({
         <div className="space-y-4 py-4">
           <div className="space-y-2">
             <Label>Instância (Remetente)</Label>
-            <Select value={instanceName} onValueChange={setInstanceName}>
+            <Select value={instanceName || undefined} onValueChange={(val) => setInstanceName(val || "")}>
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="Selecione a instância" />
+                <SelectValue placeholder="Selecione a instância">
+                  {selectedInstance ? (
+                    <div className="flex items-center gap-2 truncate">
+                      <ProviderIcon provider={selectedInstance.provider} network={selectedInstance.network} />
+                      <span className="font-medium truncate">{selectedInstance.name || selectedInstance.instance_name}</span>
+                      {(selectedInstance.units as any)?.name && (
+                        <Badge 
+                          variant="secondary" 
+                          className="text-[10px] shrink-0 font-normal px-1.5 py-0 h-4"
+                          style={(selectedInstance.units as any)?.color ? { borderColor: `${(selectedInstance.units as any).color}40` } : undefined}
+                        >
+                          {(selectedInstance.units as any)?.name}
+                        </Badge>
+                      )}
+                    </div>
+                  ) : undefined}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {isLoadingInstances ? (
@@ -232,7 +337,9 @@ export function StartConversationDialog({
                     <Loader2 className="h-4 w-4 animate-spin" /> Carregando instâncias...
                   </div>
                 ) : !instances?.length ? (
-                  <SelectItem value="none" disabled>Nenhuma instância encontrada</SelectItem>
+                  <div className="p-4 text-center text-xs text-muted-foreground">
+                    Nenhuma instância encontrada{effectiveUnitId ? " para esta unidade" : ""}.
+                  </div>
                 ) : (
                   <>
                     {groupedInstances.matriz.length > 0 && (
@@ -247,7 +354,7 @@ export function StartConversationDialog({
                             value={inst.instance_name}
                             textValue={`${inst.name || inst.instance_name} (Empresa Mãe)`}
                           >
-                            <div className="flex items-center justify-between w-full gap-2">
+                            <div className="flex items-center justify-between w-full gap-2 pr-2">
                               <div className="flex items-center gap-2 truncate">
                                 <ProviderIcon provider={inst.provider} network={inst.network} />
                                 <span className="font-medium truncate">{inst.name || inst.instance_name}</span>
@@ -261,8 +368,8 @@ export function StartConversationDialog({
                       </SelectGroup>
                     )}
 
-                    {Object.entries(groupedInstances.byUnit).map(([unitId, group], index) => (
-                      <SelectGroup key={unitId}>
+                    {Object.entries(groupedInstances.byUnit).map(([uId, group], index) => (
+                      <SelectGroup key={uId}>
                         {(groupedInstances.matriz.length > 0 || index > 0) && <SelectSeparator />}
                         <SelectLabel className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium py-1">
                           <MapPin className="h-3.5 w-3.5" style={{ color: group.unitColor || "#6366f1" }} />
@@ -274,7 +381,7 @@ export function StartConversationDialog({
                             value={inst.instance_name}
                             textValue={`${inst.name || inst.instance_name} (${group.unitName})`}
                           >
-                            <div className="flex items-center justify-between w-full gap-2">
+                            <div className="flex items-center justify-between w-full gap-2 pr-2">
                               <div className="flex items-center gap-2 truncate">
                                 <ProviderIcon provider={inst.provider} network={inst.network} />
                                 <span className="font-medium truncate">{inst.name || inst.instance_name}</span>

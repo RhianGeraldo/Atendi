@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import { useUnit } from "@/lib/unit-context";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CheckSquare, Circle, CheckCircle2, Pencil, Trash2, Calendar as CalendarIcon, Target, Plus, Phone, MessageSquare, MessageCircle, Video, CalendarClock, Clock, Info, ListTodo, StickyNote, User, UserCheck, Save, History, ExternalLink } from "lucide-react";
+import { CheckSquare, Circle, CheckCircle2, Pencil, Trash2, Calendar as CalendarIcon, Target, Plus, Phone, MessageSquare, MessageCircle, Video, CalendarClock, Clock, Info, ListTodo, StickyNote, User, UserCheck, Save, History, ExternalLink, FileText } from "lucide-react";
 import { TaskDialog } from "@/components/crm/task-dialog";
 import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { OpportunityQualificationView } from "@/components/crm/opportunity-qualification-view";
@@ -866,6 +866,7 @@ export function OpportunityDialog({
                     contactName={opportunity.contacts?.name || contacts?.find(c => c.id === contactId)?.name || ""}
                     phone={opportunity.contacts?.phone || contacts?.find(c => c.id === contactId)?.phone || ""}
                     conversationId={opportunity.conversation_id}
+                    unitId={opportunity?.unit_id || (selectedUnitId !== "all" ? selectedUnitId : undefined)}
                     onNavigate={() => setOpen(false)}
                     trigger={
                       <Button
@@ -1138,6 +1139,7 @@ export function OpportunityDialog({
                             contactName={contacts?.find(c => c.id === contactId)?.name || opportunity?.contacts?.name || ""}
                             phone={contacts?.find(c => c.id === contactId)?.phone || opportunity?.contacts?.phone || ""}
                             conversationId={opportunity?.conversation_id}
+                            unitId={opportunity?.unit_id || (selectedUnitId !== "all" ? selectedUnitId : undefined)}
                             onNavigate={() => setOpen(false)}
                             trigger={
                               <button
@@ -1295,6 +1297,30 @@ export function OpportunityDialog({
                       </Select>
                     </div>
                   </div>
+                </div>
+
+                {/* Section 3: Observações da Oportunidade */}
+                <div className="space-y-2 p-4 rounded-xl border border-border/50 bg-card">
+                  <div className="flex items-center justify-between pb-2 border-b border-border/40">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                      <FileText className="h-4 w-4 text-primary" />
+                      <span>Observações da Oportunidade</span>
+                    </div>
+                    <span className="text-[11px] text-muted-foreground">Visível para toda a equipe</span>
+                  </div>
+                  <Textarea
+                    placeholder="Adicione observações importantes sobre esta oportunidade (ex: preferências, particularidades da negociação, restrições)..."
+                    value={notes}
+                    onChange={(e) => {
+                      const newNotes = e.target.value;
+                      setNotes(newNotes);
+                      if (opportunity) {
+                        scheduleDebouncedAutoSave({ notes: newNotes });
+                      }
+                    }}
+                    rows={4}
+                    className="resize-y min-h-[90px] text-xs bg-background leading-relaxed"
+                  />
                 </div>
 
                 {/* Auto-Save Status Bar */}
@@ -1665,6 +1691,17 @@ export function OpportunityDialog({
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">Observações da Oportunidade</Label>
+              <Textarea
+                placeholder="Observações importantes, preferências do cliente ou detalhes da negociação..."
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                rows={3}
+                className="resize-y min-h-[75px] text-xs bg-background leading-relaxed"
+              />
             </div>
 
             <div className="pt-4 border-t">

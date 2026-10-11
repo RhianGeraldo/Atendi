@@ -640,7 +640,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             properties: {
               titulo: { type: "string", description: "Título da oportunidade (ex: 'Interesse em Plano Premium')." },
               valor: { type: "number", description: "Valor financeiro numérico estimado (ex: 1500.00)." },
-              etapa_nome_ou_id: { type: "string", description: "Nome da etapa do funil (ex: 'Qualificação', 'Proposta') ou UUID." }
+              etapa_nome_ou_id: { type: "string", description: "Nome da etapa do funil (ex: 'Qualificação', 'Proposta') ou UUID." },
+              observacoes: { type: "string", description: "Observações ou particularidades da oportunidade (opcional)." }
             },
             required: ["titulo"]
           }
@@ -756,7 +757,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           crmOppCreateData = {
             title: args.titulo || "Nova Oportunidade",
             value: parseCurrencyValue(args.valor),
-            stage: args.etapa_nome_ou_id || null
+            stage: args.etapa_nome_ou_id || null,
+            notes: args.observacoes ? String(args.observacoes).trim() : null,
           };
         } else if (fnName === "atualizar_oportunidade" && agent.allow_opportunities) {
           crmOppUpdateData = {
@@ -970,7 +972,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         unit_id: effectiveUnitId,
         conversation_id: conversationId,
         stage_id: resolvedStage,
-        status: "open"
+        status: "open",
+        notes: crmOppCreateData.notes || null,
       }).select("id, title, value").single();
 
       if (oppErr) {

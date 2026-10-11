@@ -1914,6 +1914,7 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                                   contactId={contact.id}
                                   contactName={contact.name || ""}
                                   phone={contact.phone || ""}
+                                  unitId={contact.unit_id}
                                   trigger={
                                     <Button 
                                       variant="secondary" 

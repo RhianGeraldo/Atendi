@@ -393,12 +393,40 @@ export function useGlobalNotifications() {
           const channelId = newMsg.channel_id;
           if (!channelId || !currentUserId) return;
 
+          // Busca dados do canal interno
+          let channelData = channelCacheRef.current.get(channelId);
+          if (!channelData) {
+            try {
+              const { data: ch } = await supabase
+                .from("internal_channels")
+                .select("id, company_id, name, type, scope, unit_id")
+                .eq("id", channelId)
+                .maybeSingle();
+              if (ch) {
+                channelData = {
+                  companyId: ch.company_id,
+                  name: ch.name,
+                  type: ch.type,
+                  scope: ch.scope,
+                  unitId: ch.unit_id,
+                };
+                channelCacheRef.current.set(channelId, channelData);
+              }
+            } catch (e) {
+              console.warn("[GlobalNotifications] Falha ao consultar canal interno:", e);
+            }
+          }
+
+          // Valida tenant
+          if (channelData && channelData.companyId && userCompanyId && channelData.companyId !== userCompanyId) {
+            return;
+          }
+
           // REGRA DE DIRECIONAMENTO POR USUÁRIO NA EQUIPE:
-          // Se for no grupo e o usuário estiver nele (ou for DM dele), notifica o usuário.
-          // Se o usuário NÃO for membro do grupo, NÃO notifica.
+          // Se for no grupo e o usuário estiver nele (ou for DM dele, ou canal da empresa/unidade dele), notifica o usuário.
+          // Se o usuário silenciou o canal: NÃO notifica.
           let membership = myChannelMembershipsRef.current.get(channelId);
           if (membership === undefined) {
-            // Consulta no banco caso tenha sido adicionado recentemente ao canal
             try {
               const { data: mem } = await supabase
                 .from("internal_channel_members")
@@ -411,7 +439,18 @@ export function useGlobalNotifications() {
                 membership = { isMuted: Boolean(mem.is_muted) };
                 myChannelMembershipsRef.current.set(channelId, membership);
               } else {
-                myChannelMembershipsRef.current.set(channelId, null as any);
+                // Se não tem registro explícito, verifica elegibilidade por escopo
+                const isEligible =
+                  isSuperOrAdminCompany ||
+                  channelData?.scope === "company" ||
+                  (channelData?.scope === "unit" && channelData.unitId && allowedUnitsRef.current.has(channelData.unitId));
+
+                if (isEligible) {
+                  membership = { isMuted: false };
+                  myChannelMembershipsRef.current.set(channelId, membership);
+                } else {
+                  myChannelMembershipsRef.current.set(channelId, null as any);
+                }
               }
             } catch (err) {
               console.warn("[GlobalNotifications] Erro ao validar filiação ao canal:", err);
@@ -420,33 +459,6 @@ export function useGlobalNotifications() {
 
           // Se não é membro ou silenciou o canal: NÃO notifica
           if (!membership || membership.isMuted) {
-            return;
-          }
-
-          // Busca dados do canal interno
-          let channelData = channelCacheRef.current.get(channelId);
-          if (!channelData) {
-            try {
-              const { data: ch } = await supabase
-                .from("internal_channels")
-                .select("id, company_id, name, type")
-                .eq("id", channelId)
-                .single();
-              if (ch) {
-                channelData = {
-                  companyId: ch.company_id,
-                  name: ch.name,
-                  type: ch.type,
-                };
-                channelCacheRef.current.set(channelId, channelData);
-              }
-            } catch (e) {
-              console.warn("[GlobalNotifications] Falha ao consultar canal interno:", e);
-            }
-          }
-
-          // Valida tenant
-          if (channelData && channelData.companyId && userCompanyId && channelData.companyId !== userCompanyId) {
             return;
           }
 
@@ -533,6 +545,24 @@ export function useGlobalNotifications() {
                   search: { mode: "team", channelId } as any,
                 });
               },
+            });
+          }
+        }
+      )
+      // 3. Atualizações de Membros e Silenciamento da Equipe (tabela 'internal_channel_members')
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "internal_channel_members" },
+        (payload) => {
+          const row = (payload.new || payload.old) as any;
+          const currentUserId = profileRef.current?.id || sessionRef.current?.user?.id;
+          if (!row || !currentUserId || row.user_id !== currentUserId) return;
+
+          if (payload.eventType === "DELETE") {
+            myChannelMembershipsRef.current.delete(row.channel_id);
+          } else {
+            myChannelMembershipsRef.current.set(row.channel_id, {
+              isMuted: Boolean(row.is_muted),
             });
           }
         }

@@ -546,6 +546,16 @@ function PipelinePage() {
                                               {formatCurrency(opp.value || 0)}
                                             </div>
                                           </div>
+
+                                          {/* Observação da Oportunidade */}
+                                          {opp.notes && opp.notes.trim().length > 0 && (
+                                            <p 
+                                              className="text-[11px] text-muted-foreground line-clamp-1 italic bg-muted/40 px-2 py-1 rounded border border-border/30 mt-1.5" 
+                                              title={`Observação: ${opp.notes}`}
+                                            >
+                                              "{opp.notes}"
+                                            </p>
+                                          )}
                                           
                                           {/* Footer: Tarefas e Notas (Esquerda) e Data (Direita) abaixo da linha */}
                                           <div className="flex items-center justify-between mt-2 pt-2.5 border-t border-border/40 gap-2">
@@ -633,6 +643,7 @@ function PipelinePage() {
                                                   contactName={opp.contacts?.name || ""}
                                                   phone={opp.contacts?.phone || ""}
                                                   conversationId={opp.conversation_id}
+                                                  unitId={opp.unit_id}
                                                 />
                                               </div>
                                             </TooltipTrigger>
