@@ -3,7 +3,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { toast } from "sonner";
-import { Plus, GripVertical, Settings2, Calendar, DollarSign, User, UserCheck, MessageCircle, CheckSquare, FileText, Building, Search, X, RefreshCw, TrendingUp, Target, Award } from "lucide-react";
+import { 
+  Plus, GripVertical, Settings2, Calendar, DollarSign, User, UserCheck, MessageCircle, 
+  CheckSquare, FileText, Building, Search, X, RefreshCw, TrendingUp, Target, Award,
+  LayoutGrid, List, CheckCircle2, XCircle, ArrowUpDown, ChevronDown, ChevronUp, Eye,
+  Layers, FilterX
+} from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -18,6 +23,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from "@/components/ui/table";
 import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import { ContactChatButton } from "@/components/chat/contact-chat-button";
@@ -48,9 +61,20 @@ function PipelinePage() {
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
+
+  const isManagerOrAdmin = 
+    profile?.role === "admin_company" || 
+    profile?.role === "super_admin" || 
+    profile?.role === "manager";
+
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(search.pipelineId || null);
   const [statusFilter, setStatusFilter] = useState<string>(search.status || "open");
+  const [ownerFilter, setOwnerFilter] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
+  const [showMetrics, setShowMetrics] = useState<boolean>(true);
+  const [tableSortField, setTableSortField] = useState<"created_at" | "value" | "title" | "expected_close_date">("created_at");
+  const [tableSortAsc, setTableSortAsc] = useState<boolean>(false);
   const [highlightedOppId, setHighlightedOppId] = useState<string | null>(search.opportunityId || null);
   const boardContainerRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef<string | null>(null);
@@ -113,6 +137,21 @@ function PipelinePage() {
     },
   });
 
+  // Fetch Company Users para filtro de responsável
+  const { data: companyUsers } = useQuery({
+    queryKey: ["company-users", activeCompanyId],
+    enabled: !!activeCompanyId && isManagerOrAdmin,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, name, email, active")
+        .eq("company_id", activeCompanyId!)
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
   // Set default pipeline via effect
   useEffect(() => {
     if (!selectedPipelineId && pipelines && pipelines.length > 0) {
@@ -137,7 +176,16 @@ function PipelinePage() {
 
   // Fetch Opportunities for this pipeline
   const { data: opportunities, isLoading: isLoadingOpps } = useQuery({
-    queryKey: ["opportunities", activeCompanyId, selectedPipelineId, profile?.role, profile?.id, selectedUnitId, statusFilter],
+    queryKey: [
+      "opportunities", 
+      activeCompanyId, 
+      selectedPipelineId, 
+      profile?.role, 
+      profile?.id, 
+      selectedUnitId, 
+      statusFilter,
+      ownerFilter
+    ],
     enabled: !!selectedPipelineId && !!stages && stages.length > 0 && !!profile?.id && !!activeCompanyId,
     queryFn: async () => {
       const stageIds = stages!.map(s => s.id);
@@ -157,9 +205,11 @@ function PipelinePage() {
         query = query.eq("status", statusFilter);
       }
       
-      // Filtra para que apenas agentes vejam as próprias oportunidades (Admins, Super Admins e Gerentes veem todas)
-      if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
+      // Filtro de permissão: agentes comuns veem apenas as próprias oportunidades
+      if (!isManagerOrAdmin) {
         query = query.eq("owner_id", profile!.id);
+      } else if (ownerFilter !== "all") {
+        query = query.eq("owner_id", ownerFilter);
       }
 
       // Filtra pela unidade selecionada no painel superior
@@ -172,6 +222,45 @@ function PipelinePage() {
       return data;
     },
   });
+
+  // Supabase Realtime Subscription para sincronização instantânea
+  useEffect(() => {
+    if (!activeCompanyId) return;
+
+    const channelName = `pipeline-realtime-${activeCompanyId}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "opportunities",
+        },
+        () => {
+          qc.invalidateQueries({ queryKey: ["opportunities"] });
+          qc.invalidateQueries({ queryKey: ["target-opportunity-lookup"] });
+          qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "pipeline_stages",
+        },
+        () => {
+          qc.invalidateQueries({ queryKey: ["pipeline-stages"] });
+          qc.invalidateQueries({ queryKey: ["opportunities"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeCompanyId, qc]);
 
   const filteredOpportunities = useMemo(() => {
     if (!opportunities) return [];
@@ -190,6 +279,74 @@ function PipelinePage() {
       );
     });
   }, [opportunities, searchTerm]);
+
+  // Métricas e Indicadores de Desempenho (KPIs)
+  const metrics = useMemo(() => {
+    const list = filteredOpportunities || [];
+    const totalCount = list.length;
+    const totalValue = list.reduce((sum, o) => sum + (o.value || 0), 0);
+
+    const openOpps = list.filter(o => o.status === "open" || !o.status);
+    const openCount = openOpps.length;
+    const openValue = openOpps.reduce((sum, o) => sum + (o.value || 0), 0);
+
+    const wonOpps = list.filter(o => o.status === "won");
+    const wonCount = wonOpps.length;
+    const wonValue = wonOpps.reduce((sum, o) => sum + (o.value || 0), 0);
+
+    const lostOpps = list.filter(o => o.status === "lost");
+    const lostCount = lostOpps.length;
+    const lostValue = lostOpps.reduce((sum, o) => sum + (o.value || 0), 0);
+
+    const finishedCount = wonCount + lostCount;
+    const conversionRate = finishedCount > 0 ? (wonCount / finishedCount) * 100 : totalCount > 0 ? (wonCount / totalCount) * 100 : 0;
+    const avgTicket = wonCount > 0 ? wonValue / wonCount : openCount > 0 ? openValue / openCount : 0;
+
+    return {
+      totalCount,
+      totalValue,
+      openCount,
+      openValue,
+      wonCount,
+      wonValue,
+      lostCount,
+      lostValue,
+      conversionRate,
+      avgTicket,
+    };
+  }, [filteredOpportunities]);
+
+  // Lista ordenada para o modo Tabela
+  const sortedTableOpportunities = useMemo(() => {
+    if (!filteredOpportunities) return [];
+    return [...filteredOpportunities].sort((a: any, b: any) => {
+      let valA: any = a[tableSortField];
+      let valB: any = b[tableSortField];
+
+      if (tableSortField === "created_at" || tableSortField === "expected_close_date") {
+        valA = valA ? new Date(valA).getTime() : 0;
+        valB = valB ? new Date(valB).getTime() : 0;
+      } else if (tableSortField === "value") {
+        valA = Number(valA || 0);
+        valB = Number(valB || 0);
+      } else if (tableSortField === "title") {
+        valA = String(valA || "").toLowerCase();
+        valB = String(valB || "").toLowerCase();
+      }
+
+      if (valA < valB) return tableSortAsc ? -1 : 1;
+      if (valA > valB) return tableSortAsc ? 1 : -1;
+      return 0;
+    });
+  }, [filteredOpportunities, tableSortField, tableSortAsc]);
+
+  const hasActiveFilters = searchTerm.trim() !== "" || statusFilter !== "open" || ownerFilter !== "all";
+
+  const handleClearFilters = () => {
+    setSearchTerm("");
+    setStatusFilter("open");
+    setOwnerFilter("all");
+  };
 
   // Organize opportunities by stage
   const columns = useMemo(() => {
@@ -333,344 +490,817 @@ function PipelinePage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-muted/20">
-      <header className="flex items-center justify-between border-b bg-card px-6 py-4 shrink-0 flex-wrap gap-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <Select value={selectedPipelineId || ""} onValueChange={setSelectedPipelineId}>
-            <SelectTrigger className="w-[220px] h-9 text-xs">
-              <SelectValue placeholder="Selecione um funil" />
-            </SelectTrigger>
-            <SelectContent>
-              {pipelines.map(p => (
-                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[150px] h-9 text-xs">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os Status</SelectItem>
-              <SelectItem value="open">Aberto</SelectItem>
-              <SelectItem value="won">Ganho</SelectItem>
-              <SelectItem value="lost">Perdido</SelectItem>
-            </SelectContent>
-          </Select>
+      {/* LINHA 1: Contexto Macro (Funil) e Ações Globais */}
+      <header className="flex items-center justify-between border-b bg-card px-6 py-3 shrink-0 flex-wrap gap-3">
+        {/* Esquerda: Identificador do Funil */}
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <Layers className="h-4 w-4" />
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select value={selectedPipelineId || ""} onValueChange={setSelectedPipelineId}>
+              <SelectTrigger className="h-9 font-semibold text-xs border-border/80 min-w-[200px] max-w-[280px] bg-background">
+                <SelectValue placeholder="Selecione um funil" />
+              </SelectTrigger>
+              <SelectContent>
+                {pipelines.map(p => (
+                  <SelectItem key={p.id} value={p.id} className="font-medium text-xs">
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-          {/* Search Bar */}
-          <div className="relative w-full sm:w-48 md:w-56">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-            <Input
-              placeholder="Buscar no funil..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8 h-9 text-xs"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
+            <Badge variant="secondary" className="text-[11px] px-2 py-0.5 font-semibold text-muted-foreground h-6">
+              {opportunities?.length || 0} {(opportunities?.length || 0) === 1 ? "oportunidade" : "oportunidades"}
+            </Badge>
+          </div>
+        </div>
+
+        {/* Direita: Controles de Exibição e Botão Nova Oportunidade */}
+        <div className="flex items-center gap-2">
+          {/* Alternador de Modo: Quadro (Kanban) vs Lista (Tabela) */}
+          <div className="flex items-center border rounded-lg p-0.5 bg-muted/40">
+            <Button
+              variant={viewMode === "kanban" ? "secondary" : "ghost"}
+              size="sm"
+              className="h-8 px-2.5 text-xs font-medium gap-1.5 cursor-pointer"
+              onClick={() => setViewMode("kanban")}
+              title="Visualização em Quadro Kanban"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Quadro</span>
+            </Button>
+            <Button
+              variant={viewMode === "list" ? "secondary" : "ghost"}
+              size="sm"
+              className="h-8 px-2.5 text-xs font-medium gap-1.5 cursor-pointer"
+              onClick={() => setViewMode("list")}
+              title="Visualização em Lista / Tabela"
+            >
+              <List className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Lista</span>
+            </Button>
           </div>
 
-          {/* Refresh Button */}
+          {/* Toggle de Métricas / KPIs */}
+          <Button
+            variant={showMetrics ? "secondary" : "outline"}
+            size="sm"
+            className="h-8 px-2.5 text-xs gap-1.5 cursor-pointer"
+            onClick={() => setShowMetrics(!showMetrics)}
+            title={showMetrics ? "Ocultar resumo de métricas" : "Exibir resumo de métricas"}
+          >
+            <TrendingUp className="h-3.5 w-3.5 text-primary" />
+            <span className="hidden md:inline">Métricas</span>
+          </Button>
+
+          {/* Botão de Atualizar */}
           <Button
             variant="outline"
             size="sm"
-            className="h-9 px-3 text-xs"
+            className="h-8 w-8 p-0 cursor-pointer"
             onClick={() => {
               qc.invalidateQueries({ queryKey: ["opportunities"] });
               qc.invalidateQueries({ queryKey: ["pipelines"] });
+              qc.invalidateQueries({ queryKey: ["pipeline-stages"] });
+              toast.info("Funil atualizado!");
             }}
+            title="Atualizar dados do funil"
           >
-            <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Atualizar
+            <RefreshCw className="h-3.5 w-3.5" />
           </Button>
-        </div>
 
-        <div>
+          <div className="h-5 w-px bg-border/60 mx-1 hidden sm:block" />
+
+          {/* Botão Nova Oportunidade */}
           <OpportunityDialog defaultPipelineId={selectedPipelineId || ""}>
-            <Button variant="default" size="sm" className="h-9 text-xs font-medium">
-              <Plus className="h-4 w-4 mr-2" />
+            <Button variant="default" size="sm" className="h-8 text-xs font-medium gap-1.5 shadow-xs cursor-pointer">
+              <Plus className="h-3.5 w-3.5" />
               Nova Oportunidade
             </Button>
           </OpportunityDialog>
         </div>
       </header>
 
-      <div ref={boardContainerRef} className="flex-1 overflow-x-auto p-6 scroll-smooth">
-        {isLoadingStages || isLoadingOpps ? (
-          <div className="text-muted-foreground text-sm">Carregando quadro...</div>
-        ) : !stages || stages.length === 0 ? (
-          <div className="text-center mt-10 text-muted-foreground">
-            Este funil ainda não tem etapas. Adicione etapas nas configurações.
+      {/* LINHA 2: Barra de Ferramentas & Filtros (Toolbar) */}
+      <div className="flex items-center justify-between border-b bg-card/60 backdrop-blur-sm px-6 py-2.5 shrink-0 flex-wrap gap-2.5">
+        <div className="flex items-center gap-2 flex-wrap flex-1 min-w-[280px]">
+          {/* Barra de Pesquisa Expandida */}
+          <div className="relative w-full sm:w-60 md:w-72">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Buscar oportunidade, contato, fone..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-8 h-8 text-xs bg-background"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
           </div>
-        ) : (
-          <DragDropContext onDragEnd={onDragEnd}>
-            <div className="flex h-full items-start gap-4 pb-4">
-              {stages.map((stage) => {
-                const stageOpps = columns[stage.id] || [];
-                const stageTotal = stageOpps.reduce((sum, opp) => sum + (opp.value || 0), 0);
-                
-                return (
-                  <div key={stage.id} id={`opp-stage-col-${stage.id}`} className="flex h-full max-h-full w-[310px] shrink-0 flex-col rounded-xl bg-card border border-border/70 shadow-sm">
-                    <div 
-                      className="flex items-center justify-between p-3.5 border-b border-border/50 shrink-0 rounded-t-xl bg-card/80"
-                      style={{ borderTop: `4px solid ${stage.color || '#3b82f6'}` }}
-                    >
-                      <div className="flex items-center gap-2 truncate flex-1" title={stage.name}>
-                        <h3 className="font-semibold text-sm truncate">{stage.name}</h3>
-                        <Badge variant="secondary" className="text-[10px] px-1.5 h-4 font-bold shrink-0">
-                          {stageOpps.length}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {stageTotal > 0 && (
-                          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                            {formatCurrency(stageTotal)}
-                          </span>
-                        )}
-                        <OpportunityDialog defaultPipelineId={selectedPipelineId || ""} defaultStageId={stage.id}>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-muted" title="Adicionar nesta etapa">
-                            <Plus className="h-3.5 w-3.5" />
-                          </Button>
-                        </OpportunityDialog>
-                      </div>
-                    </div>
-                    
-                    <Droppable droppableId={stage.id}>
-                      {(provided, snapshot) => (
-                        <div
-                          ref={provided.innerRef}
-                          {...provided.droppableProps}
-                          className={`flex-1 overflow-y-auto p-3 space-y-3 min-h-[160px] transition-colors rounded-b-xl scroll-smooth ${snapshot.isDraggingOver ? 'bg-primary/5 ring-1 ring-primary/20' : ''}`}
-                        >
-                          {stageOpps.length === 0 && !snapshot.isDraggingOver ? (
-                            <div className="flex flex-col items-center justify-center py-10 px-4 text-center border border-dashed border-border/60 rounded-xl my-1 bg-muted/20">
-                              <p className="text-xs text-muted-foreground font-medium">Nenhuma oportunidade</p>
-                              <OpportunityDialog defaultPipelineId={selectedPipelineId || ""} defaultStageId={stage.id}>
-                                <Button variant="ghost" size="sm" className="h-7 text-[11px] mt-2 text-primary hover:bg-primary/5">
-                                  <Plus className="h-3 w-3 mr-1" /> Criar nesta etapa
-                                </Button>
-                              </OpportunityDialog>
-                            </div>
-                          ) : (
-                            stageOpps.map((opp, index) => (
-                              <Draggable key={opp.id} draggableId={opp.id} index={index}>
-                                {(provided, snapshot) => {
-                                  const pendingTasksCount = opp.tasks?.filter((t: any) => t.status === 'pending' || t.status === 'todo').length || 0;
-                                  const completedTasksCount = opp.tasks?.filter((t: any) => t.status === 'done').length || 0;
-                                  const totalTasks = opp.tasks?.length || 0;
-                                  const notesCount = 
-                                    (opp.notes && String(opp.notes).trim().length > 0 ? 1 : 0) + 
-                                    (Array.isArray(opp.opportunity_notes) ? opp.opportunity_notes.length : 0);
-                                  const hasNotes = notesCount > 0;
-                                  const isHighlighted = highlightedOppId === opp.id;
 
-                                  return (
-                                    <div
-                                      id={`opp-card-${opp.id}`}
-                                      ref={provided.innerRef}
-                                      {...provided.draggableProps}
-                                      {...provided.dragHandleProps}
-                                      style={provided.draggableProps.style}
-                                      className={`group relative rounded-xl border bg-card p-4 shadow-sm hover:shadow-md transition-all duration-300 ${
-                                        snapshot.isDragging 
-                                          ? 'shadow-2xl ring-2 ring-primary/60 transition-none z-50 opacity-95' 
-                                          : isHighlighted
-                                          ? 'ring-4 ring-primary ring-offset-2 ring-offset-background border-primary shadow-2xl scale-[1.02] z-30 bg-primary/[0.05] animate-pulse'
-                                          : 'border-border/80 hover:border-primary/40'
-                                      }`}
-                                    >
-                                      <OpportunityDialog opportunity={opp} defaultPipelineId={selectedPipelineId || ""}>
-                                        <div className="cursor-pointer space-y-3">
-                                          
-                                          {/* Title */}
-                                          <div className="font-semibold text-sm leading-tight text-foreground hover:text-primary transition-colors line-clamp-2 pr-6">
-                                            {opp.title}
-                                          </div>
+          {/* Filtro de Status com pontinhos coloridos */}
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[140px] h-8 text-xs bg-background">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os Status</SelectItem>
+              <SelectItem value="open">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-blue-500" /> Aberto
+                </span>
+              </SelectItem>
+              <SelectItem value="won">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" /> Ganho
+                </span>
+              </SelectItem>
+              <SelectItem value="lost">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-rose-500" /> Perdido
+                </span>
+              </SelectItem>
+            </SelectContent>
+          </Select>
 
-                                          {/* Contact & Atendente row */}
-                                          <div className="flex items-center justify-between gap-2">
-                                            <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
-                                              <Avatar className="h-6 w-6 border bg-background shrink-0">
-                                                <AvatarFallback className="text-[10px] font-medium bg-primary/10 text-primary">
-                                                  {initials(opp.contacts?.name || "??")}
-                                                </AvatarFallback>
-                                              </Avatar>
-                                              <div className="flex flex-col truncate">
-                                                <span className="text-xs text-foreground font-medium truncate">
-                                                  {opp.contacts?.name || "Contato Desconhecido"}
-                                                </span>
-                                                {opp.contacts?.phone && (
-                                                  <span className="text-[10px] text-muted-foreground truncate">
-                                                    {opp.contacts.phone}
-                                                  </span>
-                                                )}
-                                              </div>
+          {/* Filtro por Responsável / Atendente (visível para admins e gerentes) */}
+          {isManagerOrAdmin && (
+            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+              <SelectTrigger className="w-[170px] h-8 text-xs bg-background">
+                <div className="flex items-center gap-1.5 truncate">
+                  <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <SelectValue placeholder="Responsável" />
+                </div>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os Atendentes</SelectItem>
+                {companyUsers?.map(u => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.name || u.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {/* Botão Limpar Filtros */}
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5 cursor-pointer"
+              onClick={handleClearFilters}
+              title="Redefinir filtros para o padrão"
+            >
+              <FilterX className="h-3.5 w-3.5 text-destructive" />
+              Limpar Filtros
+            </Button>
+          )}
+        </div>
+
+        {/* Direita: Totalizador de Itens Filtrados */}
+        <div className="text-xs text-muted-foreground flex items-center gap-1.5 ml-auto">
+          {opportunities && opportunities.length !== filteredOpportunities.length ? (
+            <span>
+              Exibindo <strong className="text-foreground">{filteredOpportunities.length}</strong> de {opportunities.length}
+            </span>
+          ) : (
+            <span>
+              Exibindo <strong className="text-foreground">{filteredOpportunities.length}</strong>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Barra de Métricas e KPIs */}
+      {showMetrics && (
+        <div className="px-6 py-2.5 border-b bg-card/60 backdrop-blur-sm shrink-0">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            {/* 1. Total Funil */}
+            <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground">Total Funil</p>
+                <p className="text-sm font-bold text-foreground">{formatCurrency(metrics.totalValue)}</p>
+                <span className="text-[10px] text-muted-foreground">{metrics.totalCount} oportunidades</span>
+              </div>
+              <div className="p-2 rounded-md bg-primary/10 text-primary shrink-0">
+                <Target className="h-4 w-4" />
+              </div>
+            </div>
+
+            {/* 2. Em Aberto */}
+            <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground">Em Aberto</p>
+                <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatCurrency(metrics.openValue)}</p>
+                <span className="text-[10px] text-muted-foreground">{metrics.openCount} ativas</span>
+              </div>
+              <div className="p-2 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0">
+                <DollarSign className="h-4 w-4" />
+              </div>
+            </div>
+
+            {/* 3. Ganhos */}
+            <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground">Ganhos</p>
+                <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(metrics.wonValue)}</p>
+                <span className="text-[10px] text-muted-foreground">{metrics.wonCount} fechadas</span>
+              </div>
+              <div className="p-2 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+                <CheckCircle2 className="h-4 w-4" />
+              </div>
+            </div>
+
+            {/* 4. Perdidos */}
+            <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground">Perdidos</p>
+                <p className="text-sm font-bold text-rose-600 dark:text-rose-400">{formatCurrency(metrics.lostValue)}</p>
+                <span className="text-[10px] text-muted-foreground">{metrics.lostCount} perdidas</span>
+              </div>
+              <div className="p-2 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400 shrink-0">
+                <XCircle className="h-4 w-4" />
+              </div>
+            </div>
+
+            {/* 5. Taxa de Conversão */}
+            <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground">Conversão</p>
+                <p className="text-sm font-bold text-violet-600 dark:text-violet-400">{metrics.conversionRate.toFixed(1)}%</p>
+                <span className="text-[10px] text-muted-foreground">taxa de sucesso</span>
+              </div>
+              <div className="p-2 rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400 shrink-0">
+                <TrendingUp className="h-4 w-4" />
+              </div>
+            </div>
+
+            {/* 6. Ticket Médio */}
+            <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground">Ticket Médio</p>
+                <p className="text-sm font-bold text-amber-600 dark:text-amber-400">{formatCurrency(metrics.avgTicket)}</p>
+                <span className="text-[10px] text-muted-foreground">por oportunidade</span>
+              </div>
+              <div className="p-2 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
+                <Award className="h-4 w-4" />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Conteúdo Principal: Modo Kanban ou Modo Lista/Tabela */}
+      {viewMode === "kanban" ? (
+        <div ref={boardContainerRef} className="flex-1 overflow-x-auto p-6 scroll-smooth">
+          {isLoadingStages || isLoadingOpps ? (
+            <div className="text-muted-foreground text-sm">Carregando quadro...</div>
+          ) : !stages || stages.length === 0 ? (
+            <div className="text-center mt-10 text-muted-foreground">
+              Este funil ainda não tem etapas. Adicione etapas nas configurações.
+            </div>
+          ) : (
+            <DragDropContext onDragEnd={onDragEnd}>
+              <div className="flex h-full items-start gap-4 pb-4">
+                {stages.map((stage) => {
+                  const stageOpps = columns[stage.id] || [];
+                  const stageTotal = stageOpps.reduce((sum, opp) => sum + (opp.value || 0), 0);
+                  
+                  return (
+                    <div key={stage.id} id={`opp-stage-col-${stage.id}`} className="flex h-full max-h-full w-[310px] shrink-0 flex-col rounded-xl bg-card border border-border/70 shadow-sm">
+                      <div 
+                        className="flex items-center justify-between p-3.5 border-b border-border/50 shrink-0 rounded-t-xl bg-card/80"
+                        style={{ borderTop: `4px solid ${stage.color || '#3b82f6'}` }}
+                      >
+                        <div className="flex items-center gap-2 truncate flex-1" title={stage.name}>
+                          <h3 className="font-semibold text-sm truncate">{stage.name}</h3>
+                          <Badge variant="secondary" className="text-[10px] px-1.5 h-4 font-bold shrink-0">
+                            {stageOpps.length}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {stageTotal > 0 && (
+                            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                              {formatCurrency(stageTotal)}
+                            </span>
+                          )}
+                          <OpportunityDialog defaultPipelineId={selectedPipelineId || ""} defaultStageId={stage.id}>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer" title="Adicionar nesta etapa">
+                              <Plus className="h-3.5 w-3.5" />
+                            </Button>
+                          </OpportunityDialog>
+                        </div>
+                      </div>
+                      
+                      <Droppable droppableId={stage.id}>
+                        {(provided, snapshot) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.droppableProps}
+                            className={`flex-1 overflow-y-auto p-3 space-y-3 min-h-[160px] transition-colors rounded-b-xl scroll-smooth ${snapshot.isDraggingOver ? 'bg-primary/5 ring-1 ring-primary/20' : ''}`}
+                          >
+                            {stageOpps.length === 0 && !snapshot.isDraggingOver ? (
+                              <div className="flex flex-col items-center justify-center py-10 px-4 text-center border border-dashed border-border/60 rounded-xl my-1 bg-muted/20">
+                                <p className="text-xs text-muted-foreground font-medium">Nenhuma oportunidade</p>
+                                <OpportunityDialog defaultPipelineId={selectedPipelineId || ""} defaultStageId={stage.id}>
+                                  <Button variant="ghost" size="sm" className="h-7 text-[11px] mt-2 text-primary hover:bg-primary/5 cursor-pointer">
+                                    <Plus className="h-3 w-3 mr-1" /> Criar nesta etapa
+                                  </Button>
+                                </OpportunityDialog>
+                              </div>
+                            ) : (
+                              stageOpps.map((opp, index) => (
+                                <Draggable key={opp.id} draggableId={opp.id} index={index}>
+                                  {(provided, snapshot) => {
+                                    const pendingTasksCount = opp.tasks?.filter((t: any) => t.status === 'pending' || t.status === 'todo').length || 0;
+                                    const completedTasksCount = opp.tasks?.filter((t: any) => t.status === 'done').length || 0;
+                                    const totalTasks = opp.tasks?.length || 0;
+                                    const notesCount = 
+                                      (opp.notes && String(opp.notes).trim().length > 0 ? 1 : 0) + 
+                                      (Array.isArray(opp.opportunity_notes) ? opp.opportunity_notes.length : 0);
+                                    const hasNotes = notesCount > 0;
+                                    const isHighlighted = highlightedOppId === opp.id;
+
+                                    return (
+                                      <div
+                                        id={`opp-card-${opp.id}`}
+                                        ref={provided.innerRef}
+                                        {...provided.draggableProps}
+                                        {...provided.dragHandleProps}
+                                        style={provided.draggableProps.style}
+                                        className={`group relative rounded-xl border bg-card p-4 shadow-sm hover:shadow-md transition-all duration-300 ${
+                                          snapshot.isDragging 
+                                            ? 'shadow-2xl ring-2 ring-primary/60 transition-none z-50 opacity-95' 
+                                            : isHighlighted
+                                            ? 'ring-4 ring-primary ring-offset-2 ring-offset-background border-primary shadow-2xl scale-[1.02] z-30 bg-primary/[0.05] animate-pulse'
+                                            : 'border-border/80 hover:border-primary/40'
+                                        }`}
+                                      >
+                                        <OpportunityDialog opportunity={opp} defaultPipelineId={selectedPipelineId || ""}>
+                                          <div className="cursor-pointer space-y-3">
+                                            
+                                            {/* Title */}
+                                            <div className="font-semibold text-sm leading-tight text-foreground hover:text-primary transition-colors line-clamp-2 pr-6">
+                                              {opp.title}
                                             </div>
 
-                                            {/* Atendente Badge */}
-                                            {opp.profiles?.name && (
-                                              <div className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-muted/70 text-muted-foreground shrink-0 border border-border/40" title={`Atendente: ${opp.profiles.name}`}>
-                                                <UserCheck className="h-3 w-3 text-primary shrink-0" />
-                                                <span className="truncate max-w-[90px]">{opp.profiles.name}</span>
+                                            {/* Contact & Atendente row */}
+                                            <div className="flex items-center justify-between gap-2">
+                                              <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
+                                                <Avatar className="h-6 w-6 border bg-background shrink-0">
+                                                  <AvatarFallback className="text-[10px] font-medium bg-primary/10 text-primary">
+                                                    {initials(opp.contacts?.name || "??")}
+                                                  </AvatarFallback>
+                                                </Avatar>
+                                                <div className="flex flex-col truncate">
+                                                  <span className="text-xs text-foreground font-medium truncate">
+                                                    {opp.contacts?.name || "Contato Desconhecido"}
+                                                  </span>
+                                                  {opp.contacts?.phone && (
+                                                    <span className="text-[10px] text-muted-foreground truncate">
+                                                      {opp.contacts.phone}
+                                                    </span>
+                                                  )}
+                                                </div>
                                               </div>
-                                            )}
-                                          </div>
 
-                                          {/* Middle Row (Above the divider line): Unidade (1º), Status (2º), Valor (Direita) */}
-                                          <div className="flex items-center justify-between gap-2 pt-0.5">
-                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                              {/* Unidade Primeiro */}
-                                              {!selectedUnitId && opp.units?.name && (
-                                                <div className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-muted/60 text-muted-foreground w-fit max-w-full">
-                                                  <Building className="h-3 w-3 shrink-0" />
-                                                  <span className="truncate">{opp.units.name}</span>
+                                              {/* Atendente Badge */}
+                                              {opp.profiles?.name && (
+                                                <div className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-muted/70 text-muted-foreground shrink-0 border border-border/40" title={`Atendente: ${opp.profiles.name}`}>
+                                                  <UserCheck className="h-3 w-3 text-primary shrink-0" />
+                                                  <span className="truncate max-w-[90px]">{opp.profiles.name}</span>
                                                 </div>
                                               )}
-
-                                              {/* Status Segundo */}
-                                              {opp.status && (
-                                                <Badge variant={opp.status === 'won' ? 'default' : opp.status === 'lost' ? 'destructive' : 'secondary'} className={`text-[10px] px-1.5 h-5 font-medium ${opp.status === 'won' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : ''}`}>
-                                                  {opp.status === 'won' ? 'Ganho' : opp.status === 'lost' ? 'Perdido' : 'Aberto'}
-                                                </Badge>
-                                              )}
                                             </div>
 
-                                            {/* Valor R$ acima da linha à direita */}
-                                            <div className="text-emerald-600 dark:text-emerald-400 font-bold text-xs shrink-0 whitespace-nowrap">
-                                              {formatCurrency(opp.value || 0)}
-                                            </div>
-                                          </div>
+                                            {/* Middle Row: Unidade (1º), Status (2º), Valor (Direita) */}
+                                            <div className="flex items-center justify-between gap-2 pt-0.5">
+                                              <div className="flex items-center gap-1.5 flex-wrap">
+                                                {!selectedUnitId && opp.units?.name && (
+                                                  <div className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-muted/60 text-muted-foreground w-fit max-w-full">
+                                                    <Building className="h-3 w-3 shrink-0" />
+                                                    <span className="truncate">{opp.units.name}</span>
+                                                  </div>
+                                                )}
 
-                                          {/* Observação da Oportunidade */}
-                                          {opp.notes && opp.notes.trim().length > 0 && (
-                                            <p 
-                                              className="text-[11px] text-muted-foreground line-clamp-1 italic bg-muted/40 px-2 py-1 rounded border border-border/30 mt-1.5" 
-                                              title={`Observação: ${opp.notes}`}
-                                            >
-                                              "{opp.notes}"
-                                            </p>
-                                          )}
-                                          
-                                          {/* Footer: Tarefas e Notas (Esquerda) e Data (Direita) abaixo da linha */}
-                                          <div className="flex items-center justify-between mt-2 pt-2.5 border-t border-border/40 gap-2">
-                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                              {/* Tasks Indicator */}
-                                              {totalTasks > 0 ? (
-                                                pendingTasksCount > 0 ? (
+                                                {opp.status && (
+                                                  <Badge variant={opp.status === 'won' ? 'default' : opp.status === 'lost' ? 'destructive' : 'secondary'} className={`text-[10px] px-1.5 h-5 font-medium ${opp.status === 'won' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : ''}`}>
+                                                    {opp.status === 'won' ? 'Ganho' : opp.status === 'lost' ? 'Perdido' : 'Aberto'}
+                                                  </Badge>
+                                                )}
+                                              </div>
+
+                                              <div className="text-emerald-600 dark:text-emerald-400 font-bold text-xs shrink-0 whitespace-nowrap">
+                                                {formatCurrency(opp.value || 0)}
+                                              </div>
+                                            </div>
+
+                                            {/* Observação da Oportunidade */}
+                                            {opp.notes && opp.notes.trim().length > 0 && (
+                                              <p 
+                                                className="text-[11px] text-muted-foreground line-clamp-1 italic bg-muted/40 px-2 py-1 rounded border border-border/30 mt-1.5" 
+                                                title={`Observação: ${opp.notes}`}
+                                              >
+                                                "{opp.notes}"
+                                              </p>
+                                            )}
+                                            
+                                            {/* Footer: Tarefas e Notas (Esquerda) e Data (Direita) */}
+                                            <div className="flex items-center justify-between mt-2 pt-2.5 border-t border-border/40 gap-2">
+                                              <div className="flex items-center gap-1.5 flex-wrap">
+                                                {totalTasks > 0 ? (
+                                                  pendingTasksCount > 0 ? (
+                                                    <Badge
+                                                      variant="outline"
+                                                      className="text-[10px] px-1.5 h-5 gap-1 font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                                      title={`${pendingTasksCount} tarefa(s) pendente(s)`}
+                                                    >
+                                                      <CheckSquare className="h-3 w-3" />
+                                                      <span className="relative flex h-1.5 w-1.5 shrink-0">
+                                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
+                                                      </span>
+                                                      {pendingTasksCount}
+                                                    </Badge>
+                                                  ) : (
+                                                    <Badge
+                                                      variant="outline"
+                                                      className="text-[10px] px-1.5 h-5 gap-1 font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                                                      title="Todas as tarefas concluídas"
+                                                    >
+                                                      <CheckSquare className="h-3 w-3" />
+                                                      {totalTasks}
+                                                    </Badge>
+                                                  )
+                                                ) : (
                                                   <Badge
                                                     variant="outline"
-                                                    className="text-[10px] px-1.5 h-5 gap-1 font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
-                                                    title={`${pendingTasksCount} tarefa(s) pendente(s)`}
+                                                    className="text-[10px] px-1.5 h-5 gap-1 font-normal text-muted-foreground/60 border-border/40 bg-muted/20"
+                                                    title="Sem tarefas"
                                                   >
                                                     <CheckSquare className="h-3 w-3" />
-                                                    <span className="relative flex h-1.5 w-1.5 shrink-0">
-                                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                                                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
-                                                    </span>
-                                                    {pendingTasksCount}
+                                                    0
+                                                  </Badge>
+                                                )}
+
+                                                {hasNotes ? (
+                                                  <Badge
+                                                    variant="outline"
+                                                    className="text-[10px] px-1.5 h-5 gap-1 font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30"
+                                                    title={`${notesCount} anotação(ões)`}
+                                                  >
+                                                    <FileText className="h-3 w-3" />
+                                                    {notesCount}
                                                   </Badge>
                                                 ) : (
                                                   <Badge
                                                     variant="outline"
-                                                    className="text-[10px] px-1.5 h-5 gap-1 font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-                                                    title="Todas as tarefas concluídas"
+                                                    className="text-[10px] px-1.5 h-5 gap-1 font-normal text-muted-foreground/60 border-border/40 bg-muted/20"
+                                                    title="Sem notas"
                                                   >
-                                                    <CheckSquare className="h-3 w-3" />
-                                                    {totalTasks}
+                                                    <FileText className="h-3 w-3" />
+                                                    0
                                                   </Badge>
-                                                )
-                                              ) : (
-                                                <Badge
-                                                  variant="outline"
-                                                  className="text-[10px] px-1.5 h-5 gap-1 font-normal text-muted-foreground/60 border-border/40 bg-muted/20"
-                                                  title="Sem tarefas"
-                                                >
-                                                  <CheckSquare className="h-3 w-3" />
-                                                  0
-                                                </Badge>
-                                              )}
+                                                )}
+                                              </div>
 
-                                              {/* Notes Indicator */}
-                                              {hasNotes ? (
-                                                <Badge
-                                                  variant="outline"
-                                                  className="text-[10px] px-1.5 h-5 gap-1 font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30"
-                                                  title={`${notesCount} anotação(ões)`}
+                                              {opp.expected_close_date && (
+                                                <div 
+                                                  className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted/40 px-1.5 py-0.5 rounded border border-border/40 shrink-0"
+                                                  title="Data Prevista de Fechamento"
                                                 >
-                                                  <FileText className="h-3 w-3" />
-                                                  {notesCount}
-                                                </Badge>
-                                              ) : (
-                                                <Badge
-                                                  variant="outline"
-                                                  className="text-[10px] px-1.5 h-5 gap-1 font-normal text-muted-foreground/60 border-border/40 bg-muted/20"
-                                                  title="Sem notas"
-                                                >
-                                                  <FileText className="h-3 w-3" />
-                                                  0
-                                                </Badge>
+                                                  <Calendar className="h-3 w-3" />
+                                                  {format(new Date(opp.expected_close_date), "dd/MMM", { locale: ptBR })}
+                                                </div>
                                               )}
                                             </div>
 
-                                            {opp.expected_close_date && (
-                                              <div 
-                                                className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted/40 px-1.5 py-0.5 rounded border border-border/40 shrink-0"
-                                                title="Data Prevista de Fechamento"
-                                              >
-                                                <Calendar className="h-3 w-3" />
-                                                {format(new Date(opp.expected_close_date), "dd/MMM", { locale: ptBR })}
-                                              </div>
-                                            )}
                                           </div>
+                                        </OpportunityDialog>
 
+                                        {/* Quick Actions (Hover) */}
+                                        <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <TooltipProvider>
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <div>
+                                                  <ContactChatButton 
+                                                    contactId={opp.contact_id}
+                                                    contactName={opp.contacts?.name || ""}
+                                                    phone={opp.contacts?.phone || ""}
+                                                    conversationId={opp.conversation_id}
+                                                    unitId={opp.unit_id}
+                                                  />
+                                                </div>
+                                              </TooltipTrigger>
+                                              <TooltipContent side="top">
+                                                <p className="text-xs">Ir para conversa</p>
+                                              </TooltipContent>
+                                            </Tooltip>
+                                          </TooltipProvider>
                                         </div>
-                                      </OpportunityDialog>
-
-                                      {/* Quick Actions (Hover) */}
-                                      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <TooltipProvider>
-                                          <Tooltip>
-                                            <TooltipTrigger asChild>
-                                              <div>
-                                                <ContactChatButton 
-                                                  contactId={opp.contact_id}
-                                                  contactName={opp.contacts?.name || ""}
-                                                  phone={opp.contacts?.phone || ""}
-                                                  conversationId={opp.conversation_id}
-                                                  unitId={opp.unit_id}
-                                                />
-                                              </div>
-                                            </TooltipTrigger>
-                                            <TooltipContent side="top">
-                                              <p className="text-xs">Ir para conversa</p>
-                                            </TooltipContent>
-                                          </Tooltip>
-                                        </TooltipProvider>
+                                        
                                       </div>
-                                      
-                                    </div>
-                                  );
-                                }}
-                              </Draggable>
-                            ))
-                          )}
-                          {provided.placeholder}
+                                    );
+                                  }}
+                                </Draggable>
+                              ))
+                            )}
+                            {provided.placeholder}
+                          </div>
+                        )}
+                      </Droppable>
+                    </div>
+                  );
+                })}
+              </div>
+            </DragDropContext>
+          )}
+        </div>
+      ) : (
+        /* Visualização em Lista / Tabela */
+        <div className="flex-1 overflow-auto p-6">
+          <Card className="border border-border/70 shadow-sm overflow-hidden bg-card">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader className="bg-muted/40">
+                  <TableRow>
+                    <TableHead 
+                      className="cursor-pointer select-none font-semibold text-xs"
+                      onClick={() => {
+                        if (tableSortField === "title") {
+                          setTableSortAsc(!tableSortAsc);
+                        } else {
+                          setTableSortField("title");
+                          setTableSortAsc(true);
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        Oportunidade
+                        <ArrowUpDown className="h-3 w-3 text-muted-foreground" />
+                      </div>
+                    </TableHead>
+                    <TableHead className="font-semibold text-xs">Contato</TableHead>
+                    <TableHead className="font-semibold text-xs">Etapa</TableHead>
+                    <TableHead className="font-semibold text-xs">Status</TableHead>
+                    <TableHead className="font-semibold text-xs">Responsável</TableHead>
+                    {!selectedUnitId && <TableHead className="font-semibold text-xs">Unidade</TableHead>}
+                    <TableHead 
+                      className="cursor-pointer select-none font-semibold text-xs"
+                      onClick={() => {
+                        if (tableSortField === "value") {
+                          setTableSortAsc(!tableSortAsc);
+                        } else {
+                          setTableSortField("value");
+                          setTableSortAsc(false);
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        Valor (R$)
+                        <ArrowUpDown className="h-3 w-3 text-muted-foreground" />
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="cursor-pointer select-none font-semibold text-xs"
+                      onClick={() => {
+                        if (tableSortField === "expected_close_date") {
+                          setTableSortAsc(!tableSortAsc);
+                        } else {
+                          setTableSortField("expected_close_date");
+                          setTableSortAsc(true);
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        Previsão
+                        <ArrowUpDown className="h-3 w-3 text-muted-foreground" />
+                      </div>
+                    </TableHead>
+                    <TableHead className="font-semibold text-xs">Tarefas & Notas</TableHead>
+                    <TableHead className="text-right font-semibold text-xs">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoadingStages || isLoadingOpps ? (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-center py-10 text-muted-foreground text-sm">
+                        Carregando oportunidades...
+                      </TableCell>
+                    </TableRow>
+                  ) : sortedTableOpportunities.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-center py-12">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <p className="text-sm font-medium text-muted-foreground">Nenhuma oportunidade encontrada</p>
+                          <OpportunityDialog defaultPipelineId={selectedPipelineId || ""}>
+                            <Button variant="outline" size="sm" className="h-8 text-xs mt-1">
+                              <Plus className="h-3.5 w-3.5 mr-1" /> Criar Oportunidade
+                            </Button>
+                          </OpportunityDialog>
                         </div>
-                      )}
-                    </Droppable>
-                  </div>
-                )
-              })}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    sortedTableOpportunities.map((opp: any) => {
+                      const stage = stages?.find(s => s.id === opp.stage_id);
+                      const pendingTasksCount = opp.tasks?.filter((t: any) => t.status === 'pending' || t.status === 'todo').length || 0;
+                      const totalTasks = opp.tasks?.length || 0;
+                      const notesCount = 
+                        (opp.notes && String(opp.notes).trim().length > 0 ? 1 : 0) + 
+                        (Array.isArray(opp.opportunity_notes) ? opp.opportunity_notes.length : 0);
+
+                      return (
+                        <TableRow 
+                          key={opp.id} 
+                          className="hover:bg-muted/40 transition-colors group cursor-pointer"
+                        >
+                          {/* Oportunidade */}
+                          <TableCell className="font-medium text-xs">
+                            <OpportunityDialog opportunity={opp} defaultPipelineId={selectedPipelineId || ""}>
+                              <div className="space-y-0.5">
+                                <span className="font-semibold text-foreground hover:text-primary transition-colors block line-clamp-1">
+                                  {opp.title}
+                                </span>
+                                {opp.notes && (
+                                  <span className="text-[10px] text-muted-foreground italic line-clamp-1">
+                                    "{opp.notes}"
+                                  </span>
+                                )}
+                              </div>
+                            </OpportunityDialog>
+                          </TableCell>
+
+                          {/* Contato */}
+                          <TableCell className="text-xs">
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-6 w-6 border bg-background shrink-0">
+                                <AvatarFallback className="text-[10px] font-medium bg-primary/10 text-primary">
+                                  {initials(opp.contacts?.name || "??")}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex flex-col truncate max-w-[150px]">
+                                <span className="text-foreground font-medium truncate">
+                                  {opp.contacts?.name || "Contato Desconhecido"}
+                                </span>
+                                {opp.contacts?.phone && (
+                                  <span className="text-[10px] text-muted-foreground truncate">
+                                    {opp.contacts.phone}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </TableCell>
+
+                          {/* Etapa */}
+                          <TableCell className="text-xs">
+                            <Badge 
+                              variant="outline" 
+                              className="text-[10px] font-semibold px-2 py-0.5 border"
+                              style={{ 
+                                borderColor: stage?.color || '#3b82f6', 
+                                backgroundColor: `${stage?.color || '#3b82f6'}15`,
+                                color: stage?.color || '#3b82f6'
+                              }}
+                            >
+                              {stage?.name || "Sem etapa"}
+                            </Badge>
+                          </TableCell>
+
+                          {/* Status */}
+                          <TableCell className="text-xs">
+                            <Badge 
+                              variant={opp.status === 'won' ? 'default' : opp.status === 'lost' ? 'destructive' : 'secondary'} 
+                              className={`text-[10px] px-1.5 h-5 font-medium ${opp.status === 'won' ? 'bg-emerald-600 text-white' : ''}`}
+                            >
+                              {opp.status === 'won' ? 'Ganho' : opp.status === 'lost' ? 'Perdido' : 'Aberto'}
+                            </Badge>
+                          </TableCell>
+
+                          {/* Responsável */}
+                          <TableCell className="text-xs">
+                            {opp.profiles?.name ? (
+                              <div className="flex items-center gap-1.5 text-muted-foreground text-[11px]">
+                                <UserCheck className="h-3.5 w-3.5 text-primary shrink-0" />
+                                <span className="truncate max-w-[120px]">{opp.profiles.name}</span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground/50">Não atribuído</span>
+                            )}
+                          </TableCell>
+
+                          {/* Unidade */}
+                          {!selectedUnitId && (
+                            <TableCell className="text-xs text-muted-foreground">
+                              {opp.units?.name ? (
+                                <div className="flex items-center gap-1 text-[11px]">
+                                  <Building className="h-3 w-3 shrink-0" />
+                                  <span className="truncate max-w-[100px]">{opp.units.name}</span>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground/50">-</span>
+                              )}
+                            </TableCell>
+                          )}
+
+                          {/* Valor */}
+                          <TableCell className="text-xs font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                            {formatCurrency(opp.value || 0)}
+                          </TableCell>
+
+                          {/* Previsão */}
+                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                            {opp.expected_close_date ? (
+                              <div className="flex items-center gap-1 text-[11px]">
+                                <Calendar className="h-3 w-3" />
+                                {format(new Date(opp.expected_close_date), "dd/MM/yyyy", { locale: ptBR })}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground/40">-</span>
+                            )}
+                          </TableCell>
+
+                          {/* Tarefas & Notas */}
+                          <TableCell className="text-xs">
+                            <div className="flex items-center gap-1.5">
+                              {totalTasks > 0 && (
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] px-1.5 h-5 gap-1 font-semibold ${
+                                    pendingTasksCount > 0 
+                                      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30" 
+                                      : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                                  }`}
+                                  title={`${pendingTasksCount} tarefa(s) pendente(s)`}
+                                >
+                                  <CheckSquare className="h-3 w-3" />
+                                  {pendingTasksCount > 0 ? pendingTasksCount : totalTasks}
+                                </Badge>
+                              )}
+                              {notesCount > 0 && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] px-1.5 h-5 gap-1 font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30"
+                                  title={`${notesCount} nota(s)`}
+                                >
+                                  <FileText className="h-3 w-3" />
+                                  {notesCount}
+                                </Badge>
+                              )}
+                              {totalTasks === 0 && notesCount === 0 && (
+                                <span className="text-[11px] text-muted-foreground/40">-</span>
+                              )}
+                            </div>
+                          </TableCell>
+
+                          {/* Ações */}
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div>
+                                      <ContactChatButton 
+                                        contactId={opp.contact_id}
+                                        contactName={opp.contacts?.name || ""}
+                                        phone={opp.contacts?.phone || ""}
+                                        conversationId={opp.conversation_id}
+                                        unitId={opp.unit_id}
+                                      />
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top">
+                                    <p className="text-xs">Ir para conversa</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+
+                              <OpportunityDialog opportunity={opp} defaultPipelineId={selectedPipelineId || ""}>
+                                <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground cursor-pointer" title="Ver detalhes">
+                                  <Eye className="h-3.5 w-3.5" />
+                                </Button>
+                              </OpportunityDialog>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
             </div>
-          </DragDropContext>
-        )}
-      </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

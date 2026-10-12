@@ -20,6 +20,7 @@ import {
   Eye,
   Activity,
   Calendar,
+  Info,
 } from "lucide-react";
 
 import {
@@ -272,38 +273,115 @@ export function MetaCapiSettingsTab({ companyId }: MetaCapiSettingsProps) {
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-1">
                 <Label htmlFor="access-token">Token de Acesso (CAPI)</Label>
-                {configData?.hasMetaSystemUserToken && (
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 border-emerald-300"
-                  >
-                    <ShieldCheck className="h-3 w-3 mr-1" /> Token de Sistema Conectado
-                  </Badge>
-                )}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {configData?.tokenValidation?.valid ? (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 border-emerald-300"
+                    >
+                      <ShieldCheck className="h-3 w-3 mr-1" />
+                      {configData.tokenSource === "custom"
+                        ? "Token CAPI Validado na Meta"
+                        : "Token do WhatsApp (Ativo na Meta)"}
+                    </Badge>
+                  ) : configData?.hasMetaSystemUserToken ? (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400 border-blue-300"
+                    >
+                      <ShieldCheck className="h-3 w-3 mr-1" /> Token de Sistema Conectado
+                    </Badge>
+                  ) : null}
+
+                  {configData?.tokenValidation?.hasAdsManagement && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 border-emerald-300"
+                    >
+                      ✓ ads_management
+                    </Badge>
+                  )}
+                </div>
               </div>
               <Input
                 id="access-token"
                 type="password"
-                placeholder="EAA..."
+                placeholder={
+                  configData?.hasMetaSystemUserToken
+                    ? "Deixe em branco para usar o Token de Sistema, ou cole o token do Pixel..."
+                    : "EAA..."
+                }
                 value={accessToken}
                 onChange={(e) => setAccessToken(e.target.value)}
               />
-              <p className="text-[11px] text-muted-foreground">
-                Gere no{" "}
-                <strong>
-                  Gerenciador de Eventos da Meta &gt; Configurações &gt; API de Conversões &gt;
-                  Gerar token de acesso
-                </strong>
-                .
-                {configData?.hasMetaSystemUserToken && (
-                  <span className="block mt-0.5 text-[10px] text-amber-600 dark:text-amber-400">
-                    * O token de mensageria WhatsApp conectado não possui permissões de anúncios
-                    (ads_management). É necessário colar aqui o token gerado no Pixel.
-                  </span>
+              <div className="space-y-1 text-[11px] text-muted-foreground">
+                {accessToken.trim() ? (
+                  <>
+                    <p>
+                      Token personalizado inserido. Gere ou renove no{" "}
+                      <strong>
+                        Gerenciador de Eventos da Meta &gt; Configurações do Pixel/Dataset &gt; API de Conversões &gt;
+                        Gerar token de acesso
+                      </strong>.
+                    </p>
+                    {configData?.tokenValidation?.valid && configData.tokenValidation.permissions && configData.tokenValidation.permissions.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 mt-1">
+                        <span className="text-[10px] text-muted-foreground">Permissões ativas:</span>
+                        {configData.tokenValidation.permissions.map((perm: string) => (
+                          <Badge
+                            key={perm}
+                            variant="outline"
+                            className={`text-[9px] px-1 py-0 h-4 ${
+                              perm === "ads_management" || perm === "read_ads_dataset_quality"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-300 font-medium"
+                                : "bg-muted/40"
+                            }`}
+                          >
+                            {perm}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : configData?.hasMetaSystemUserToken ? (
+                  <div className="rounded-md p-2.5 bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-800/40 mt-1 space-y-1">
+                    <p className="text-[11px] text-blue-700 dark:text-blue-300 flex items-center gap-1.5 font-medium">
+                      <Info className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
+                      Usando o Token do Usuário de Sistema (WhatsApp) como padrão.
+                    </p>
+                    {configData.tokenValidation?.valid && configData.tokenValidation.permissions && configData.tokenValidation.permissions.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                        <span className="text-[10px] text-blue-800/70 dark:text-blue-200/70">Permissões do Token:</span>
+                        {configData.tokenValidation.permissions.map((perm: string) => (
+                          <Badge
+                            key={perm}
+                            variant="outline"
+                            className={`text-[9px] px-1 py-0 h-4 ${
+                              perm === "ads_management" || perm === "read_ads_dataset_quality"
+                                ? "bg-emerald-100 text-emerald-800 border-emerald-400 font-semibold"
+                                : "bg-background/80 text-foreground"
+                            }`}
+                          >
+                            {perm}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-muted-foreground pt-0.5">
+                      Se o seu Pixel/Dataset exigir credenciais exclusivas, cole acima o token gerado diretamente no Gerenciador de Eventos da Meta.
+                    </p>
+                  </div>
+                ) : (
+                  <p>
+                    Gere no{" "}
+                    <strong>
+                      Gerenciador de Eventos da Meta &gt; Configurações &gt; API de Conversões &gt; Gerar token de acesso
+                    </strong>.
+                  </p>
                 )}
-              </p>
+              </div>
             </div>
           </div>
 
@@ -317,8 +395,7 @@ export function MetaCapiSettingsTab({ companyId }: MetaCapiSettingsProps) {
                 onChange={(e) => setTestEventCode(e.target.value)}
               />
               <p className="text-[11px] text-muted-foreground">
-                Acesse a aba <strong>Testar Eventos</strong> no Gerenciador de Eventos da Meta para
-                ver os disparos chegando ao vivo.
+                Utilizado exclusivamente pelo botão <strong>Disparar Evento de Teste</strong> para você validar na aba <strong>Testar Eventos</strong> da Meta. Eventos reais do dia a dia (anúncios e CRM) são sempre gravados como produção real.
               </p>
             </div>
 

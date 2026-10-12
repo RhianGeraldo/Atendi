@@ -88,6 +88,94 @@ export function splitName(fullName: string | null | undefined): {
   };
 }
 
+export interface MetaTokenValidationResult {
+  valid: boolean;
+  source: "custom" | "system_user" | "none";
+  error?: string;
+  userName?: string;
+  userId?: string;
+  permissions: string[];
+  hasAdsManagement: boolean;
+  hasDatasetAccess: boolean;
+}
+
+/**
+ * Valida o token contra a Meta Graph API (/me e /me/permissions)
+ */
+export async function validateMetaToken(
+  token: string | null | undefined,
+  source: "custom" | "system_user" | "none" = "custom"
+): Promise<MetaTokenValidationResult> {
+  if (!token || !token.trim()) {
+    return {
+      valid: false,
+      source: "none",
+      error: "Nenhum token configurado.",
+      permissions: [],
+      hasAdsManagement: false,
+      hasDatasetAccess: false,
+    };
+  }
+
+  const cleanToken = token.trim();
+
+  try {
+    const [meRes, permRes] = await Promise.all([
+      fetch(`https://graph.facebook.com/v21.0/me?access_token=${encodeURIComponent(cleanToken)}&fields=id,name`),
+      fetch(`https://graph.facebook.com/v21.0/me/permissions?access_token=${encodeURIComponent(cleanToken)}`),
+    ]);
+
+    const meJson = await meRes.json().catch(() => ({}));
+    const permJson = await permRes.json().catch(() => ({}));
+
+    if (!meRes.ok || meJson.error) {
+      return {
+        valid: false,
+        source,
+        error: meJson.error?.message || "Token inválido ou expirado na Meta.",
+        permissions: [],
+        hasAdsManagement: false,
+        hasDatasetAccess: false,
+      };
+    }
+
+    const permissions: string[] = [];
+    if (Array.isArray(permJson?.data)) {
+      for (const item of permJson.data) {
+        if (item.status === "granted" && item.permission) {
+          permissions.push(item.permission);
+        }
+      }
+    }
+
+    const hasAdsManagement = permissions.includes("ads_management");
+    const hasDatasetAccess =
+      hasAdsManagement ||
+      permissions.includes("read_ads_dataset_quality") ||
+      permissions.includes("ads_read") ||
+      permissions.length === 0;
+
+    return {
+      valid: true,
+      source,
+      userName: meJson.name || undefined,
+      userId: meJson.id || undefined,
+      permissions,
+      hasAdsManagement,
+      hasDatasetAccess,
+    };
+  } catch (err: any) {
+    return {
+      valid: false,
+      source,
+      error: err.message || "Falha ao conectar com os servidores da Meta.",
+      permissions: [],
+      hasAdsManagement: false,
+      hasDatasetAccess: false,
+    };
+  }
+}
+
 /**
  * Recupera as configurações da Meta CAPI para uma empresa, com fallback resiliente
  * para custom_variables caso a coluna meta_capi_settings ainda não tenha sido migrada.
@@ -262,7 +350,7 @@ export async function sendMetaCapiEvent(params: SendMetaCapiParams): Promise<Met
     // Se nenhum identificador foi fornecido, a Meta rejeitará o evento
     if (!hashedPhone && !hashedEmail && !userData.ctwa_clid) {
       // Para testes manuais onde o contato não foi especificado, usamos um fallback de teste seguro
-      if (params.testEventCode) {
+      if (params.testEventCode || config.test_event_code || !params.contactId) {
         userData.ph = [hashSha256("5511999999999")!];
         userData.em = [hashSha256("test@atendi.ai")!];
       } else {
@@ -295,7 +383,8 @@ export async function sendMetaCapiEvent(params: SendMetaCapiParams): Promise<Met
     // 6. Montar payload do evento CAPI (v21.0)
     const eventId =
       params.eventId || `atendi_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
-    const testCode = params.testEventCode || config.test_event_code || undefined;
+    // O código de teste só deve ser enviado se o disparo for explicitamente um teste (evita que eventos de produção fiquem retidos na aba de teste da Meta)
+    const testCode = params.testEventCode || undefined;
 
     const eventPayload: Record<string, any> = {
       event_name: params.eventName,

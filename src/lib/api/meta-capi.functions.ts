@@ -3,7 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { getMetaCapiConfig, sendMetaCapiEvent, type MetaCapiSettings } from "../server/meta-capi";
+import { getMetaCapiConfig, sendMetaCapiEvent, validateMetaToken, type MetaCapiSettings, type MetaTokenValidationResult } from "../server/meta-capi";
 
 /**
  * 1. Consulta as configurações da Meta CAPI da empresa
@@ -25,13 +25,48 @@ export const getMetaCapiConfigAction = createServerFn({ method: "POST" })
       .eq("id", companyId)
       .single();
 
+    const hasMetaSystemUserToken = !!company?.meta_system_user_token;
+    const tokenSource = config.access_token?.trim()
+      ? ("custom" as const)
+      : hasMetaSystemUserToken
+      ? ("system_user" as const)
+      : ("none" as const);
+
+    let tokenValidation: MetaTokenValidationResult = {
+      valid: false,
+      source: "none",
+      permissions: [],
+      hasAdsManagement: false,
+      hasDatasetAccess: false,
+    };
+
+    if (effectiveToken) {
+      tokenValidation = await validateMetaToken(effectiveToken, tokenSource);
+    }
+
     return {
       config,
-      hasMetaSystemUserToken: !!company?.meta_system_user_token,
+      hasMetaSystemUserToken,
       effectiveTokenPreview: effectiveToken
         ? `${effectiveToken.slice(0, 8)}...${effectiveToken.slice(-4)}`
         : null,
+      tokenSource,
+      tokenValidation,
     };
+  });
+
+/**
+ * Valida um token específico da Meta contra a Graph API
+ */
+export const validateMetaTokenAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    z.object({
+      token: z.string(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    return await validateMetaToken(data.token, "custom");
   });
 
 /**
@@ -126,12 +161,14 @@ export const testMetaCapiEventAction = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { companyId, testEventCode, eventName, contactId } = data;
+    const { config } = await getMetaCapiConfig(companyId);
+    const effectiveTestCode = testEventCode?.trim() || config.test_event_code || undefined;
 
     const result = await sendMetaCapiEvent({
       companyId,
       contactId,
       eventName,
-      testEventCode,
+      testEventCode: effectiveTestCode,
       value: 100,
       currency: "BRL",
       contentName: "Teste Meta Conversions API (Atendi)",
