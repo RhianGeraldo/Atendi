@@ -44,7 +44,11 @@ function parseTaskDueDate(rawDate: string | undefined | null): string {
 
   // Se já for ISO 8601 válido
   const directDate = new Date(trimmed);
-  if (!isNaN(directDate.getTime()) && trimmed.includes("-") && (trimmed.includes("T") || trimmed.length === 10)) {
+  if (
+    !isNaN(directDate.getTime()) &&
+    trimmed.includes("-") &&
+    (trimmed.includes("T") || trimmed.length === 10)
+  ) {
     return directDate.toISOString();
   }
 
@@ -63,7 +67,9 @@ function parseTaskDueDate(rawDate: string | undefined | null): string {
   }
 
   // Formato ISO parcial YYYY-MM-DD HH:mm
-  const isoLikeMatch = trimmed.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/);
+  const isoLikeMatch = trimmed.match(
+    /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/,
+  );
   if (isoLikeMatch) {
     const year = parseInt(isoLikeMatch[1], 10);
     const month = parseInt(isoLikeMatch[2], 10) - 1;
@@ -138,7 +144,10 @@ function parseTaskDueDate(rawDate: string | undefined | null): string {
 /**
  * Resolve o stageId de forma tolerante (por UUID ou por nome aproximado na pipeline)
  */
-async function resolveStageId(pipelineId: string | null, stageInput: string | null | undefined): Promise<string | null> {
+async function resolveStageId(
+  pipelineId: string | null,
+  stageInput: string | null | undefined,
+): Promise<string | null> {
   if (!pipelineId) return null;
 
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -179,19 +188,23 @@ async function resolveStageId(pipelineId: string | null, stageInput: string | nu
 /**
  * Resolve o colega de IA por UUID ou nome
  */
-function resolveColleagueAgentId(colleagues: any[], agentInput: string | null | undefined): string | null {
+function resolveColleagueAgentId(
+  colleagues: any[],
+  agentInput: string | null | undefined,
+): string | null {
   if (!agentInput || !colleagues || colleagues.length === 0) return null;
   const trimmed = agentInput.trim();
 
-  const byId = colleagues.find(c => c.id.toLowerCase() === trimmed.toLowerCase());
+  const byId = colleagues.find((c) => c.id.toLowerCase() === trimmed.toLowerCase());
   if (byId) return byId.id;
 
   const lower = trimmed.toLowerCase();
-  const byName = colleagues.find(c =>
-    c.name.toLowerCase() === lower ||
-    c.name.toLowerCase().includes(lower) ||
-    lower.includes(c.name.toLowerCase()) ||
-    (c.ai_type && c.ai_type.toLowerCase().includes(lower))
+  const byName = colleagues.find(
+    (c) =>
+      c.name.toLowerCase() === lower ||
+      c.name.toLowerCase().includes(lower) ||
+      lower.includes(c.name.toLowerCase()) ||
+      (c.ai_type && c.ai_type.toLowerCase().includes(lower)),
   );
   if (byName) return byName.id;
 
@@ -201,7 +214,10 @@ function resolveColleagueAgentId(colleagues: any[], agentInput: string | null | 
 /**
  * Resolve departamento por UUID ou nome
  */
-async function resolveDepartmentId(companyId: string, deptInput: string | null | undefined): Promise<string | null> {
+async function resolveDepartmentId(
+  companyId: string,
+  deptInput: string | null | undefined,
+): Promise<string | null> {
   if (!deptInput || !deptInput.trim()) return null;
   const trimmed = deptInput.trim();
 
@@ -232,7 +248,9 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     // 1. Buscar detalhes da conversa com garantia estrita de Empresa e Unidade
     const { data: conv, error: convErr } = await supabaseAdmin
       .from("conversations")
-      .select("id, ai_active, ai_agent_id, whatsapp_instance_id, contact_id, status, unit_id, current_session_id, contacts(name, phone, company_id, unit_id), whatsapp_instances(unit_id, company_id)")
+      .select(
+        "id, ai_active, ai_agent_id, whatsapp_instance_id, contact_id, status, unit_id, current_session_id, contacts(name, phone, company_id, unit_id), whatsapp_instances(unit_id, company_id)",
+      )
       .eq("id", conversationId)
       .single();
 
@@ -242,14 +260,20 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     }
 
     if (!conv.ai_active || conv.status === "resolved") {
-      console.log(`[ai-generator] AI not active or conversation resolved. Aborting generation for ${conversationId}`);
+      console.log(
+        `[ai-generator] AI not active or conversation resolved. Aborting generation for ${conversationId}`,
+      );
       return;
     }
 
     // Garantia 1º: Empresa e Unidade sempre resolvidas
-    const instData = Array.isArray(conv.whatsapp_instances) ? conv.whatsapp_instances[0] : conv.whatsapp_instances;
-    const effectiveCompanyId = companyId || conv.contacts?.company_id || (instData as any)?.company_id;
-    let effectiveUnitId = conv.unit_id || conv.contacts?.unit_id || (instData as any)?.unit_id || null;
+    const instData = Array.isArray(conv.whatsapp_instances)
+      ? conv.whatsapp_instances[0]
+      : conv.whatsapp_instances;
+    const effectiveCompanyId =
+      companyId || conv.contacts?.company_id || (instData as any)?.company_id;
+    let effectiveUnitId =
+      conv.unit_id || conv.contacts?.unit_id || (instData as any)?.unit_id || null;
 
     if (!effectiveUnitId && effectiveCompanyId) {
       const { data: defaultUnit } = await supabaseAdmin
@@ -264,13 +288,18 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     }
 
     if (!conv.unit_id && effectiveUnitId) {
-      await supabaseAdmin.from("conversations").update({ unit_id: effectiveUnitId }).eq("id", conversationId);
+      await supabaseAdmin
+        .from("conversations")
+        .update({ unit_id: effectiveUnitId })
+        .eq("id", conversationId);
     }
 
     let agentIdToUse = conv.ai_agent_id;
 
     if (!agentIdToUse) {
-      console.log(`[ai-generator] No AI agent assigned to conversation ${conversationId}. Auto-assigning best available agent...`);
+      console.log(
+        `[ai-generator] No AI agent assigned to conversation ${conversationId}. Auto-assigning best available agent...`,
+      );
       const { data: defaultAgents } = await supabaseAdmin
         .from("ai_agents")
         .select("id")
@@ -281,9 +310,14 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
       if (defaultAgents && defaultAgents.length > 0) {
         agentIdToUse = defaultAgents[0].id;
-        await supabaseAdmin.from("conversations").update({ ai_agent_id: agentIdToUse }).eq("id", conversationId);
+        await supabaseAdmin
+          .from("conversations")
+          .update({ ai_agent_id: agentIdToUse })
+          .eq("id", conversationId);
       } else {
-        console.log(`[ai-generator] No active AI agents found in company ${effectiveCompanyId}. Aborting.`);
+        console.log(
+          `[ai-generator] No active AI agents found in company ${effectiveCompanyId}. Aborting.`,
+        );
         return;
       }
     }
@@ -366,15 +400,37 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     messages.reverse();
 
     // Mesclar variáveis personalizadas (Unidade sobressai à Empresa)
-    const compVars = typeof company.custom_variables === "object" && company.custom_variables !== null ? company.custom_variables : {};
-    const unitVars = (unitData && typeof unitData.custom_variables === "object" && unitData.custom_variables !== null) ? unitData.custom_variables : {};
+    const compVars =
+      typeof company.custom_variables === "object" && company.custom_variables !== null
+        ? company.custom_variables
+        : {};
+    const unitVars =
+      unitData &&
+      typeof unitData.custom_variables === "object" &&
+      unitData.custom_variables !== null
+        ? unitData.custom_variables
+        : {};
     const mergedCustomVars = { ...compVars, ...unitVars };
 
-    const infoEmpresa = `EMPRESA: ${company.name || ""}\nCNPJ: ${company.document || ""}\nEndereço: ${company.address || ""}\nHorários: ${company.business_hours || ""}\n${Object.entries(compVars).length ? `Variáveis:\n${Object.entries(compVars).map(([k,v]) => `- ${k}: ${v}`).join("\n")}` : ""}`.trim();
+    const infoEmpresa =
+      `EMPRESA: ${company.name || ""}\nCNPJ: ${company.document || ""}\nEndereço: ${company.address || ""}\nHorários: ${company.business_hours || ""}\n${
+        Object.entries(compVars).length
+          ? `Variáveis:\n${Object.entries(compVars)
+              .map(([k, v]) => `- ${k}: ${v}`)
+              .join("\n")}`
+          : ""
+      }`.trim();
 
     let infoUnidade = "";
     if (unitData) {
-      infoUnidade = `UNIDADE: ${unitData.name || ""}\nCNPJ: ${unitData.document || ""}\nEndereço: ${unitData.address || ""}\nHorários: ${unitData.business_hours || ""}\n${Object.entries(unitVars).length ? `Variáveis:\n${Object.entries(unitVars).map(([k,v]) => `- ${k}: ${v}`).join("\n")}` : ""}`.trim();
+      infoUnidade =
+        `UNIDADE: ${unitData.name || ""}\nCNPJ: ${unitData.document || ""}\nEndereço: ${unitData.address || ""}\nHorários: ${unitData.business_hours || ""}\n${
+          Object.entries(unitVars).length
+            ? `Variáveis:\n${Object.entries(unitVars)
+                .map(([k, v]) => `- ${k}: ${v}`)
+                .join("\n")}`
+            : ""
+        }`.trim();
     }
 
     const rawClientName = (conv.contacts?.name || "").trim();
@@ -426,16 +482,30 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       `=== CONTEXTO DO ATENDIMENTO ATUAL (DADOS AUTORITATIVOS DO SISTEMA) ===`,
       `EMPRESA: ${companyName}`,
       `UNIDADE ATUAL DE ATENDIMENTO: ${unitName}`,
-      rawClientName ? `NOME DO CLIENTE: ${rawClientName} (Primeiro nome: ${clientFirstName})` : `NOME DO CLIENTE: Não informado ainda`,
+      rawClientName
+        ? `NOME DO CLIENTE: ${rawClientName} (Primeiro nome: ${clientFirstName})`
+        : `NOME DO CLIENTE: Não informado ainda`,
       conv.contacts?.phone ? `TELEFONE DO CLIENTE: ${conv.contacts.phone}` : null,
-      unitData?.address ? `ENDEREÇO DA UNIDADE: ${unitData.address}` : (company.address ? `ENDEREÇO DA EMPRESA: ${company.address}` : null),
-      unitData?.business_hours ? `HORÁRIOS DA UNIDADE: ${unitData.business_hours}` : (company.business_hours ? `HORÁRIOS: ${company.business_hours}` : null),
+      unitData?.address
+        ? `ENDEREÇO DA UNIDADE: ${unitData.address}`
+        : company.address
+          ? `ENDEREÇO DA EMPRESA: ${company.address}`
+          : null,
+      unitData?.business_hours
+        ? `HORÁRIOS DA UNIDADE: ${unitData.business_hours}`
+        : company.business_hours
+          ? `HORÁRIOS: ${company.business_hours}`
+          : null,
       `--- DIRETRIZES CRÍTICAS DE CONTEXTO E LOCALIZAÇÃO ---`,
       `1. O cliente JÁ ESTÁ em contato diretamente com a unidade '${unitName}'. Você está respondendo exclusivamente pela unidade '${unitName}'.`,
       `2. NUNCA pergunte 'qual unidade você prefere?', 'qual cidade você está?' ou apresente lista de outras unidades/cidades da empresa. A unidade já está 100% definida como '${unitName}'. Só aborde outras filiais se o próprio cliente disser explicitamente que deseja atendimento em outra cidade.`,
-      rawClientName ? `3. O nome do cliente já é conhecido (${rawClientName}). Trate-o com naturalidade e cordialidade (preferencialmente chamando por ${clientFirstName}). NUNCA pergunte 'qual é o seu nome?' ou 'com quem estou falando?'.` : null,
-      `======================================================================`
-    ].filter(Boolean).join("\n");
+      rawClientName
+        ? `3. O nome do cliente já é conhecido (${rawClientName}). Trate-o com naturalidade e cordialidade (preferencialmente chamando por ${clientFirstName}). NUNCA pergunte 'qual é o seu nome?' ou 'com quem estou falando?'.`
+        : null,
+      `======================================================================`,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     systemPromptParts.push(contextHeader);
 
@@ -447,35 +517,37 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     if (agent.allow_handoff) {
       systemPromptParts.push(
         applyVars(agent.prompt_handoff) ||
-        `DIRETRIZ DE TRANSFERÊNCIA HUMANA:\nSe você não souber como resolver a solicitação do cliente após tentar ajudar ou se ele solicitar explicitamente atendimento humano, chame a ferramenta 'transferir_atendimento' com o motivo detalhado.`
+          `DIRETRIZ DE TRANSFERÊNCIA HUMANA:\nSe você não souber como resolver a solicitação do cliente após tentar ajudar ou se ele solicitar explicitamente atendimento humano, chame a ferramenta 'transferir_atendimento' com o motivo detalhado.`,
       );
     }
 
     if (agent.allow_resolution) {
       systemPromptParts.push(
         applyVars(agent.prompt_resolution) ||
-        `DIRETRIZ DE ENCERRAMENTO:\nQuando o cliente tiver suas dúvidas sanadas, confirmar que deu tudo certo ou se despedir cordialmente, chame a ferramenta 'encerrar_atendimento' com o resumo do que foi concluído.`
+          `DIRETRIZ DE ENCERRAMENTO:\nQuando o cliente tiver suas dúvidas sanadas, confirmar que deu tudo certo ou se despedir cordialmente, chame a ferramenta 'encerrar_atendimento' com o resumo do que foi concluído.`,
       );
     }
 
     if (colleagues && colleagues.length > 0) {
-      const colleaguesList = colleagues.map(c => `- ${c.name} (${c.ai_type || 'Geral'}): ${c.description || 'Especialista'}`).join("\n");
+      const colleaguesList = colleagues
+        .map((c) => `- ${c.name} (${c.ai_type || "Geral"}): ${c.description || "Especialista"}`)
+        .join("\n");
       systemPromptParts.push(
-        `TRABALHO EM EQUIPE (MULTI-AGENTES):\nSe a solicitação for de competência de outro colega especialista, chame a ferramenta 'delegar_para_outro_agente_ia' informando o nome ou ID do colega.\nColegas disponíveis:\n${colleaguesList}`
+        `TRABALHO EM EQUIPE (MULTI-AGENTES):\nSe a solicitação for de competência de outro colega especialista, chame a ferramenta 'delegar_para_outro_agente_ia' informando o nome ou ID do colega.\nColegas disponíveis:\n${colleaguesList}`,
       );
     }
 
     if (agent.allow_tasks) {
       systemPromptParts.push(
         applyVars(agent.prompt_tasks) ||
-        `CRIAÇÃO DE TAREFAS NO CRM:\nVocê pode agendar tarefas e follow-ups para a equipe usando a ferramenta 'criar_tarefa'. Informe data e hora previstas (ex: 'amanhã às 14:00', '2026-10-10 10:00').`
+          `CRIAÇÃO DE TAREFAS NO CRM:\nVocê pode agendar tarefas e follow-ups para a equipe usando a ferramenta 'criar_tarefa'. Informe data e hora previstas (ex: 'amanhã às 14:00', '2026-10-10 10:00').`,
       );
     }
 
     if (agent.allow_opportunities) {
       systemPromptParts.push(
         applyVars(agent.prompt_opportunities) ||
-        `OPORTUNIDADES DE VENDAS NO CRM:\nVocê tem acesso direto ao funil de vendas. Quando o cliente demonstrar interesse comercial ou solicitar proposta, chame 'criar_oportunidade'. Para avançar de etapa no funil, chame 'atualizar_oportunidade'.`
+          `OPORTUNIDADES DE VENDAS NO CRM:\nVocê tem acesso direto ao funil de vendas. Quando o cliente demonstrar interesse comercial ou solicitar proposta, chame 'criar_oportunidade'. Para avançar de etapa no funil, chame 'atualizar_oportunidade'.`,
       );
 
       if (agent.pipeline_id) {
@@ -485,7 +557,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           .eq("pipeline_id", agent.pipeline_id)
           .order("order_index");
         if (stages && stages.length > 0) {
-          const stagesList = stages.map(s => `- ${s.name} (ID: ${s.id})`).join("\n");
+          const stagesList = stages.map((s) => `- ${s.name} (ID: ${s.id})`).join("\n");
           systemPromptParts.push(`ETAPAS DO FUNIL DESTE AGENTE:\n${stagesList}`);
         }
 
@@ -494,8 +566,14 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           .select("id, title, value, stage_id")
           .eq("contact_id", conv.contact_id);
         if (opps && opps.length > 0) {
-          const oppsList = opps.map(o => `- Oportunidade ID: ${o.id} | Título: ${o.title} | Etapa Atual: ${o.stage_id}`).join("\n");
-          systemPromptParts.push(`OPORTUNIDADES EXISTENTES DO CLIENTE:\n${oppsList}\nSe o cliente já tiver oportunidade aberta sobre o assunto, utilize 'atualizar_oportunidade' em vez de criar uma nova.`);
+          const oppsList = opps
+            .map(
+              (o) => `- Oportunidade ID: ${o.id} | Título: ${o.title} | Etapa Atual: ${o.stage_id}`,
+            )
+            .join("\n");
+          systemPromptParts.push(
+            `OPORTUNIDADES EXISTENTES DO CLIENTE:\n${oppsList}\nSe o cliente já tiver oportunidade aberta sobre o assunto, utilize 'atualizar_oportunidade' em vez de criar uma nova.`,
+          );
         }
       }
     }
@@ -526,26 +604,36 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           role = "user";
           content = `[MENSAGEM INTERNA DO SISTEMA]: ${content}`;
           if (content.includes("transferido pela IA para o colega")) {
-            const defaultHandoffReceive = "Um colega de equipe transferiu este cliente para você. Leia o histórico acima para entender o contexto e continue o atendimento a partir de agora de acordo com a sua especialidade. NÃO transfira de volta sem antes tentar ajudar o cliente.";
-            const inst = agent.prompt_receive_handoff ? applyVars(agent.prompt_receive_handoff) : defaultHandoffReceive;
+            const defaultHandoffReceive =
+              "Um colega de equipe transferiu este cliente para você. Leia o histórico acima para entender o contexto e continue o atendimento a partir de agora de acordo com a sua especialidade. NÃO transfira de volta sem antes tentar ajudar o cliente.";
+            const inst = agent.prompt_receive_handoff
+              ? applyVars(agent.prompt_receive_handoff)
+              : defaultHandoffReceive;
             content += `\n[INSTRUÇÃO CRÍTICA]: ${inst}`;
           }
           if (content.includes("SYSTEM_FOLLOW_UP_1")) {
-            const defaultFollowup = "[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente está há muito tempo sem responder. Envie UMA mensagem curta, amigável e natural perguntando se ele conseguiu resolver a questão anterior ou se precisa de ajuda. NÃO encerre o atendimento ainda.";
-            content = agent.prompt_followup ? `[INSTRUÇÃO CRÍTICA DE SISTEMA: ACOMPANHAMENTO]\n${applyVars(agent.prompt_followup)}` : defaultFollowup;
+            const defaultFollowup =
+              "[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente está há muito tempo sem responder. Envie UMA mensagem curta, amigável e natural perguntando se ele conseguiu resolver a questão anterior ou se precisa de ajuda. NÃO encerre o atendimento ainda.";
+            content = agent.prompt_followup
+              ? `[INSTRUÇÃO CRÍTICA DE SISTEMA: ACOMPANHAMENTO]\n${applyVars(agent.prompt_followup)}`
+              : defaultFollowup;
           }
           if (content.includes("SYSTEM_FOLLOW_UP_2")) {
-            const defaultFollowup2 = "[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente não respondeu ao seu primeiro follow-up. Envie um aviso amigável informando que, se não houver resposta, o atendimento será encerrado em breve. NÃO encerre o atendimento ainda.";
-            content = agent.prompt_followup ? `[INSTRUÇÃO CRÍTICA DE SISTEMA: ACOMPANHAMENTO (2º AVISO)]\n${applyVars(agent.prompt_followup)}` : defaultFollowup2;
+            const defaultFollowup2 =
+              "[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente não respondeu ao seu primeiro follow-up. Envie um aviso amigável informando que, se não houver resposta, o atendimento será encerrado em breve. NÃO encerre o atendimento ainda.";
+            content = agent.prompt_followup
+              ? `[INSTRUÇÃO CRÍTICA DE SISTEMA: ACOMPANHAMENTO (2º AVISO)]\n${applyVars(agent.prompt_followup)}`
+              : defaultFollowup2;
           }
           if (content.includes("SYSTEM_RESOLVE_INACTIVE")) {
-            content = "[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente ignorou as tentativas de contato. Despeça-se cordialmente agora. O sistema finalizará o atendimento.";
+            content =
+              "[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente ignorou as tentativas de contato. Despeça-se cordialmente agora. O sistema finalizará o atendimento.";
             isInactivityClose = true;
           }
         }
 
         return { role: role as any, content };
-      })
+      }),
     ];
 
     let finalModel = agent.model || "default";
@@ -561,16 +649,23 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         type: "function",
         function: {
           name: "transferir_atendimento",
-          description: "Transfere o atendimento para a equipe ou fila humana de atendentes quando o cliente solicita ou o assunto foge do seu escopo.",
+          description:
+            "Transfere o atendimento para a equipe ou fila humana de atendentes quando o cliente solicita ou o assunto foge do seu escopo.",
           parameters: {
             type: "object",
             properties: {
-              motivo: { type: "string", description: "Motivo claro e detalhado do transbordo para os atendentes." },
-              departamento_nome_ou_id: { type: "string", description: "Nome ou ID do departamento de destino (opcional)." }
+              motivo: {
+                type: "string",
+                description: "Motivo claro e detalhado do transbordo para os atendentes.",
+              },
+              departamento_nome_ou_id: {
+                type: "string",
+                description: "Nome ou ID do departamento de destino (opcional).",
+              },
             },
-            required: ["motivo"]
-          }
-        }
+            required: ["motivo"],
+          },
+        },
       });
     }
 
@@ -579,20 +674,26 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         type: "function",
         function: {
           name: "encerrar_atendimento",
-          description: "Encerra o chamado e marca como resolvido quando a dúvida do cliente for sanada ou ele se despedir com sucesso.",
+          description:
+            "Encerra o chamado e marca como resolvido quando a dúvida do cliente for sanada ou ele se despedir com sucesso.",
           parameters: {
             type: "object",
             properties: {
-              resumo: { type: "string", description: "Breve resumo do que foi concluído com sucesso." }
+              resumo: {
+                type: "string",
+                description: "Breve resumo do que foi concluído com sucesso.",
+              },
             },
-            required: ["resumo"]
-          }
-        }
+            required: ["resumo"],
+          },
+        },
       });
     }
 
     if (colleagues && colleagues.length > 0) {
-      const colleaguesDesc = colleagues.map(c => `${c.name} (${c.ai_type || 'Geral'})`).join(", ");
+      const colleaguesDesc = colleagues
+        .map((c) => `${c.name} (${c.ai_type || "Geral"})`)
+        .join(", ");
       tools.push({
         type: "function",
         function: {
@@ -601,12 +702,15 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           parameters: {
             type: "object",
             properties: {
-              agente_nome_ou_id: { type: "string", description: "Nome ou ID do agente colega para quem transferir." },
-              motivo: { type: "string", description: "Motivo da delegação para o colega." }
+              agente_nome_ou_id: {
+                type: "string",
+                description: "Nome ou ID do agente colega para quem transferir.",
+              },
+              motivo: { type: "string", description: "Motivo da delegação para o colega." },
             },
-            required: ["agente_nome_ou_id"]
-          }
-        }
+            required: ["agente_nome_ou_id"],
+          },
+        },
       });
     }
 
@@ -620,12 +724,19 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             type: "object",
             properties: {
               titulo: { type: "string", description: "Título claro da tarefa." },
-              descricao: { type: "string", description: "Descrição ou notas de contexto da tarefa." },
-              data_hora: { type: "string", description: "Data e horário de vencimento (ex: 'amanhã às 14h', '2026-10-15 10:00')." }
+              descricao: {
+                type: "string",
+                description: "Descrição ou notas de contexto da tarefa.",
+              },
+              data_hora: {
+                type: "string",
+                description:
+                  "Data e horário de vencimento (ex: 'amanhã às 14h', '2026-10-15 10:00').",
+              },
             },
-            required: ["titulo", "data_hora"]
-          }
-        }
+            required: ["titulo", "data_hora"],
+          },
+        },
       });
     }
 
@@ -638,14 +749,26 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           parameters: {
             type: "object",
             properties: {
-              titulo: { type: "string", description: "Título da oportunidade (ex: 'Interesse em Plano Premium')." },
-              valor: { type: "number", description: "Valor financeiro numérico estimado (ex: 1500.00)." },
-              etapa_nome_ou_id: { type: "string", description: "Nome da etapa do funil (ex: 'Qualificação', 'Proposta') ou UUID." },
-              observacoes: { type: "string", description: "Observações ou particularidades da oportunidade (opcional)." }
+              titulo: {
+                type: "string",
+                description: "Título da oportunidade (ex: 'Interesse em Plano Premium').",
+              },
+              valor: {
+                type: "number",
+                description: "Valor financeiro numérico estimado (ex: 1500.00).",
+              },
+              etapa_nome_ou_id: {
+                type: "string",
+                description: "Nome da etapa do funil (ex: 'Qualificação', 'Proposta') ou UUID.",
+              },
+              observacoes: {
+                type: "string",
+                description: "Observações ou particularidades da oportunidade (opcional).",
+              },
             },
-            required: ["titulo"]
-          }
-        }
+            required: ["titulo"],
+          },
+        },
       });
 
       tools.push({
@@ -656,22 +779,30 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           parameters: {
             type: "object",
             properties: {
-              oportunidade_id: { type: "string", description: "ID da oportunidade (opcional se houver apenas uma)." },
-              nova_etapa_nome_ou_id: { type: "string", description: "Nome ou ID da nova etapa no funil." }
+              oportunidade_id: {
+                type: "string",
+                description: "ID da oportunidade (opcional se houver apenas uma).",
+              },
+              nova_etapa_nome_ou_id: {
+                type: "string",
+                description: "Nome ou ID da nova etapa no funil.",
+              },
             },
-            required: ["nova_etapa_nome_ou_id"]
-          }
-        }
+            required: ["nova_etapa_nome_ou_id"],
+          },
+        },
       });
     }
 
-    console.log(`[ai-generator] Calling LLM (${provider} - ${finalModel}) with ${tools.length} native tools...`);
+    console.log(
+      `[ai-generator] Calling LLM (${provider} - ${finalModel}) with ${tools.length} native tools...`,
+    );
 
     const requestBody: any = {
       model: finalModel.replace("openrouter/", "").replace("groq/", ""),
       messages: formattedMessages,
       temperature: 0.7,
-      max_tokens: agent.max_tokens || 4096
+      max_tokens: agent.max_tokens || 4096,
     };
 
     if (tools.length > 0) {
@@ -684,13 +815,13 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         ...(provider === "openrouter" && {
           "HTTP-Referer": "https://atendi.app",
-          "X-Title": "Atendi CRM"
-        })
+          "X-Title": "Atendi CRM",
+        }),
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -733,14 +864,21 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         const fnName = call.function?.name;
         let args: any = {};
         try {
-          args = typeof call.function?.arguments === "string" ? JSON.parse(call.function.arguments) : call.function?.arguments || {};
+          args =
+            typeof call.function?.arguments === "string"
+              ? JSON.parse(call.function.arguments)
+              : call.function?.arguments || {};
         } catch (e) {
-          console.error(`[ai-generator] Erro ao parsear argumentos da tool ${fnName}:`, call.function?.arguments);
+          console.error(
+            `[ai-generator] Erro ao parsear argumentos da tool ${fnName}:`,
+            call.function?.arguments,
+          );
         }
 
         if (fnName === "transferir_atendimento" && agent.allow_handoff) {
           isHandoff = true;
-          handoffNote = args.motivo || "Cliente solicitou atendimento humano ou IA realizou transbordo.";
+          handoffNote =
+            args.motivo || "Cliente solicitou atendimento humano ou IA realizou transbordo.";
           handoffDeptInput = args.departamento_nome_ou_id || null;
         } else if (fnName === "encerrar_atendimento" && agent.allow_resolution) {
           isResolve = true;
@@ -751,7 +889,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           crmTaskData = {
             title: args.titulo || "Acompanhamento de Atendimento",
             description: args.descricao || "",
-            dueDate: args.data_hora || ""
+            dueDate: args.data_hora || "",
           };
         } else if (fnName === "criar_oportunidade" && agent.allow_opportunities) {
           crmOppCreateData = {
@@ -763,7 +901,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         } else if (fnName === "atualizar_oportunidade" && agent.allow_opportunities) {
           crmOppUpdateData = {
             oppId: args.oportunidade_id || null,
-            stage: args.nova_etapa_nome_ou_id || args.etapa_nome_ou_id || ""
+            stage: args.nova_etapa_nome_ou_id || args.etapa_nome_ou_id || "",
           };
         }
       }
@@ -774,7 +912,9 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       const handoffMatch = cleanResponse.match(/\[TRANSFERIR(?::\s*(.*?))?\]/i);
       if (handoffMatch) {
         isHandoff = true;
-        handoffNote = handoffMatch[1] ? handoffMatch[1].trim() : "Cliente solicitou atendimento humano ou IA não soube responder.";
+        handoffNote = handoffMatch[1]
+          ? handoffMatch[1].trim()
+          : "Cliente solicitou atendimento humano ou IA não soube responder.";
         cleanResponse = cleanResponse.replace(/\[TRANSFERIR(?::\s*.*?)?\]/gi, "").trim();
       }
     }
@@ -793,40 +933,54 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         crmTaskData = {
           title: taskMatch[1].trim(),
           description: taskMatch[2].trim(),
-          dueDate: taskMatch[3].trim()
+          dueDate: taskMatch[3].trim(),
         };
-        cleanResponse = cleanResponse.replace(/\[CRIAR_TAREFA:\s*.*?\s*\|\s*.*?\s*\|\s*.*?\]/gi, "").trim();
+        cleanResponse = cleanResponse
+          .replace(/\[CRIAR_TAREFA:\s*.*?\s*\|\s*.*?\s*\|\s*.*?\]/gi, "")
+          .trim();
       }
     }
 
     if (!crmOppCreateData && agent.allow_opportunities) {
-      const oppMatch = cleanResponse.match(/\[CRIAR_OPORTUNIDADE:\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\]/i);
+      const oppMatch = cleanResponse.match(
+        /\[CRIAR_OPORTUNIDADE:\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\]/i,
+      );
       if (oppMatch) {
         crmOppCreateData = {
           title: oppMatch[1].trim(),
           value: parseCurrencyValue(oppMatch[2]),
-          stage: oppMatch[3].trim()
+          stage: oppMatch[3].trim(),
         };
-        cleanResponse = cleanResponse.replace(/\[CRIAR_OPORTUNIDADE:\s*.*?\s*\|\s*.*?\s*\|\s*.*?\]/gi, "").trim();
+        cleanResponse = cleanResponse
+          .replace(/\[CRIAR_OPORTUNIDADE:\s*.*?\s*\|\s*.*?\s*\|\s*.*?\]/gi, "")
+          .trim();
       }
     }
 
     if (!crmOppUpdateData && agent.allow_opportunities) {
-      const updateOppMatch3 = cleanResponse.match(/\[ATUALIZAR_OPORTUNIDADE:\s*([^\s\|]+)\s*\|\s*([^\s\|]+)\s*\|\s*([^\s\|\]]+)\]/i);
+      const updateOppMatch3 = cleanResponse.match(
+        /\[ATUALIZAR_OPORTUNIDADE:\s*([^\s\|]+)\s*\|\s*([^\s\|]+)\s*\|\s*([^\s\|\]]+)\]/i,
+      );
       if (updateOppMatch3) {
         crmOppUpdateData = {
           oppId: updateOppMatch3[1].trim(),
-          stage: updateOppMatch3[3].trim()
+          stage: updateOppMatch3[3].trim(),
         };
-        cleanResponse = cleanResponse.replace(/\[ATUALIZAR_OPORTUNIDADE:\s*[^\s\|]+\s*\|\s*[^\s\|]+\s*\|\s*[^\s\|\]]+\]/gi, "").trim();
+        cleanResponse = cleanResponse
+          .replace(/\[ATUALIZAR_OPORTUNIDADE:\s*[^\s\|]+\s*\|\s*[^\s\|]+\s*\|\s*[^\s\|\]]+\]/gi, "")
+          .trim();
       } else {
-        const updateOppMatch2 = cleanResponse.match(/\[ATUALIZAR_OPORTUNIDADE:\s*([^\s\|]+)\s*\|\s*([^\s\|\]]+)\]/i);
+        const updateOppMatch2 = cleanResponse.match(
+          /\[ATUALIZAR_OPORTUNIDADE:\s*([^\s\|]+)\s*\|\s*([^\s\|\]]+)\]/i,
+        );
         if (updateOppMatch2) {
           crmOppUpdateData = {
             oppId: updateOppMatch2[1].trim(),
-            stage: updateOppMatch2[2].trim()
+            stage: updateOppMatch2[2].trim(),
           };
-          cleanResponse = cleanResponse.replace(/\[ATUALIZAR_OPORTUNIDADE:\s*[^\s\|]+\s*\|\s*[^\s\|\]]+\]/gi, "").trim();
+          cleanResponse = cleanResponse
+            .replace(/\[ATUALIZAR_OPORTUNIDADE:\s*[^\s\|]+\s*\|\s*[^\s\|\]]+\]/gi, "")
+            .trim();
         }
       }
     }
@@ -866,7 +1020,9 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       const resolvedTargetAgentId = resolveColleagueAgentId(colleagues, transferAgentInput);
 
       if (!resolvedTargetAgentId) {
-        console.warn(`[ai-generator] Could not resolve colleague agent from input: ${transferAgentInput}`);
+        console.warn(
+          `[ai-generator] Could not resolve colleague agent from input: ${transferAgentInput}`,
+        );
       } else {
         // Proteção contra loop infinito (máximo 3 transferências em 5 minutos)
         const { data: recentSystemMsgs } = await supabaseAdmin
@@ -878,13 +1034,17 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           .limit(10);
 
         const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-        const transferCount = recentSystemMsgs?.filter(m =>
-          m.content.includes("Atendimento transferido pela IA para o colega") &&
-          new Date(m.created_at).getTime() > fiveMinutesAgo
-        ).length || 0;
+        const transferCount =
+          recentSystemMsgs?.filter(
+            (m) =>
+              m.content.includes("Atendimento transferido pela IA para o colega") &&
+              new Date(m.created_at).getTime() > fiveMinutesAgo,
+          ).length || 0;
 
         if (transferCount >= 3) {
-          console.warn(`[ai-generator] Infinite loop between agents detected! Falling back to human queue.`);
+          console.warn(
+            `[ai-generator] Infinite loop between agents detected! Falling back to human queue.`,
+          );
           isHandoff = true;
           handoffNote = "Loop entre IAs detectado. Transferido para equipe humana.";
         } else {
@@ -895,7 +1055,9 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             .single();
 
           const targetName = targetAgent?.name || "Colega Especialista";
-          console.log(`[ai-generator] Delegating from ${agent.name} to ${targetName} (${resolvedTargetAgentId})`);
+          console.log(
+            `[ai-generator] Delegating from ${agent.name} to ${targetName} (${resolvedTargetAgentId})`,
+          );
 
           await supabaseAdmin
             .from("conversations")
@@ -912,17 +1074,21 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
                 targetId: resolvedTargetAgentId,
                 targetName: targetName,
                 ai_agent_id: agent.id,
-                ai_agent_name: agent.name
-              }
+                ai_agent_name: agent.name,
+              },
             });
           }
 
           const systemMsg = `Atendimento transferido pela IA para o colega de equipe: ${targetName}`;
-          const { data: insertedMsg } = await supabaseAdmin.from("messages").insert({
-            conversation_id: conversationId,
-            sender_type: "system",
-            content: systemMsg
-          }).select("id").single();
+          const { data: insertedMsg } = await supabaseAdmin
+            .from("messages")
+            .insert({
+              conversation_id: conversationId,
+              sender_type: "system",
+              content: systemMsg,
+            })
+            .select("id")
+            .single();
 
           if (insertedMsg) {
             const { enqueueAiMessage } = await import("./ai-queue");
@@ -937,16 +1103,20 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       const parsedDue = parseTaskDueDate(crmTaskData.dueDate);
       console.log(`[ai-generator] Creating task: "${crmTaskData.title}" for ${parsedDue}`);
 
-      const { data: newTask, error: taskErr } = await supabaseAdmin.from("tasks").insert({
-        title: crmTaskData.title,
-        description: crmTaskData.description || null,
-        due_date: parsedDue,
-        contact_id: conv.contact_id,
-        unit_id: effectiveUnitId,
-        status: "pending",
-        priority: "medium",
-        task_type: "follow_up"
-      }).select("id, title").single();
+      const { data: newTask, error: taskErr } = await supabaseAdmin
+        .from("tasks")
+        .insert({
+          title: crmTaskData.title,
+          description: crmTaskData.description || null,
+          due_date: parsedDue,
+          contact_id: conv.contact_id,
+          unit_id: effectiveUnitId,
+          status: "pending",
+          priority: "medium",
+          task_type: "follow_up",
+        })
+        .select("id, title")
+        .single();
 
       if (taskErr) {
         console.error(`[ai-generator] Failed to create task:`, taskErr);
@@ -955,7 +1125,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           conversation_id: conversationId,
           sender_type: "agent",
           is_internal: true,
-          content: `📌 Tarefa criada pela IA: ${newTask.title} (Previsão: ${new Date(parsedDue).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})`
+          content: `📌 Tarefa criada pela IA: ${newTask.title} (Previsão: ${new Date(parsedDue).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})`,
         });
       }
     }
@@ -963,18 +1133,25 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     // C. Criar Oportunidade no CRM
     if (crmOppCreateData && conv.contact_id) {
       const resolvedStage = await resolveStageId(agent.pipeline_id, crmOppCreateData.stage);
-      console.log(`[ai-generator] Creating opportunity: "${crmOppCreateData.title}" (Value: ${crmOppCreateData.value}, Stage: ${resolvedStage})`);
+      console.log(
+        `[ai-generator] Creating opportunity: "${crmOppCreateData.title}" (Value: ${crmOppCreateData.value}, Stage: ${resolvedStage})`,
+      );
 
-      const { data: newOpp, error: oppErr } = await supabaseAdmin.from("opportunities").insert({
-        title: crmOppCreateData.title,
-        value: crmOppCreateData.value,
-        contact_id: conv.contact_id,
-        unit_id: effectiveUnitId,
-        conversation_id: conversationId,
-        stage_id: resolvedStage,
-        status: "open",
-        notes: crmOppCreateData.notes || null,
-      }).select("id, title, value").single();
+      const { data: newOpp, error: oppErr } = await supabaseAdmin
+        .from("opportunities")
+        .insert({
+          title: crmOppCreateData.title,
+          value: crmOppCreateData.value,
+          contact_id: conv.contact_id,
+          unit_id: effectiveUnitId,
+          conversation_id: conversationId,
+          stage_id: resolvedStage,
+          owner_id: conv.assigned_agent_id || null,
+          status: "open",
+          notes: crmOppCreateData.notes || null,
+        })
+        .select("id, title, value")
+        .single();
 
       if (oppErr) {
         console.error(`[ai-generator] Failed to create opportunity:`, oppErr);
@@ -983,13 +1160,13 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           conversation_id: conversationId,
           sender_type: "agent",
           is_internal: true,
-          content: `💰 Oportunidade criada pela IA: ${newOpp.title} (Valor: R$ ${newOpp.value.toFixed(2)})`
+          content: `💰 Oportunidade criada pela IA: ${newOpp.title} (Valor: R$ ${newOpp.value.toFixed(2)})`,
         });
 
         await supabaseAdmin.from("opportunity_history").insert({
           opportunity_id: newOpp.id,
           action_type: "created",
-          description: `Oportunidade criada automaticamente pelo Agente de IA (${agent.name})`
+          description: `Oportunidade criada automaticamente pelo Agente de IA (${agent.name})`,
         });
       }
     }
@@ -1018,19 +1195,23 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             .update({ stage_id: resolvedStage })
             .eq("id", targetOppId);
 
-          const { data: stName } = await supabaseAdmin.from("pipeline_stages").select("name").eq("id", resolvedStage).single();
+          const { data: stName } = await supabaseAdmin
+            .from("pipeline_stages")
+            .select("name")
+            .eq("id", resolvedStage)
+            .single();
 
           await supabaseAdmin.from("messages").insert({
             conversation_id: conversationId,
             sender_type: "agent",
             is_internal: true,
-            content: `🔄 Oportunidade atualizada pela IA (Movida para etapa: ${stName?.name || resolvedStage}).`
+            content: `🔄 Oportunidade atualizada pela IA (Movida para etapa: ${stName?.name || resolvedStage}).`,
           });
 
           await supabaseAdmin.from("opportunity_history").insert({
             opportunity_id: targetOppId,
             action_type: "stage_changed",
-            description: `Etapa alterada pelo Agente de IA (${agent.name}) para ${stName?.name || resolvedStage}`
+            description: `Etapa alterada pelo Agente de IA (${agent.name}) para ${stName?.name || resolvedStage}`,
           });
         }
       }
@@ -1049,18 +1230,26 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       const updatePayload: any = {
         ai_active: false,
         assigned_agent_id: null,
-        status: "waiting"
+        status: "waiting",
       };
 
       let deptName = null;
       if (targetDeptId) {
         updatePayload.department_id = targetDeptId;
-        const { data: dept } = await supabaseAdmin.from("departments").select("name").eq("id", targetDeptId).single();
+        const { data: dept } = await supabaseAdmin
+          .from("departments")
+          .select("name")
+          .eq("id", targetDeptId)
+          .single();
         if (dept) deptName = dept.name;
 
         // Distribuição Round-Robin respeitando estritamente a Unidade
         const { assignDepartmentRoundRobin } = await import("./routing");
-        const roundRobinAgent = await assignDepartmentRoundRobin(effectiveCompanyId, targetDeptId, effectiveUnitId);
+        const roundRobinAgent = await assignDepartmentRoundRobin(
+          effectiveCompanyId,
+          targetDeptId,
+          effectiveUnitId,
+        );
         if (roundRobinAgent) {
           updatePayload.assigned_agent_id = roundRobinAgent;
         }
@@ -1075,7 +1264,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       await supabaseAdmin.from("messages").insert({
         conversation_id: conversationId,
         sender_type: "system",
-        content: systemMsg
+        content: systemMsg,
       });
 
       await supabaseAdmin.from("messages").insert({
@@ -1083,13 +1272,16 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         sender_type: "agent",
         is_internal: true,
         content: handoffNote,
-        metadata: { ai_generated: true, ai_agent_id: agent.id, ai_agent_name: agent.name }
+        metadata: { ai_generated: true, ai_agent_id: agent.id, ai_agent_name: agent.name },
       });
 
       if (conv.current_session_id) {
         const sessionUpdate: any = { assigned_agent_id: updatePayload.assigned_agent_id || null };
         if (targetDeptId) sessionUpdate.department_id = targetDeptId;
-        await supabaseAdmin.from("conversation_sessions").update(sessionUpdate).eq("id", conv.current_session_id);
+        await supabaseAdmin
+          .from("conversation_sessions")
+          .update(sessionUpdate)
+          .eq("id", conv.current_session_id);
 
         await supabaseAdmin.from("session_events").insert({
           session_id: conv.current_session_id,
@@ -1099,13 +1291,15 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             targetId: targetDeptId || "queue",
             targetName: deptName || "Fila Geral",
             by_ai: true,
-            observation: handoffNote
-          }
+            observation: handoffNote,
+          },
         });
       }
     } else if (isResolve) {
       // F. Encerramento Confiável do Atendimento
-      console.log(`[ai-generator] Resolving conversation ${conversationId}. Reason: ${resolveNote}`);
+      console.log(
+        `[ai-generator] Resolving conversation ${conversationId}. Reason: ${resolveNote}`,
+      );
 
       const sessionId = conv.current_session_id;
 
@@ -1114,29 +1308,31 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         .update({
           status: "resolved",
           resolved_at: new Date().toISOString(),
-          current_session_id: null
+          current_session_id: null,
         })
         .eq("id", conversationId);
 
       if (sessionId) {
         const resolvedReasonId = isInactivityClose
-          ? (agent.followup_resolution_reason_id || agent.resolution_reason_id || null)
-          : (agent.resolution_reason_id || null);
+          ? agent.followup_resolution_reason_id || agent.resolution_reason_id || null
+          : agent.resolution_reason_id || null;
 
-        await supabaseAdmin.from("conversation_sessions").update({
-          resolved_at: new Date().toISOString(),
-          resolution_reason_id: resolvedReasonId,
-          resolution_observation: resolveNote
-        }).eq("id", sessionId);
+        await supabaseAdmin
+          .from("conversation_sessions")
+          .update({
+            resolved_at: new Date().toISOString(),
+            resolution_reason_id: resolvedReasonId,
+            resolution_observation: resolveNote,
+          })
+          .eq("id", sessionId);
 
         await supabaseAdmin.from("session_events").insert({
           session_id: sessionId,
           event_type: "resolved",
-          metadata: { by_ai: true, observation: resolveNote, isInactivityClose }
+          metadata: { by_ai: true, observation: resolveNote, isInactivityClose },
         });
       }
     }
-
   } catch (err) {
     console.error(`[ai-generator] Fatal error:`, err);
   }

@@ -1,13 +1,15 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit2, GripVertical, Settings2, CheckSquare } from "lucide-react";
+import { Plus, Trash2, Edit2, GripVertical, Settings2, CheckSquare, Clock } from "lucide-react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { StageChecklistDialog } from "@/components/crm/stage-checklist-dialog";
+import { StageSlaDialog } from "@/components/crm/stage-sla-dialog";
+import { formatSlaDuration } from "@/types/crm-sla";
 import {
   Select,
   SelectContent,
@@ -206,7 +208,18 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
   const { profile } = useAuth();
   const [newStageName, setNewStageName] = useState("");
   const [newStageColor, setNewStageColor] = useState("#3b82f6"); // Default blue
-  const [managingChecklistStage, setManagingChecklistStage] = useState<{ id: string; name: string } | null>(null);
+  const [managingChecklistStage, setManagingChecklistStage] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [managingSlaStage, setManagingSlaStage] = useState<{
+    id: string;
+    name: string;
+    color?: string;
+    sla_enabled?: boolean | null;
+    sla_minutes?: number | null;
+    sla_warning_pct?: number | null;
+  } | null>(null);
 
   // We need a fallback unit_id if selectedUnitId is null, because the original table requires it.
   const { data: fallbackUnit } = useQuery({
@@ -325,7 +338,10 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
   const reorderStages = useMutation({
     mutationFn: async (orderedStageIds: string[]) => {
       const updates = orderedStageIds.map((id, index) =>
-        supabase.from("pipeline_stages").update({ order: index + 1 }).eq("id", id)
+        supabase
+          .from("pipeline_stages")
+          .update({ order: index + 1 })
+          .eq("id", id),
       );
       await Promise.all(updates);
     },
@@ -409,11 +425,7 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
             <DragDropContext onDragEnd={onDragEnd}>
               <Droppable droppableId="pipeline-stages-droppable">
                 {(provided) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className="space-y-2"
-                  >
+                  <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-2">
                     {stages?.map((stage, index) => (
                       <Draggable key={stage.id} draggableId={stage.id} index={index}>
                         {(provided, snapshot) => (
@@ -421,18 +433,22 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
                             ref={provided.innerRef}
                             {...provided.draggableProps}
                             className={`flex items-center gap-3 p-3 bg-muted/30 border rounded-md transition-all ${
-                              snapshot.isDragging ? "shadow-lg bg-card ring-2 ring-primary/40 z-10" : ""
+                              snapshot.isDragging
+                                ? "shadow-lg bg-card ring-2 ring-primary/40 z-10"
+                                : ""
                             }`}
                           >
-                            <div 
-                              {...provided.dragHandleProps} 
-                              className="cursor-grab active:cursor-grabbing p-1 -m-1 text-muted-foreground hover:text-foreground" 
+                            <div
+                              {...provided.dragHandleProps}
+                              className="cursor-grab active:cursor-grabbing p-1 -m-1 text-muted-foreground hover:text-foreground"
                               title="Arraste para reordenar"
                             >
                               <GripVertical className="h-4 w-4" />
                             </div>
 
-                            <span className="text-xs font-mono text-muted-foreground w-4">{index + 1}</span>
+                            <span className="text-xs font-mono text-muted-foreground w-4">
+                              {index + 1}
+                            </span>
 
                             <div className="relative flex h-8 w-8 overflow-hidden rounded-md border border-input shrink-0">
                               <input
@@ -449,10 +465,14 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
                             <div className="flex-1 font-medium text-sm">{stage.name}</div>
 
                             <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="text-[11px] text-muted-foreground hidden sm:inline">Meta CAPI:</span>
+                              <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                                Meta CAPI:
+                              </span>
                               <Select
                                 value={(stage as any).meta_event_name || "none"}
-                                onValueChange={(val) => updateStageMetaEvent.mutate({ id: stage.id, metaEvent: val })}
+                                onValueChange={(val) =>
+                                  updateStageMetaEvent.mutate({ id: stage.id, metaEvent: val })
+                                }
                               >
                                 <SelectTrigger className="h-8 w-[140px] text-xs">
                                   <SelectValue placeholder="Sem evento" />
@@ -462,13 +482,41 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
                                   <SelectItem value="Lead">Lead</SelectItem>
                                   <SelectItem value="Contact">Contact</SelectItem>
                                   <SelectItem value="Schedule">Schedule (Agendamento)</SelectItem>
-                                  <SelectItem value="SubmitApplication">Submit Application</SelectItem>
+                                  <SelectItem value="SubmitApplication">
+                                    Submit Application
+                                  </SelectItem>
                                   <SelectItem value="QualifiedLead">Qualified Lead</SelectItem>
-                                  <SelectItem value="InitiateCheckout">Initiate Checkout</SelectItem>
+                                  <SelectItem value="InitiateCheckout">
+                                    Initiate Checkout
+                                  </SelectItem>
                                   <SelectItem value="Purchase">Purchase (Compra)</SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>
+
+                            <Button
+                              type="button"
+                              variant={stage.sla_enabled ? "secondary" : "outline"}
+                              size="sm"
+                              className={`h-8 gap-1.5 text-xs font-medium cursor-pointer shrink-0 ${
+                                stage.sla_enabled
+                                  ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
+                                  : "border-border/80 hover:border-primary/40 text-muted-foreground hover:text-foreground"
+                              }`}
+                              onClick={() => setManagingSlaStage(stage)}
+                              title="Configurar SLA / Tempo limite desta etapa"
+                            >
+                              <Clock className="h-3.5 w-3.5" />
+                              <span>SLA</span>
+                              {stage.sla_enabled && stage.sla_minutes ? (
+                                <Badge
+                                  variant="outline"
+                                  className="px-1.5 py-0 text-[10px] h-4 bg-background/80 font-bold border-amber-500/40 text-amber-700 dark:text-amber-300"
+                                >
+                                  {formatSlaDuration(stage.sla_minutes)}
+                                </Badge>
+                              ) : null}
+                            </Button>
 
                             <Button
                               type="button"
@@ -481,7 +529,10 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
                               <CheckSquare className="h-3.5 w-3.5 text-primary" />
                               <span>Passos</span>
                               {checklistCounts && (checklistCounts[stage.id] ?? 0) > 0 && (
-                                <Badge variant="secondary" className="px-1.5 py-0 text-[10px] h-4 bg-primary/10 text-primary font-bold">
+                                <Badge
+                                  variant="secondary"
+                                  className="px-1.5 py-0 text-[10px] h-4 bg-primary/10 text-primary font-bold"
+                                >
                                   {checklistCounts[stage.id]}
                                 </Badge>
                               )}
@@ -519,6 +570,12 @@ function PipelineStagesManager({ pipeline }: { pipeline: { id: string; name: str
         stage={managingChecklistStage}
         open={!!managingChecklistStage}
         onOpenChange={(open) => !open && setManagingChecklistStage(null)}
+      />
+
+      <StageSlaDialog
+        stage={managingSlaStage}
+        open={!!managingSlaStage}
+        onOpenChange={(open) => !open && setManagingSlaStage(null)}
       />
     </Card>
   );

@@ -450,6 +450,18 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
               messageSecret: msg.messageContextInfo?.messageSecret || null,
             };
           }
+        } else if (msg.orderMessage) {
+          mediaType = "text";
+          const count = msg.orderMessage.itemCount || 1;
+          const title = msg.orderMessage.orderTitle || "Pedido via catálogo";
+          textContent = `🛍️ *Pedido feito via catálogo*\n• ${count} ${count > 1 ? "itens" : "item"}: ${title}`;
+          metadata.order = {
+            orderId: msg.orderMessage.orderID,
+            orderTitle: msg.orderMessage.orderTitle,
+            itemCount: msg.orderMessage.itemCount,
+            sellerJid: msg.orderMessage.sellerJID,
+            thumbnail: msg.orderMessage.thumbnail || null,
+          };
         } else if (msg.pollUpdateMessage) {
           return;
         } else if (
@@ -745,6 +757,18 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
                 messageSecret: msgType.messageContextInfo?.messageSecret || null,
               };
             }
+          } else if (msgType.orderMessage) {
+            mediaType = "text";
+            const count = msgType.orderMessage.itemCount || 1;
+            const title = msgType.orderMessage.orderTitle || "Pedido via catálogo";
+            textContent = `🛍️ *Pedido feito via catálogo*\n• ${count} ${count > 1 ? "itens" : "item"}: ${title}`;
+            metadata.order = {
+              orderId: msgType.orderMessage.orderID,
+              orderTitle: msgType.orderMessage.orderTitle,
+              itemCount: msgType.orderMessage.itemCount,
+              sellerJid: msgType.orderMessage.sellerJID,
+              thumbnail: msgType.orderMessage.thumbnail || null,
+            };
           } else if (msgType.pollUpdateMessage) {
             return;
           } else if (msgType.reactionMessage) {
@@ -815,7 +839,12 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         return;
       }
 
-      const { id: instance_id, company_id, unit_id, department_id: instanceDepartmentId } = instance;
+      const {
+        id: instance_id,
+        company_id,
+        unit_id,
+        department_id: instanceDepartmentId,
+      } = instance;
 
       // Se phoneNumber for nulo mas houver extractedLid, resolve via contato existente na empresa
       if (!phoneNumber && extractedLid) {
@@ -828,11 +857,15 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
 
         if (contactByLid?.phone) {
           phoneNumber = contactByLid.phone;
-          console.log(`[evogo-webhook] Telefone resolvido pelo whatsapp_lid ${extractedLid}: ${phoneNumber}`);
+          console.log(
+            `[evogo-webhook] Telefone resolvido pelo whatsapp_lid ${extractedLid}: ${phoneNumber}`,
+          );
         } else {
           // Se ainda não tem telefone cadastrado, usa o LID provisório como identificador para não perder a mensagem
           phoneNumber = extractedLid;
-          console.log(`[evogo-webhook] Usando LID temporário como número de contato: ${extractedLid}`);
+          console.log(
+            `[evogo-webhook] Usando LID temporário como número de contato: ${extractedLid}`,
+          );
         }
       }
 

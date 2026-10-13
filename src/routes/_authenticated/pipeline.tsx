@@ -3,33 +3,77 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { toast } from "sonner";
-import { 
-  Plus, GripVertical, Settings2, Calendar, DollarSign, User, UserCheck, MessageCircle, 
-  CheckSquare, FileText, Building, Search, X, RefreshCw, TrendingUp, Target, Award,
-  LayoutGrid, List, CheckCircle2, XCircle, ArrowUpDown, ChevronDown, ChevronUp, Eye,
-  Layers, FilterX
+import {
+  Plus,
+  GripVertical,
+  Settings2,
+  Calendar,
+  DollarSign,
+  User,
+  UserCheck,
+  MessageCircle,
+  CheckSquare,
+  FileText,
+  Building,
+  Search,
+  X,
+  RefreshCw,
+  TrendingUp,
+  Target,
+  Award,
+  LayoutGrid,
+  List,
+  CheckCircle2,
+  XCircle,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  Layers,
+  FilterX,
+  Clock,
+  AlertTriangle,
+  Filter,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { calculateOpportunitySla, formatSlaDuration, type SlaStatus } from "@/types/crm-sla";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
@@ -62,20 +106,31 @@ function PipelinePage() {
   const { selectedUnitId } = useUnit();
   const qc = useQueryClient();
 
-  const isManagerOrAdmin = 
-    profile?.role === "admin_company" || 
-    profile?.role === "super_admin" || 
+  const isManagerOrAdmin =
+    profile?.role === "admin_company" ||
+    profile?.role === "super_admin" ||
     profile?.role === "manager";
 
-  const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(search.pipelineId || null);
+  const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(
+    search.pipelineId || null,
+  );
   const [statusFilter, setStatusFilter] = useState<string>(search.status || "open");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
+  const [slaFilter, setSlaFilter] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
-  const [showMetrics, setShowMetrics] = useState<boolean>(true);
-  const [tableSortField, setTableSortField] = useState<"created_at" | "value" | "title" | "expected_close_date">("created_at");
+  const [showMetrics, setShowMetrics] = useState<boolean>(false);
+  const [tableSortField, setTableSortField] = useState<
+    "created_at" | "value" | "title" | "expected_close_date"
+  >("created_at");
   const [tableSortAsc, setTableSortAsc] = useState<boolean>(false);
-  const [highlightedOppId, setHighlightedOppId] = useState<string | null>(search.opportunityId || null);
+  const [highlightedOppId, setHighlightedOppId] = useState<string | null>(
+    search.opportunityId || null,
+  );
+  // Paginação sob demanda por coluna no Kanban (carrega inicialmente 20 por coluna)
+  const [stageLimits, setStageLimits] = useState<Record<string, number>>({});
+  // Paginação sob demanda no modo Tabela / Lista (carrega inicialmente 30 linhas)
+  const [tableLimit, setTableLimit] = useState<number>(30);
   const boardContainerRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef<string | null>(null);
 
@@ -177,37 +232,42 @@ function PipelinePage() {
   // Fetch Opportunities for this pipeline
   const { data: opportunities, isLoading: isLoadingOpps } = useQuery({
     queryKey: [
-      "opportunities", 
-      activeCompanyId, 
-      selectedPipelineId, 
-      profile?.role, 
-      profile?.id, 
-      selectedUnitId, 
+      "opportunities",
+      activeCompanyId,
+      selectedPipelineId,
+      profile?.role,
+      profile?.id,
+      selectedUnitId,
       statusFilter,
-      ownerFilter
+      ownerFilter,
     ],
-    enabled: !!selectedPipelineId && !!stages && stages.length > 0 && !!profile?.id && !!activeCompanyId,
+    enabled:
+      !!selectedPipelineId && !!stages && stages.length > 0 && !!profile?.id && !!activeCompanyId,
     queryFn: async () => {
-      const stageIds = stages!.map(s => s.id);
+      const stageIds = stages!.map((s) => s.id);
       let query = supabase
         .from("opportunities")
-        .select(`
-          id, title, value, stage_id, expected_close_date, contact_id, created_at, notes, owner_id, unit_id, status, conversation_id,
+        .select(
+          `
+          id, title, value, stage_id, expected_close_date, contact_id, created_at, notes, owner_id, unit_id, status, conversation_id, stage_entered_at,
           contacts ( name, phone ),
           profiles:owner_id ( id, name, email ),
           tasks ( id, status ),
           opportunity_notes ( id ),
           units ( name )
-        `)
+        `,
+        )
         .in("stage_id", stageIds);
-        
+
       if (statusFilter !== "all") {
         query = query.eq("status", statusFilter);
       }
-      
-      // Filtro de permissão: agentes comuns veem apenas as próprias oportunidades
+
+      // Filtro de permissão: agentes comuns veem as próprias oportunidades ou as sem responsável atribuído (null) para atenderem
       if (!isManagerOrAdmin) {
-        query = query.eq("owner_id", profile!.id);
+        query = query.or(`owner_id.eq.${profile!.id},owner_id.is.null`);
+      } else if (ownerFilter === "unassigned") {
+        query = query.is("owner_id", null);
       } else if (ownerFilter !== "all") {
         query = query.eq("owner_id", ownerFilter);
       }
@@ -241,7 +301,7 @@ function PipelinePage() {
           qc.invalidateQueries({ queryKey: ["opportunities"] });
           qc.invalidateQueries({ queryKey: ["target-opportunity-lookup"] });
           qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
-        }
+        },
       )
       .on(
         "postgres_changes",
@@ -253,7 +313,7 @@ function PipelinePage() {
         () => {
           qc.invalidateQueries({ queryKey: ["pipeline-stages"] });
           qc.invalidateQueries({ queryKey: ["opportunities"] });
-        }
+        },
       )
       .subscribe();
 
@@ -264,21 +324,31 @@ function PipelinePage() {
 
   const filteredOpportunities = useMemo(() => {
     if (!opportunities) return [];
-    if (!searchTerm.trim()) return opportunities;
-    const term = searchTerm.toLowerCase();
+    const term = searchTerm.trim().toLowerCase();
+
     return opportunities.filter((opp: any) => {
-      const title = (opp.title || "").toLowerCase();
-      const contactName = (opp.contacts?.name || "").toLowerCase();
-      const contactPhone = (opp.contacts?.phone || "").toLowerCase();
-      const notes = (opp.notes || "").toLowerCase();
-      return (
-        title.includes(term) ||
-        contactName.includes(term) ||
-        contactPhone.includes(term) ||
-        notes.includes(term)
-      );
+      if (term) {
+        const title = (opp.title || "").toLowerCase();
+        const contactName = (opp.contacts?.name || "").toLowerCase();
+        const contactPhone = (opp.contacts?.phone || "").toLowerCase();
+        const notes = (opp.notes || "").toLowerCase();
+        const matches =
+          title.includes(term) ||
+          contactName.includes(term) ||
+          contactPhone.includes(term) ||
+          notes.includes(term);
+        if (!matches) return false;
+      }
+
+      if (slaFilter !== "all") {
+        const stage = stages?.find((s) => s.id === opp.stage_id);
+        const sla = calculateOpportunitySla(opp, stage);
+        if (sla.status !== slaFilter) return false;
+      }
+
+      return true;
     });
-  }, [opportunities, searchTerm]);
+  }, [opportunities, searchTerm, slaFilter, stages]);
 
   // Métricas e Indicadores de Desempenho (KPIs)
   const metrics = useMemo(() => {
@@ -286,21 +356,36 @@ function PipelinePage() {
     const totalCount = list.length;
     const totalValue = list.reduce((sum, o) => sum + (o.value || 0), 0);
 
-    const openOpps = list.filter(o => o.status === "open" || !o.status);
+    const openOpps = list.filter((o) => o.status === "open" || !o.status);
     const openCount = openOpps.length;
     const openValue = openOpps.reduce((sum, o) => sum + (o.value || 0), 0);
 
-    const wonOpps = list.filter(o => o.status === "won");
+    const wonOpps = list.filter((o) => o.status === "won");
     const wonCount = wonOpps.length;
     const wonValue = wonOpps.reduce((sum, o) => sum + (o.value || 0), 0);
 
-    const lostOpps = list.filter(o => o.status === "lost");
+    const lostOpps = list.filter((o) => o.status === "lost");
     const lostCount = lostOpps.length;
     const lostValue = lostOpps.reduce((sum, o) => sum + (o.value || 0), 0);
 
     const finishedCount = wonCount + lostCount;
-    const conversionRate = finishedCount > 0 ? (wonCount / finishedCount) * 100 : totalCount > 0 ? (wonCount / totalCount) * 100 : 0;
-    const avgTicket = wonCount > 0 ? wonValue / wonCount : openCount > 0 ? openValue / openCount : 0;
+    const conversionRate =
+      finishedCount > 0
+        ? (wonCount / finishedCount) * 100
+        : totalCount > 0
+          ? (wonCount / totalCount) * 100
+          : 0;
+    const avgTicket =
+      wonCount > 0 ? wonValue / wonCount : openCount > 0 ? openValue / openCount : 0;
+
+    let breachedCount = 0;
+    let warningCount = 0;
+    list.forEach((o) => {
+      const stage = stages?.find((s) => s.id === o.stage_id);
+      const sla = calculateOpportunitySla(o, stage);
+      if (sla.status === "breached") breachedCount++;
+      if (sla.status === "warning") warningCount++;
+    });
 
     return {
       totalCount,
@@ -313,8 +398,10 @@ function PipelinePage() {
       lostValue,
       conversionRate,
       avgTicket,
+      breachedCount,
+      warningCount,
     };
-  }, [filteredOpportunities]);
+  }, [filteredOpportunities, stages]);
 
   // Lista ordenada para o modo Tabela
   const sortedTableOpportunities = useMemo(() => {
@@ -340,20 +427,27 @@ function PipelinePage() {
     });
   }, [filteredOpportunities, tableSortField, tableSortAsc]);
 
-  const hasActiveFilters = searchTerm.trim() !== "" || statusFilter !== "open" || ownerFilter !== "all";
+  const hasActiveFilters =
+    searchTerm.trim() !== "" ||
+    statusFilter !== "open" ||
+    ownerFilter !== "all" ||
+    slaFilter !== "all";
 
   const handleClearFilters = () => {
     setSearchTerm("");
     setStatusFilter("open");
     setOwnerFilter("all");
+    setSlaFilter("all");
   };
 
   // Organize opportunities by stage
   const columns = useMemo(() => {
     if (!stages) return {};
     const cols: Record<string, any[]> = {};
-    stages.forEach(s => {
-      cols[s.id] = (filteredOpportunities || []).filter(o => o.stage_id === s.id).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    stages.forEach((s) => {
+      cols[s.id] = (filteredOpportunities || [])
+        .filter((o) => o.stage_id === s.id)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     });
     return cols;
   }, [stages, filteredOpportunities]);
@@ -382,27 +476,25 @@ function PipelinePage() {
   }, [highlightedOppId, opportunities, stages]);
 
   const moveOpportunity = useMutation({
-    mutationFn: async ({ oppId, newStageId }: { oppId: string, newStageId: string }) => {
-      const targetStageName = stages?.find(s => s.id === newStageId)?.name || "Nova etapa";
+    mutationFn: async ({ oppId, newStageId }: { oppId: string; newStageId: string }) => {
+      const targetStageName = stages?.find((s) => s.id === newStageId)?.name || "Nova etapa";
 
       const { error: oppError } = await supabase
         .from("opportunities")
-        .update({ 
-          stage_id: newStageId
+        .update({
+          stage_id: newStageId,
         })
         .eq("id", oppId);
       if (oppError) throw oppError;
 
       // Record stage movement in opportunity_history
-      const { error: histError } = await supabase
-        .from("opportunity_history")
-        .insert({
-          opportunity_id: oppId,
-          user_id: profile?.id,
-          action_type: "stage_change",
-          description: `Oportunidade movida para a etapa "${targetStageName}"`
-        });
-      if (histError && histError.code !== '42P01') {
+      const { error: histError } = await supabase.from("opportunity_history").insert({
+        opportunity_id: oppId,
+        user_id: profile?.id,
+        action_type: "stage_change",
+        description: `Oportunidade movida para a etapa "${targetStageName}"`,
+      });
+      if (histError && histError.code !== "42P01") {
         console.warn("Could not record stage history:", histError);
       }
 
@@ -414,8 +506,8 @@ function PipelinePage() {
             opportunityId: oppId,
             triggerType: "stage_change",
             stageId: newStageId,
-          }
-        }).catch(err => console.warn("[CAPI] Falha ao disparar evento de etapa:", err));
+          },
+        }).catch((err) => console.warn("[CAPI] Falha ao disparar evento de etapa:", err));
       }
     },
     onMutate: async ({ oppId, newStageId }) => {
@@ -428,8 +520,8 @@ function PipelinePage() {
       // 3. Optimistically update all opportunity queries in cache immediately
       qc.setQueriesData({ queryKey: ["opportunities"] }, (oldData: any) => {
         if (!Array.isArray(oldData)) return oldData;
-        return oldData.map((opp: any) => 
-          opp.id === oppId ? { ...opp, stage_id: newStageId } : opp
+        return oldData.map((opp: any) =>
+          opp.id === oppId ? { ...opp, stage_id: newStageId } : opp,
         );
       });
 
@@ -455,14 +547,15 @@ function PipelinePage() {
       qc.invalidateQueries({ queryKey: ["opportunity"] });
       qc.invalidateQueries({ queryKey: ["opportunity-history"] });
       qc.invalidateQueries({ queryKey: ["contact-journey"] });
-    }
+    },
   });
 
   const onDragEnd = (result: DropResult) => {
     const { destination, source, draggableId } = result;
 
     if (!destination) return;
-    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+    if (destination.droppableId === source.droppableId && destination.index === source.index)
+      return;
 
     if (source.droppableId !== destination.droppableId) {
       moveOpportunity.mutate({ oppId: draggableId, newStageId: destination.droppableId });
@@ -470,7 +563,7 @@ function PipelinePage() {
   };
 
   const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
   };
 
   if (isLoadingPipelines) return <div className="p-6">Carregando CRM...</div>;
@@ -482,7 +575,10 @@ function PipelinePage() {
             <Settings2 className="h-6 w-6" />
           </div>
           <h2 className="text-lg font-semibold">Nenhum Funil Encontrado</h2>
-          <p className="text-sm text-muted-foreground">Você ainda não configurou um funil de vendas. Acesse as Configurações para criar seu primeiro funil e etapas.</p>
+          <p className="text-sm text-muted-foreground">
+            Você ainda não configurou um funil de vendas. Acesse as Configurações para criar seu
+            primeiro funil e etapas.
+          </p>
         </Card>
       </div>
     );
@@ -490,20 +586,21 @@ function PipelinePage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-muted/20">
-      {/* LINHA 1: Contexto Macro (Funil) e Ações Globais */}
-      <header className="flex items-center justify-between border-b bg-card px-6 py-3 shrink-0 flex-wrap gap-3">
-        {/* Esquerda: Identificador do Funil */}
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-            <Layers className="h-4 w-4" />
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
+      {/* BARRA ÚNICA SUPERIOR: Contexto do Funil, Busca, Filtros em Dropdown, Visualização e Ações */}
+      <header className="flex items-center justify-between border-b bg-card px-4 py-2.5 shrink-0 gap-2.5 flex-nowrap overflow-x-auto">
+        {/* Lado Esquerdo: Funil + Contador + Busca + Botão Filtros */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Seletor do Funil (mais compacto) */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <Layers className="h-4 w-4" />
+            </div>
             <Select value={selectedPipelineId || ""} onValueChange={setSelectedPipelineId}>
-              <SelectTrigger className="h-9 font-semibold text-xs border-border/80 min-w-[200px] max-w-[280px] bg-background">
-                <SelectValue placeholder="Selecione um funil" />
+              <SelectTrigger className="h-8 font-semibold text-xs border-border/80 w-[140px] sm:w-[170px] bg-background">
+                <SelectValue placeholder="Funil" />
               </SelectTrigger>
               <SelectContent>
-                {pipelines.map(p => (
+                {pipelines.map((p) => (
                   <SelectItem key={p.id} value={p.id} className="font-medium text-xs">
                     {p.name}
                   </SelectItem>
@@ -511,86 +608,21 @@ function PipelinePage() {
               </SelectContent>
             </Select>
 
-            <Badge variant="secondary" className="text-[11px] px-2 py-0.5 font-semibold text-muted-foreground h-6">
-              {opportunities?.length || 0} {(opportunities?.length || 0) === 1 ? "oportunidade" : "oportunidades"}
+            <Badge
+              variant="secondary"
+              className="text-[10px] px-1.5 h-6 font-bold text-muted-foreground shrink-0 hidden sm:inline-flex"
+            >
+              {opportunities?.length || 0}
             </Badge>
           </div>
-        </div>
 
-        {/* Direita: Controles de Exibição e Botão Nova Oportunidade */}
-        <div className="flex items-center gap-2">
-          {/* Alternador de Modo: Quadro (Kanban) vs Lista (Tabela) */}
-          <div className="flex items-center border rounded-lg p-0.5 bg-muted/40">
-            <Button
-              variant={viewMode === "kanban" ? "secondary" : "ghost"}
-              size="sm"
-              className="h-8 px-2.5 text-xs font-medium gap-1.5 cursor-pointer"
-              onClick={() => setViewMode("kanban")}
-              title="Visualização em Quadro Kanban"
-            >
-              <LayoutGrid className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Quadro</span>
-            </Button>
-            <Button
-              variant={viewMode === "list" ? "secondary" : "ghost"}
-              size="sm"
-              className="h-8 px-2.5 text-xs font-medium gap-1.5 cursor-pointer"
-              onClick={() => setViewMode("list")}
-              title="Visualização em Lista / Tabela"
-            >
-              <List className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Lista</span>
-            </Button>
-          </div>
+          <div className="h-5 w-px bg-border/60 mx-0.5 shrink-0" />
 
-          {/* Toggle de Métricas / KPIs */}
-          <Button
-            variant={showMetrics ? "secondary" : "outline"}
-            size="sm"
-            className="h-8 px-2.5 text-xs gap-1.5 cursor-pointer"
-            onClick={() => setShowMetrics(!showMetrics)}
-            title={showMetrics ? "Ocultar resumo de métricas" : "Exibir resumo de métricas"}
-          >
-            <TrendingUp className="h-3.5 w-3.5 text-primary" />
-            <span className="hidden md:inline">Métricas</span>
-          </Button>
-
-          {/* Botão de Atualizar */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 w-8 p-0 cursor-pointer"
-            onClick={() => {
-              qc.invalidateQueries({ queryKey: ["opportunities"] });
-              qc.invalidateQueries({ queryKey: ["pipelines"] });
-              qc.invalidateQueries({ queryKey: ["pipeline-stages"] });
-              toast.info("Funil atualizado!");
-            }}
-            title="Atualizar dados do funil"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
-
-          <div className="h-5 w-px bg-border/60 mx-1 hidden sm:block" />
-
-          {/* Botão Nova Oportunidade */}
-          <OpportunityDialog defaultPipelineId={selectedPipelineId || ""}>
-            <Button variant="default" size="sm" className="h-8 text-xs font-medium gap-1.5 shadow-xs cursor-pointer">
-              <Plus className="h-3.5 w-3.5" />
-              Nova Oportunidade
-            </Button>
-          </OpportunityDialog>
-        </div>
-      </header>
-
-      {/* LINHA 2: Barra de Ferramentas & Filtros (Toolbar) */}
-      <div className="flex items-center justify-between border-b bg-card/60 backdrop-blur-sm px-6 py-2.5 shrink-0 flex-wrap gap-2.5">
-        <div className="flex items-center gap-2 flex-wrap flex-1 min-w-[280px]">
-          {/* Barra de Pesquisa Expandida */}
-          <div className="relative w-full sm:w-60 md:w-72">
+          {/* Campo de Busca Rápida */}
+          <div className="relative w-40 sm:w-56 md:w-64 shrink-0">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Buscar oportunidade, contato, fone..."
+              placeholder="Buscar oportunidade, contato..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-8 h-8 text-xs bg-background"
@@ -605,90 +637,311 @@ function PipelinePage() {
             )}
           </div>
 
-          {/* Filtro de Status com pontinhos coloridos */}
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[140px] h-8 text-xs bg-background">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os Status</SelectItem>
-              <SelectItem value="open">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-blue-500" /> Aberto
-                </span>
-              </SelectItem>
-              <SelectItem value="won">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500" /> Ganho
-                </span>
-              </SelectItem>
-              <SelectItem value="lost">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-rose-500" /> Perdido
-                </span>
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          {/* Ícone de Filtro com Dropdown (idêntico ao Atendimento) */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon"
+                variant={hasActiveFilters ? "default" : "outline"}
+                className="h-8 w-8 shrink-0 relative cursor-pointer"
+                title="Filtrar por Status, SLA e Atendente"
+              >
+                <Filter className="h-3.5 w-3.5" />
+                {hasActiveFilters && (
+                  <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background animate-pulse" />
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              {hasActiveFilters && (
+                <>
+                  <DropdownMenuItem
+                    className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer font-medium text-xs flex items-center justify-between"
+                    onClick={handleClearFilters}
+                  >
+                    <span>Limpar Filtros</span>
+                    <FilterX className="h-3.5 w-3.5 text-destructive" />
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
 
-          {/* Filtro por Responsável / Atendente (visível para admins e gerentes) */}
-          {isManagerOrAdmin && (
-            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-              <SelectTrigger className="w-[170px] h-8 text-xs bg-background">
-                <div className="flex items-center gap-1.5 truncate">
-                  <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <SelectValue placeholder="Responsável" />
-                </div>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os Atendentes</SelectItem>
-                {companyUsers?.map(u => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.name || u.email}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
+              {/* Submenu 1: Status */}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="cursor-pointer text-xs">
+                  <span>Status</span>
+                  {statusFilter !== "all" && (
+                    <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
+                  )}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuSubContent className="w-48">
+                    <DropdownMenuItem
+                      onClick={() => setStatusFilter("all")}
+                      className="cursor-pointer text-xs flex items-center justify-between"
+                    >
+                      <span>Todos</span>
+                      {statusFilter === "all" && (
+                        <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setStatusFilter("open")}
+                      className="cursor-pointer text-xs flex items-center justify-between"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-blue-500" />
+                        Em Aberto
+                      </span>
+                      {statusFilter === "open" && (
+                        <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setStatusFilter("won")}
+                      className="cursor-pointer text-xs flex items-center justify-between text-emerald-600 dark:text-emerald-400"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        Ganho
+                      </span>
+                      {statusFilter === "won" && (
+                        <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-emerald-500" />
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setStatusFilter("lost")}
+                      className="cursor-pointer text-xs flex items-center justify-between text-destructive"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-rose-500" />
+                        Perdido
+                      </span>
+                      {statusFilter === "lost" && (
+                        <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-destructive" />
+                      )}
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuPortal>
+              </DropdownMenuSub>
 
-          {/* Botão Limpar Filtros */}
+              {/* Submenu 2: SLA */}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="cursor-pointer text-xs">
+                  <span>SLA</span>
+                  {slaFilter !== "all" && <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuPortal>
+                  <DropdownMenuSubContent className="w-52">
+                    <DropdownMenuItem
+                      onClick={() => setSlaFilter("all")}
+                      className="cursor-pointer text-xs flex items-center justify-between"
+                    >
+                      <span>Todos os SLAs</span>
+                      {slaFilter === "all" && (
+                        <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setSlaFilter("breached")}
+                      className="cursor-pointer text-xs flex items-center justify-between text-destructive"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-rose-500" />
+                        SLA Estourado
+                      </span>
+                      {slaFilter === "breached" && (
+                        <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-destructive" />
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setSlaFilter("warning")}
+                      className="cursor-pointer text-xs flex items-center justify-between text-amber-600 dark:text-amber-400"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-amber-500" />
+                        Em Risco
+                      </span>
+                      {slaFilter === "warning" && (
+                        <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-amber-500" />
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setSlaFilter("ok")}
+                      className="cursor-pointer text-xs flex items-center justify-between text-emerald-600 dark:text-emerald-400"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        No Prazo
+                      </span>
+                      {slaFilter === "ok" && (
+                        <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-emerald-500" />
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setSlaFilter("none")}
+                      className="cursor-pointer text-xs flex items-center justify-between text-muted-foreground"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-muted-foreground/40" />
+                        Sem Limite de SLA
+                      </span>
+                      {slaFilter === "none" && (
+                        <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-muted-foreground" />
+                      )}
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuPortal>
+              </DropdownMenuSub>
+
+              {/* Submenu 3: Atendentes / Responsáveis (para admins e gerentes) */}
+              {isManagerOrAdmin && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="cursor-pointer text-xs">
+                    <span>Atendente</span>
+                    {ownerFilter !== "all" && (
+                      <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent className="w-56 max-h-64 overflow-y-auto">
+                      <DropdownMenuItem
+                        onClick={() => setOwnerFilter("all")}
+                        className="cursor-pointer text-xs flex items-center justify-between"
+                      >
+                        <span>Todos os Atendentes</span>
+                        {ownerFilter === "all" && (
+                          <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setOwnerFilter("unassigned")}
+                        className="cursor-pointer text-xs flex items-center justify-between text-amber-600 dark:text-amber-400 font-medium"
+                      >
+                        <span>Sem Responsável (Geral)</span>
+                        {ownerFilter === "unassigned" && (
+                          <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {companyUsers?.map((u) => (
+                        <DropdownMenuItem
+                          key={u.id}
+                          onClick={() => setOwnerFilter(u.id)}
+                          className="cursor-pointer text-xs flex items-center justify-between"
+                        >
+                          <span className="truncate max-w-[170px]">{u.name || u.email}</span>
+                          {ownerFilter === u.id && (
+                            <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary shrink-0" />
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Contador de Filtrados se houver filtro ativo */}
           {hasActiveFilters && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5 cursor-pointer"
-              onClick={handleClearFilters}
-              title="Redefinir filtros para o padrão"
-            >
-              <FilterX className="h-3.5 w-3.5 text-destructive" />
-              Limpar Filtros
-            </Button>
+            <div className="hidden lg:flex items-center gap-1.5 text-[11px] text-muted-foreground shrink-0 bg-muted/30 px-2 py-0.5 rounded border border-border/40">
+              <span>
+                Exibindo <strong className="text-foreground">{filteredOpportunities.length}</strong>{" "}
+                de {opportunities?.length || 0}
+              </span>
+              <button
+                onClick={handleClearFilters}
+                className="text-muted-foreground hover:text-destructive cursor-pointer ml-1"
+                title="Limpar filtros"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
           )}
         </div>
 
-        {/* Direita: Totalizador de Itens Filtrados */}
-        <div className="text-xs text-muted-foreground flex items-center gap-1.5 ml-auto">
-          {opportunities && opportunities.length !== filteredOpportunities.length ? (
-            <span>
-              Exibindo <strong className="text-foreground">{filteredOpportunities.length}</strong> de {opportunities.length}
-            </span>
-          ) : (
-            <span>
-              Exibindo <strong className="text-foreground">{filteredOpportunities.length}</strong>
-            </span>
-          )}
+        {/* Lado Direito: Alternador Quadro/Lista (Apenas Ícone) + Métricas + Atualizar + Nova Oportunidade */}
+        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+          {/* Alternador de Modo: Apenas Ícones */}
+          <div className="flex items-center border rounded-lg p-0.5 bg-muted/40">
+            <Button
+              variant={viewMode === "kanban" ? "secondary" : "ghost"}
+              size="icon"
+              className="h-7 w-7 cursor-pointer"
+              onClick={() => setViewMode("kanban")}
+              title="Visualização em Quadro (Kanban)"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant={viewMode === "list" ? "secondary" : "ghost"}
+              size="icon"
+              className="h-7 w-7 cursor-pointer"
+              onClick={() => setViewMode("list")}
+              title="Visualização em Lista (Tabela)"
+            >
+              <List className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          {/* Toggle de Métricas / KPIs */}
+          <Button
+            variant={showMetrics ? "secondary" : "outline"}
+            size="icon"
+            className="h-8 w-8 cursor-pointer"
+            onClick={() => setShowMetrics(!showMetrics)}
+            title={showMetrics ? "Ocultar métricas" : "Exibir métricas"}
+          >
+            <TrendingUp className="h-3.5 w-3.5 text-primary" />
+          </Button>
+
+          {/* Botão de Atualizar */}
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 cursor-pointer"
+            onClick={() => {
+              qc.invalidateQueries({ queryKey: ["opportunities"] });
+              qc.invalidateQueries({ queryKey: ["pipelines"] });
+              qc.invalidateQueries({ queryKey: ["pipeline-stages"] });
+              toast.info("Funil atualizado!");
+            }}
+            title="Atualizar funil"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+
+          <div className="h-5 w-px bg-border/60 mx-0.5 hidden sm:block" />
+
+          {/* Botão Nova Oportunidade */}
+          <OpportunityDialog defaultPipelineId={selectedPipelineId || ""}>
+            <Button
+              variant="default"
+              size="sm"
+              className="h-8 text-xs font-medium gap-1.5 shadow-xs cursor-pointer px-2.5 sm:px-3"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Nova Oportunidade</span>
+            </Button>
+          </OpportunityDialog>
         </div>
-      </div>
+      </header>
 
       {/* Barra de Métricas e KPIs */}
       {showMetrics && (
         <div className="px-6 py-2.5 border-b bg-card/60 backdrop-blur-sm shrink-0">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
             {/* 1. Total Funil */}
             <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground">Total Funil</p>
-                <p className="text-sm font-bold text-foreground">{formatCurrency(metrics.totalValue)}</p>
-                <span className="text-[10px] text-muted-foreground">{metrics.totalCount} oportunidades</span>
+                <p className="text-sm font-bold text-foreground">
+                  {formatCurrency(metrics.totalValue)}
+                </p>
+                <span className="text-[10px] text-muted-foreground">
+                  {metrics.totalCount} oportunidades
+                </span>
               </div>
               <div className="p-2 rounded-md bg-primary/10 text-primary shrink-0">
                 <Target className="h-4 w-4" />
@@ -699,8 +952,12 @@ function PipelinePage() {
             <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground">Em Aberto</p>
-                <p className="text-sm font-bold text-blue-600 dark:text-blue-400">{formatCurrency(metrics.openValue)}</p>
-                <span className="text-[10px] text-muted-foreground">{metrics.openCount} ativas</span>
+                <p className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                  {formatCurrency(metrics.openValue)}
+                </p>
+                <span className="text-[10px] text-muted-foreground">
+                  {metrics.openCount} ativas
+                </span>
               </div>
               <div className="p-2 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0">
                 <DollarSign className="h-4 w-4" />
@@ -711,8 +968,12 @@ function PipelinePage() {
             <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground">Ganhos</p>
-                <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(metrics.wonValue)}</p>
-                <span className="text-[10px] text-muted-foreground">{metrics.wonCount} fechadas</span>
+                <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                  {formatCurrency(metrics.wonValue)}
+                </p>
+                <span className="text-[10px] text-muted-foreground">
+                  {metrics.wonCount} fechadas
+                </span>
               </div>
               <div className="p-2 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
                 <CheckCircle2 className="h-4 w-4" />
@@ -723,8 +984,12 @@ function PipelinePage() {
             <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground">Perdidos</p>
-                <p className="text-sm font-bold text-rose-600 dark:text-rose-400">{formatCurrency(metrics.lostValue)}</p>
-                <span className="text-[10px] text-muted-foreground">{metrics.lostCount} perdidas</span>
+                <p className="text-sm font-bold text-rose-600 dark:text-rose-400">
+                  {formatCurrency(metrics.lostValue)}
+                </p>
+                <span className="text-[10px] text-muted-foreground">
+                  {metrics.lostCount} perdidas
+                </span>
               </div>
               <div className="p-2 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400 shrink-0">
                 <XCircle className="h-4 w-4" />
@@ -735,7 +1000,9 @@ function PipelinePage() {
             <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground">Conversão</p>
-                <p className="text-sm font-bold text-violet-600 dark:text-violet-400">{metrics.conversionRate.toFixed(1)}%</p>
+                <p className="text-sm font-bold text-violet-600 dark:text-violet-400">
+                  {metrics.conversionRate.toFixed(1)}%
+                </p>
                 <span className="text-[10px] text-muted-foreground">taxa de sucesso</span>
               </div>
               <div className="p-2 rounded-md bg-violet-500/10 text-violet-600 dark:text-violet-400 shrink-0">
@@ -747,11 +1014,35 @@ function PipelinePage() {
             <div className="bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs">
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground">Ticket Médio</p>
-                <p className="text-sm font-bold text-amber-600 dark:text-amber-400">{formatCurrency(metrics.avgTicket)}</p>
+                <p className="text-sm font-bold text-amber-600 dark:text-amber-400">
+                  {formatCurrency(metrics.avgTicket)}
+                </p>
                 <span className="text-[10px] text-muted-foreground">por oportunidade</span>
               </div>
               <div className="p-2 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
                 <Award className="h-4 w-4" />
+              </div>
+            </div>
+
+            {/* 7. SLA Estourado */}
+            <div
+              className={`bg-background/80 border rounded-lg p-2.5 flex items-center justify-between shadow-xs ${metrics.breachedCount > 0 ? "border-rose-400/60 dark:border-rose-900/60 bg-rose-500/[0.04]" : ""}`}
+            >
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground">SLA Estourado</p>
+                <p
+                  className={`text-sm font-bold ${metrics.breachedCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-foreground"}`}
+                >
+                  {metrics.breachedCount}
+                </p>
+                <span className="text-[10px] text-muted-foreground">
+                  {metrics.warningCount > 0 ? `${metrics.warningCount} em risco` : "sem atrasos"}
+                </span>
+              </div>
+              <div
+                className={`p-2 rounded-md shrink-0 ${metrics.breachedCount > 0 ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 animate-pulse" : "bg-muted text-muted-foreground"}`}
+              >
+                <Clock className="h-4 w-4" />
               </div>
             </div>
           </div>
@@ -772,19 +1063,57 @@ function PipelinePage() {
               <div className="flex h-full items-start gap-4 pb-4">
                 {stages.map((stage) => {
                   const stageOpps = columns[stage.id] || [];
+                  const currentLimit = stageLimits[stage.id] ?? 20;
+                  const visibleOpps = stageOpps.slice(0, currentLimit);
+                  const hasMoreInStage = stageOpps.length > currentLimit;
+                  const remainingInStage = stageOpps.length - currentLimit;
+
                   const stageTotal = stageOpps.reduce((sum, opp) => sum + (opp.value || 0), 0);
-                  
+                  const stageBreachedCount = stageOpps.filter(
+                    (o) => calculateOpportunitySla(o, stage).status === "breached",
+                  ).length;
+
                   return (
-                    <div key={stage.id} id={`opp-stage-col-${stage.id}`} className="flex h-full max-h-full w-[310px] shrink-0 flex-col rounded-xl bg-card border border-border/70 shadow-sm">
-                      <div 
+                    <div
+                      key={stage.id}
+                      id={`opp-stage-col-${stage.id}`}
+                      className="flex h-full max-h-full w-[310px] shrink-0 flex-col rounded-xl bg-card border border-border/70 shadow-sm"
+                    >
+                      <div
                         className="flex items-center justify-between p-3.5 border-b border-border/50 shrink-0 rounded-t-xl bg-card/80"
-                        style={{ borderTop: `4px solid ${stage.color || '#3b82f6'}` }}
+                        style={{ borderTop: `4px solid ${stage.color || "#3b82f6"}` }}
                       >
-                        <div className="flex items-center gap-2 truncate flex-1" title={stage.name}>
+                        <div
+                          className="flex items-center gap-1.5 truncate flex-1 flex-wrap"
+                          title={stage.name}
+                        >
                           <h3 className="font-semibold text-sm truncate">{stage.name}</h3>
-                          <Badge variant="secondary" className="text-[10px] px-1.5 h-4 font-bold shrink-0">
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] px-1.5 h-4 font-bold shrink-0"
+                          >
                             {stageOpps.length}
                           </Badge>
+                          {stage.sla_enabled && stage.sla_minutes ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] px-1.5 h-4 gap-0.5 font-medium border-border/70 text-muted-foreground bg-muted/40 shrink-0"
+                              title={`SLA da Etapa: ${formatSlaDuration(stage.sla_minutes)}`}
+                            >
+                              <Clock className="h-2.5 w-2.5 text-muted-foreground/70" />
+                              <span>{formatSlaDuration(stage.sla_minutes)}</span>
+                            </Badge>
+                          ) : null}
+                          {stageBreachedCount > 0 ? (
+                            <Badge
+                              variant="destructive"
+                              className="text-[10px] px-1.5 h-4 font-bold shrink-0 animate-pulse bg-rose-600"
+                              title={`${stageBreachedCount} oportunidade(s) atrasadas nesta etapa`}
+                            >
+                              {stageBreachedCount}{" "}
+                              {stageBreachedCount === 1 ? "atrasada" : "atrasadas"}
+                            </Badge>
+                          ) : null}
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {stageTotal > 0 && (
@@ -792,42 +1121,68 @@ function PipelinePage() {
                               {formatCurrency(stageTotal)}
                             </span>
                           )}
-                          <OpportunityDialog defaultPipelineId={selectedPipelineId || ""} defaultStageId={stage.id}>
-                            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer" title="Adicionar nesta etapa">
+                          <OpportunityDialog
+                            defaultPipelineId={selectedPipelineId || ""}
+                            defaultStageId={stage.id}
+                          >
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer"
+                              title="Adicionar nesta etapa"
+                            >
                               <Plus className="h-3.5 w-3.5" />
                             </Button>
                           </OpportunityDialog>
                         </div>
                       </div>
-                      
+
                       <Droppable droppableId={stage.id}>
                         {(provided, snapshot) => (
                           <div
                             ref={provided.innerRef}
                             {...provided.droppableProps}
-                            className={`flex-1 overflow-y-auto p-3 space-y-3 min-h-[160px] transition-colors rounded-b-xl scroll-smooth ${snapshot.isDraggingOver ? 'bg-primary/5 ring-1 ring-primary/20' : ''}`}
+                            className={`flex-1 overflow-y-auto p-3 space-y-3 min-h-[160px] transition-colors rounded-b-xl scroll-smooth ${snapshot.isDraggingOver ? "bg-primary/5 ring-1 ring-primary/20" : ""}`}
                           >
                             {stageOpps.length === 0 && !snapshot.isDraggingOver ? (
                               <div className="flex flex-col items-center justify-center py-10 px-4 text-center border border-dashed border-border/60 rounded-xl my-1 bg-muted/20">
-                                <p className="text-xs text-muted-foreground font-medium">Nenhuma oportunidade</p>
-                                <OpportunityDialog defaultPipelineId={selectedPipelineId || ""} defaultStageId={stage.id}>
-                                  <Button variant="ghost" size="sm" className="h-7 text-[11px] mt-2 text-primary hover:bg-primary/5 cursor-pointer">
+                                <p className="text-xs text-muted-foreground font-medium">
+                                  Nenhuma oportunidade
+                                </p>
+                                <OpportunityDialog
+                                  defaultPipelineId={selectedPipelineId || ""}
+                                  defaultStageId={stage.id}
+                                >
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-[11px] mt-2 text-primary hover:bg-primary/5 cursor-pointer"
+                                  >
                                     <Plus className="h-3 w-3 mr-1" /> Criar nesta etapa
                                   </Button>
                                 </OpportunityDialog>
                               </div>
                             ) : (
-                              stageOpps.map((opp, index) => (
+                              visibleOpps.map((opp, index) => (
                                 <Draggable key={opp.id} draggableId={opp.id} index={index}>
                                   {(provided, snapshot) => {
-                                    const pendingTasksCount = opp.tasks?.filter((t: any) => t.status === 'pending' || t.status === 'todo').length || 0;
-                                    const completedTasksCount = opp.tasks?.filter((t: any) => t.status === 'done').length || 0;
+                                    const pendingTasksCount =
+                                      opp.tasks?.filter(
+                                        (t: any) => t.status === "pending" || t.status === "todo",
+                                      ).length || 0;
+                                    const completedTasksCount =
+                                      opp.tasks?.filter((t: any) => t.status === "done").length ||
+                                      0;
                                     const totalTasks = opp.tasks?.length || 0;
-                                    const notesCount = 
-                                      (opp.notes && String(opp.notes).trim().length > 0 ? 1 : 0) + 
-                                      (Array.isArray(opp.opportunity_notes) ? opp.opportunity_notes.length : 0);
+                                    const notesCount =
+                                      (opp.notes && String(opp.notes).trim().length > 0 ? 1 : 0) +
+                                      (Array.isArray(opp.opportunity_notes)
+                                        ? opp.opportunity_notes.length
+                                        : 0);
                                     const hasNotes = notesCount > 0;
                                     const isHighlighted = highlightedOppId === opp.id;
+                                    const slaInfo = calculateOpportunitySla(opp, stage);
+                                    const isBreached = slaInfo.status === "breached";
 
                                     return (
                                       <div
@@ -837,16 +1192,20 @@ function PipelinePage() {
                                         {...provided.dragHandleProps}
                                         style={provided.draggableProps.style}
                                         className={`group relative rounded-xl border bg-card p-4 shadow-sm hover:shadow-md transition-all duration-300 ${
-                                          snapshot.isDragging 
-                                            ? 'shadow-2xl ring-2 ring-primary/60 transition-none z-50 opacity-95' 
+                                          snapshot.isDragging
+                                            ? "shadow-2xl ring-2 ring-primary/60 transition-none z-50 opacity-95"
                                             : isHighlighted
-                                            ? 'ring-4 ring-primary ring-offset-2 ring-offset-background border-primary shadow-2xl scale-[1.02] z-30 bg-primary/[0.05] animate-pulse'
-                                            : 'border-border/80 hover:border-primary/40'
+                                              ? "ring-4 ring-primary ring-offset-2 ring-offset-background border-primary shadow-2xl scale-[1.02] z-30 bg-primary/[0.05] animate-pulse"
+                                              : isBreached
+                                                ? "border-rose-400/80 dark:border-rose-900/60 hover:border-rose-500 bg-rose-500/[0.02]"
+                                                : "border-border/80 hover:border-primary/40"
                                         }`}
                                       >
-                                        <OpportunityDialog opportunity={opp} defaultPipelineId={selectedPipelineId || ""}>
+                                        <OpportunityDialog
+                                          opportunity={opp}
+                                          defaultPipelineId={selectedPipelineId || ""}
+                                        >
                                           <div className="cursor-pointer space-y-3">
-                                            
                                             {/* Title */}
                                             <div className="font-semibold text-sm leading-tight text-foreground hover:text-primary transition-colors line-clamp-2 pr-6">
                                               {opp.title}
@@ -873,29 +1232,90 @@ function PipelinePage() {
                                               </div>
 
                                               {/* Atendente Badge */}
-                                              {opp.profiles?.name && (
-                                                <div className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-muted/70 text-muted-foreground shrink-0 border border-border/40" title={`Atendente: ${opp.profiles.name}`}>
+                                              {opp.profiles?.name ? (
+                                                <div
+                                                  className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-muted/70 text-muted-foreground shrink-0 border border-border/40"
+                                                  title={`Atendente: ${opp.profiles.name}`}
+                                                >
                                                   <UserCheck className="h-3 w-3 text-primary shrink-0" />
-                                                  <span className="truncate max-w-[90px]">{opp.profiles.name}</span>
+                                                  <span className="truncate max-w-[90px]">
+                                                    {opp.profiles.name}
+                                                  </span>
+                                                </div>
+                                              ) : (
+                                                <div
+                                                  className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0 border border-amber-500/30"
+                                                  title="Oportunidade sem responsável atribuído (disponível para a equipe da unidade)"
+                                                >
+                                                  <UserCheck className="h-3 w-3 text-amber-500 shrink-0" />
+                                                  <span className="truncate max-w-[90px]">
+                                                    Disponível
+                                                  </span>
                                                 </div>
                                               )}
                                             </div>
 
-                                            {/* Middle Row: Unidade (1º), Status (2º), Valor (Direita) */}
+                                            {/* Middle Row: Unidade (1º), Status (2º), SLA (3º), Valor (Direita) */}
                                             <div className="flex items-center justify-between gap-2 pt-0.5">
                                               <div className="flex items-center gap-1.5 flex-wrap">
                                                 {!selectedUnitId && opp.units?.name && (
                                                   <div className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-muted/60 text-muted-foreground w-fit max-w-full">
                                                     <Building className="h-3 w-3 shrink-0" />
-                                                    <span className="truncate">{opp.units.name}</span>
+                                                    <span className="truncate">
+                                                      {opp.units.name}
+                                                    </span>
                                                   </div>
                                                 )}
 
                                                 {opp.status && (
-                                                  <Badge variant={opp.status === 'won' ? 'default' : opp.status === 'lost' ? 'destructive' : 'secondary'} className={`text-[10px] px-1.5 h-5 font-medium ${opp.status === 'won' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : ''}`}>
-                                                    {opp.status === 'won' ? 'Ganho' : opp.status === 'lost' ? 'Perdido' : 'Aberto'}
+                                                  <Badge
+                                                    variant={
+                                                      opp.status === "won"
+                                                        ? "default"
+                                                        : opp.status === "lost"
+                                                          ? "destructive"
+                                                          : "secondary"
+                                                    }
+                                                    className={`text-[10px] px-1.5 h-5 font-medium ${opp.status === "won" ? "bg-emerald-600 text-white hover:bg-emerald-700" : ""}`}
+                                                  >
+                                                    {opp.status === "won"
+                                                      ? "Ganho"
+                                                      : opp.status === "lost"
+                                                        ? "Perdido"
+                                                        : "Aberto"}
                                                   </Badge>
                                                 )}
+
+                                                {slaInfo.status !== "none" ? (
+                                                  <Badge
+                                                    variant="outline"
+                                                    className={`text-[10px] px-1.5 h-5 gap-1 font-semibold ${
+                                                      slaInfo.status === "breached"
+                                                        ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 font-bold"
+                                                        : slaInfo.status === "warning"
+                                                          ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                                          : "bg-muted/40 text-muted-foreground border-border/40 font-normal"
+                                                    }`}
+                                                    title={`SLA da Etapa: ${formatSlaDuration(slaInfo.limitMinutes)} (${slaInfo.percentElapsed}% decorrido)`}
+                                                  >
+                                                    {slaInfo.status === "breached" ? (
+                                                      <AlertTriangle className="h-2.5 w-2.5 text-rose-600 dark:text-rose-400 animate-pulse shrink-0" />
+                                                    ) : (
+                                                      <Clock className="h-2.5 w-2.5 shrink-0" />
+                                                    )}
+                                                    <span>{slaInfo.badgeLabel}</span>
+                                                  </Badge>
+                                                ) : (opp.status === "open" || !opp.status) &&
+                                                  slaInfo.badgeLabel ? (
+                                                  <Badge
+                                                    variant="outline"
+                                                    className="text-[10px] px-1.5 h-5 gap-1 font-normal text-muted-foreground bg-muted/30 border-border/40"
+                                                    title="Tempo nesta etapa (sem limite de SLA definido)"
+                                                  >
+                                                    <Clock className="h-2.5 w-2.5 text-muted-foreground/70 shrink-0" />
+                                                    <span>{slaInfo.badgeLabel}</span>
+                                                  </Badge>
+                                                ) : null}
                                               </div>
 
                                               <div className="text-emerald-600 dark:text-emerald-400 font-bold text-xs shrink-0 whitespace-nowrap">
@@ -905,14 +1325,14 @@ function PipelinePage() {
 
                                             {/* Observação da Oportunidade */}
                                             {opp.notes && opp.notes.trim().length > 0 && (
-                                              <p 
-                                                className="text-[11px] text-muted-foreground line-clamp-1 italic bg-muted/40 px-2 py-1 rounded border border-border/30 mt-1.5" 
+                                              <p
+                                                className="text-[11px] text-muted-foreground line-clamp-1 italic bg-muted/40 px-2 py-1 rounded border border-border/30 mt-1.5"
                                                 title={`Observação: ${opp.notes}`}
                                               >
                                                 "{opp.notes}"
                                               </p>
                                             )}
-                                            
+
                                             {/* Footer: Tarefas e Notas (Esquerda) e Data (Direita) */}
                                             <div className="flex items-center justify-between mt-2 pt-2.5 border-t border-border/40 gap-2">
                                               <div className="flex items-center gap-1.5 flex-wrap">
@@ -946,8 +1366,7 @@ function PipelinePage() {
                                                     className="text-[10px] px-1.5 h-5 gap-1 font-normal text-muted-foreground/60 border-border/40 bg-muted/20"
                                                     title="Sem tarefas"
                                                   >
-                                                    <CheckSquare className="h-3 w-3" />
-                                                    0
+                                                    <CheckSquare className="h-3 w-3" />0
                                                   </Badge>
                                                 )}
 
@@ -966,23 +1385,25 @@ function PipelinePage() {
                                                     className="text-[10px] px-1.5 h-5 gap-1 font-normal text-muted-foreground/60 border-border/40 bg-muted/20"
                                                     title="Sem notas"
                                                   >
-                                                    <FileText className="h-3 w-3" />
-                                                    0
+                                                    <FileText className="h-3 w-3" />0
                                                   </Badge>
                                                 )}
                                               </div>
 
                                               {opp.expected_close_date && (
-                                                <div 
+                                                <div
                                                   className="flex items-center gap-1 text-[10px] text-muted-foreground font-medium bg-muted/40 px-1.5 py-0.5 rounded border border-border/40 shrink-0"
                                                   title="Data Prevista de Fechamento"
                                                 >
                                                   <Calendar className="h-3 w-3" />
-                                                  {format(new Date(opp.expected_close_date), "dd/MMM", { locale: ptBR })}
+                                                  {format(
+                                                    new Date(opp.expected_close_date),
+                                                    "dd/MMM",
+                                                    { locale: ptBR },
+                                                  )}
                                                 </div>
                                               )}
                                             </div>
-
                                           </div>
                                         </OpportunityDialog>
 
@@ -992,7 +1413,7 @@ function PipelinePage() {
                                             <Tooltip>
                                               <TooltipTrigger asChild>
                                                 <div>
-                                                  <ContactChatButton 
+                                                  <ContactChatButton
                                                     contactId={opp.contact_id}
                                                     contactName={opp.contacts?.name || ""}
                                                     phone={opp.contacts?.phone || ""}
@@ -1007,7 +1428,6 @@ function PipelinePage() {
                                             </Tooltip>
                                           </TooltipProvider>
                                         </div>
-                                        
                                       </div>
                                     );
                                   }}
@@ -1015,6 +1435,26 @@ function PipelinePage() {
                               ))
                             )}
                             {provided.placeholder}
+
+                            {/* Botão de carregar mais itens progressivamente na coluna */}
+                            {hasMoreInStage && (
+                              <div className="pt-1 pb-2 flex justify-center">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-3 text-[11px] font-medium text-muted-foreground hover:text-foreground bg-background/80 hover:bg-muted border-dashed border-border/80 w-full cursor-pointer"
+                                  onClick={() =>
+                                    setStageLimits((prev) => ({
+                                      ...prev,
+                                      [stage.id]: currentLimit + 20,
+                                    }))
+                                  }
+                                >
+                                  Carregar mais (+{Math.min(20, remainingInStage)} de{" "}
+                                  {remainingInStage})
+                                </Button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </Droppable>
@@ -1033,7 +1473,7 @@ function PipelinePage() {
               <Table>
                 <TableHeader className="bg-muted/40">
                   <TableRow>
-                    <TableHead 
+                    <TableHead
                       className="cursor-pointer select-none font-semibold text-xs"
                       onClick={() => {
                         if (tableSortField === "title") {
@@ -1051,10 +1491,13 @@ function PipelinePage() {
                     </TableHead>
                     <TableHead className="font-semibold text-xs">Contato</TableHead>
                     <TableHead className="font-semibold text-xs">Etapa</TableHead>
+                    <TableHead className="font-semibold text-xs">SLA / Tempo</TableHead>
                     <TableHead className="font-semibold text-xs">Status</TableHead>
                     <TableHead className="font-semibold text-xs">Responsável</TableHead>
-                    {!selectedUnitId && <TableHead className="font-semibold text-xs">Unidade</TableHead>}
-                    <TableHead 
+                    {!selectedUnitId && (
+                      <TableHead className="font-semibold text-xs">Unidade</TableHead>
+                    )}
+                    <TableHead
                       className="cursor-pointer select-none font-semibold text-xs"
                       onClick={() => {
                         if (tableSortField === "value") {
@@ -1070,7 +1513,7 @@ function PipelinePage() {
                         <ArrowUpDown className="h-3 w-3 text-muted-foreground" />
                       </div>
                     </TableHead>
-                    <TableHead 
+                    <TableHead
                       className="cursor-pointer select-none font-semibold text-xs"
                       onClick={() => {
                         if (tableSortField === "expected_close_date") {
@@ -1093,15 +1536,20 @@ function PipelinePage() {
                 <TableBody>
                   {isLoadingStages || isLoadingOpps ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="text-center py-10 text-muted-foreground text-sm">
+                      <TableCell
+                        colSpan={11}
+                        className="text-center py-10 text-muted-foreground text-sm"
+                      >
                         Carregando oportunidades...
                       </TableCell>
                     </TableRow>
                   ) : sortedTableOpportunities.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={10} className="text-center py-12">
+                      <TableCell colSpan={11} className="text-center py-12">
                         <div className="flex flex-col items-center justify-center gap-2">
-                          <p className="text-sm font-medium text-muted-foreground">Nenhuma oportunidade encontrada</p>
+                          <p className="text-sm font-medium text-muted-foreground">
+                            Nenhuma oportunidade encontrada
+                          </p>
                           <OpportunityDialog defaultPipelineId={selectedPipelineId || ""}>
                             <Button variant="outline" size="sm" className="h-8 text-xs mt-1">
                               <Plus className="h-3.5 w-3.5 mr-1" /> Criar Oportunidade
@@ -1111,22 +1559,27 @@ function PipelinePage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sortedTableOpportunities.map((opp: any) => {
-                      const stage = stages?.find(s => s.id === opp.stage_id);
-                      const pendingTasksCount = opp.tasks?.filter((t: any) => t.status === 'pending' || t.status === 'todo').length || 0;
+                    sortedTableOpportunities.slice(0, tableLimit).map((opp: any) => {
+                      const stage = stages?.find((s) => s.id === opp.stage_id);
+                      const pendingTasksCount =
+                        opp.tasks?.filter((t: any) => t.status === "pending" || t.status === "todo")
+                          .length || 0;
                       const totalTasks = opp.tasks?.length || 0;
-                      const notesCount = 
-                        (opp.notes && String(opp.notes).trim().length > 0 ? 1 : 0) + 
+                      const notesCount =
+                        (opp.notes && String(opp.notes).trim().length > 0 ? 1 : 0) +
                         (Array.isArray(opp.opportunity_notes) ? opp.opportunity_notes.length : 0);
 
                       return (
-                        <TableRow 
-                          key={opp.id} 
+                        <TableRow
+                          key={opp.id}
                           className="hover:bg-muted/40 transition-colors group cursor-pointer"
                         >
                           {/* Oportunidade */}
                           <TableCell className="font-medium text-xs">
-                            <OpportunityDialog opportunity={opp} defaultPipelineId={selectedPipelineId || ""}>
+                            <OpportunityDialog
+                              opportunity={opp}
+                              defaultPipelineId={selectedPipelineId || ""}
+                            >
                               <div className="space-y-0.5">
                                 <span className="font-semibold text-foreground hover:text-primary transition-colors block line-clamp-1">
                                   {opp.title}
@@ -1163,26 +1616,81 @@ function PipelinePage() {
 
                           {/* Etapa */}
                           <TableCell className="text-xs">
-                            <Badge 
-                              variant="outline" 
+                            <Badge
+                              variant="outline"
                               className="text-[10px] font-semibold px-2 py-0.5 border"
-                              style={{ 
-                                borderColor: stage?.color || '#3b82f6', 
-                                backgroundColor: `${stage?.color || '#3b82f6'}15`,
-                                color: stage?.color || '#3b82f6'
+                              style={{
+                                borderColor: stage?.color || "#3b82f6",
+                                backgroundColor: `${stage?.color || "#3b82f6"}15`,
+                                color: stage?.color || "#3b82f6",
                               }}
                             >
                               {stage?.name || "Sem etapa"}
                             </Badge>
                           </TableCell>
 
+                          {/* SLA / Tempo */}
+                          <TableCell className="text-xs">
+                            {(() => {
+                              const slaInfo = calculateOpportunitySla(opp, stage);
+                              if (slaInfo.status === "none") {
+                                const isOpen = opp.status === "open" || !opp.status;
+                                if (isOpen && slaInfo.badgeLabel) {
+                                  return (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] px-2 py-0.5 gap-1 font-normal text-muted-foreground bg-muted/30 border-border/40"
+                                      title="Tempo nesta etapa (sem limite de SLA definido)"
+                                    >
+                                      <Clock className="h-2.5 w-2.5 text-muted-foreground/70 shrink-0" />
+                                      <span>{slaInfo.badgeLabel}</span>
+                                    </Badge>
+                                  );
+                                }
+                                return (
+                                  <span className="text-[11px] text-muted-foreground/40">-</span>
+                                );
+                              }
+                              return (
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] px-2 py-0.5 gap-1 font-semibold ${
+                                    slaInfo.status === "breached"
+                                      ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 font-bold"
+                                      : slaInfo.status === "warning"
+                                        ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                                        : "bg-muted/40 text-muted-foreground border-border/40 font-normal"
+                                  }`}
+                                  title={`SLA da Etapa: ${formatSlaDuration(slaInfo.limitMinutes)} (${slaInfo.percentElapsed}% decorrido)`}
+                                >
+                                  {slaInfo.status === "breached" ? (
+                                    <AlertTriangle className="h-2.5 w-2.5 text-rose-600 dark:text-rose-400 animate-pulse shrink-0" />
+                                  ) : (
+                                    <Clock className="h-2.5 w-2.5 shrink-0" />
+                                  )}
+                                  <span>{slaInfo.badgeLabel}</span>
+                                </Badge>
+                              );
+                            })()}
+                          </TableCell>
+
                           {/* Status */}
                           <TableCell className="text-xs">
-                            <Badge 
-                              variant={opp.status === 'won' ? 'default' : opp.status === 'lost' ? 'destructive' : 'secondary'} 
-                              className={`text-[10px] px-1.5 h-5 font-medium ${opp.status === 'won' ? 'bg-emerald-600 text-white' : ''}`}
+                            <Badge
+                              variant={
+                                opp.status === "won"
+                                  ? "default"
+                                  : opp.status === "lost"
+                                    ? "destructive"
+                                    : "secondary"
+                              }
+                              className={`text-[10px] px-1.5 h-5 font-medium ${opp.status === "won" ? "bg-emerald-600 text-white" : ""}`}
                             >
-                              {opp.status === 'won' ? 'Ganho' : opp.status === 'lost' ? 'Perdido' : 'Aberto'}
+                              {opp.status === "won"
+                                ? "Ganho"
+                                : opp.status === "lost"
+                                  ? "Perdido"
+                                  : "Aberto"}
                             </Badge>
                           </TableCell>
 
@@ -1194,7 +1702,9 @@ function PipelinePage() {
                                 <span className="truncate max-w-[120px]">{opp.profiles.name}</span>
                               </div>
                             ) : (
-                              <span className="text-[11px] text-muted-foreground/50">Não atribuído</span>
+                              <span className="text-[11px] text-muted-foreground/50">
+                                Não atribuído
+                              </span>
                             )}
                           </TableCell>
 
@@ -1222,7 +1732,9 @@ function PipelinePage() {
                             {opp.expected_close_date ? (
                               <div className="flex items-center gap-1 text-[11px]">
                                 <Calendar className="h-3 w-3" />
-                                {format(new Date(opp.expected_close_date), "dd/MM/yyyy", { locale: ptBR })}
+                                {format(new Date(opp.expected_close_date), "dd/MM/yyyy", {
+                                  locale: ptBR,
+                                })}
                               </div>
                             ) : (
                               <span className="text-muted-foreground/40">-</span>
@@ -1236,8 +1748,8 @@ function PipelinePage() {
                                 <Badge
                                   variant="outline"
                                   className={`text-[10px] px-1.5 h-5 gap-1 font-semibold ${
-                                    pendingTasksCount > 0 
-                                      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30" 
+                                    pendingTasksCount > 0
+                                      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
                                       : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
                                   }`}
                                   title={`${pendingTasksCount} tarefa(s) pendente(s)`}
@@ -1269,7 +1781,7 @@ function PipelinePage() {
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <div>
-                                      <ContactChatButton 
+                                      <ContactChatButton
                                         contactId={opp.contact_id}
                                         contactName={opp.contacts?.name || ""}
                                         phone={opp.contacts?.phone || ""}
@@ -1284,8 +1796,16 @@ function PipelinePage() {
                                 </Tooltip>
                               </TooltipProvider>
 
-                              <OpportunityDialog opportunity={opp} defaultPipelineId={selectedPipelineId || ""}>
-                                <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground cursor-pointer" title="Ver detalhes">
+                              <OpportunityDialog
+                                opportunity={opp}
+                                defaultPipelineId={selectedPipelineId || ""}
+                              >
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-muted-foreground hover:text-foreground cursor-pointer"
+                                  title="Ver detalhes"
+                                >
                                   <Eye className="h-3.5 w-3.5" />
                                 </Button>
                               </OpportunityDialog>
@@ -1298,6 +1818,22 @@ function PipelinePage() {
                 </TableBody>
               </Table>
             </div>
+            {sortedTableOpportunities.length > tableLimit && (
+              <div className="p-3 border-t bg-muted/20 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  Exibindo <strong>{tableLimit}</strong> de{" "}
+                  <strong>{sortedTableOpportunities.length}</strong> oportunidades
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs cursor-pointer"
+                  onClick={() => setTableLimit((prev) => prev + 30)}
+                >
+                  Carregar mais (+{Math.min(30, sortedTableOpportunities.length - tableLimit)})
+                </Button>
+              </div>
+            )}
           </Card>
         </div>
       )}

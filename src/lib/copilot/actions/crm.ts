@@ -260,7 +260,15 @@ export const crmActions: CopilotAction[] = [
         },
         etapa_id: { type: "string", description: "ID da etapa do funil onde será criada." },
         valor: { type: "number", description: "Valor estimado da oportunidade (R$)." },
-        observacao: { type: "string", description: "Observações ou detalhes da oportunidade (opcional)." },
+        observacao: {
+          type: "string",
+          description: "Observações ou detalhes da oportunidade (opcional).",
+        },
+        responsavel_id: {
+          type: "string",
+          description:
+            "UUID do perfil do atendente responsável (opcional). Se omitido, tenta herdar o atendente da conversa recente do contato ou deixa em aberto (null) para a unidade.",
+        },
       },
       required: ["titulo", "contato_id"],
     },
@@ -332,6 +340,27 @@ export const crmActions: CopilotAction[] = [
         if (st?.unit_id) unitId = st.unit_id;
       }
 
+      // Resolução inteligente do responsável
+      let resolvedOwnerId: string | null = params.responsavel_id || null;
+      if (!resolvedOwnerId) {
+        const { data: conv } = await supabaseAdmin
+          .from("conversations")
+          .select("assigned_agent_id")
+          .eq("contact_id", params.contato_id)
+          .not("assigned_agent_id", "is", null)
+          .order("last_message_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (conv?.assigned_agent_id) {
+          resolvedOwnerId = conv.assigned_agent_id;
+        } else if (context.userRole === "agent") {
+          resolvedOwnerId = context.userId;
+        } else {
+          resolvedOwnerId = null;
+        }
+      }
+
       const { data: opp, error } = await supabaseAdmin
         .from("opportunities")
         .insert({
@@ -339,7 +368,7 @@ export const crmActions: CopilotAction[] = [
           contact_id: params.contato_id,
           stage_id: stageId || null,
           unit_id: unitId || null,
-          owner_id: context.userId,
+          owner_id: resolvedOwnerId,
           value: params.valor !== undefined ? Number(params.valor) : null,
           status: "open",
           notes: params.observacao ? String(params.observacao).trim() : null,

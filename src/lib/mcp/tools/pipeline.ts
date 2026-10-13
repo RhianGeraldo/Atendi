@@ -206,6 +206,11 @@ export const pipelineTools: McpToolDefinition[] = [
           description:
             "ID da unidade responsável pela oportunidade (opcional para chave restrita).",
         },
+        responsavel_id: {
+          type: "string",
+          description:
+            "ID (UUID) do atendente/usuário responsável (opcional). Se omitido, o sistema tentará vincular o atendente da conversa recente do contato; se não houver, ficará sem responsável (null) para que toda a equipe da unidade possa ver e assumir.",
+        },
         observacoes: {
           type: "string",
           description: "Observações ou anotações gerais da oportunidade (opcional).",
@@ -243,6 +248,28 @@ export const pipelineTools: McpToolDefinition[] = [
         stageId = stages?.[0]?.id || null;
       }
 
+      // Resolução inteligente do responsável (owner_id)
+      let resolvedOwnerId: string | null = args.responsavel_id || args.atendente_id || null;
+
+      if (!resolvedOwnerId) {
+        // Tenta buscar o atendente responsável pela conversa mais recente deste contato
+        const { data: activeConv } = await supabaseAdmin
+          .from("conversations")
+          .select("assigned_agent_id")
+          .eq("contact_id", contactId)
+          .not("assigned_agent_id", "is", null)
+          .order("last_message_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (activeConv?.assigned_agent_id) {
+          resolvedOwnerId = activeConv.assigned_agent_id;
+        } else {
+          // Se não houver conversa atribuída, mantém como null (disponível para todos da unidade)
+          resolvedOwnerId = null;
+        }
+      }
+
       const { data: created, error } = await supabaseAdmin
         .from("opportunities")
         .insert({
@@ -251,10 +278,11 @@ export const pipelineTools: McpToolDefinition[] = [
           value,
           stage_id: stageId,
           unit_id: targetUnitId || contact.unit_id || null,
+          owner_id: resolvedOwnerId,
           status: "open",
           notes: args.observacoes ? String(args.observacoes).trim() : null,
         })
-        .select("*, pipeline_stages(name), units(name)")
+        .select("*, pipeline_stages(name), units(name), profiles:owner_id(name, email)")
         .single();
 
       if (error || !created) {
@@ -262,10 +290,11 @@ export const pipelineTools: McpToolDefinition[] = [
       }
 
       // Registrar histórico
+      const ownerName = (created.profiles as any)?.name;
       await supabaseAdmin.from("opportunity_history").insert({
         opportunity_id: created.id,
         action_type: "created",
-        description: `Oportunidade criada via MCP com o título "${title}" e valor R$ ${value}${args.observacoes ? ` | Observações: "${args.observacoes}"` : ""}`,
+        description: `Oportunidade criada via MCP com o título "${title}" e valor R$ ${value}${ownerName ? ` | Responsável: ${ownerName}` : " | Sem responsável inicial (Geral/Unidade)"}${args.observacoes ? ` | Observações: "${args.observacoes}"` : ""}`,
       });
 
       return {
@@ -401,6 +430,11 @@ export const pipelineTools: McpToolDefinition[] = [
           type: "string",
           description: "Nova observação da oportunidade.",
         },
+        responsavel_id: {
+          type: "string",
+          description:
+            "Novo responsável (UUID do perfil do atendente) ou null para deixar sem responsável.",
+        },
       },
       required: ["oportunidade_id"],
     },
@@ -413,6 +447,9 @@ export const pipelineTools: McpToolDefinition[] = [
       if (args.titulo) updateData.title = String(args.titulo).trim();
       if (args.observacoes !== undefined) {
         updateData.notes = args.observacoes ? String(args.observacoes).trim() : null;
+      }
+      if (args.responsavel_id !== undefined) {
+        updateData.owner_id = args.responsavel_id || null;
       }
 
       const { data: opp, error: oppErr } = await supabaseAdmin

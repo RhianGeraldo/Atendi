@@ -3,7 +3,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Users, RefreshCw, Tag, Plus, Square, Target, Check, Edit2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { toggleContactLabelAction, createLabelAction, updateContactFromWhatsappAction } from "@/lib/api/chat.functions";
+import {
+  toggleContactLabelAction,
+  createLabelAction,
+  updateContactFromWhatsappAction,
+} from "@/lib/api/chat.functions";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
@@ -15,7 +19,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 import { ContactBlockDialog } from "@/components/contacts/contact-block-dialog";
 import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
@@ -38,10 +50,14 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
     queryKey: ["labels", activeCompanyId],
     queryFn: async () => {
       if (!activeCompanyId) return [];
-      const { data } = await supabase.from('labels').select('*').eq('company_id', activeCompanyId).order("name");
+      const { data } = await supabase
+        .from("labels")
+        .select("*")
+        .eq("company_id", activeCompanyId)
+        .order("name");
       return data || [];
     },
-    enabled: !!activeCompanyId
+    enabled: !!activeCompanyId,
   });
 
   const { data: contactLabels, isLoading: isLoadingContactLabels } = useQuery({
@@ -59,9 +75,10 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
     staleTime: 5 * 1000,
   });
 
-  const effectiveLabels = !isLoadingContactLabels && contactLabels !== undefined
-    ? contactLabels
-    : (conv.contact?.contact_labels || []);
+  const effectiveLabels =
+    !isLoadingContactLabels && contactLabels !== undefined
+      ? contactLabels
+      : conv.contact?.contact_labels || [];
 
   const { allSources, addSource, updateContactSource } = useContactSources();
   const [sourcePopoverOpen, setSourcePopoverOpen] = useState(false);
@@ -112,16 +129,16 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
   };
 
   const toggleLabel = useMutation({
-    mutationFn: async ({ labelId, action }: { labelId: string, action: "add" | "remove" }) => {
+    mutationFn: async ({ labelId, action }: { labelId: string; action: "add" | "remove" }) => {
       if (!conv.contact?.id) throw new Error("Contato não identificado");
       const unitId = selectedUnitId || conv.unit_id || null;
-      const res = await toggleContactLabelAction({ 
-        data: { 
-          unitId, 
-          contactId: conv.contact.id, 
-          labelId, 
-          action 
-        } 
+      const res = await toggleContactLabelAction({
+        data: {
+          unitId,
+          contactId: conv.contact.id,
+          labelId,
+          action,
+        },
       });
       if (!res?.success) throw new Error(res?.error || "Erro ao atualizar etiqueta");
       return res;
@@ -131,7 +148,7 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["contacts"] });
     },
-    onError: (e: any) => toast.error(e.message || "Erro ao atualizar etiqueta")
+    onError: (e: any) => toast.error(e.message || "Erro ao atualizar etiqueta"),
   });
 
   const createLabel = useMutation({
@@ -139,12 +156,12 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
       const trimmedName = name.trim();
       if (!trimmedName) throw new Error("O nome da etiqueta é obrigatório");
       const unitId = selectedUnitId || conv.unit_id || null;
-      const res = await createLabelAction({ 
-        data: { 
-          unitId, 
-          companyId: activeCompanyId, 
-          name: trimmedName 
-        } 
+      const res = await createLabelAction({
+        data: {
+          unitId,
+          companyId: activeCompanyId,
+          name: trimmedName,
+        },
       });
       if (!res?.success || !res.label) throw new Error(res?.error || "Falha ao criar etiqueta");
       return res.label;
@@ -158,13 +175,17 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
       setSearchLabel("");
       toast.success("Etiqueta criada!");
     },
-    onError: (e: any) => toast.error(e.message || "Falha ao criar etiqueta")
+    onError: (e: any) => toast.error(e.message || "Falha ao criar etiqueta"),
   });
 
   const updateContact = useMutation({
     mutationFn: async () => {
       return await updateContactFromWhatsappAction({
-        data: { contactId: conv.contact?.id, unitId: conv.unit_id, whatsappInstanceId: conv.whatsapp_instance_id }
+        data: {
+          contactId: conv.contact?.id,
+          unitId: conv.unit_id,
+          whatsappInstanceId: conv.whatsapp_instance_id,
+        },
       });
     },
     onSuccess: (data) => {
@@ -181,14 +202,36 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
     },
     onError: (e) => {
       toast.error(e.message || "Erro ao atualizar contato.");
-    }
+    },
   });
 
-  const isGroup = conv.contact?.phone && (conv.contact.phone.startsWith('120363') || (conv.contact.phone.includes('-') && conv.contact.phone.length > 18));
-  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  const isGroup =
+    conv.contact?.phone &&
+    (conv.contact.phone.startsWith("120363") ||
+      (conv.contact.phone.includes("-") && conv.contact.phone.length > 18));
+  const contactName =
+    isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
   return (
     <div className="flex h-full flex-col bg-background/50">
+      {/* Header com título e botão de fechar X no canto superior direito */}
+      <div className="h-14 px-4 border-b border-border flex items-center justify-between shrink-0 bg-card/60">
+        <h2 className="text-sm md:text-base font-semibold text-foreground truncate">
+          {isGroup ? "Dados do grupo" : "Dados do contato"}
+        </h2>
+        {onClose && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground cursor-pointer"
+            onClick={onClose}
+            title="Fechar informações"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+
       <div className="flex-1 overflow-y-auto min-w-0 flex flex-col">
         <div className="px-4 pb-4 space-y-4 pt-4 flex-1 flex flex-col min-h-0">
           {/* Dados do Contato e Etiquetas no mesmo card/div igual ao da IA */}
@@ -204,40 +247,50 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                   fallbackClassName="text-xl font-medium"
                 />
                 {conv.contact && (
-                  <Button 
-                    variant="secondary" 
-                    size="icon" 
+                  <Button
+                    variant="secondary"
+                    size="icon"
                     className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full shadow-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                    title={conv.channel === 'instagram' ? "Sincronizar perfil e foto do Instagram" : "Sincronizar foto do WhatsApp"}
+                    title={
+                      conv.channel === "instagram"
+                        ? "Sincronizar perfil e foto do Instagram"
+                        : "Sincronizar foto do WhatsApp"
+                    }
                     onClick={() => updateContact.mutate()}
                     disabled={updateContact.isPending}
                   >
-                    <RefreshCw className={`h-3 w-3 text-muted-foreground ${updateContact.isPending ? 'animate-spin' : ''}`} />
+                    <RefreshCw
+                      className={`h-3 w-3 text-muted-foreground ${updateContact.isPending ? "animate-spin" : ""}`}
+                    />
                   </Button>
                 )}
               </div>
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1">
-                  <h3 className="font-bold text-base text-foreground truncate" title={contactName || "Desconhecido"}>
+                  <h3
+                    className="font-bold text-base text-foreground truncate"
+                    title={contactName || "Desconhecido"}
+                  >
                     {contactName || "Desconhecido"}
                   </h3>
                   <div className="flex items-center shrink-0">
                     <ContactEditDialog contact={conv.contact} />
-                    {(profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager") && conv.contact && (
-                      <ContactBlockDialog contact={conv.contact} />
-                    )}
+                    {(profile?.role === "admin_company" ||
+                      profile?.role === "super_admin" ||
+                      profile?.role === "manager") &&
+                      conv.contact && <ContactBlockDialog contact={conv.contact} />}
                   </div>
                 </div>
-                
+
                 <p className="text-xs text-muted-foreground font-mono truncate mt-0.5">
-                  {isGroup 
-                    ? "Grupo do WhatsApp" 
-                    : (conv.contact?.phone 
-                        ? formatPhone(conv.contact.phone) 
-                        : (conv.contact?.instagram_username 
-                            ? `@${conv.contact.instagram_username}` 
-                            : "Sem número"))}
+                  {isGroup
+                    ? "Grupo do WhatsApp"
+                    : conv.contact?.phone
+                      ? formatPhone(conv.contact.phone)
+                      : conv.contact?.instagram_username
+                        ? `@${conv.contact.instagram_username}`
+                        : "Sem número"}
                 </p>
               </div>
             </div>
@@ -246,114 +299,128 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
             <div className="pt-2 border-t border-border/40">
               <div className="flex items-center justify-between mb-1.5">
                 <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                  <Target className="h-3.5 w-3.5 text-muted-foreground" /> 
+                  <Target className="h-3.5 w-3.5 text-muted-foreground" />
                   Origem
                 </h4>
                 <Popover open={sourcePopoverOpen} onOpenChange={setSourcePopoverOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full text-muted-foreground hover:text-primary" title={conv.contact?.source ? "Alterar origem" : "Adicionar origem"}>
-                      {conv.contact?.source ? <Edit2 className="h-3 w-3" /> : <Plus className="h-4 w-4" />}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 rounded-full text-muted-foreground hover:text-primary"
+                      title={conv.contact?.source ? "Alterar origem" : "Adicionar origem"}
+                    >
+                      {conv.contact?.source ? (
+                        <Edit2 className="h-3 w-3" />
+                      ) : (
+                        <Plus className="h-4 w-4" />
+                      )}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="p-0 w-64" align="end">
-                  <Command>
-                    <CommandInput 
-                      placeholder="Buscar ou criar origem..." 
-                      className="h-8 text-xs" 
-                      value={searchSource}
-                      onValueChange={setSearchSource}
-                    />
-                    <CommandList>
-                      <CommandEmpty>
-                        {searchSource.trim().length > 0 ? (
-                          <Button 
-                            variant="ghost" 
-                            className="w-full justify-start text-xs h-8 font-normal"
-                            onClick={() => handleCreateAndSelectSource(searchSource)}
-                            disabled={addSource.isPending || updateContactSource.isPending}
-                          >
-                            <Plus className="h-3.5 w-3.5 mr-1 text-primary" />
-                            Criar "{searchSource.trim()}"
-                          </Button>
-                        ) : "Nenhuma origem encontrada."}
-                      </CommandEmpty>
-                      <CommandGroup heading="Origens">
-                        {allSources.map(src => {
-                          const isSelected = conv.contact?.source?.toLowerCase() === src.toLowerCase();
-                          return (
-                            <CommandItem
-                              key={src}
-                              onSelect={() => handleSelectSource(src)}
-                              className="text-xs flex items-center justify-between gap-2 cursor-pointer"
+                    <Command>
+                      <CommandInput
+                        placeholder="Buscar ou criar origem..."
+                        className="h-8 text-xs"
+                        value={searchSource}
+                        onValueChange={setSearchSource}
+                      />
+                      <CommandList>
+                        <CommandEmpty>
+                          {searchSource.trim().length > 0 ? (
+                            <Button
+                              variant="ghost"
+                              className="w-full justify-start text-xs h-8 font-normal"
+                              onClick={() => handleCreateAndSelectSource(searchSource)}
+                              disabled={addSource.isPending || updateContactSource.isPending}
                             >
-                              <div className="flex items-center gap-2 truncate flex-1">
-                                {getSourceIcon(src)}
-                                <span className="truncate">{src}</span>
-                              </div>
-                              {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-                            </CommandItem>
-                          );
-                        })}
-                      </CommandGroup>
-                      {conv.contact?.source && (
-                        <>
-                          <CommandSeparator />
-                          <CommandGroup>
-                            <CommandItem 
-                              onSelect={() => handleSelectSource(null)}
-                              className="text-xs text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
-                            >
-                              <X className="h-3.5 w-3.5 mr-1.5" />
-                              Remover origem
-                            </CommandItem>
-                          </CommandGroup>
-                        </>
-                      )}
-                    </CommandList>
-                  </Command>
+                              <Plus className="h-3.5 w-3.5 mr-1 text-primary" />
+                              Criar "{searchSource.trim()}"
+                            </Button>
+                          ) : (
+                            "Nenhuma origem encontrada."
+                          )}
+                        </CommandEmpty>
+                        <CommandGroup heading="Origens">
+                          {allSources.map((src) => {
+                            const isSelected =
+                              conv.contact?.source?.toLowerCase() === src.toLowerCase();
+                            return (
+                              <CommandItem
+                                key={src}
+                                onSelect={() => handleSelectSource(src)}
+                                className="text-xs flex items-center justify-between gap-2 cursor-pointer"
+                              >
+                                <div className="flex items-center gap-2 truncate flex-1">
+                                  {getSourceIcon(src)}
+                                  <span className="truncate">{src}</span>
+                                </div>
+                                {isSelected && (
+                                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                )}
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                        {conv.contact?.source && (
+                          <>
+                            <CommandSeparator />
+                            <CommandGroup>
+                              <CommandItem
+                                onSelect={() => handleSelectSource(null)}
+                                className="text-xs text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
+                              >
+                                <X className="h-3.5 w-3.5 mr-1.5" />
+                                Remover origem
+                              </CommandItem>
+                            </CommandGroup>
+                          </>
+                        )}
+                      </CommandList>
+                    </Command>
 
-                  {conv.contact?.source && (
-                    <div className="p-2 border-t border-border/50 bg-muted/20">
-                      <label className="text-[10px] text-muted-foreground font-medium block mb-1">
-                        Detalhe (Campanha, Indicação, etc.)
-                      </label>
-                      <div className="flex items-center gap-1.5">
-                        <Input 
-                          placeholder="Ex: Campanha Dia das Mães" 
-                          value={detailsInput}
-                          onChange={(e) => setDetailsInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
+                    {conv.contact?.source && (
+                      <div className="p-2 border-t border-border/50 bg-muted/20">
+                        <label className="text-[10px] text-muted-foreground font-medium block mb-1">
+                          Detalhe (Campanha, Indicação, etc.)
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <Input
+                            placeholder="Ex: Campanha Dia das Mães"
+                            value={detailsInput}
+                            onChange={(e) => setDetailsInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleSaveDetails();
+                                setSourcePopoverOpen(false);
+                              }
+                            }}
+                            className="h-7 text-xs"
+                          />
+                          <Button
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => {
                               handleSaveDetails();
                               setSourcePopoverOpen(false);
-                            }
-                          }}
-                          className="h-7 text-xs"
-                        />
-                        <Button 
-                          size="sm" 
-                          className="h-7 px-2 text-xs"
-                          onClick={() => {
-                            handleSaveDetails();
-                            setSourcePopoverOpen(false);
-                          }}
-                          disabled={updateContactSource.isPending}
-                        >
-                          Salvar
-                        </Button>
+                            }}
+                            disabled={updateContactSource.isPending}
+                          >
+                            Salvar
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </PopoverContent>
-              </Popover>
-            </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              </div>
 
-            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {conv.contact?.source ? (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <Badge 
-                      variant="outline" 
+                    <Badge
+                      variant="outline"
                       onClick={() => setSourcePopoverOpen(true)}
                       className="cursor-pointer hover:bg-accent text-xs py-0.5 px-2 flex items-center gap-1.5 font-medium transition-colors border-border/80"
                       title="Clique para alterar a origem"
@@ -363,13 +430,16 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                     </Badge>
 
                     {conv.contact.source_details && (
-                      <span className="text-[11px] text-muted-foreground truncate max-w-[180px]" title={conv.contact.source_details}>
+                      <span
+                        className="text-[11px] text-muted-foreground truncate max-w-[180px]"
+                        title={conv.contact.source_details}
+                      >
                         • {conv.contact.source_details}
                       </span>
                     )}
                   </div>
                 ) : (
-                  <button 
+                  <button
                     onClick={() => setSourcePopoverOpen(true)}
                     className="text-xs text-muted-foreground/70 italic hover:text-primary transition-colors flex items-center gap-1 cursor-pointer"
                   >
@@ -384,28 +454,32 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
             <div className="pt-2 border-t border-border/40">
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                  <Tag className="h-3.5 w-3.5 text-muted-foreground" /> 
+                  <Tag className="h-3.5 w-3.5 text-muted-foreground" />
                   Etiquetas
                 </h4>
                 <Popover open={labelPopoverOpen} onOpenChange={setLabelPopoverOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full text-muted-foreground hover:text-primary cursor-pointer">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 rounded-full text-muted-foreground hover:text-primary cursor-pointer"
+                    >
                       <Plus className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="p-0 w-60" align="end">
                     <Command>
-                      <CommandInput 
-                        placeholder="Buscar ou criar etiqueta..." 
-                        className="h-8 text-xs" 
+                      <CommandInput
+                        placeholder="Buscar ou criar etiqueta..."
+                        className="h-8 text-xs"
                         value={searchLabel}
                         onValueChange={setSearchLabel}
                       />
                       <CommandList>
                         <CommandEmpty>
                           {searchLabel.trim().length > 0 ? (
-                            <Button 
-                              variant="ghost" 
+                            <Button
+                              variant="ghost"
                               className="w-full justify-start text-xs h-8 font-normal cursor-pointer text-primary hover:text-primary"
                               onClick={() => createLabel.mutate(searchLabel.trim())}
                               disabled={createLabel.isPending}
@@ -418,43 +492,52 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                           )}
                         </CommandEmpty>
                         <CommandGroup>
-                          {allLabels?.map(label => {
-                            const isSelected = effectiveLabels.some(cl => cl.labels?.id === label.id);
+                          {allLabels?.map((label) => {
+                            const isSelected = effectiveLabels.some(
+                              (cl) => cl.labels?.id === label.id,
+                            );
                             return (
                               <CommandItem
                                 key={label.id}
                                 onSelect={() => {
-                                  toggleLabel.mutate({ labelId: label.id, action: isSelected ? "remove" : "add" });
+                                  toggleLabel.mutate({
+                                    labelId: label.id,
+                                    action: isSelected ? "remove" : "add",
+                                  });
                                 }}
                                 className="text-xs cursor-pointer flex items-center justify-between py-1.5"
                               >
                                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                                  <div 
-                                    className="w-2.5 h-2.5 rounded-full shrink-0" 
+                                  <div
+                                    className="w-2.5 h-2.5 rounded-full shrink-0"
                                     style={{ backgroundColor: label.color || "#6b7280" }}
                                   />
                                   <span className="truncate">{label.name}</span>
                                 </div>
-                                {isSelected && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                                {isSelected && (
+                                  <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                )}
                               </CommandItem>
                             );
                           })}
                         </CommandGroup>
-                        {searchLabel.trim().length > 0 && 
-                         !allLabels?.some(l => l.name.toLowerCase() === searchLabel.trim().toLowerCase()) && (
-                          <div className="p-1 border-t border-border/50">
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              className="w-full justify-start text-xs h-8 font-normal text-primary hover:text-primary hover:bg-primary/10 cursor-pointer"
-                              onClick={() => createLabel.mutate(searchLabel.trim())}
-                              disabled={createLabel.isPending}
-                            >
-                              <Plus className="h-3.5 w-3.5 mr-1" />
-                              Criar "{searchLabel.trim()}"
-                            </Button>
-                          </div>
-                        )}
+                        {searchLabel.trim().length > 0 &&
+                          !allLabels?.some(
+                            (l) => l.name.toLowerCase() === searchLabel.trim().toLowerCase(),
+                          ) && (
+                            <div className="p-1 border-t border-border/50">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="w-full justify-start text-xs h-8 font-normal text-primary hover:text-primary hover:bg-primary/10 cursor-pointer"
+                                onClick={() => createLabel.mutate(searchLabel.trim())}
+                                disabled={createLabel.isPending}
+                              >
+                                <Plus className="h-3.5 w-3.5 mr-1" />
+                                Criar "{searchLabel.trim()}"
+                              </Button>
+                            </div>
+                          )}
                       </CommandList>
                     </Command>
                   </PopoverContent>
@@ -467,14 +550,14 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                   if (!label) return null;
                   const hexColor = label.color || "#6b7280";
                   return (
-                    <Badge 
-                      key={label.id} 
-                      variant="outline" 
+                    <Badge
+                      key={label.id}
+                      variant="outline"
                       className="font-normal text-[10px] pl-2 pr-1 py-0 h-5 flex items-center gap-1 group/badge"
-                      style={{ 
-                        backgroundColor: `${hexColor}15`, 
-                        color: hexColor, 
-                        borderColor: `${hexColor}30` 
+                      style={{
+                        backgroundColor: `${hexColor}15`,
+                        color: hexColor,
+                        borderColor: `${hexColor}30`,
                       }}
                     >
                       <span>{label.name}</span>
@@ -493,7 +576,9 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                   );
                 })}
                 {!effectiveLabels.length && (
-                  <span className="text-xs text-muted-foreground/70 italic">Nenhuma etiqueta atribuída.</span>
+                  <span className="text-xs text-muted-foreground/70 italic">
+                    Nenhuma etiqueta atribuída.
+                  </span>
                 )}
               </div>
             </div>
