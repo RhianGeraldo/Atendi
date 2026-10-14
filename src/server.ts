@@ -107,6 +107,24 @@ export default {
         return await handleCronFollowUps(request);
       }
 
+      // Reprocessa a caixa de entrada de webhooks (Vercel Cron envia Authorization: Bearer $CRON_SECRET)
+      if (url.pathname === '/api/cron/webhook-inbox') {
+        const cronSecret = process.env.CRON_SECRET;
+        if (!cronSecret || request.headers.get('Authorization') !== `Bearer ${cronSecret}`) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const { drainInbox } = await import('./lib/server/webhook-inbox');
+        const { processEvogoWebhookBody } = await import('./lib/server/evogo-webhook');
+        const reprocessed = await drainInbox('evogo', processEvogoWebhookBody, 20);
+        return new Response(JSON.stringify({ reprocessed }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       // Descoberta de Recursos Protegidos OAuth 2.0 (RFC 9728) para Claude.ai / MCP
       if (url.pathname === '/.well-known/oauth-protected-resource' || url.pathname === '/.well-known/oauth-protected-resource/mcp') {
         const { getOauthProtectedResourceMetadata } = await import('./lib/mcp/oauth');

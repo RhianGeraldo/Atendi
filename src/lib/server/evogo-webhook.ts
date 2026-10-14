@@ -6,6 +6,7 @@ import { syncContactProfile } from "@/lib/api/chat.functions";
 import { extractExternalAdReply, processAndCacheAdPreview } from "./ad-preview-cache";
 import { dispatchAutomationEvent } from "./automation-engine";
 import { sendMetaCapiEvent } from "./meta-capi";
+import { drainInbox, processWithInbox, type InboxProcessOptions } from "./webhook-inbox";
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
 export async function handleEvogoWebhook(request: Request): Promise<Response> {
@@ -28,9 +29,25 @@ export async function handleEvogoWebhook(request: Request): Promise<Response> {
 
     // In serverless environments like Vercel, we MUST await the processing
     // otherwise the function is killed the moment we return the Response.
-    // The previous timeout issue was largely due to blocking fs/console logging
-    // which has been removed.
-    await processEvogoWebhookBody(body);
+    // Eventos com dados passam pela caixa de entrada (webhook_inbox): se o
+    // processamento falhar, o payload fica salvo e é reprocessado depois.
+    if (INBOX_EVENTS.has(body?.event)) {
+      await processWithInbox(
+        "evogo",
+        body,
+        {
+          event: body.event,
+          instanceName: body.instanceName || body.instance || null,
+          externalId: body.data?.Info?.ID || body.data?.key?.id || null,
+        },
+        processEvogoWebhookBody,
+      );
+    } else {
+      await processEvogoWebhookBody(body).catch((err) => console.error("Webhook error:", err));
+    }
+
+    // Reprocessa "de carona" itens pendentes de falhas anteriores
+    await drainInbox("evogo", processEvogoWebhookBody);
 
     return new Response("OK", { status: 200 });
   } catch (err) {
@@ -41,7 +58,18 @@ export async function handleEvogoWebhook(request: Request): Promise<Response> {
 
 import * as fs from "fs";
 
-export async function processEvogoWebhookBody(body: any): Promise<void> {
+// Eventos que geram/alteram dados e por isso passam pela caixa de entrada
+const INBOX_EVENTS = new Set(["Message", "SendMessage", "messages.upsert", "messages.update", "PushName"]);
+
+// Reprocessamento: não aciona a IA para mensagens mais antigas que isso
+const RETRY_AI_MAX_AGE_MS = 10 * 60 * 1000;
+
+export async function processEvogoWebhookBody(
+  body: any,
+  opts: InboxProcessOptions = { isRetry: false },
+): Promise<void> {
+  // Horário original da mensagem no WhatsApp (usado no reprocessamento)
+  const originalTimestamp: string | null = body?.data?.Info?.Timestamp || null;
   try {
     // Log webhook without base64 to avoid blocking Node.js with huge strings
     const logBody = JSON.parse(JSON.stringify(body));
@@ -1453,6 +1481,10 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         participant_jid: participantJid,
         metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
       };
+      // No reprocessamento a mensagem entra no histórico no horário em que foi enviada
+      if (opts.isRetry && originalTimestamp && !Number.isNaN(Date.parse(originalTimestamp))) {
+        insertPayload.created_at = new Date(originalTimestamp).toISOString();
+      }
 
       const { error: msgErr, data: newMessage } = await supabaseAdmin
         .from("messages")
@@ -1490,23 +1522,10 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
           return;
         }
 
-        // Fallback without new columns in case migration hasn't run yet
-        console.error("Insert failed with new columns, falling back...", msgErr);
-        const { data: fallbackMsg } = await supabaseAdmin
-          .from("messages")
-          .insert({
-            conversation_id: conversationId,
-            sender_type: isFromMe ? "agent" : "contact",
-            content: textContent,
-            media_type: mediaType,
-            media_url: mediaUrl,
-          })
-          .select()
-          .single();
-
-        if (fallbackMsg && mediaType === "audio" && audioBase64 && instance.company_id) {
-          await triggerAudioTranscription(fallbackMsg.id, audioBase64, instance.company_id);
-        }
+        // Falha real ao gravar (timeout, lock, rede): relança para a caixa de entrada
+        // reprocessar. O remote_msg_id único garante que não haverá duplicidade.
+        console.error("[evogo-webhook] Falha ao gravar mensagem:", msgErr);
+        throw msgErr;
       } else if (newMessage && mediaType === "audio" && audioBase64 && instance.company_id) {
         await triggerAudioTranscription(newMessage.id, audioBase64, instance.company_id);
       }
@@ -1592,7 +1611,11 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       }
 
       // 7. Check if we need to queue AI response
-      if (aiActive && newMessage && !isFromMe) {
+      const tooOldForAi =
+        opts.isRetry &&
+        !!originalTimestamp &&
+        Date.now() - Date.parse(originalTimestamp) > RETRY_AI_MAX_AGE_MS;
+      if (aiActive && newMessage && !isFromMe && !tooOldForAi) {
         // Enqueue the AI message generator to allow for 10s buffer
         console.log(
           `[evogo-webhook] Queueing AI response for conversation ${conversationId}, message ${newMessage.id}`,
@@ -1714,8 +1737,9 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
   } catch (err) {
     console.log(new Date().toISOString() + " ERROR: " + String(err) + "\n");
     console.error("Webhook error:", err);
-    // Return 200 to acknowledge receipt and prevent endless retries from EvoGo
-    return;
+    // Relança para a caixa de entrada registrar a falha e reprocessar depois.
+    // A rota continua respondendo 200 para a EvoGo (sem retentativas do provedor).
+    throw err;
   }
 }
 
