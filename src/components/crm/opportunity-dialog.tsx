@@ -464,20 +464,6 @@ export function OpportunityDialog({
     },
   });
 
-  // Fallback unit
-  const { data: fallbackUnit } = useQuery({
-    queryKey: ["first-unit-opp", profile?.company_id],
-    enabled: !selectedUnitId && !!profile?.company_id && open,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("units")
-        .select("id")
-        .eq("company_id", profile!.company_id!)
-        .limit(1)
-        .single();
-      return data;
-    },
-  });
 
   // Auto-Save Mutation for existing opportunities
   const autoSaveMutation = useMutation({
@@ -611,9 +597,9 @@ export function OpportunityDialog({
           .maybeSingle();
         contactUnitId = contactRow?.unit_id || null;
       }
+      // Sem unidade definida, a oportunidade fica na Rede da empresa
       const effectiveUnitId =
-        opportunity?.unit_id || contactUnitId || selectedUnitId || fallbackUnit?.id;
-      if (!effectiveUnitId) throw new Error("Crie uma unidade primeiro para salvar oportunidades.");
+        opportunity?.unit_id || contactUnitId || selectedUnitId || null;
 
       const payload = {
         title,

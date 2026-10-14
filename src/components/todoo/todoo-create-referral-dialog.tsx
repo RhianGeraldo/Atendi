@@ -32,6 +32,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
+import { useUnit } from "@/lib/unit-context";
 import { toast } from "sonner";
 
 interface Props {
@@ -49,6 +50,7 @@ interface ReferredFriend {
 export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Props) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
+  const { selectedUnitId } = useUnit();
 
   // Dados da cliente indicadora
   const [referrerName, setReferrerName] = useState("");
@@ -124,6 +126,27 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
       const numValue = voucherValue ? parseFloat(voucherValue.replace(",", ".")) : 150;
       const captorId = capturedById || profile.id;
 
+      // Unidade da indicação: da cliente indicadora > unidade única de quem captou > unidade selecionada > Rede
+      let referralUnitId: string | null = null;
+      if (referrerContactId) {
+        const { data: referrer } = await supabase
+          .from("contacts")
+          .select("unit_id")
+          .eq("id", referrerContactId)
+          .maybeSingle();
+        referralUnitId = referrer?.unit_id || null;
+      }
+      if (!referralUnitId) {
+        const { data: captorUnits } = await supabase
+          .from("user_units")
+          .select("unit_id")
+          .eq("user_id", captorId);
+        if (captorUnits && captorUnits.length === 1) referralUnitId = captorUnits[0].unit_id;
+      }
+      if (!referralUnitId && selectedUnitId && selectedUnitId !== "all") {
+        referralUnitId = selectedUnitId;
+      }
+
       // 1. Localiza ou cria a campanha padrão do Desafio 3 Amigas / MGM
       let campaignId: string;
       const { data: existingCamp } = await (supabase.from("todoo_campaigns") as any)
@@ -190,6 +213,7 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
             .from("contacts")
             .insert({
               company_id: activeCompanyId,
+              unit_id: referralUnitId,
               name: friend.name.trim(),
               phone: cleanPhone,
               tags: ["Lead Indicado", `Indicado por: ${referrerName}`],
@@ -206,6 +230,7 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
         // B. Registra na tabela todoo_referrals
         await (supabase.from("todoo_referrals") as any).insert({
           company_id: activeCompanyId,
+          unit_id: referralUnitId,
           referrer_contact_id: referrerContactId || null,
           referrer_name: referrerName.trim(),
           referrer_phone: referrerPhone || null,
@@ -225,6 +250,7 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
         await (supabase.from("todoo_leads") as any).insert({
           campaign_id: campaignId,
           company_id: activeCompanyId,
+          unit_id: referralUnitId,
           contact_id: contactId,
           contact_name: friend.name.trim(),
           contact_phone: cleanPhone,
