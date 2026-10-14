@@ -44,6 +44,8 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
+import { useAuth } from "@/lib/auth-context";
+import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { TodooCampaign } from "@/types/todoo";
 import { TodooEditCampaignDialog } from "./todoo-edit-campaign-dialog";
 import { Building2 } from "lucide-react";
@@ -57,6 +59,12 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const queryClient = useQueryClient();
+  const { profile } = useAuth();
+  const { unitIds: myUnitIds, isAdmin: isCompanyAdmin } = useAccessibleUnits();
+
+  // Mesma regra do RLS: admin edita tudo; gerente só campanhas da própria unidade
+  const canManageCampaign = (c: { unit_id?: string | null }) =>
+    isCompanyAdmin || (profile?.role === "manager" && !!c.unit_id && myUnitIds.includes(c.unit_id));
 
   // Estados para edição e exclusão
   const [editingCampaign, setEditingCampaign] = useState<TodooCampaign | null>(null);
@@ -133,11 +141,13 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
   const handleToggleStatus = async (campaign: TodooCampaign) => {
     const nextStatus = campaign.status === "active" ? "paused" : "active";
     try {
-      const { error } = await (supabase.from("todoo_campaigns") as any)
+      const { data, error } = await (supabase.from("todoo_campaigns") as any)
         .update({ status: nextStatus, updated_at: new Date().toISOString() })
-        .eq("id", campaign.id);
+        .eq("id", campaign.id)
+        .select("id");
 
       if (error) throw error;
+      if (!data || data.length === 0) throw new Error("Você não tem permissão para alterar esta ação.");
       toast.success(nextStatus === "active" ? "Ação comercial retomada!" : "Ação comercial pausada.");
       refetch();
     } catch (err: any) {
@@ -151,6 +161,10 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
     setIsDeleting(true);
 
     try {
+      if (!canManageCampaign(deletingCampaign)) {
+        throw new Error("Você não tem permissão para excluir esta ação.");
+      }
+
       // 1. Exclui os leads vinculados à campanha
       const { error: leadsErr } = await (supabase.from("todoo_leads") as any)
         .delete()
@@ -164,11 +178,15 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
         .eq("campaign_id", deletingCampaign.id);
 
       // 3. Exclui a campanha
-      const { error: campErr } = await (supabase.from("todoo_campaigns") as any)
+      const { data: deletedCamp, error: campErr } = await (supabase.from("todoo_campaigns") as any)
         .delete()
-        .eq("id", deletingCampaign.id);
+        .eq("id", deletingCampaign.id)
+        .select("id");
 
       if (campErr) throw campErr;
+      if (!deletedCamp || deletedCamp.length === 0) {
+        throw new Error("Você não tem permissão para excluir esta ação.");
+      }
 
       toast.success("Ação comercial e seus leads excluídos com sucesso!");
       setDeleteDialogOpen(false);
@@ -285,6 +303,7 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
                       </Badge>
 
                       {/* Menu de Ações (CRUD) */}
+                      {canManageCampaign(camp) && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground">
@@ -334,6 +353,7 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      )}
                     </div>
                   </div>
 
@@ -392,6 +412,7 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
                     </span>
 
                     <div className="flex items-center gap-1">
+                      {canManageCampaign(camp) && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -404,6 +425,7 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
                         <Edit className="h-3 w-3" />
                         Editar
                       </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>

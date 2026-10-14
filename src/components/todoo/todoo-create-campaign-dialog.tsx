@@ -41,6 +41,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
+import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { TodooCampaignType, TodooDistributionMode } from "@/types/todoo";
 import { toast } from "sonner";
 
@@ -152,24 +153,12 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // Busca unidades da empresa
-  const { data: companyUnits = [] } = useQuery({
-    queryKey: ["todoo-company-units", activeCompanyId],
-    enabled: !!activeCompanyId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("units")
-        .select("id, name, color")
-        .eq("company_id", activeCompanyId!)
-        .order("name");
-      if (error) throw error;
-      return data || [];
-    },
-  });
+  // Unidades que o usuário pode ver (admin: todas; demais: as suas)
+  const { units: companyUnits, unitIds: myUnitIds, isAdmin: isCompanyAdmin, hasRedeAccess } = useAccessibleUnits();
 
-  // Busca consultoras/atendentes da empresa com suas unidades vinculadas
+  // Consultoras/atendentes com suas unidades vinculadas (gerente: só a equipe das suas unidades)
   const { data: teamMembers = [] } = useQuery({
-    queryKey: ["todoo-team-members-units", activeCompanyId],
+    queryKey: ["todoo-team-members-units", activeCompanyId, isCompanyAdmin, myUnitIds.join(",")],
     enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -178,10 +167,14 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
         .eq("company_id", activeCompanyId!)
         .order("name");
       if (error) throw error;
-      return (data || []).map((m: any) => ({
+      const members = (data || []).map((m: any) => ({
         ...m,
         unitIds: (m.user_units || []).map((u: any) => u.unit_id),
       }));
+      if (isCompanyAdmin) return members;
+      return members.filter(
+        (m: any) => m.id === profile?.id || m.unitIds.some((id: string) => myUnitIds.includes(id)),
+      );
     },
   });
 
@@ -423,10 +416,26 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
         throw new Error("Nenhum lead válido com telefone encontrado.");
       }
 
+      // Quem não tem acesso à Rede só cria leads nas próprias unidades
+      if (!hasRedeAccess) {
+        const fallbackUnit = myUnitIds.length === 1 ? myUnitIds[0] : null;
+        finalLeads = finalLeads
+          .map((l) => ({ ...l, unit_id: l.unit_id && myUnitIds.includes(l.unit_id) ? l.unit_id : fallbackUnit }))
+          .filter((l) => !!l.unit_id);
+        if (finalLeads.length === 0) {
+          throw new Error("Selecione uma unidade padrão para os leads desta campanha.");
+        }
+      }
+
+      // Campanha de uma unidade só fica vinculada a ela; senão é geral da empresa
+      const leadUnits = new Set(finalLeads.map((l) => l.unit_id || null));
+      const campaignUnitId = leadUnits.size === 1 ? [...leadUnits][0] : null;
+
       // 2. Cria a Campanha em todoo_campaigns
       const { data: campaignData, error: campaignErr } = await (supabase.from("todoo_campaigns") as any)
         .insert({
           company_id: activeCompanyId,
+          unit_id: campaignUnitId,
           title,
           description: description || null,
           type: campaignType,
@@ -465,13 +474,15 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
       const leadsToInsert: any[] = [];
 
       leadsByUnit.forEach((unitLeads, uKey) => {
-        // Encontra consultoras aptas para esta unidade
+        // Consultoras aptas: da própria unidade (ou com acesso à Rede, para leads sem unidade).
+        // Sem ninguém apto, o lead fica com quem criou a campanha — nunca vai para outra unidade.
         const unitConsultants = selectedConsultants.filter((c: any) => {
-          if (uKey === "general") return true;
-          return c.has_matriz_access || c.role === "admin_company" || c.role === "super_admin" || (c.unitIds && c.unitIds.includes(uKey));
+          if (c.role === "admin_company" || c.role === "super_admin") return true;
+          if (uKey === "general") return Boolean(c.has_matriz_access);
+          return (c.unitIds || []).includes(uKey);
         });
 
-        const pool = unitConsultants.length > 0 ? unitConsultants : selectedConsultants;
+        const pool = unitConsultants.length > 0 ? unitConsultants : [{ id: profile.id }];
 
         unitLeads.forEach((lead, idx) => {
           const assignedUser = pool[idx % pool.length];

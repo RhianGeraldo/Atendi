@@ -70,7 +70,7 @@ export function TodooEditCampaignDialog({
 
     setSaving(true);
     try {
-      const { error } = await (supabase.from("todoo_campaigns") as any)
+      const { data: updated, error } = await (supabase.from("todoo_campaigns") as any)
         .update({
           title: title.trim(),
           description: description.trim() || null,
@@ -82,9 +82,11 @@ export function TodooEditCampaignDialog({
           target_revenue: Number(targetRevenue) || 0,
           updated_at: new Date().toISOString(),
         })
-        .eq("id", campaign.id);
+        .eq("id", campaign.id)
+        .select("id");
 
       if (error) throw error;
+      if (!updated || updated.length === 0) throw new Error("Você não tem permissão para alterar esta ação.");
 
       toast.success("Ação comercial atualizada com sucesso!");
       onOpenChange(false);

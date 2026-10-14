@@ -56,6 +56,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
+import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { useWavoip } from "@/hooks/use-wavoip";
 import { TodooLead, TodooOutcomeType, TodooCampaign } from "@/types/todoo";
 import { TodooOutcomeDialog } from "./todoo-outcome-dialog";
@@ -153,33 +154,25 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
     },
   });
 
-  // 2. Busca todas as unidades da empresa
-  const { data: allUnits = [] } = useQuery({
-    queryKey: ["todoo-all-units", activeCompanyId],
-    enabled: !!activeCompanyId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("units")
-        .select("id, name, color")
-        .eq("company_id", activeCompanyId!)
-        .order("name");
-      if (error) throw error;
-      return data || [];
-    },
-  });
+  // 2. Unidades que o usuário pode ver
+  const { units: allUnits, unitIds: myUnitIds, isAdmin: isCompanyAdmin } = useAccessibleUnits();
 
-  // 3. Busca consultoras / usuários da empresa
+  // 3. Consultoras / usuários da empresa (gerente: só a equipe das suas unidades)
   const { data: consultants = [] } = useQuery({
-    queryKey: ["todoo-consultants-filter", activeCompanyId],
+    queryKey: ["todoo-consultants-filter", activeCompanyId, isCompanyAdmin, myUnitIds.join(",")],
     enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, avatar_url")
+        .select("id, name, avatar_url, user_units(unit_id)")
         .eq("company_id", activeCompanyId!)
         .order("name");
       if (error) throw error;
-      return data || [];
+      const list = (data || []) as any[];
+      if (isCompanyAdmin) return list;
+      return list.filter(
+        (p) => p.id === profile?.id || (p.user_units || []).some((uu: any) => myUnitIds.includes(uu.unit_id)),
+      );
     },
   });
 
@@ -199,12 +192,14 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
         .order("created_at", { ascending: false });
 
       // Se for consultor normal, apenas os seus leads
-      if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
+      const isManagerOrAdmin =
+        profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager";
+      if (!isManagerOrAdmin) {
         query = query.eq("assigned_user_id", profile?.id);
       }
 
-      // Filtro de unidade do seletor global
-      if (selectedUnitId && selectedUnitId !== "all") {
+      // Filtro de unidade do seletor global (consultora vê todos os seus leads)
+      if (isManagerOrAdmin && selectedUnitId && selectedUnitId !== "all") {
         query = query.eq("unit_id", selectedUnitId);
       }
 

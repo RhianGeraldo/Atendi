@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Target, Loader2, Sparkles, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useActiveCompany } from "@/lib/active-company-context";
+import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { toast } from "sonner";
 
 interface Props {
@@ -24,6 +25,7 @@ interface Props {
 
 export function TodooGoalsDialog({ open, onOpenChange, onSuccess }: Props) {
   const { activeCompanyId } = useActiveCompany();
+  const { unitIds: myUnitIds, isAdmin: isCompanyAdmin } = useAccessibleUnits();
   const queryClient = useQueryClient();
 
   const currentMonthYear = new Date().toISOString().slice(0, 7); // Ex: '2026-10'
@@ -32,17 +34,22 @@ export function TodooGoalsDialog({ open, onOpenChange, onSuccess }: Props) {
 
   // Busca equipe e metas atuais do mês
   const { data: teamWithGoals = [], isLoading } = useQuery({
-    queryKey: ["todoo-team-goals-config", activeCompanyId, currentMonthYear],
+    queryKey: ["todoo-team-goals-config", activeCompanyId, currentMonthYear, isCompanyAdmin, myUnitIds.join(",")],
     enabled: !!activeCompanyId && open,
     queryFn: async () => {
-      // 1. Busca usuários da empresa
-      const { data: profiles, error: pErr } = await supabase
+      // 1. Busca usuários da empresa (gerente: só a equipe das suas unidades)
+      const { data: allProfiles, error: pErr } = await supabase
         .from("profiles")
-        .select("id, name, avatar_url, role")
+        .select("id, name, avatar_url, role, user_units(unit_id)")
         .eq("company_id", activeCompanyId!)
         .order("name");
 
       if (pErr) throw pErr;
+      const profiles = isCompanyAdmin
+        ? allProfiles
+        : (allProfiles || []).filter((p: any) =>
+            (p.user_units || []).some((uu: any) => myUnitIds.includes(uu.unit_id)),
+          );
 
       // 2. Busca metas cadastradas do mês
       const { data: goals, error: gErr } = await (supabase.from("todoo_goals") as any)
