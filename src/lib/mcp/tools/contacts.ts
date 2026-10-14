@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { dispatchAutomationEvent } from "@/lib/server/automation-engine";
+import { buildFbc } from "@/lib/server/meta-capi";
 import type { McpContext, McpToolDefinition } from "../types";
 
 const DEFAULT_CONTACT_SOURCES = [
@@ -197,6 +198,21 @@ export const contactsTools: McpToolDefinition[] = [
           type: "string",
           description: "Nota inicial sobre o contato (opcional).",
         },
+        fbc: {
+          type: "string",
+          description:
+            "Cookie _fbc da Meta capturado no site/formulário (formato fb.1.<timestamp>.<fbclid>). Usado na API de Conversões.",
+        },
+        fbp: {
+          type: "string",
+          description:
+            "Cookie _fbp do Pixel da Meta capturado no site/formulário (formato fb.1.<timestamp>.<número>). Usado na API de Conversões.",
+        },
+        fbclid: {
+          type: "string",
+          description:
+            "Parâmetro fbclid da URL de entrada, caso o cookie _fbc não esteja disponível (será convertido em fbc).",
+        },
       },
       required: ["nome", "telefone"],
     },
@@ -207,6 +223,8 @@ export const contactsTools: McpToolDefinition[] = [
       const targetUnitId = context.unitId || args.unidade_id || null;
       const source = args.origem ? String(args.origem).trim() : null;
       const sourceDetails = args.detalhes_origem ? String(args.detalhes_origem).trim() : null;
+      const metaFbc = buildFbc(args.fbc || args.fbclid) || null;
+      const metaFbp = args.fbp ? String(args.fbp).trim() : null;
 
       if (!name || !rawPhone) {
         throw new Error("Nome e telefone são obrigatórios para criar um contato.");
@@ -215,12 +233,22 @@ export const contactsTools: McpToolDefinition[] = [
       // Verificar se já existe contato com esse telefone na empresa
       const { data: existing } = await supabaseAdmin
         .from("contacts")
-        .select("id, name, phone, unit_id, source, source_details")
+        .select("id, name, phone, email, unit_id, source, source_details, meta_fbc, meta_fbp")
         .eq("company_id", context.companyId)
         .eq("phone", rawPhone)
         .maybeSingle();
 
       if (existing) {
+        // Completa dados de correspondência da Meta (email, fbc, fbp) que chegaram agora
+        const enrich: Record<string, string> = {};
+        if (email && !existing.email) enrich.email = email;
+        if (metaFbc && metaFbc !== existing.meta_fbc) enrich.meta_fbc = metaFbc;
+        if (metaFbp && metaFbp !== existing.meta_fbp) enrich.meta_fbp = metaFbp;
+        if (Object.keys(enrich).length > 0) {
+          await supabaseAdmin.from("contacts").update(enrich).eq("id", existing.id);
+          Object.assign(existing, enrich);
+        }
+
         return {
           sucesso: true,
           mensagem: `Contato já existia com o telefone ${rawPhone}. Retornando registro existente.`,
@@ -239,6 +267,8 @@ export const contactsTools: McpToolDefinition[] = [
           email,
           source,
           source_details: sourceDetails,
+          meta_fbc: metaFbc,
+          meta_fbp: metaFbp,
         })
         .select("*, units(name, slug)")
         .single();
@@ -284,7 +314,7 @@ export const contactsTools: McpToolDefinition[] = [
   {
     name: "atualizar_contato",
     description:
-      "Atualiza os dados de um contato existente (nome, telefone, email, canal de origem ou filial).",
+      "Atualiza os dados de um contato existente (nome, telefone, email, canal de origem, filial ou identificadores Meta fbc/fbp).",
     inputSchema: {
       type: "object",
       properties: {
@@ -317,6 +347,21 @@ export const contactsTools: McpToolDefinition[] = [
           type: "string",
           description: "Novo ID de unidade (apenas para chaves com visão Matriz).",
         },
+        fbc: {
+          type: "string",
+          description:
+            "Cookie _fbc da Meta capturado no site/formulário (formato fb.1.<timestamp>.<fbclid>). Usado na API de Conversões.",
+        },
+        fbp: {
+          type: "string",
+          description:
+            "Cookie _fbp do Pixel da Meta capturado no site/formulário (formato fb.1.<timestamp>.<número>). Usado na API de Conversões.",
+        },
+        fbclid: {
+          type: "string",
+          description:
+            "Parâmetro fbclid da URL de entrada, caso o cookie _fbc não esteja disponível (será convertido em fbc).",
+        },
       },
       required: ["contato_id"],
     },
@@ -335,6 +380,9 @@ export const contactsTools: McpToolDefinition[] = [
           ? String(args.detalhes_origem).trim()
           : null;
       if (args.unidade_id !== undefined && !context.unitId) updateData.unit_id = args.unidade_id;
+      if (args.fbc !== undefined || args.fbclid !== undefined)
+        updateData.meta_fbc = buildFbc(args.fbc || args.fbclid) || null;
+      if (args.fbp !== undefined) updateData.meta_fbp = args.fbp ? String(args.fbp).trim() : null;
 
       let query = supabaseAdmin
         .from("contacts")

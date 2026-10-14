@@ -31,6 +31,8 @@ export interface SendMetaCapiParams {
     phone?: string;
     email?: string;
     name?: string;
+    fbc?: string;
+    fbp?: string;
   };
 }
 
@@ -72,6 +74,54 @@ export function normalizePhone(phone: string | null | undefined): string | undef
 }
 
 /**
+ * Variantes do telefone brasileiro para aumentar a correspondência na Meta.
+ * O WhatsApp às vezes entrega celulares sem o 9º dígito (55 + DDD + 8 dígitos);
+ * enviamos as duas formas (com e sem o 9) para casar com o cadastro do usuário.
+ */
+export function phoneVariants(normalized: string | undefined): string[] {
+  if (!normalized) return [];
+  const variants = new Set<string>([normalized]);
+  if (normalized.startsWith("55")) {
+    const ddd = normalized.slice(2, 4);
+    const local = normalized.slice(4);
+    if (local.length === 8 && /^[6-9]/.test(local)) {
+      variants.add(`55${ddd}9${local}`);
+    } else if (local.length === 9 && local.startsWith("9")) {
+      variants.add(`55${ddd}${local.slice(1)}`);
+    }
+  }
+  return Array.from(variants);
+}
+
+/**
+ * Normaliza nome conforme a Meta: minúsculo, sem emojis, números ou pontuação.
+ */
+export function normalizeNamePart(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[^\p{L}\s'-]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || undefined;
+}
+
+/**
+ * Monta o parâmetro fbc a partir de um fbclid (fb.1.<timestamp_ms>.<fbclid>).
+ * Se já vier no formato fbc, retorna como está.
+ */
+export function buildFbc(
+  value: string | null | undefined,
+  clickTimeMs: number = Date.now(),
+): string | undefined {
+  const v = value?.trim();
+  if (!v) return undefined;
+  if (/^fb\.\d\.\d+\./.test(v)) return v;
+  return `fb.1.${clickTimeMs}.${v}`;
+}
+
+/**
  * Divide nome completo em primeiro e último nome para envio à Meta.
  */
 export function splitName(fullName: string | null | undefined): {
@@ -79,7 +129,7 @@ export function splitName(fullName: string | null | undefined): {
   lastName?: string;
 } {
   if (!fullName) return {};
-  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  const parts = (normalizeNamePart(fullName) || "").split(" ").filter(Boolean);
   if (parts.length === 0) return {};
   if (parts.length === 1) return { firstName: parts[0] };
   return {
@@ -104,7 +154,7 @@ export interface MetaTokenValidationResult {
  */
 export async function validateMetaToken(
   token: string | null | undefined,
-  source: "custom" | "system_user" | "none" = "custom"
+  source: "custom" | "system_user" | "none" = "custom",
 ): Promise<MetaTokenValidationResult> {
   if (!token || !token.trim()) {
     return {
@@ -121,8 +171,12 @@ export async function validateMetaToken(
 
   try {
     const [meRes, permRes] = await Promise.all([
-      fetch(`https://graph.facebook.com/v21.0/me?access_token=${encodeURIComponent(cleanToken)}&fields=id,name`),
-      fetch(`https://graph.facebook.com/v21.0/me/permissions?access_token=${encodeURIComponent(cleanToken)}`),
+      fetch(
+        `https://graph.facebook.com/v21.0/me?access_token=${encodeURIComponent(cleanToken)}&fields=id,name`,
+      ),
+      fetch(
+        `https://graph.facebook.com/v21.0/me/permissions?access_token=${encodeURIComponent(cleanToken)}`,
+      ),
     ]);
 
     const meJson = await meRes.json().catch(() => ({}));
@@ -261,6 +315,8 @@ export async function sendMetaCapiEvent(params: SendMetaCapiParams): Promise<Met
     let phone = params.userDataOverride?.phone;
     let email = params.userDataOverride?.email;
     let name = params.userDataOverride?.name;
+    let fbc = params.userDataOverride?.fbc;
+    let fbp = params.userDataOverride?.fbp;
     let ctwaClid = params.ctwaClid;
 
     // 1. Se tem contactId, buscar dados do contato
@@ -287,10 +343,10 @@ export async function sendMetaCapiEvent(params: SendMetaCapiParams): Promise<Met
     }
 
     // Se temos contactId e faltam dados de usuário, buscar contato
-    if (contactId && (!phone || !email || !name)) {
+    if (contactId && (!phone || !email || !name || !fbc || !fbp)) {
       const { data: contact } = await supabaseAdmin
         .from("contacts")
-        .select("id, name, phone, email")
+        .select("id, name, phone, email, meta_fbc, meta_fbp")
         .eq("id", contactId)
         .maybeSingle();
 
@@ -298,6 +354,8 @@ export async function sendMetaCapiEvent(params: SendMetaCapiParams): Promise<Met
         if (!phone && contact.phone) phone = contact.phone;
         if (!email && contact.email) email = contact.email;
         if (!name && contact.name) name = contact.name;
+        if (!fbc && contact.meta_fbc) fbc = contact.meta_fbc;
+        if (!fbp && contact.meta_fbp) fbp = contact.meta_fbp;
       }
     }
 
@@ -321,9 +379,12 @@ export async function sendMetaCapiEvent(params: SendMetaCapiParams): Promise<Met
     const userData: Record<string, any> = {};
 
     const normalizedPhone = normalizePhone(phone);
-    const hashedPhone = hashSha256(normalizedPhone);
-    if (hashedPhone) {
-      userData.ph = [hashedPhone];
+    const hashedPhones = phoneVariants(normalizedPhone)
+      .map((p) => hashSha256(p))
+      .filter((h): h is string => !!h);
+    const hashedPhone = hashedPhones[0];
+    if (hashedPhones.length > 0) {
+      userData.ph = hashedPhones;
     }
 
     const hashedEmail = hashSha256(email);
@@ -342,15 +403,24 @@ export async function sendMetaCapiEvent(params: SendMetaCapiParams): Promise<Met
       userData.ln = [hashedLn];
     }
 
-    // Regra da Meta: ctwa_clid NUNCA deve ser hasheado!
+    // Regra da Meta: fbc, fbp e ctwa_clid NUNCA devem ser hasheados!
+    const normalizedFbc = buildFbc(fbc);
+    if (normalizedFbc) {
+      userData.fbc = normalizedFbc;
+    }
+    if (fbp?.trim()) {
+      userData.fbp = fbp.trim();
+    }
+
     if (ctwaClid) {
       userData.ctwa_clid = ctwaClid.trim();
     }
 
     // Se nenhum identificador foi fornecido, a Meta rejeitará o evento
-    if (!hashedPhone && !hashedEmail && !userData.ctwa_clid) {
+    if (!hashedPhone && !hashedEmail && !userData.ctwa_clid && !userData.fbc && !userData.fbp) {
       // Para testes manuais onde o contato não foi especificado, usamos um fallback de teste seguro
-      if (params.testEventCode || config.test_event_code || !params.contactId) {
+      // Somente em disparos de teste explícitos: nunca enviar dados fictícios em eventos reais
+      if (params.testEventCode) {
         userData.ph = [hashSha256("5511999999999")!];
         userData.em = [hashSha256("test@atendi.ai")!];
       } else {
@@ -434,7 +504,7 @@ export async function sendMetaCapiEvent(params: SendMetaCapiParams): Promise<Met
 
     // 8. Gravar log em meta_capi_logs (com tolerância a falha caso tabela não exista)
     try {
-      await supabaseAdmin.from("meta_capi_logs").insert({
+      const { error: logInsertErr } = await supabaseAdmin.from("meta_capi_logs").insert({
         company_id: companyId,
         contact_id: contactId || null,
         opportunity_id: params.opportunityId || null,
@@ -449,11 +519,15 @@ export async function sendMetaCapiEvent(params: SendMetaCapiParams): Promise<Met
         response_payload: responseJson,
         error_message: errorMessage,
       });
-    } catch (logErr: any) {
-      // Ignora erro 42P01 (relação meta_capi_logs inexistente)
-      if (logErr?.code !== "42P01") {
-        console.warn("[Meta CAPI] Falha ao registrar log:", logErr);
+      if (logInsertErr) {
+        console.error(
+          "[Meta CAPI] Falha ao gravar log em meta_capi_logs:",
+          logInsertErr.code,
+          logInsertErr.message,
+        );
       }
+    } catch (logErr: any) {
+      console.warn("[Meta CAPI] Exceção ao registrar log:", logErr);
     }
 
     if (!isSuccess) {

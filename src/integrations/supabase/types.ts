@@ -505,6 +505,8 @@ export type Database = {
           name: string
           phone: string | null
           source: string | null
+          meta_fbc: string | null
+          meta_fbp: string | null
           source_details: string | null
           tags: string[]
           unit_id: string | null
@@ -519,6 +521,8 @@ export type Database = {
           name: string
           phone?: string | null
           source?: string | null
+          meta_fbc?: string | null
+          meta_fbp?: string | null
           source_details?: string | null
           tags?: string[]
           unit_id?: string | null
@@ -533,6 +537,8 @@ export type Database = {
           name?: string
           phone?: string | null
           source?: string | null
+          meta_fbc?: string | null
+          meta_fbp?: string | null
           source_details?: string | null
           tags?: string[]
           unit_id?: string | null
