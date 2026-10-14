@@ -899,7 +899,7 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
       const phoneVariants = phoneNumber ? getPhoneVariants(phoneNumber) : [];
       let contactQuery = supabaseAdmin
         .from("contacts")
-        .select("id, name, whatsapp_lid, merged_into_id")
+        .select("id, name, whatsapp_lid, merged_into_id, unit_id")
         .eq("company_id", company_id);
 
       if (extractedLid && phoneVariants.length > 0) {
@@ -961,6 +961,11 @@ export async function processEvogoWebhookBody(body: any): Promise<void> {
         // Lock in the LID if we discovered it
         if (extractedLid && targetContact.whatsapp_lid !== extractedLid) {
           updates.whatsapp_lid = extractedLid;
+        }
+
+        // Contato sem unidade herda a unidade da instância por onde a conversa chegou
+        if (!targetContact.unit_id && unit_id) {
+          updates.unit_id = unit_id;
         }
 
         if (Object.keys(updates).length > 0) {

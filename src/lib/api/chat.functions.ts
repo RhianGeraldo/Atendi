@@ -794,11 +794,21 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
 
     if (existingContacts && existingContacts.length > 0) {
       contactIds = existingContacts.map((c) => c.merged_into_id || c.id);
+
+      // Contato sem unidade herda a unidade da instância usada no envio
+      if (instance.unit_id) {
+        await supabaseAdmin
+          .from("contacts")
+          .update({ unit_id: instance.unit_id })
+          .in("id", contactIds)
+          .is("unit_id", null);
+      }
     } else {
       const { data: newContact, error: contactErr } = await supabaseAdmin
         .from("contacts")
         .insert({
           company_id: data.companyId,
+          unit_id: instance.unit_id || null,
           name: rawPhone, // They can edit later
           phone: rawPhone,
         })
