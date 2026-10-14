@@ -10,6 +10,12 @@ import { conversationsActions } from "./actions/conversations";
 import { quickMessagesActions } from "./actions/quick-messages";
 import { intelligenceActions } from "./actions/intelligence";
 import { callsActions } from "./actions/calls";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import {
+  assertCompanyUnitAccess,
+  assertContactAccess,
+  assertConversationAccess,
+} from "@/lib/server/access-control";
 
 export const allCopilotActions: CopilotAction[] = [
   ...settingsActions,
@@ -76,6 +82,35 @@ export function getAuthorizedCopilotActions(context: CopilotContext): CopilotAct
   return allCopilotActions.filter((action) => isActionAuthorized(action, context));
 }
 
+async function assertCopilotParamsScope(params: any, context: CopilotContext) {
+  if (typeof params.conversa_id === "string" && params.conversa_id) {
+    await assertConversationAccess(context.userId, params.conversa_id);
+  }
+  if (typeof params.contato_id === "string" && params.contato_id) {
+    await assertContactAccess(context.userId, params.contato_id);
+  }
+  if (typeof params.oportunidade_id === "string" && params.oportunidade_id) {
+    const { data: opp } = await supabaseAdmin
+      .from("opportunities")
+      .select("company_id, unit_id")
+      .eq("id", params.oportunidade_id)
+      .maybeSingle();
+    if (!opp) throw new Error("Oportunidade não encontrada.");
+    await assertCompanyUnitAccess(context.userId, (opp as any).company_id, opp.unit_id);
+  }
+  if (typeof params.tarefa_id === "string" && params.tarefa_id) {
+    const { data: task } = await supabaseAdmin
+      .from("tasks")
+      .select("company_id, unit_id, assigned_to")
+      .eq("id", params.tarefa_id)
+      .maybeSingle();
+    if (!task) throw new Error("Tarefa não encontrada.");
+    if (task.assigned_to !== context.userId) {
+      await assertCompanyUnitAccess(context.userId, (task as any).company_id, task.unit_id);
+    }
+  }
+}
+
 /**
  * Executa uma ação de forma segura
  */
@@ -98,6 +133,13 @@ export async function executeCopilotAction(
       success: false,
       message: `Acesso negado: Seu perfil de ${context.userRole} não tem permissão para executar "${action.label}".`,
     };
+  }
+
+  // Guarda de escopo: IDs recebidos precisam estar ao alcance do usuário (unidade/Rede/empresa)
+  try {
+    await assertCopilotParamsScope(params || {}, context);
+  } catch (err: any) {
+    return { success: false, message: `Acesso negado: ${err?.message || "fora do seu escopo."}` };
   }
 
   try {

@@ -40,10 +40,9 @@ export async function assignDepartmentRoundRobin(
       return null;
     }
 
-    // Filter by unit if necessary
+    // Unidade: só quem está vinculado a ela. Rede (sem unidade): só quem tem acesso Matriz/Rede
     const validAgents = rawAgents.filter((a) => {
-      if (!unitId) return true; // Global scope
-      if (a.has_matriz_access) return true;
+      if (!unitId) return Boolean(a.has_matriz_access);
       return a.user_units?.some((uu: any) => uu.unit_id === unitId);
     });
 

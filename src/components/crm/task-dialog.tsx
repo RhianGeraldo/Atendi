@@ -99,15 +99,9 @@ export function TaskDialog({
             unitId = convData.unit_id;
           }
         }
-        
-        if (!unitId) {
-          const { data: fallbackUnit } = await supabase.from("units").select("id").limit(1).maybeSingle();
-          if (fallbackUnit?.id) unitId = fallbackUnit.id;
-        }
+        // Sem unidade definida, a tarefa fica na Rede da empresa (o responsável continua vendo)
       }
 
-      if (!taskToEdit && !unitId) throw new Error("Não foi possível determinar a unidade para esta tarefa.");
-      
       const payload: any = {
         title,
         task_type: taskType,
@@ -118,7 +112,7 @@ export function TaskDialog({
       };
 
       if (!taskToEdit) {
-        payload.unit_id = unitId;
+        payload.unit_id = unitId || null;
         if (contactId) payload.contact_id = contactId;
         if (opportunityId) payload.opportunity_id = opportunityId;
         

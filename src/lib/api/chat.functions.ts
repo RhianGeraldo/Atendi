@@ -2,6 +2,13 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import {
+  assertCompanyAccess,
+  assertCompanyUnitAccess,
+  assertContactAccess,
+  assertConversationAccess,
+  assertMessageAccess,
+} from "@/lib/server/access-control";
 import { abrirCanal, destinatarioDe } from "@/lib/canais/motor";
 import type { CanalAberto, Destinatario } from "@/lib/canais/tipos";
 import {
@@ -748,6 +755,8 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       throw new Error("Instance not found or access denied.");
     }
 
+    await assertCompanyUnitAccess(userId, data.companyId, instance.unit_id);
+
     const host = instance.companies?.evogo_host;
     const token = instance.evogo_api_key;
     const instanceName = instance.instance_name;
@@ -1034,6 +1043,8 @@ export const fetchContactInfoAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertContactAccess(context.userId, data.contactId);
+
     const { supabase } = context;
 
     let whatsappInstanceId = data.whatsappInstanceId;
@@ -1171,6 +1182,7 @@ export const createLabelAction = createServerFn({ method: "POST" })
     }
 
     if (!targetCompanyId) return { success: false, error: "Empresa não encontrada" };
+    await assertCompanyAccess(context.userId, targetCompanyId);
 
     const randomColor = `#${Math.floor(Math.random() * 16777215)
       .toString(16)
@@ -1206,6 +1218,15 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertContactAccess(context.userId, data.contactId);
+    const { data: labelRow } = await supabaseAdmin
+      .from("labels")
+      .select("company_id")
+      .eq("id", data.labelId)
+      .maybeSingle();
+    if (!labelRow) return { success: false, error: "Etiqueta não encontrada." };
+    await assertCompanyAccess(context.userId, labelRow.company_id);
+
     // Local system labels management
     if (data.action === "add") {
       const { error } = await supabaseAdmin
@@ -1242,7 +1263,9 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       emoji: z.string(),
     }),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    await assertConversationAccess(context.userId, data.conversationId);
+
     // 1. Get conversation and message
     const { data: conv } = await supabaseAdmin
       .from("conversations")
@@ -1258,6 +1281,7 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
       .from("messages")
       .select("id, remote_msg_id, sender_type, participant_jid, reactions, metadata, is_internal")
       .eq("id", data.messageId)
+      .eq("conversation_id", data.conversationId)
       .single();
 
     if (!msg) throw new Error("Mensagem não encontrada.");
@@ -1436,6 +1460,8 @@ export const assignConversationAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertConversationAccess(context.userId, data.conversationId);
+
     const { supabase, userId } = context;
 
     // 1. Get current conversation to preserve existing department
@@ -1543,6 +1569,23 @@ export const transferConversationAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertConversationAccess(context.userId, data.conversationId);
+
+    // O destino precisa ser da mesma empresa e ter acesso à conversa
+    if (data.targetType === "agent") {
+      await assertConversationAccess(data.targetId, data.conversationId).catch(() => {
+        throw new Error("O atendente de destino não tem acesso a esta conversa.");
+      });
+    } else {
+      const [{ data: targetDept }, { data: convScope }] = await Promise.all([
+        supabaseAdmin.from("departments").select("company_id").eq("id", data.targetId).maybeSingle(),
+        supabaseAdmin.from("conversations").select("company_id").eq("id", data.conversationId).maybeSingle(),
+      ]);
+      if (!targetDept || targetDept.company_id !== (convScope as any)?.company_id) {
+        throw new Error("Departamento de destino inválido.");
+      }
+    }
+
     const { userId } = context;
 
     const updateData: any = {};
@@ -1555,13 +1598,13 @@ export const transferConversationAction = createServerFn({ method: "POST" })
       // Fetch company and unit info to check Round Robin
       const { data: convInfo } = await supabaseAdmin
         .from("conversations")
-        .select("company_id, whatsapp_instances(unit_id)")
+        .select("company_id, unit_id")
         .eq("id", data.conversationId)
         .limit(1)
         .maybeSingle();
 
       if (convInfo?.company_id) {
-        const unitId = convInfo.whatsapp_instances?.[0]?.unit_id || null;
+        const unitId = (convInfo as any).unit_id || null;
         const { assignDepartmentRoundRobin } = await import("../server/routing");
         const roundRobinAgent = await assignDepartmentRoundRobin(
           convInfo.company_id,
@@ -2016,7 +2059,9 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
       whatsappInstanceId: z.string().uuid().optional().nullable(),
     }),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    await assertContactAccess(context.userId, data.contactId);
+
     const res = await syncContactProfile(data.contactId, data.whatsappInstanceId);
     if (!res.success) {
       throw new Error(res.message);
@@ -2034,6 +2079,8 @@ export const editMessageAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertConversationAccess(context.userId, data.conversationId);
+
     const { userId } = context;
 
     // 1. Get conversation and message
@@ -2054,6 +2101,7 @@ export const editMessageAction = createServerFn({ method: "POST" })
         "id, remote_msg_id, sender_type, sender_id, media_type, metadata, is_internal, content, conversation_id",
       )
       .eq("id", data.messageId)
+      .eq("conversation_id", data.conversationId)
       .single();
 
     if (!msg) throw new Error("Mensagem não encontrada.");
@@ -2193,6 +2241,8 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertMessageAccess(context.userId, data.messageId);
+
     const { userId } = context;
 
     // 1. Get message
@@ -2328,6 +2378,8 @@ export const transcribeAudioAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertMessageAccess(context.userId, data.messageId);
+
     const { supabase, userId } = context;
 
     const { data: msg } = await supabaseAdmin
@@ -2472,6 +2524,8 @@ export const fixMessageTextAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertConversationAccess(context.userId, data.conversationId);
+
     const { userId } = context;
 
     const { data: conv } = await supabaseAdmin
@@ -2648,7 +2702,7 @@ export const transcribeCallAction = createServerFn({ method: "POST" })
       callId: z.string().uuid(),
     }),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     // 1. Buscar o call_log com a recording_url e company_id
     const { data: callLog } = await supabaseAdmin
       .from("call_logs")
@@ -2659,6 +2713,7 @@ export const transcribeCallAction = createServerFn({ method: "POST" })
     if (!callLog?.recording_url) {
       throw new Error("Gravação não disponível para esta chamada.");
     }
+    await assertCompanyAccess(context.userId, callLog.company_id);
 
     // 2. Buscar configurações de IA da empresa
     const { data: company } = await supabaseAdmin
@@ -2770,6 +2825,8 @@ export const salesCoachAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertConversationAccess(context.userId, data.conversationId);
+
     const { userId } = context;
 
     // 1. Obter a empresa da conversa
@@ -2928,6 +2985,8 @@ export const salesCoachSuggestAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertConversationAccess(context.userId, data.conversationId);
+
     const { userId } = context;
 
     // 1. Obter a empresa e o último relatório
@@ -3153,6 +3212,8 @@ export const resolveConversationAction = createServerFn({ method: "POST" })
     }),
   )
   .handler(async ({ data, context }) => {
+    await assertConversationAccess(context.userId, data.conversationId);
+
     try {
       await internalResolveConversation(
         data.conversationId,

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { assertConversationAccess } from "@/lib/server/access-control";
 import { sendPlatformMessage } from "@/lib/server/message-sender";
 import { sendEvogoText } from "@/lib/evogo";
 import { calculateConversationSla, DEFAULT_SLA_SETTINGS, type SlaSettings } from "@/lib/sla";
@@ -1118,6 +1119,25 @@ export const conversationsActions: CopilotAction[] = [
 
       if (convErr || !conv || (conv.contacts as any)?.company_id !== context.companyId) {
         return { success: false, message: "Conversa não encontrada ou acesso negado." };
+      }
+
+      // O destino precisa pertencer à mesma empresa (e o atendente precisa ter acesso à conversa)
+      if (params.tipo_destino === "atendente") {
+        try {
+          await assertConversationAccess(params.destino_id, params.conversa_id);
+        } catch {
+          return { success: false, message: "O atendente de destino não tem acesso a esta conversa." };
+        }
+      } else {
+        const destinoTable = params.tipo_destino === "unidade" ? "units" : "departments";
+        const { data: destino } = await supabaseAdmin
+          .from(destinoTable)
+          .select("company_id")
+          .eq("id", params.destino_id)
+          .maybeSingle();
+        if (!destino || destino.company_id !== context.companyId) {
+          return { success: false, message: "Destino da transferência inválido." };
+        }
       }
 
       const updatePayload: any = {};
