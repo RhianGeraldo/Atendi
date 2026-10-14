@@ -193,6 +193,26 @@ function ConversationsPage() {
     enabled: !!profile?.id && !isAdmin,
   });
 
+  // Escopo de unidade para não-admins: suas unidades + a Rede (unit_id nulo) se tiver acesso à Matriz/Rede
+  const applyUnitScope = <Q extends { in: any; or: any; eq: any }>(query: Q): Q => {
+    if (isAdmin) return query;
+    const allowedUnitIds = myUnits || [];
+    if (profile?.has_matriz_access) {
+      const parts = ["unit_id.is.null"];
+      if (allowedUnitIds.length > 0) parts.push(`unit_id.in.(${allowedUnitIds.join(",")})`);
+      return query.or(parts.join(","));
+    }
+    if (allowedUnitIds.length > 0) return query.in("unit_id", allowedUnitIds);
+    return query.eq("unit_id", "00000000-0000-0000-0000-000000000000");
+  };
+
+  // Mesma regra do RLS: conversa de unidade exige vínculo; conversa da Rede exige acesso à Matriz/Rede
+  const canAccessConvScope = (unitId: string | null | undefined) => {
+    if (isAdmin) return true;
+    if (!unitId) return Boolean(profile?.has_matriz_access);
+    return (myUnits || []).includes(unitId);
+  };
+
   const { data: instances } = useQuery({
     queryKey: [
       "whatsapp_instances_filter",
@@ -214,13 +234,8 @@ function ConversationsPage() {
 
       if (selectedUnitId && selectedUnitId !== "all") {
         query = query.eq("unit_id", selectedUnitId);
-      } else if (!isAdmin && !profile?.has_matriz_access) {
-        const allowedUnitIds = myUnits || [];
-        if (allowedUnitIds.length > 0) {
-          query = query.in("unit_id", allowedUnitIds);
-        } else {
-          query = query.eq("unit_id", "00000000-0000-0000-0000-000000000000");
-        }
+      } else {
+        query = applyUnitScope(query);
       }
 
       // Se não for super admin nem admin da empresa, restringe ao departamento do atendente ou gerais
@@ -328,13 +343,8 @@ function ConversationsPage() {
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
-      } else if (!isAdmin && !profile?.has_matriz_access) {
-        const allowedUnitIds = myUnits || [];
-        if (allowedUnitIds.length > 0) {
-          query = query.in("unit_id", allowedUnitIds);
-        } else {
-          query = query.eq("unit_id", "00000000-0000-0000-0000-000000000000");
-        }
+      } else {
+        query = applyUnitScope(query);
       }
 
       if (instanceFilter && instanceFilter !== "all") {
@@ -557,8 +567,8 @@ function ConversationsPage() {
 
   // Consulta direta da conversa selecionada caso ela não esteja na primeira página ou aba atual da lista
   const { data: directSelectedConv, isLoading: isLoadingDirectConv } = useQuery({
-    queryKey: ["direct-conversation", selectedId],
-    enabled: !!selectedId,
+    queryKey: ["direct-conversation", selectedId, myUnits?.join(",")],
+    enabled: !!selectedId && !!profile && (isAdmin || myUnits !== undefined),
     queryFn: async () => {
       if (!selectedId) return null;
       const selectString =
@@ -570,6 +580,7 @@ function ConversationsPage() {
         .maybeSingle();
 
       if (error || !data) return null;
+      if (!canAccessConvScope((data as any).unit_id)) return null;
 
       const { data: recentDirectMsgs } = await supabase
         .from("messages")
@@ -666,13 +677,8 @@ function ConversationsPage() {
 
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
-      } else if (!isAdmin && !profile?.has_matriz_access) {
-        const allowedUnitIds = myUnits || [];
-        if (allowedUnitIds.length > 0) {
-          query = query.in("unit_id", allowedUnitIds);
-        } else {
-          query = query.eq("unit_id", "00000000-0000-0000-0000-000000000000");
-        }
+      } else {
+        query = applyUnitScope(query);
       }
 
       if (instanceFilter && instanceFilter !== "all") {
@@ -1054,6 +1060,11 @@ function ConversationsPage() {
           return null;
         }
 
+        // Permissão por unidade / Rede
+        if (!canAccessConvScope((data as any).unit_id)) {
+          return null;
+        }
+
         // Permissão por instância
         if (!isAdmin && instances) {
           const allowedIds = instances.map((inst: any) => inst.id);
@@ -1130,7 +1141,7 @@ function ConversationsPage() {
         return null;
       }
     },
-    [updateConversationInCache, activeCompanyId, isAdmin, instances, profile],
+    [updateConversationInCache, activeCompanyId, isAdmin, instances, profile, myUnits],
   );
 
   const updateUnreadCountsInCache = useCallback(

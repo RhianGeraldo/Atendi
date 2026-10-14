@@ -124,8 +124,9 @@ export function useGlobalNotifications() {
   const allowedUnitsRef = useRef<Set<string>>(new Set());
   const isSuperOrAdminCompany =
     profile?.role === "super_admin" ||
-    profile?.role === "admin_company" ||
-    Boolean(profile?.has_matriz_access);
+    profile?.role === "admin_company";
+  // Acesso à Matriz/Rede: conversas sem unidade (unit_id nulo)
+  const hasRedeAccess = isSuperOrAdminCompany || Boolean(profile?.has_matriz_access);
 
   // Canais que o usuário logado é membro (channel_id -> { isMuted: boolean })
   const myChannelMembershipsRef = useRef<Map<string, { isMuted: boolean }>>(new Map());
@@ -301,11 +302,12 @@ export function useGlobalNotifications() {
             }
           } else {
             // Conversa no Aguardando (fila geral) -> Notifica quem atende aquela unidade
-            if (!isSuperOrAdminCompany && convDetail.unit_id) {
-              if (!allowedUnitsRef.current.has(convDetail.unit_id)) {
-                // Operador não tem permissão para essa filial -> NÃO notifica
-                return;
-              }
+            if (!convDetail.unit_id) {
+              // Conversa da Rede -> só notifica admin ou quem tem acesso à Matriz/Rede
+              if (!hasRedeAccess) return;
+            } else if (!isSuperOrAdminCompany && !allowedUnitsRef.current.has(convDetail.unit_id)) {
+              // Operador não tem permissão para essa filial -> NÃO notifica
+              return;
             }
           }
 
@@ -584,5 +586,5 @@ export function useGlobalNotifications() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile?.id, activeCompanyId, navigate, isSuperOrAdminCompany]);
+  }, [profile?.id, activeCompanyId, navigate, isSuperOrAdminCompany, hasRedeAccess]);
 }

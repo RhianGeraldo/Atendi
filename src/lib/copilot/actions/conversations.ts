@@ -161,12 +161,16 @@ export const conversationsActions: CopilotAction[] = [
         .order("last_message_at", { ascending: false, nullsFirst: false });
 
       // Restringir às unidades do usuário quando não for admin com acesso matriz
-      const isAdminOrMatriz =
-        context.userRole === "admin_company" ||
-        context.userRole === "super_admin" ||
-        context.hasMatrizAccess;
-      if (!isAdminOrMatriz && context.userUnitIds.length > 0) {
-        query = query.in("unit_id", context.userUnitIds);
+      // Acesso à Matriz/Rede libera só as conversas sem unidade (Rede), não todas as unidades
+      const isAdmin = context.userRole === "admin_company" || context.userRole === "super_admin";
+      if (!isAdmin) {
+        const parts: string[] = [];
+        if (context.userUnitIds.length > 0) parts.push(`unit_id.in.(${context.userUnitIds.join(",")})`);
+        if (context.hasMatrizAccess) parts.push("unit_id.is.null");
+        if (parts.length === 0) {
+          return { success: true, message: "Você não está vinculado a nenhuma unidade.", data: [] };
+        }
+        query = query.or(parts.join(","));
       }
 
       if (targetStatus !== "all") {
