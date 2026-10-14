@@ -65,6 +65,8 @@ function triggerBrowserNotification({
       icon: icon || "/favicon.ico",
       tag: tag || `atendi-msg-${Date.now()}`,
       badge: "/favicon.ico",
+      // O som é tocado pelo próprio sistema (ICQ / iPhone); evita o som padrão do SO
+      silent: true,
     });
 
     notif.onclick = () => {
@@ -424,7 +426,7 @@ export function useGlobalNotifications() {
 
           // REGRA DE DIRECIONAMENTO POR USUÁRIO NA EQUIPE:
           // Se for no grupo e o usuário estiver nele (ou for DM dele, ou canal da empresa/unidade dele), notifica o usuário.
-          // Se o usuário silenciou o canal: NÃO notifica.
+          // Se o usuário silenciou o canal: NÃO notifica (exceto quando mencionado com @).
           let membership = myChannelMembershipsRef.current.get(channelId);
           if (membership === undefined) {
             try {
@@ -445,11 +447,11 @@ export function useGlobalNotifications() {
                   channelData?.scope === "company" ||
                   (channelData?.scope === "unit" && channelData.unitId && allowedUnitsRef.current.has(channelData.unitId));
 
+                // Não guarda resultado negativo: as unidades permitidas carregam de forma assíncrona
+                // e o usuário pode ser adicionado ao grupo depois, então revalida na próxima mensagem
                 if (isEligible) {
                   membership = { isMuted: false };
                   myChannelMembershipsRef.current.set(channelId, membership);
-                } else {
-                  myChannelMembershipsRef.current.set(channelId, null as any);
                 }
               }
             } catch (err) {
@@ -457,8 +459,18 @@ export function useGlobalNotifications() {
             }
           }
 
-          // Se não é membro ou silenciou o canal: NÃO notifica
-          if (!membership || membership.isMuted) {
+          // Menção direta (@nome / @todos) fura o silenciamento do grupo
+          const myName = profileRef.current?.name?.toLowerCase();
+          const contentLower = String(newMsg.content || "").toLowerCase();
+          const mentionsMe =
+            channelData?.type !== "direct" &&
+            (Boolean(newMsg.metadata?.has_all_mention) ||
+              Boolean(newMsg.metadata?.mentions?.includes(currentUserId)) ||
+              (myName ? contentLower.includes(`@${myName}`) : false) ||
+              contentLower.includes("@todos"));
+
+          // Se não é membro ou silenciou o canal (sem menção): NÃO notifica
+          if (!membership || (membership.isMuted && !mentionsMe)) {
             return;
           }
 

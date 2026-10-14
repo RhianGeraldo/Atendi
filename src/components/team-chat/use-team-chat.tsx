@@ -31,6 +31,8 @@ function notifyBrowser({
       icon: icon || "/favicon.ico",
       badge: "/favicon.ico",
       tag: "atendi-team-message",
+      // O som (ICQ) é tocado pelo hook global; evita o som padrão do SO
+      silent: true,
     });
 
     notif.onclick = () => {

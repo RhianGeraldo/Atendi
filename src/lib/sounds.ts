@@ -1,103 +1,142 @@
 /**
  * Utilitários de áudio / efeitos sonoros do sistema Atendi
- * 
+ *
  * - Mensagens recebidas de clientes: Toque clássico iPhone Notification
- * - Mensagens recebidas da equipe (chat interno): Toque clássico ICQ ("Uh-oh!")
+ * - Mensagens recebidas da equipe (chat interno, grupos e conversas diretas): Toque clássico ICQ ("Uh-oh!")
  * - Mensagens enviadas: Silencioso (sem som)
+ *
+ * Os mp3 são decodificados uma única vez em um AudioContext compartilhado, liberado na primeira
+ * interação do usuário. Isso evita o bloqueio de autoplay que `new Audio().play()` sofre com a aba
+ * em segundo plano. Se o Web Audio não estiver disponível, cai para HTMLAudioElement com o MESMO mp3.
  */
 
-let audioUnlocked = false;
-let lastTeamSoundTimestamp = 0;
-let lastClientSoundTimestamp = 0;
+const SOUNDS = {
+  team: { url: "/sounds/icq-uh-oh.mp3", volume: 0.8 },
+  client: { url: "/sounds/iphone-notification.mp3", volume: 0.85 },
+} as const;
 
-let cachedIcqAudio: HTMLAudioElement | null = null;
-let cachedClientAudio: HTMLAudioElement | null = null;
+type SoundKey = keyof typeof SOUNDS;
 
-// Desbloqueia o contexto de áudio na primeira interação do usuário com o site (evita bloqueio de Autoplay do navegador)
+let audioCtx: AudioContext | null = null;
+const buffers: Partial<Record<SoundKey, AudioBuffer>> = {};
+const loading: Partial<Record<SoundKey, Promise<AudioBuffer | null>>> = {};
+const lastPlayed: Record<SoundKey, number> = { team: 0, client: 0 };
+
+function getAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  if (audioCtx) return audioCtx;
+  const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioCtxClass) return null;
+  try {
+    audioCtx = new AudioCtxClass();
+  } catch {
+    audioCtx = null;
+  }
+  return audioCtx;
+}
+
+function loadBuffer(key: SoundKey): Promise<AudioBuffer | null> {
+  if (buffers[key]) return Promise.resolve(buffers[key]!);
+  if (loading[key]) return loading[key]!;
+
+  const ctx = getAudioContext();
+  if (!ctx) return Promise.resolve(null);
+
+  loading[key] = fetch(SOUNDS[key].url)
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status} ao carregar ${SOUNDS[key].url}`);
+      return res.arrayBuffer();
+    })
+    .then((data) => ctx.decodeAudioData(data))
+    .then((buffer) => {
+      buffers[key] = buffer;
+      return buffer;
+    })
+    .catch((err) => {
+      console.warn(`[Audio] Falha ao carregar som "${key}":`, err);
+      delete loading[key];
+      return null;
+    });
+
+  return loading[key]!;
+}
+
+// Desbloqueia o contexto de áudio a cada interação até ele ficar "running" (evita bloqueio de Autoplay do navegador)
 if (typeof window !== "undefined") {
   const unlockAudio = () => {
-    if (audioUnlocked) return;
-    audioUnlocked = true;
-
-    try {
-      if (!cachedIcqAudio) {
-        cachedIcqAudio = new Audio("/sounds/icq-uh-oh.mp3");
-        cachedIcqAudio.volume = 0.8;
-        cachedIcqAudio.load();
-      }
-      if (!cachedClientAudio) {
-        cachedClientAudio = new Audio("/sounds/iphone-notification.mp3");
-        cachedClientAudio.volume = 0.85;
-        cachedClientAudio.load();
-      }
-    } catch {}
-
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    loadBuffer("team");
+    loadBuffer("client");
+    if (ctx.state !== "running") {
+      ctx.resume().catch(() => {});
+      return;
+    }
     window.removeEventListener("pointerdown", unlockAudio);
     window.removeEventListener("keydown", unlockAudio);
     window.removeEventListener("touchstart", unlockAudio);
   };
 
-  window.addEventListener("pointerdown", unlockAudio, { passive: true, once: true });
-  window.addEventListener("keydown", unlockAudio, { passive: true, once: true });
-  window.addEventListener("touchstart", unlockAudio, { passive: true, once: true });
+  window.addEventListener("pointerdown", unlockAudio, { passive: true });
+  window.addEventListener("keydown", unlockAudio, { passive: true });
+  window.addEventListener("touchstart", unlockAudio, { passive: true });
 }
 
-/**
- * Fallback sintético via Web Audio API para o ICQ "Uh-oh" (D5 ~587Hz -> A5 ~880Hz)
- */
-function playSyntheticIcqSound() {
-  if (typeof window === "undefined") return;
+function playWithHtmlAudio(key: SoundKey) {
   try {
-    const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtxClass) return;
-    const ctx = new AudioCtxClass();
-
-    if (ctx.state === "suspended") {
-      ctx.resume().catch(() => {});
-    }
-
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.type = "sine";
-
-    osc.frequency.setValueAtTime(587.33, now);
-    osc.frequency.setValueAtTime(880, now + 0.08);
-
-    gain.gain.setValueAtTime(0.25, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-
-    osc.start(now);
-    osc.stop(now + 0.3);
-  } catch {}
+    const audio = new Audio(SOUNDS[key].url);
+    audio.volume = SOUNDS[key].volume;
+    audio.play().catch((err) => {
+      console.warn(`[Audio] Navegador bloqueou o som "${key}" (interaja com a página para liberar):`, err);
+    });
+  } catch (err) {
+    console.warn(`[Audio] Erro ao reproduzir som "${key}":`, err);
+  }
 }
 
-/**
- * Reproduz o som de nova mensagem RECEBIDA DA EQUIPE (Chat Interno)
- * Som: Clássico ICQ ("Uh-oh!")
- */
-export function playTeamMessageSound() {
+async function playSound(key: SoundKey) {
   if (typeof window === "undefined") return;
 
   const now = Date.now();
-  if (now - lastTeamSoundTimestamp < 400) return;
-  lastTeamSoundTimestamp = now;
+  if (now - lastPlayed[key] < 400) return;
+  lastPlayed[key] = now;
+
+  const ctx = getAudioContext();
+  if (!ctx) {
+    playWithHtmlAudio(key);
+    return;
+  }
+
+  if (ctx.state !== "running") {
+    await ctx.resume().catch(() => {});
+  }
+
+  const buffer = await loadBuffer(key);
+  if (!buffer || ctx.state !== "running") {
+    playWithHtmlAudio(key);
+    return;
+  }
 
   try {
-    const audio = new Audio("/sounds/icq-uh-oh.mp3");
-    audio.volume = 0.8;
-    const playPromise = audio.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(() => {
-        playSyntheticIcqSound();
-      });
-    }
-  } catch {
-    playSyntheticIcqSound();
+    const source = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    gain.gain.value = SOUNDS[key].volume;
+    source.buffer = buffer;
+    source.connect(gain);
+    gain.connect(ctx.destination);
+    source.start();
+  } catch (err) {
+    console.warn(`[Audio] Erro no Web Audio, usando fallback para "${key}":`, err);
+    playWithHtmlAudio(key);
   }
+}
+
+/**
+ * Reproduz o som de nova mensagem RECEBIDA DA EQUIPE (Chat Interno — grupos e conversas diretas)
+ * Som: Clássico ICQ ("Uh-oh!")
+ */
+export function playTeamMessageSound() {
+  void playSound("team");
 }
 
 /**
@@ -105,24 +144,7 @@ export function playTeamMessageSound() {
  * Som: Clássico iPhone Notification
  */
 export function playClientMessageSound() {
-  if (typeof window === "undefined") return;
-
-  const now = Date.now();
-  if (now - lastClientSoundTimestamp < 400) return;
-  lastClientSoundTimestamp = now;
-
-  try {
-    const audio = new Audio("/sounds/iphone-notification.mp3");
-    audio.volume = 0.85;
-    const playPromise = audio.play();
-    if (playPromise !== undefined) {
-      playPromise.catch((err) => {
-        console.warn("[Audio] Não foi possível reproduzir som de cliente:", err);
-      });
-    }
-  } catch (err) {
-    console.warn("[Audio] Erro ao instanciar som de cliente:", err);
-  }
+  void playSound("client");
 }
 
 /**
