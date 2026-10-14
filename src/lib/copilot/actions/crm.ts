@@ -322,8 +322,9 @@ export const crmActions: CopilotAction[] = [
         }
       }
 
-      let unitId = context.unitId || null;
-      if (!unitId && params.contato_id) {
+      // A oportunidade herda a unidade do contato; a unidade do contexto é só fallback
+      let unitId: string | null = null;
+      if (params.contato_id) {
         const { data: c } = await supabaseAdmin
           .from("contacts")
           .select("unit_id")
@@ -331,6 +332,7 @@ export const crmActions: CopilotAction[] = [
           .maybeSingle();
         if (c?.unit_id) unitId = c.unit_id;
       }
+      if (!unitId) unitId = context.unitId || null;
       if (!unitId && stageId) {
         const { data: st } = await supabaseAdmin
           .from("pipeline_stages")

@@ -601,7 +601,18 @@ export function OpportunityDialog({
 
   const saveOpportunity = useMutation({
     mutationFn: async () => {
-      const effectiveUnitId = selectedUnitId || fallbackUnit?.id;
+      // A oportunidade herda a unidade do contato; o filtro global de unidade é só fallback
+      let contactUnitId: string | null = null;
+      if (contactId) {
+        const { data: contactRow } = await supabase
+          .from("contacts")
+          .select("unit_id")
+          .eq("id", contactId)
+          .maybeSingle();
+        contactUnitId = contactRow?.unit_id || null;
+      }
+      const effectiveUnitId =
+        opportunity?.unit_id || contactUnitId || selectedUnitId || fallbackUnit?.id;
       if (!effectiveUnitId) throw new Error("Crie uma unidade primeiro para salvar oportunidades.");
 
       const payload = {
