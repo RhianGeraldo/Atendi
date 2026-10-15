@@ -31,10 +31,14 @@ function errorText(err: unknown): string {
   return String(err);
 }
 
-async function markDone(id: string) {
-  await (supabaseAdmin.from("webhook_inbox" as any) as any)
-    .update({ status: "done", payload: null, processed_at: new Date().toISOString(), last_error: null })
-    .eq("id", id);
+async function markDone(id: string, keepPayload = false) {
+  const update: Record<string, unknown> = {
+    status: "done",
+    processed_at: new Date().toISOString(),
+    last_error: null,
+  };
+  if (!keepPayload) update.payload = null;
+  await (supabaseAdmin.from("webhook_inbox" as any) as any).update(update).eq("id", id);
 }
 
 async function markError(id: string, attempts: number, err: unknown) {
@@ -61,7 +65,13 @@ async function markError(id: string, attempts: number, err: unknown) {
 export async function processWithInbox(
   provider: string,
   payload: any,
-  meta: { event?: string | null; instanceName?: string | null; externalId?: string | null },
+  meta: {
+    event?: string | null;
+    instanceName?: string | null;
+    externalId?: string | null;
+    /** Mantém o payload após o sucesso (para diagnóstico; some na limpeza de 3 dias) */
+    keepPayload?: boolean;
+  },
   processor: Processor,
 ): Promise<void> {
   let inboxId: string | null = null;
@@ -92,7 +102,7 @@ export async function processWithInbox(
 
   try {
     await processor(payload, { isRetry: false });
-    await markDone(inboxId);
+    await markDone(inboxId, meta.keepPayload);
   } catch (err) {
     console.error(`[webhook-inbox] Falha ao processar ${provider} (${inboxId}), será reprocessado:`, errorText(err));
     await markError(inboxId, 1, err);

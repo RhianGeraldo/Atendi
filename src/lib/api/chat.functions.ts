@@ -30,6 +30,11 @@ import {
   checkStevoUser,
 } from "../stevo";
 import { getPhoneVariants } from "@/lib/utils";
+import {
+  isProvisionalPhone,
+  promoteProvisionalContact,
+  rememberLid,
+} from "@/lib/server/whatsapp-lid";
 import { getCompanyPlaybookSummary } from "./training.functions";
 import { ZernioClient } from "../canais/zernio/client";
 import { persistirAvatarContatoNoStorage } from "../avatar-storage";
@@ -725,6 +730,21 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     if (msgRes.error) {
       console.error("Failed to save message in DB:", msgRes.error);
       throw new Error("Message sent but failed to save in history.");
+    }
+
+    // Envio para contato provisório (telefone = LID) e a API devolveu o número real:
+    // aprende o par e corrige o contato (funções não lançam erro)
+    const contatoConv = (conv as any)?.contacts;
+    if (
+      typeof evogoChatJid === "string" &&
+      evogoChatJid.endsWith("@s.whatsapp.net") &&
+      contatoConv?.company_id &&
+      isProvisionalPhone(contatoConv.phone, contatoConv.whatsapp_lid)
+    ) {
+      const realPhone = evogoChatJid.split("@")[0];
+      const lid = contatoConv.whatsapp_lid || contatoConv.phone;
+      await rememberLid(contatoConv.company_id, lid, realPhone, "send");
+      await promoteProvisionalContact(contatoConv.company_id, lid, realPhone);
     }
 
     return { success: true, message: msgRes.data };

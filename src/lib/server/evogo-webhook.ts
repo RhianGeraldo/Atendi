@@ -7,6 +7,13 @@ import { extractExternalAdReply, processAndCacheAdPreview } from "./ad-preview-c
 import { dispatchAutomationEvent } from "./automation-engine";
 import { sendMetaCapiEvent } from "./meta-capi";
 import { drainInbox, processWithInbox, type InboxProcessOptions } from "./webhook-inbox";
+import {
+  isProvisionalPhone,
+  learnLidFromOwnMessage,
+  promoteProvisionalContact,
+  rememberLid,
+  resolveLidPhone,
+} from "./whatsapp-lid";
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
 export async function handleEvogoWebhook(request: Request): Promise<Response> {
@@ -39,6 +46,8 @@ export async function handleEvogoWebhook(request: Request): Promise<Response> {
           event: body.event,
           instanceName: body.instanceName || body.instance || null,
           externalId: body.data?.Info?.ID || body.data?.key?.id || null,
+          // Eventos com @lid ficam guardados para diagnóstico de contatos LID/número
+          keepPayload: porta.corpoBruto.includes("@lid"),
         },
         processEvogoWebhookBody,
       );
@@ -110,6 +119,9 @@ export async function processEvogoWebhookBody(
           .single();
 
         if (instance) {
+          // Guarda o par mesmo sem contato: o PushName costuma chegar antes da 1ª mensagem
+          await rememberLid(instance.company_id, lidNumber, realNumber, "pushname");
+
           const { data: contact } = await supabaseAdmin
             .from("contacts")
             .select("id, phone")
@@ -874,16 +886,36 @@ export async function processEvogoWebhookBody(
         department_id: instanceDepartmentId,
       } = instance;
 
+      // Mensagem trouxe o par LID + número: guarda e corrige contato provisório (telefone = LID)
+      if (extractedLid && phoneNumber && phoneNumber !== extractedLid) {
+        await rememberLid(company_id, extractedLid, phoneNumber, "message");
+        await promoteProvisionalContact(company_id, extractedLid, phoneNumber);
+      }
+
       // Se phoneNumber for nulo mas houver extractedLid, resolve via contato existente na empresa
       if (!phoneNumber && extractedLid) {
-        const { data: contactByLid } = await supabaseAdmin
+        // Pode haver mais de um contato com o LID (provisório + real): prefere o número real
+        const { data: contactsByLid } = await supabaseAdmin
           .from("contacts")
           .select("id, phone, name")
           .eq("company_id", company_id)
           .eq("whatsapp_lid", extractedLid)
-          .maybeSingle();
+          .limit(5);
+        const contactByLid =
+          (contactsByLid || []).find((c) => c.phone && !isProvisionalPhone(c.phone, extractedLid)) ||
+          (contactsByLid || [])[0];
+        const knownPhone =
+          contactByLid?.phone && !isProvisionalPhone(contactByLid.phone, extractedLid)
+            ? contactByLid.phone
+            : await resolveLidPhone(company_id, extractedLid);
 
-        if (contactByLid?.phone) {
+        if (knownPhone) {
+          phoneNumber = knownPhone;
+          console.log(
+            `[evogo-webhook] Telefone resolvido pelo whatsapp_lid ${extractedLid}: ${phoneNumber}`,
+          );
+          await promoteProvisionalContact(company_id, extractedLid, knownPhone);
+        } else if (contactByLid?.phone) {
           phoneNumber = contactByLid.phone;
           console.log(
             `[evogo-webhook] Telefone resolvido pelo whatsapp_lid ${extractedLid}: ${phoneNumber}`,
@@ -925,22 +957,41 @@ export async function processEvogoWebhookBody(
       let activeConv = null;
 
       const phoneVariants = phoneNumber ? getPhoneVariants(phoneNumber) : [];
-      let contactQuery = supabaseAdmin
-        .from("contacts")
-        .select("id, name, whatsapp_lid, merged_into_id, unit_id")
-        .eq("company_id", company_id);
+      const findExistingContacts = async () => {
+        let contactQuery = supabaseAdmin
+          .from("contacts")
+          .select("id, name, whatsapp_lid, merged_into_id, unit_id")
+          .eq("company_id", company_id);
 
-      if (extractedLid && phoneVariants.length > 0) {
-        contactQuery = contactQuery.or(
-          `phone.in.(${phoneVariants.join(",")}),whatsapp_lid.eq.${extractedLid}`,
-        );
-      } else if (phoneVariants.length > 0) {
-        contactQuery = contactQuery.or(`phone.in.(${phoneVariants.join(",")})`);
-      } else if (extractedLid) {
-        contactQuery = contactQuery.eq("whatsapp_lid", extractedLid);
+        if (extractedLid && phoneVariants.length > 0) {
+          contactQuery = contactQuery.or(
+            `phone.in.(${phoneVariants.join(",")}),whatsapp_lid.eq.${extractedLid}`,
+          );
+        } else if (phoneVariants.length > 0) {
+          contactQuery = contactQuery.or(`phone.in.(${phoneVariants.join(",")})`);
+        } else if (extractedLid) {
+          contactQuery = contactQuery.eq("whatsapp_lid", extractedLid);
+        }
+
+        const { data } = await contactQuery;
+        return data;
+      };
+
+      let existingContacts = await findExistingContacts();
+
+      // Eco de mensagem enviada pelo sistema só com o número real (sem LID), e nenhum
+      // contato com esse número: se a mensagem é de uma conversa de contato provisório
+      // (telefone = LID), corrige esse contato em vez de criar um duplicado.
+      if (
+        (!existingContacts || existingContacts.length === 0) &&
+        isFromMe &&
+        remoteMsgId &&
+        phoneNumber &&
+        !extractedLid
+      ) {
+        const learned = await learnLidFromOwnMessage(company_id, remoteMsgId, phoneNumber);
+        if (learned) existingContacts = await findExistingContacts();
       }
-
-      const { data: existingContacts } = await contactQuery;
 
       if (existingContacts && existingContacts.length > 0) {
         // Find if ANY of these contacts has an active conversation
