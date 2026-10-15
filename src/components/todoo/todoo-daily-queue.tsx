@@ -1,7 +1,6 @@
 import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
-import { useNavigate } from "@tanstack/react-router";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -67,6 +66,7 @@ import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { useWavoip } from "@/hooks/use-wavoip";
 import { TodooLead, TodooOutcomeType, TodooCampaign } from "@/types/todoo";
 import { TodooOutcomeDialog } from "./todoo-outcome-dialog";
+import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { formatTodooPhone } from "./todoo-period";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -139,7 +139,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId, setSelectedUnitId } = useUnit();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const { startCall, instances: wavoipInstances } = useWavoip();
 
   // Filtros
@@ -159,7 +158,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   // Feedback de cópia
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedPhoneId, setCopiedPhoneId] = useState<string | null>(null);
-  const [isOpeningChat, setIsOpeningChat] = useState(false);
 
   // 1. Busca todas as campanhas para o filtro
   const { data: campaigns = [] } = useQuery({
@@ -428,91 +426,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     }
 
     window.open(`tel:${lead.contact_phone}`, "_self");
-  };
-
-  // Abrir conversa nativa no Atendimento
-  const handleOpenInConversations = async (lead: TodooLead, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    try {
-      setIsOpeningChat(true);
-
-      // 1. Busca conversa por contact_id
-      let conversationId: string | null = null;
-      if (lead.contact_id) {
-        const { data: conv } = await supabase
-          .from("conversations")
-          .select("id")
-          .eq("contact_id", lead.contact_id)
-          .order("last_message_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (conv?.id) conversationId = conv.id;
-      }
-
-      // 2. Busca conversa por telefone
-      if (!conversationId && lead.contact_phone) {
-        const cleanPhone = lead.contact_phone.replace(/\D/g, "");
-        const { data: convByPhone } = await supabase
-          .from("conversations")
-          .select("id, contact:contacts!inner(phone, company_id)")
-          .eq("contact.company_id", activeCompanyId!)
-          .ilike("contact.phone", `%${cleanPhone.slice(-8)}%`)
-          .order("last_message_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (convByPhone?.id) conversationId = convByPhone.id;
-      }
-
-      if (conversationId) {
-        navigate({
-          to: "/conversations",
-          search: { conversationId },
-        });
-        return;
-      }
-
-      // Se já possui contato mas não tem conversa, abre tela com o contato
-      if (lead.contact_id) {
-        navigate({
-          to: "/conversations",
-          search: { contactId: lead.contact_id } as any,
-        });
-        return;
-      }
-
-      // Cria ou vincula o contato no Atendi
-      const cleanPhone = lead.contact_phone.replace(/\D/g, "");
-      const { data: newContact, error: contactErr } = await supabase
-        .from("contacts")
-        .upsert(
-          {
-            name: lead.contact_name,
-            phone: cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`,
-            company_id: activeCompanyId!,
-            unit_id: lead.unit_id || null,
-          },
-          { onConflict: "phone,company_id" }
-        )
-        .select("id")
-        .single();
-
-      if (contactErr) throw contactErr;
-
-      await (supabase.from("todoo_leads") as any)
-        .update({ contact_id: newContact.id })
-        .eq("id", lead.id);
-
-      navigate({
-        to: "/conversations",
-        search: { contactId: newContact.id } as any,
-      });
-    } catch (err: any) {
-      console.error("Erro ao abrir atendimento:", err);
-      toast.error("Erro ao abrir atendimento: " + err.message);
-    } finally {
-      setIsOpeningChat(false);
-    }
   };
 
   const handleCopyPhone = (phone: string, id: string, e?: React.MouseEvent) => {
@@ -987,16 +900,23 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                             <span>Ligar</span>
                                           </Button>
 
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            className="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground hover:bg-muted"
-                                            onClick={(e) => handleOpenInConversations(lead, e)}
-                                            title="Abrir no atendimento"
-                                          >
-                                            <MessageSquare className="h-3 w-3 text-emerald-500" />
-                                            <span>Mensagem</span>
-                                          </Button>
+                                          <ContactChatButton
+                                            contactId={lead.contact_id}
+                                            contactName={lead.contact_name}
+                                            phone={lead.contact_phone}
+                                            unitId={lead.unit_id}
+                                            trigger={
+                                              <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground hover:bg-muted"
+                                                title="Abrir no atendimento"
+                                              >
+                                                <MessageSquare className="h-3 w-3 text-emerald-500" />
+                                                <span>Mensagem</span>
+                                              </Button>
+                                            }
+                                          />
                                         </div>
 
                                         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary transition-colors shrink-0" />
@@ -1081,19 +1001,18 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                   <span>Fazer Ligação</span>
                 </Button>
 
-                <Button
-                  size="sm"
-                  className="gap-2 text-xs h-9 bg-primary text-primary-foreground"
-                  onClick={() => handleOpenInConversations(selectedLeadForSheet)}
-                  disabled={isOpeningChat}
-                >
-                  {isOpeningChat ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  )}
-                  <span>Abrir Atendimento</span>
-                </Button>
+                <ContactChatButton
+                  contactId={selectedLeadForSheet.contact_id}
+                  contactName={selectedLeadForSheet.contact_name}
+                  phone={selectedLeadForSheet.contact_phone}
+                  unitId={selectedLeadForSheet.unit_id}
+                  trigger={
+                    <Button size="sm" className="gap-2 text-xs h-9 bg-primary text-primary-foreground">
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      <span>Abrir Atendimento</span>
+                    </Button>
+                  }
+                />
               </div>
 
               {/* Oferta Comercial da Ação */}

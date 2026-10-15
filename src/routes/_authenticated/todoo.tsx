@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Flame, ListTodo, Trophy, BarChart3, UserPlus } from "lucide-react";
+import { CalendarCheck, Flame, ListTodo, Trophy, BarChart3, UserPlus } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 import { TodooDailyQueue } from "@/components/todoo/todoo-daily-queue";
+import { TodooMyDay } from "@/components/todoo/todoo-my-day";
 import { TodooCampaignsList } from "@/components/todoo/todoo-campaigns-list";
 import { TodooGincana } from "@/components/todoo/todoo-gincana";
 import { TodooMetrics } from "@/components/todoo/todoo-metrics";
@@ -17,6 +18,7 @@ export const Route = createFileRoute("/_authenticated/todoo")({
 });
 
 const TABS = [
+  { value: "my-day", label: "Meu Dia", icon: CalendarCheck },
   { value: "queue", label: "Quadro Comercial", icon: Flame },
   { value: "referrals", label: "Cadastros & Metas", icon: UserPlus },
   { value: "campaigns", label: "Ações Comerciais", icon: ListTodo },
@@ -26,7 +28,7 @@ const TABS = [
 
 function TodooPage() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState("queue");
+  const [activeTab, setActiveTab] = useState("my-day");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createReferralOpen, setCreateReferralOpen] = useState(false);
 
@@ -61,6 +63,9 @@ function TodooPage() {
               {tabs}
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 w-full">
+              {activeTab === "my-day" && (
+                <TodooMyDay onCreateContactsClick={() => setCreateReferralOpen(true)} />
+              )}
               {activeTab === "referrals" && <TodooReferralsTab />}
               {activeTab === "campaigns" && (
                 <TodooCampaignsList onCreateClick={() => setCreateDialogOpen(true)} />
@@ -88,6 +93,7 @@ function TodooPage() {
             queryClient.invalidateQueries({ queryKey: ["todoo-referrals-list"] });
             queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] });
             queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
+            queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
           }}
         />
       </div>

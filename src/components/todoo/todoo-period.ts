@@ -24,6 +24,16 @@ export function todooPeriodStarts() {
   };
 }
 
+/** Limites do dia atual e dias que faltam no mês (contando hoje), para o Meu Dia. */
+export function todooDayBounds() {
+  const today = todayInSaoPaulo();
+  const { dayStart, monthStart } = todooPeriodStarts();
+  const dayEnd = new Date(new Date(dayStart).getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const [y, m, d] = today.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  return { dayStart, dayEnd, monthStart, daysLeftInMonth: daysInMonth - d + 1 };
+}
+
 export type TodooRangeKey = "month" | "last_month" | "all";
 
 /** Intervalo [from, to) em ISO para os filtros de período da Gincana e dos Indicadores. */
