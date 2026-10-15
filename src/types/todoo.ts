@@ -3,6 +3,7 @@ export type TodooCampaignType =
   | 'upsell_zones'
   | 'reactivation'
   | 'mgm_referral'
+  | 'prospecting'
   | 'quote_followup'
   | 'birthday'
   | 'custom';
@@ -123,26 +124,22 @@ export interface TodooConsultantScore {
   totalPoints: number;
 }
 
-export type TodooReferralStatus = 'pending' | 'contacted' | 'scheduled' | 'won' | 'lost';
-export type TodooRewardStatus = 'pending' | 'granted' | 'claimed';
+export type TodooCaptureOrigin = 'prospeccao' | 'indicacao';
 
 export interface TodooReferral {
   id: string;
   company_id: string;
   unit_id: string | null;
+  origin: TodooCaptureOrigin;
   referrer_contact_id: string | null;
-  referrer_name: string;
+  referrer_name: string | null;
   referrer_phone: string | null;
   referred_contact_id: string | null;
   referred_name: string;
   referred_phone: string;
   interested_service: string | null;
-  voucher_code: string | null;
-  voucher_value: number;
   captured_by_user_id: string | null;
-  status: TodooReferralStatus;
-  reward_status: TodooRewardStatus;
-  reward_details: string | null;
+  lead_id: string | null;
   created_at: string;
   updated_at: string;
 
@@ -151,7 +148,13 @@ export interface TodooReferral {
     name: string;
     avatar_url?: string | null;
   } | null;
+  lead?: {
+    id: string;
+    status: TodooLeadStatus;
+  } | null;
 }
+
+export type TodooGoalPeriod = 'daily' | 'monthly';
 
 export interface TodooGoal {
   id: string;
@@ -159,6 +162,7 @@ export interface TodooGoal {
   user_id: string;
   month_year: string;
   target_contacts: number;
+  contacts_period: TodooGoalPeriod;
   target_conversions: number;
   target_revenue: number;
   created_at: string;

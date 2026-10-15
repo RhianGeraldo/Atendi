@@ -81,11 +81,11 @@ const TEMPLATES = [
   },
   {
     type: "mgm_referral" as TodooCampaignType,
-    title: "Desafio 3 Amigas (Member-Get-Member)",
-    description: "Momento de encantamento visual (2ª/3ª sessão). Vouchers para presentear amigas.",
+    title: "Pedir Indicações",
+    description: "Momento de encantamento com o resultado (2ª/3ª sessão). Peça indicações de amigas.",
     defaultScript:
-      "Oi, {primeiro_nome}! Ficamos muito felizes em ver como você está amando seus resultados! Liberamos no seu nome 3 vouchers nominais no valor de R$ 150 para você presentear suas melhores amigas. E o melhor: para cada amiga que iniciar, você ganha créditos automáticos no seu tratamento! Quem são as 3 amigas que você gostaria de presentear?",
-    defaultOffer: "3 Vouchers de R$ 150 válidos por 7 dias + créditos para indicadora",
+      "Oi, {primeiro_nome}! Ficamos muito felizes em ver como você está amando seus resultados! Você tem alguma amiga que também gostaria de conhecer a clínica? Me passa o nome e o WhatsApp dela que eu entro em contato com todo o carinho!",
+    defaultOffer: "",
     defaultSla: 24,
   },
   {
@@ -895,7 +895,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
                   { label: "Saldo de Sessões", tag: "{saldo}" },
                   { label: "Área/Zona", tag: "{zona}" },
                   { label: "Nome da Consultora", tag: "{consultora}" },
-                  { label: "Voucher Bônus", tag: "{voucher}" },
+                  { label: "Quem Indicou", tag: "{indicadora}" },
                 ].map((v) => (
                   <button
                     key={v.tag}

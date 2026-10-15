@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   Target,
@@ -9,6 +10,7 @@ import {
   Plus,
   Sparkles,
   Gift,
+  UserPlus,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -28,6 +30,7 @@ export const Route = createFileRoute("/_authenticated/todoo")({
 
 function TodooPage() {
   const { profile } = useAuth();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("queue");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createReferralOpen, setCreateReferralOpen] = useState(false);
@@ -55,7 +58,7 @@ function TodooPage() {
 
               <TabsTrigger value="referrals" className="gap-2 py-1.5 text-xs">
                 <Gift className="h-3.5 w-3.5 text-pink-500" />
-                <span>Indicações & Metas</span>
+                <span>Cadastros & Metas</span>
               </TabsTrigger>
 
               <TabsTrigger value="campaigns" className="gap-2 py-1.5 text-xs">
@@ -82,8 +85,8 @@ function TodooPage() {
               onClick={() => setCreateReferralOpen(true)}
               className="gap-1.5 text-xs border-pink-500/30 text-pink-700 dark:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-950/40 shrink-0 h-8"
             >
-              <Gift className="h-3.5 w-3.5 text-pink-600" />
-              Cadastrar Indicação
+              <UserPlus className="h-3.5 w-3.5 text-pink-600" />
+              Cadastrar Contatos
             </Button>
 
             {canManage && (
@@ -128,12 +131,15 @@ function TodooPage() {
           }}
         />
 
-        {/* Modal de Cadastro de Indicações */}
+        {/* Modal de Cadastro de Contatos */}
         <TodooCreateReferralDialog
           open={createReferralOpen}
           onOpenChange={setCreateReferralOpen}
           onSuccess={() => {
             setActiveTab("referrals");
+            queryClient.invalidateQueries({ queryKey: ["todoo-referrals-list"] });
+            queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] });
+            queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
           }}
         />
       </div>

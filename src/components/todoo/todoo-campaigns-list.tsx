@@ -210,7 +210,9 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
       case "reactivation":
         return { label: "Reativação de Inativos", color: "bg-amber-600/10 text-amber-700 dark:text-amber-400" };
       case "mgm_referral":
-        return { label: "Desafio 3 Amigas (MGM)", color: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" };
+        return { label: "Indicações", color: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" };
+      case "prospecting":
+        return { label: "Prospecção Ativa", color: "bg-cyan-600/10 text-cyan-700 dark:text-cyan-400" };
       case "quote_followup":
         return { label: "Follow-up Orçamento", color: "bg-rose-600/10 text-rose-700 dark:text-rose-400" };
       default:

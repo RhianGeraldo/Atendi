@@ -118,8 +118,8 @@ export function TodooConversationBanner({ conv }: Props) {
       profile?.name || "sua consultora",
     );
     template = template.replace(
-      /\{voucher\}/gi,
-      custom.voucher || "VOUCHER150",
+      /\{indicadora\}/gi,
+      custom.indicadora || "uma amiga",
     );
 
     return template;

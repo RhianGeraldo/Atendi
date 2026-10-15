@@ -1,176 +1,238 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import {
-  Gift,
-  Plus,
-  Users,
-  Target,
-  CheckCircle2,
-  Clock,
-  Sparkles,
-  Phone,
-  MessageSquare,
-  Award,
-  ChevronRight,
-  TrendingUp,
-} from "lucide-react";
+import { Gift, Plus, Target, Phone, MessageSquare, Megaphone, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
-import { TodooReferral, TodooGoal } from "@/types/todoo";
+import { useUnit } from "@/lib/unit-context";
+import { TodooReferral, TodooGoalPeriod, TodooLeadStatus } from "@/types/todoo";
 import { TodooCreateReferralDialog } from "./todoo-create-referral-dialog";
 import { TodooGoalsDialog } from "./todoo-goals-dialog";
+import { currentTodooMonth, todooPeriodStarts } from "./todoo-period";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
-import { toast } from "sonner";
+
+type OriginFilter = "all" | "indicacao" | "prospeccao";
+type PeriodFilter = "day" | "month" | "all";
+
+const LEAD_STATUS: Record<TodooLeadStatus, { label: string; className: string }> = {
+  pending: { label: "Aguardando contato", className: "bg-muted text-muted-foreground" },
+  contacted: {
+    label: "Em negociação",
+    className: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  },
+  callback: {
+    label: "Retornar depois",
+    className: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
+  },
+  quoted: { label: "Orçamento enviado", className: "bg-sky-500/15 text-sky-700 dark:text-sky-400" },
+  scheduled: { label: "Agendou avaliação", className: "bg-blue-600 text-white" },
+  won: { label: "Fechou", className: "bg-emerald-600 text-white" },
+  lost: { label: "Sem interesse", className: "bg-rose-500/15 text-rose-700 dark:text-rose-400" },
+};
+
+interface GoalProgress {
+  userId: string;
+  userName: string;
+  period: TodooGoalPeriod;
+  target: number;
+  done: number;
+}
+
+function formatPhone(phone: string) {
+  const d = phone.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return phone;
+}
+
+const periodLabel = (p: TodooGoalPeriod) => (p === "daily" ? "hoje" : "no mês");
+const pct = (done: number, target: number) =>
+  target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0;
 
 export function TodooReferralsTab() {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
+  const { selectedUnitId } = useUnit();
   const queryClient = useQueryClient();
 
-  const [createReferralOpen, setCreateReferralOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [goalsDialogOpen, setGoalsDialogOpen] = useState(false);
-  const currentMonthYear = new Date().toISOString().slice(0, 7);
+  const [originFilter, setOriginFilter] = useState<OriginFilter>("all");
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("month");
+  const currentMonth = currentTodooMonth();
 
   const canManage =
     profile?.role === "admin_company" ||
     profile?.role === "super_admin" ||
     profile?.role === "manager";
 
-  // Busca lista de indicações
-  const { data: referrals = [], isLoading: loadingReferrals, refetch: refetchReferrals } = useQuery({
-    queryKey: ["todoo-referrals-list", activeCompanyId],
+  // Lista de cadastros
+  const {
+    data: captures = [],
+    isLoading: loadingCaptures,
+    error: capturesError,
+  } = useQuery({
+    queryKey: ["todoo-referrals-list", activeCompanyId, selectedUnitId, originFilter, periodFilter],
     enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data, error } = await (supabase.from("todoo_referrals") as any)
-        .select(`
+      const { dayStart, monthStart } = todooPeriodStarts();
+      let query = (supabase.from("todoo_referrals") as any)
+        .select(
+          `
           *,
-          captured_by:profiles(id, name, avatar_url)
-        `)
+          captured_by:profiles(id, name, avatar_url),
+          lead:todoo_leads(id, status)
+        `,
+        )
         .eq("company_id", activeCompanyId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(300);
 
+      if (selectedUnitId) query = query.eq("unit_id", selectedUnitId);
+      if (originFilter !== "all") query = query.eq("origin", originFilter);
+      if (periodFilter === "day") query = query.gte("created_at", dayStart);
+      if (periodFilter === "month") query = query.gte("created_at", monthStart);
+
+      const { data, error } = await query;
       if (error) throw error;
       return (data || []) as TodooReferral[];
     },
   });
 
-  // Busca metas e realizações do mês atual
-  const { data: goalsData, isLoading: loadingGoals, refetch: refetchGoals } = useQuery({
-    queryKey: ["todoo-goals-overview", activeCompanyId, currentMonthYear, profile?.id],
+  // Metas do mês e realizado por consultora
+  const { data: goalsData } = useQuery({
+    queryKey: ["todoo-goals-overview", activeCompanyId, currentMonth],
     enabled: !!activeCompanyId,
     queryFn: async () => {
-      // 1. Metas do mês
-      const { data: goals } = await (supabase.from("todoo_goals") as any)
-        .select("*")
-        .eq("company_id", activeCompanyId)
-        .eq("month_year", currentMonthYear);
+      const { dayStart, monthStart } = todooPeriodStarts();
 
-      // 2. Contagem de cadastros de contatos no mês por usuário
-      const firstDay = `${currentMonthYear}-01T00:00:00Z`;
-      const { data: monthReferrals } = await (supabase.from("todoo_referrals") as any)
-        .select("id, captured_by_user_id, status")
-        .eq("company_id", activeCompanyId)
-        .gte("created_at", firstDay);
+      const [{ data: goals, error: gErr }, { data: monthCaptures, error: rErr }] =
+        await Promise.all([
+          (supabase.from("todoo_goals") as any)
+            .select("user_id, target_contacts, contacts_period, user:profiles(id, name)")
+            .eq("company_id", activeCompanyId)
+            .eq("month_year", currentMonth)
+            .gt("target_contacts", 0),
+          (supabase.from("todoo_referrals") as any)
+            .select("captured_by_user_id, created_at")
+            .eq("company_id", activeCompanyId)
+            .gte("created_at", monthStart),
+        ]);
+      if (gErr) throw gErr;
+      if (rErr) throw rErr;
 
-      const countByUser: Record<string, number> = {};
-      (monthReferrals || []).forEach((r: any) => {
-        if (r.captured_by_user_id) {
-          countByUser[r.captured_by_user_id] = (countByUser[r.captured_by_user_id] || 0) + 1;
+      const dayCount: Record<string, number> = {};
+      const monthCount: Record<string, number> = {};
+      for (const r of monthCaptures || []) {
+        if (!r.captured_by_user_id) continue;
+        monthCount[r.captured_by_user_id] = (monthCount[r.captured_by_user_id] || 0) + 1;
+        if (r.created_at >= dayStart) {
+          dayCount[r.captured_by_user_id] = (dayCount[r.captured_by_user_id] || 0) + 1;
         }
-      });
+      }
 
-      // Meta da consultora logada
-      const myGoal = (goals || []).find((g: any) => g.user_id === profile?.id);
-      const myCaptured = countByUser[profile?.id || ""] || 0;
-      const myTarget = myGoal?.target_contacts || 20;
+      const team: GoalProgress[] = (goals || [])
+        .map((g: any) => {
+          const period: TodooGoalPeriod = g.contacts_period === "daily" ? "daily" : "monthly";
+          return {
+            userId: g.user_id,
+            userName: g.user?.name || "—",
+            period,
+            target: g.target_contacts,
+            done: (period === "daily" ? dayCount : monthCount)[g.user_id] || 0,
+          };
+        })
+        .sort((a: GoalProgress, b: GoalProgress) => pct(b.done, b.target) - pct(a.done, a.target));
 
-      // Total da empresa
-      const totalTarget = (goals || []).reduce((acc: number, curr: any) => acc + (curr.target_contacts || 0), 0) || 50;
-      const totalCaptured = (monthReferrals || []).length;
-
+      const myId = profile?.id || "";
       return {
-        myCaptured,
-        myTarget,
-        totalCaptured,
-        totalTarget,
-        monthReferralsCount: (monthReferrals || []).length,
+        team,
+        myGoal: team.find((t) => t.userId === myId) || null,
+        myToday: dayCount[myId] || 0,
+        myMonth: monthCount[myId] || 0,
       };
     },
   });
 
-  // Atualizar status da recompensa da indicadora (ex: marcar como resgatada)
-  const handleUpdateRewardStatus = async (referralId: string, nextStatus: "granted" | "claimed") => {
-    try {
-      const { error } = await (supabase.from("todoo_referrals") as any)
-        .update({
-          reward_status: nextStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", referralId);
-
-      if (error) throw error;
-      toast.success(
-        nextStatus === "granted"
-          ? "Crédito da indicadora liberado!"
-          : "Bônus marcado como resgatado pela cliente!"
-      );
-      refetchReferrals();
-    } catch (err: any) {
-      toast.error("Erro ao atualizar recompensa: " + err.message);
-    }
+  const refreshAll = () => {
+    queryClient.invalidateQueries({ queryKey: ["todoo-referrals-list"] });
+    queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] });
+    queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
   };
 
-  const myProgress = goalsData ? Math.min(100, Math.round((goalsData.myCaptured / goalsData.myTarget) * 100)) : 0;
-  const companyProgress = goalsData ? Math.min(100, Math.round((goalsData.totalCaptured / goalsData.totalTarget) * 100)) : 0;
+  const myGoal = goalsData?.myGoal;
 
   return (
     <div className="space-y-6">
-      {/* Cards de Metas de Cadastro de Contatos */}
+      {/* Metas de cadastro */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Minha Meta Individual */}
+        {/* Minha meta */}
         <Card className="bg-primary/5 border-primary/20">
           <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
             <div className="space-y-0.5">
               <span className="text-[11px] font-semibold text-primary uppercase tracking-wide">
-                Minha Meta de Cadastros ({currentMonthYear})
+                {myGoal
+                  ? `Minha meta ${myGoal.period === "daily" ? "diária" : "mensal"} de cadastros`
+                  : "Meus cadastros"}
               </span>
               <CardTitle className="text-xl font-bold">
-                {goalsData?.myCaptured || 0} / {goalsData?.myTarget || 20}{" "}
-                <span className="text-xs font-normal text-muted-foreground">indicações</span>
+                {myGoal ? (
+                  <>
+                    {myGoal.done} / {myGoal.target}{" "}
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {periodLabel(myGoal.period)}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    {goalsData?.myMonth || 0}{" "}
+                    <span className="text-xs font-normal text-muted-foreground">no mês</span>
+                  </>
+                )}
               </CardTitle>
             </div>
             <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary">
-              <Gift className="h-5 w-5" />
+              <UserPlus className="h-5 w-5" />
             </div>
           </CardHeader>
           <CardContent className="p-4 pt-2 space-y-2">
-            <Progress value={myProgress} className="h-2" />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>{myProgress}% da sua meta atingida</span>
-              <span>Faltam {Math.max(0, (goalsData?.myTarget || 20) - (goalsData?.myCaptured || 0))} contatos</span>
-            </div>
+            {myGoal ? (
+              <>
+                <Progress value={pct(myGoal.done, myGoal.target)} className="h-2" />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>
+                    {myGoal.done >= myGoal.target
+                      ? "Meta batida! 🎉"
+                      : `Faltam ${myGoal.target - myGoal.done} ${periodLabel(myGoal.period)}`}
+                  </span>
+                  <span>
+                    {myGoal.period === "daily"
+                      ? `No mês: ${goalsData?.myMonth || 0}`
+                      : `Hoje: ${goalsData?.myToday || 0}`}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Hoje: {goalsData?.myToday || 0} · Nenhuma meta definida para você neste mês.
+              </p>
+            )}
           </CardContent>
         </Card>
 
-        {/* Meta Geral da Equipe */}
+        {/* Equipe */}
         <Card>
           <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
-            <div className="space-y-0.5">
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-                Meta Geral da Equipe (Mês)
-              </span>
-              <CardTitle className="text-xl font-bold">
-                {goalsData?.totalCaptured || 0} / {goalsData?.totalTarget || 50}{" "}
-                <span className="text-xs font-normal text-muted-foreground">novos leads</span>
-              </CardTitle>
-            </div>
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+              Metas da equipe ({currentMonth})
+            </span>
             {canManage && (
               <Button
                 variant="outline"
@@ -183,158 +245,162 @@ export function TodooReferralsTab() {
               </Button>
             )}
           </CardHeader>
-          <CardContent className="p-4 pt-2 space-y-2">
-            <Progress value={companyProgress} className="h-2 bg-muted" />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>{companyProgress}% do objetivo da clínica</span>
-              <span>Total no mês: {goalsData?.totalCaptured || 0}</span>
-            </div>
+          <CardContent className="p-4 pt-1">
+            {!goalsData?.team.length ? (
+              <p className="text-xs text-muted-foreground py-2">Nenhuma meta definida neste mês.</p>
+            ) : (
+              <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                {goalsData.team.map((g) => (
+                  <div key={g.userId} className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-medium truncate">{g.userName}</span>
+                      <span className="text-muted-foreground shrink-0">
+                        {g.done} / {g.target} {periodLabel(g.period)}
+                      </span>
+                    </div>
+                    <Progress value={pct(g.done, g.target)} className="h-1.5 bg-muted" />
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Ações e Título da Tabela */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+      {/* Título, filtros e ação */}
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-foreground">
-            Indicações Captadas (Desafio 3 Amigas)
-          </h3>
+          <h3 className="text-base font-semibold text-foreground">Contatos Cadastrados</h3>
           <p className="text-xs text-muted-foreground">
-            Acompanhe as clientes indicadoras, amigas presenteadas e liberação de créditos.
+            Prospecção ativa e indicações. O status acompanha o Quadro Comercial.
           </p>
         </div>
 
-        <Button
-          onClick={() => setCreateReferralOpen(true)}
-          className="gap-2 bg-pink-600 hover:bg-pink-700 text-white shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          Cadastrar Indicação
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Tabs value={originFilter} onValueChange={(v) => setOriginFilter(v as OriginFilter)}>
+            <TabsList className="h-8">
+              <TabsTrigger value="all" className="text-xs h-6">
+                Todos
+              </TabsTrigger>
+              <TabsTrigger value="indicacao" className="text-xs h-6">
+                Indicações
+              </TabsTrigger>
+              <TabsTrigger value="prospeccao" className="text-xs h-6">
+                Prospecção
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Tabs value={periodFilter} onValueChange={(v) => setPeriodFilter(v as PeriodFilter)}>
+            <TabsList className="h-8">
+              <TabsTrigger value="day" className="text-xs h-6">
+                Hoje
+              </TabsTrigger>
+              <TabsTrigger value="month" className="text-xs h-6">
+                Este mês
+              </TabsTrigger>
+              <TabsTrigger value="all" className="text-xs h-6">
+                Tudo
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Button
+            onClick={() => setCreateOpen(true)}
+            className="gap-2 bg-pink-600 hover:bg-pink-700 text-white shrink-0 h-8 text-xs"
+          >
+            <Plus className="h-4 w-4" />
+            Cadastrar Contatos
+          </Button>
+        </div>
       </div>
 
-      {/* Tabela de Indicações */}
-      {loadingReferrals ? (
+      {/* Lista */}
+      {loadingCaptures ? (
         <div className="p-12 text-center text-xs text-muted-foreground">
-          Carregando indicações...
+          Carregando cadastros...
         </div>
-      ) : referrals.length === 0 ? (
+      ) : capturesError ? (
+        <Card className="p-8 text-center border-destructive/40">
+          <h4 className="text-sm font-semibold text-destructive">
+            Não foi possível carregar os cadastros
+          </h4>
+          <p className="text-xs text-muted-foreground mt-1">{(capturesError as Error).message}</p>
+        </Card>
+      ) : captures.length === 0 ? (
         <Card className="p-12 text-center border-dashed">
           <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-pink-500/10 text-pink-600">
-            <Gift className="h-6 w-6" />
+            <UserPlus className="h-6 w-6" />
           </div>
-          <h4 className="text-base font-semibold mt-3">Nenhuma indicação cadastrada ainda</h4>
+          <h4 className="text-base font-semibold mt-3">Nenhum contato cadastrado neste filtro</h4>
           <p className="text-xs text-muted-foreground max-w-md mx-auto mt-1">
-            Aproveite o momento de pico de satisfação da cliente em cabine e cadastre 3 amigas para ganhar bônus e bater sua meta de contatos!
+            Cadastre contatos de prospecção ativa ou peça indicações às clientes para alimentar o
+            Quadro Comercial e bater sua meta.
           </p>
           <Button
-            onClick={() => setCreateReferralOpen(true)}
+            onClick={() => setCreateOpen(true)}
             className="mt-4 gap-2 bg-pink-600 hover:bg-pink-700 text-white"
           >
             <Plus className="h-4 w-4" />
-            Cadastrar 3 Amigas
+            Cadastrar Contatos
           </Button>
         </Card>
       ) : (
         <div className="space-y-3">
-          {referrals.map((ref) => {
+          {captures.map((c) => {
+            const status = c.lead ? LEAD_STATUS[c.lead.status] : null;
             return (
-              <Card key={ref.id} className="hover:border-primary/40 transition-all">
+              <Card key={c.id} className="hover:border-primary/40 transition-all">
                 <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  {/* Informações da Indicadora e Indicada */}
                   <div className="space-y-1.5 flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-sm text-foreground">
-                        {ref.referred_name}
+                        {c.referred_name}
                       </span>
-                      <Badge variant="outline" className="text-[11px] font-normal">
-                        Indicada por: <strong>{ref.referrer_name}</strong>
-                      </Badge>
-
-                      {/* Status da Indicada */}
-                      <Badge
-                        className={
-                          ref.status === "won"
-                            ? "bg-emerald-600 text-white"
-                            : ref.status === "scheduled"
-                            ? "bg-blue-600 text-white"
-                            : "bg-muted text-muted-foreground"
-                        }
-                      >
-                        {ref.status === "won"
-                          ? "✓ Fechou Pacote!"
-                          : ref.status === "scheduled"
-                          ? "Agendou Avaliação"
-                          : "Aguardando Contato"}
-                      </Badge>
+                      {c.origin === "indicacao" ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[11px] font-normal gap-1 border-pink-500/30"
+                        >
+                          <Gift className="h-3 w-3 text-pink-600" />
+                          Indicada por: <strong>{c.referrer_name}</strong>
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-[11px] font-normal gap-1">
+                          <Megaphone className="h-3 w-3 text-primary" />
+                          Prospecção ativa
+                        </Badge>
+                      )}
+                      {status && (
+                        <Badge className={`text-[11px] ${status.className}`}>{status.label}</Badge>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Phone className="h-3 w-3" />
-                        {ref.referred_phone}
+                        {formatPhone(c.referred_phone)}
                       </span>
-
-                      {ref.interested_service && (
-                        <span>Interesse: {ref.interested_service}</span>
-                      )}
-
+                      {c.interested_service && <span>Interesse: {c.interested_service}</span>}
+                      {c.captured_by && <span>Captado por: {c.captured_by.name}</span>}
                       <span>
-                        Voucher: <strong>{ref.voucher_code} (R$ {ref.voucher_value})</strong>
+                        {format(new Date(c.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
                       </span>
-
-                      {ref.captured_by && (
-                        <span>Captado por: {ref.captured_by.name}</span>
-                      )}
                     </div>
                   </div>
 
-                  {/* Status da Recompensa da Indicadora & Ações */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    {ref.reward_status === "claimed" ? (
-                      <Badge variant="secondary" className="text-xs bg-muted text-muted-foreground">
-                        ✓ Recompensa Resgatada
-                      </Badge>
-                    ) : ref.reward_status === "granted" ? (
+                  <StartConversationDialog
+                    initialPhone={c.referred_phone}
+                    contactName={c.referred_name}
+                    trigger={
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        onClick={() => handleUpdateRewardStatus(ref.id, "claimed")}
-                        className="text-xs border-emerald-500 text-emerald-600 hover:bg-emerald-50"
+                        title="Iniciar atendimento no Atendi"
+                        className="h-8 w-8 p-0 shrink-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
                       >
-                        Marcar Resgate (R$ 50)
+                        <MessageSquare className="h-4 w-4" />
                       </Button>
-                    ) : ref.status === "won" ? (
-                      <Button
-                        variant="default"
-                        size="sm"
-                        onClick={() => handleUpdateRewardStatus(ref.id, "granted")}
-                        className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
-                      >
-                        <Sparkles className="h-3.5 w-3.5" />
-                        Liberar Crédito
-                      </Button>
-                    ) : (
-                      <span className="text-[11px] text-muted-foreground italic">
-                        Crédito pendente (aguarda fechamento)
-                      </span>
-                    )}
-
-                    <StartConversationDialog
-                      initialPhone={ref.referred_phone}
-                      contactName={ref.referred_name}
-                      trigger={
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title="Iniciar atendimento no Atendi"
-                          className="h-8 w-8 p-0 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-                        >
-                          <MessageSquare className="h-4 w-4" />
-                        </Button>
-                      }
-                    />
-                  </div>
+                    }
+                  />
                 </CardContent>
               </Card>
             );
@@ -342,24 +408,16 @@ export function TodooReferralsTab() {
         </div>
       )}
 
-      {/* Modal de Cadastro de Indicação */}
       <TodooCreateReferralDialog
-        open={createReferralOpen}
-        onOpenChange={setCreateReferralOpen}
-        onSuccess={() => {
-          refetchReferrals();
-          refetchGoals();
-          queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
-        }}
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onSuccess={refreshAll}
       />
 
-      {/* Modal de Gestão de Metas */}
       <TodooGoalsDialog
         open={goalsDialogOpen}
         onOpenChange={setGoalsDialogOpen}
-        onSuccess={() => {
-          refetchGoals();
-        }}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] })}
       />
     </div>
   );

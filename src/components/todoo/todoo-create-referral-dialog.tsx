@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
@@ -24,15 +24,17 @@ import {
   Trash2,
   Users,
   Sparkles,
-  Phone,
   User,
-  CheckCircle2,
   Loader2,
+  Megaphone,
+  UserPlus,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
+import { TodooCaptureOrigin } from "@/types/todoo";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface Props {
@@ -41,240 +43,113 @@ interface Props {
   onSuccess: () => void;
 }
 
-interface ReferredFriend {
+interface CapturedContact {
   name: string;
   phone: string;
   service: string;
 }
+
+const emptyContact = (): CapturedContact => ({ name: "", phone: "", service: "" });
 
 export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Props) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
 
-  // Dados da cliente indicadora
+  const [origin, setOrigin] = useState<TodooCaptureOrigin>("indicacao");
   const [referrerName, setReferrerName] = useState("");
-  const [referrerPhone, setReferrerPhone] = useState("");
-  const [referrerContactId, setReferrerContactId] = useState<string | null>(null);
-
-  // Amigas indicadas (inicia com 3 amigos por padrão - Desafio 3 Amigas)
-  const [friends, setFriends] = useState<ReferredFriend[]>([
-    { name: "", phone: "", service: "Laser / Estética" },
-    { name: "", phone: "", service: "Laser / Estética" },
-    { name: "", phone: "", service: "Laser / Estética" },
-  ]);
-
-  // Detalhes do voucher e captador
-  const [voucherCode, setVoucherCode] = useState("VOUCHER150");
-  const [voucherValue, setVoucherValue] = useState("150,00");
-  const [capturedById, setCapturedById] = useState<string>(profile?.id || "");
+  const [contacts, setContacts] = useState<CapturedContact[]>([emptyContact()]);
+  const [capturedById, setCapturedById] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Busca consultoras/aplicadoras para atribuir quem colheu
+  // Formulário limpo a cada abertura
+  useEffect(() => {
+    if (!open) return;
+    setOrigin("indicacao");
+    setReferrerName("");
+    setContacts([emptyContact()]);
+    setCapturedById(profile?.id || "");
+  }, [open, profile?.id]);
+
+  // Equipe para atribuir quem captou (conta na meta)
   const { data: teamMembers = [] } = useQuery({
     queryKey: ["todoo-team-members-referrals", activeCompanyId],
-    enabled: !!activeCompanyId,
+    enabled: !!activeCompanyId && open,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, name, avatar_url")
-        .eq("company_id", activeCompanyId)
+        .select("id, name")
+        .eq("company_id", activeCompanyId!)
         .order("name");
       if (error) throw error;
       return data || [];
     },
   });
 
-  const handleFriendChange = (index: number, field: keyof ReferredFriend, val: string) => {
-    setFriends((prev) => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], [field]: val };
-      return updated;
-    });
-  };
-
-  const handleAddFriend = () => {
-    setFriends((prev) => [...prev, { name: "", phone: "", service: "Laser / Estética" }]);
-  };
-
-  const handleRemoveFriend = (index: number) => {
-    if (friends.length <= 1) return;
-    setFriends((prev) => prev.filter((_, i) => i !== index));
+  const handleContactChange = (index: number, field: keyof CapturedContact, val: string) => {
+    setContacts((prev) => prev.map((c, i) => (i === index ? { ...c, [field]: val } : c)));
   };
 
   const handleSubmit = async () => {
     if (!profile || !activeCompanyId) return;
 
-    if (!referrerName.trim()) {
-      toast.error("Por favor, informe o nome da cliente indicadora.");
+    if (origin === "indicacao" && !referrerName.trim()) {
+      toast.error("Informe o nome da cliente que está indicando.");
       return;
     }
 
-    // Filtra amigos com pelo menos nome e telefone preenchidos
-    const validFriends = friends.filter(
-      (f) => f.name.trim() && f.phone.replace(/\D/g, "").length >= 8
-    );
-
-    if (validFriends.length === 0) {
-      toast.error("Por favor, preencha o nome e WhatsApp de pelo menos 1 amiga indicada.");
+    const filled = contacts.filter((c) => c.name.trim() || c.phone.trim());
+    const invalid = filled.find((c) => !c.name.trim() || c.phone.replace(/\D/g, "").length < 10);
+    if (invalid) {
+      toast.error("Cada contato precisa de nome e WhatsApp com DDD.");
+      return;
+    }
+    if (filled.length === 0) {
+      toast.error("Preencha o nome e o WhatsApp de pelo menos 1 contato.");
       return;
     }
 
     setSubmitting(true);
-
     try {
-      const numValue = voucherValue ? parseFloat(voucherValue.replace(",", ".")) : 150;
-      const captorId = capturedById || profile.id;
+      const { data, error } = await (supabase.rpc as any)("todoo_register_contacts", {
+        p_company_id: activeCompanyId,
+        p_origin: origin,
+        p_referrer_name: origin === "indicacao" ? referrerName.trim() : null,
+        p_captured_by: capturedById || profile.id,
+        p_unit_id: selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null,
+        p_contacts: filled.map((c) => ({
+          name: c.name.trim(),
+          phone: c.phone,
+          service: c.service.trim(),
+        })),
+      });
+      if (error) throw error;
 
-      // Unidade da indicação: da cliente indicadora > unidade única de quem captou > unidade selecionada > Rede
-      let referralUnitId: string | null = null;
-      if (referrerContactId) {
-        const { data: referrer } = await supabase
-          .from("contacts")
-          .select("unit_id")
-          .eq("id", referrerContactId)
-          .maybeSingle();
-        referralUnitId = referrer?.unit_id || null;
+      const created: number = data?.created ?? 0;
+      const duplicates: { name: string }[] = data?.duplicates ?? [];
+
+      if (created > 0) {
+        toast.success(
+          created === 1
+            ? "1 contato cadastrado e adicionado ao Quadro Comercial!"
+            : `${created} contatos cadastrados e adicionados ao Quadro Comercial!`,
+        );
       }
-      if (!referralUnitId) {
-        const { data: captorUnits } = await supabase
-          .from("user_units")
-          .select("unit_id")
-          .eq("user_id", captorId);
-        if (captorUnits && captorUnits.length === 1) referralUnitId = captorUnits[0].unit_id;
-      }
-      if (!referralUnitId && selectedUnitId && selectedUnitId !== "all") {
-        referralUnitId = selectedUnitId;
-      }
-
-      // 1. Localiza ou cria a campanha padrão do Desafio 3 Amigas / MGM
-      let campaignId: string;
-      const { data: existingCamp } = await (supabase.from("todoo_campaigns") as any)
-        .select("id")
-        .eq("company_id", activeCompanyId)
-        .eq("type", "mgm_referral")
-        .eq("status", "active")
-        .limit(1)
-        .maybeSingle();
-
-      if (existingCamp) {
-        campaignId = existingCamp.id;
-      } else {
-        const { data: newCamp, error: campErr } = await (supabase.from("todoo_campaigns") as any)
-          .insert({
-            company_id: activeCompanyId,
-            title: "Desafio 3 Amigas (Leads Indicados)",
-            description: "Campanha contínua de captação de indicações de clientes em cabine.",
-            type: "mgm_referral",
-            source_type: "manual",
-            status: "active",
-            sla_hours: 24,
-            message_template:
-              "Olá {primeiro_nome}! Sua amiga {nome} esteve na clínica e liberou no seu nome um voucher nominal de R$ 150 para você realizar sua primeira sessão de cortesia! Vamos agendar seu horário desta semana?",
-            offer_details: "Voucher de R$ 150 válido por 7 dias",
-            created_by: profile.id,
-          })
-          .select("id")
-          .single();
-
-        if (campErr) throw campErr;
-        campaignId = newCamp.id;
+      if (duplicates.length > 0) {
+        toast.warning(
+          `Já cadastrado${duplicates.length > 1 ? "s" : ""} antes, não contou de novo: ${duplicates
+            .map((d) => d.name)
+            .join(", ")}`,
+        );
       }
 
-      // 2. Para cada amiga indicada: cria contato, registra indicação e injeta no Todoo
-      const now = new Date();
-      const slaDeadline = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
-
-      for (const friend of validFriends) {
-        const cleanPhone = friend.phone.replace(/\D/g, "");
-
-        // A. Cria ou busca o contato na tabela contacts
-        let contactId: string | null = null;
-        const { data: existingContact } = await supabase
-          .from("contacts")
-          .select("id, tags")
-          .eq("company_id", activeCompanyId)
-          .eq("phone", cleanPhone)
-          .maybeSingle();
-
-        if (existingContact) {
-          contactId = existingContact.id;
-          const currentTags = existingContact.tags || [];
-          if (!currentTags.includes("Lead Indicado")) {
-            await supabase
-              .from("contacts")
-              .update({
-                tags: [...currentTags, "Lead Indicado", `Indicado por: ${referrerName}`],
-              })
-              .eq("id", contactId);
-          }
-        } else {
-          const { data: newContact } = await supabase
-            .from("contacts")
-            .insert({
-              company_id: activeCompanyId,
-              unit_id: referralUnitId,
-              name: friend.name.trim(),
-              phone: cleanPhone,
-              tags: ["Lead Indicado", `Indicado por: ${referrerName}`],
-              source: "Indicado por Cliente",
-              source_details: `Indicada por ${referrerName} (${referrerPhone || "Sem tel"})`,
-              created_by: profile.id,
-            })
-            .select("id")
-            .single();
-
-          if (newContact) contactId = newContact.id;
-        }
-
-        // B. Registra na tabela todoo_referrals
-        await (supabase.from("todoo_referrals") as any).insert({
-          company_id: activeCompanyId,
-          unit_id: referralUnitId,
-          referrer_contact_id: referrerContactId || null,
-          referrer_name: referrerName.trim(),
-          referrer_phone: referrerPhone || null,
-          referred_contact_id: contactId,
-          referred_name: friend.name.trim(),
-          referred_phone: cleanPhone,
-          interested_service: friend.service,
-          voucher_code: voucherCode || "VOUCHER150",
-          voucher_value: numValue,
-          captured_by_user_id: captorId,
-          status: "pending",
-          reward_status: "pending",
-          reward_details: `Crédito de R$ 50 para ${referrerName} quando ${friend.name} fechar pacote`,
-        });
-
-        // C. Injeta na fila do Todoo (todoo_leads) com SLA prioritário de 24h
-        await (supabase.from("todoo_leads") as any).insert({
-          campaign_id: campaignId,
-          company_id: activeCompanyId,
-          unit_id: referralUnitId,
-          contact_id: contactId,
-          contact_name: friend.name.trim(),
-          contact_phone: cleanPhone,
-          assigned_user_id: captorId,
-          assigned_at: now.toISOString(),
-          sla_deadline: slaDeadline,
-          status: "pending",
-          custom_fields: {
-            indicadora: referrerName.trim(),
-            servico: friend.service,
-            voucher: voucherCode,
-            valor_voucher: numValue,
-          },
-        });
+      if (created > 0) {
+        onOpenChange(false);
+        onSuccess();
       }
-
-      toast.success(
-        `🎉 ${validFriends.length} indicação(ões) cadastrada(s) e adicionada(s) à fila do Todoo!`
-      );
-      onOpenChange(false);
-      onSuccess();
     } catch (err: any) {
       console.error(err);
-      toast.error("Erro ao cadastrar indicação: " + err.message);
+      toast.error("Erro ao cadastrar contatos: " + err.message);
     } finally {
       setSubmitting(false);
     }
@@ -286,71 +161,80 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
         <DialogHeader>
           <div className="flex items-center gap-2">
             <div className="grid h-8 w-8 place-items-center rounded-lg bg-pink-500/10 text-pink-600">
-              <Gift className="h-4 w-4" />
+              <UserPlus className="h-4 w-4" />
             </div>
             <div>
-              <DialogTitle className="text-base">Cadastrar Novas Indicações</DialogTitle>
+              <DialogTitle className="text-base">Cadastrar Contatos</DialogTitle>
               <DialogDescription className="text-xs">
-                Desafio 3 Amigas (Member-Get-Member): colete indicações e some pontos na sua meta!
+                Contatos de prospecção ativa ou indicação entram no Quadro Comercial e contam na sua
+                meta.
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Seção 1: Cliente Indicadora */}
-          <div className="bg-muted/40 p-3.5 rounded-xl border border-border/80 space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold uppercase text-muted-foreground flex items-center gap-1.5">
-                <User className="h-3.5 w-3.5 text-primary" />
-                Quem está indicando? (Cliente na Clínica)
-              </Label>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <Label className="text-xs">Nome da Cliente *</Label>
-                <Input
-                  className="mt-1"
-                  placeholder="Ex: Maria Clara Silva"
-                  value={referrerName}
-                  onChange={(e) => setReferrerName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <Label className="text-xs">WhatsApp da Cliente</Label>
-                <Input
-                  className="mt-1"
-                  placeholder="(00) 00000-0000"
-                  value={referrerPhone}
-                  onChange={(e) => setReferrerPhone(e.target.value)}
-                />
-              </div>
-            </div>
+          {/* Origem */}
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                { value: "indicacao", label: "Indicação", icon: Gift },
+                { value: "prospeccao", label: "Prospecção Ativa", icon: Megaphone },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setOrigin(opt.value)}
+                className={cn(
+                  "flex items-center justify-center gap-2 rounded-xl border p-2.5 text-sm font-medium transition-colors",
+                  origin === opt.value
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:bg-muted/50",
+                )}
+              >
+                <opt.icon className="h-4 w-4" />
+                {opt.label}
+              </button>
+            ))}
           </div>
 
-          {/* Seção 2: Amigas Indicadas (Lista Dinâmica) */}
+          {/* Cliente que indicou */}
+          {origin === "indicacao" && (
+            <div className="bg-muted/40 p-3.5 rounded-xl border border-border/80 space-y-1.5">
+              <Label className="text-xs font-semibold uppercase text-muted-foreground flex items-center gap-1.5">
+                <User className="h-3.5 w-3.5 text-primary" />
+                Cliente que está indicando *
+              </Label>
+              <Input
+                placeholder="Ex: Maria Clara Silva"
+                value={referrerName}
+                onChange={(e) => setReferrerName(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Contatos */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold uppercase text-muted-foreground flex items-center gap-1.5">
                 <Users className="h-3.5 w-3.5 text-pink-600" />
-                Amigas Indicadas para Receber o Voucher
+                {origin === "indicacao" ? "Pessoas indicadas" : "Contatos"}
               </Label>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={handleAddFriend}
+                onClick={() => setContacts((prev) => [...prev, emptyContact()])}
                 className="h-7 text-xs text-primary gap-1"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Adicionar Amiga
+                Adicionar contato
               </Button>
             </div>
 
             <div className="space-y-2.5">
-              {friends.map((friend, idx) => (
+              {contacts.map((contact, idx) => (
                 <div
                   key={idx}
                   className="flex items-center gap-2 p-2.5 rounded-xl border border-border bg-card"
@@ -361,31 +245,31 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 flex-1">
                     <Input
-                      placeholder="Nome da Amiga"
-                      value={friend.name}
-                      onChange={(e) => handleFriendChange(idx, "name", e.target.value)}
+                      placeholder="Nome"
+                      value={contact.name}
+                      onChange={(e) => handleContactChange(idx, "name", e.target.value)}
                       className="text-xs h-8"
                     />
                     <Input
                       placeholder="WhatsApp (com DDD)"
-                      value={friend.phone}
-                      onChange={(e) => handleFriendChange(idx, "phone", e.target.value)}
+                      value={contact.phone}
+                      onChange={(e) => handleContactChange(idx, "phone", e.target.value)}
                       className="text-xs h-8"
                     />
                     <Input
-                      placeholder="Área de Interesse"
-                      value={friend.service}
-                      onChange={(e) => handleFriendChange(idx, "service", e.target.value)}
+                      placeholder="Interesse (opcional)"
+                      value={contact.service}
+                      onChange={(e) => handleContactChange(idx, "service", e.target.value)}
                       className="text-xs h-8"
                     />
                   </div>
 
-                  {friends.length > 1 && (
+                  {contacts.length > 1 && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleRemoveFriend(idx)}
+                      onClick={() => setContacts((prev) => prev.filter((_, i) => i !== idx))}
                       className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -396,46 +280,31 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
             </div>
           </div>
 
-          {/* Seção 3: Atribuição e Voucher */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-border">
-            <div>
-              <Label className="text-xs">Código do Voucher</Label>
-              <Input
-                className="mt-1 text-xs"
-                value={voucherCode}
-                onChange={(e) => setVoucherCode(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <Label className="text-xs">Valor do Voucher (R$)</Label>
-              <Input
-                className="mt-1 text-xs"
-                value={voucherValue}
-                onChange={(e) => setVoucherValue(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <Label className="text-xs">Captado Por (Meta)</Label>
-              <Select value={capturedById} onValueChange={setCapturedById}>
-                <SelectTrigger className="mt-1 text-xs">
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {teamMembers.map((m: any) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs">
-                      {m.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Quem captou */}
+          <div className="pt-2 border-t border-border sm:w-1/2">
+            <Label className="text-xs">Captado por (conta na meta)</Label>
+            <Select value={capturedById} onValueChange={setCapturedById}>
+              <SelectTrigger className="mt-1 text-xs">
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                {teamMembers.map((m: any) => (
+                  <SelectItem key={m.id} value={m.id} className="text-xs">
+                    {m.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={submitting}
+          >
             Cancelar
           </Button>
           <Button type="button" onClick={handleSubmit} disabled={submitting} className="gap-1.5">
@@ -447,7 +316,7 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
             ) : (
               <>
                 <Sparkles className="h-4 w-4" />
-                Cadastrar e Injetar no Todoo
+                Cadastrar e enviar ao Quadro
               </>
             )}
           </Button>
