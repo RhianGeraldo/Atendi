@@ -70,6 +70,7 @@ import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { formatTodooPhone } from "./todoo-period";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { TodooReferrerLink } from "./todoo-referrer-link";
 
 interface Props {
   /** Abas da página do Todoo, exibidas na mesma barra dos controles do quadro */
@@ -852,7 +853,12 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                         <div className="mt-1.5 text-[10px] text-muted-foreground space-y-0.5">
                                           {lead.custom_fields?.indicadora && (
                                             <p className="truncate">
-                                              Indicada por <strong className="text-foreground font-medium">{lead.custom_fields.indicadora}</strong>
+                                              Indicada por{" "}
+                                              <TodooReferrerLink
+                                                name={lead.custom_fields.indicadora}
+                                                contactId={lead.custom_fields?.indicadora_id}
+                                                className="text-foreground font-medium"
+                                              />
                                             </p>
                                           )}
                                           {lead.custom_fields?.servico && (

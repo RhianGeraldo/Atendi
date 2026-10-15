@@ -1,3 +1,5 @@
+import type { TodooLeadStatus } from "@/types/todoo";
+
 // Datas das metas do Todoo no horário de Brasília (sem horário de verão desde 2019).
 const TZ_OFFSET = "-03:00";
 
@@ -55,3 +57,20 @@ export function formatTodooPhone(phone: string | null | undefined): string {
   if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
   return phone;
 }
+
+/** Rótulo e cor de cada status do lead no Quadro Comercial. */
+export const TODOO_LEAD_STATUS: Record<TodooLeadStatus, { label: string; className: string }> = {
+  pending: { label: "Aguardando contato", className: "bg-muted text-muted-foreground" },
+  contacted: {
+    label: "Em negociação",
+    className: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  },
+  callback: {
+    label: "Retornar depois",
+    className: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
+  },
+  quoted: { label: "Orçamento enviado", className: "bg-sky-500/15 text-sky-700 dark:text-sky-400" },
+  scheduled: { label: "Agendou avaliação", className: "bg-blue-600 text-white" },
+  won: { label: "Fechou", className: "bg-emerald-600 text-white" },
+  lost: { label: "Sem interesse", className: "bg-rose-500/15 text-rose-700 dark:text-rose-400" },
+};

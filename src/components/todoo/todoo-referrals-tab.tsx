@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Gift, Plus, Target, Phone, MessageSquare, Megaphone, UserPlus } from "lucide-react";
+import { Gift, Plus, Target, Phone, MessageSquare, Megaphone, UserPlus, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,31 +12,21 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
-import { TodooReferral, TodooGoalPeriod, TodooLeadStatus } from "@/types/todoo";
+import { TodooReferral, TodooGoalPeriod } from "@/types/todoo";
 import { TodooCreateReferralDialog } from "./todoo-create-referral-dialog";
 import { TodooGoalsDialog } from "./todoo-goals-dialog";
-import { currentTodooMonth, formatTodooPhone, todooPeriodStarts } from "./todoo-period";
+import {
+  TODOO_LEAD_STATUS,
+  currentTodooMonth,
+  formatTodooPhone,
+  todooPeriodStarts,
+} from "./todoo-period";
 import { TodooSectionHeader } from "./todoo-section-header";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
+import { TodooReferrerLink } from "./todoo-referrer-link";
 
 type OriginFilter = "all" | "indicacao" | "prospeccao";
 type PeriodFilter = "day" | "month" | "all";
-
-const LEAD_STATUS: Record<TodooLeadStatus, { label: string; className: string }> = {
-  pending: { label: "Aguardando contato", className: "bg-muted text-muted-foreground" },
-  contacted: {
-    label: "Em negociação",
-    className: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  },
-  callback: {
-    label: "Retornar depois",
-    className: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
-  },
-  quoted: { label: "Orçamento enviado", className: "bg-sky-500/15 text-sky-700 dark:text-sky-400" },
-  scheduled: { label: "Agendou avaliação", className: "bg-blue-600 text-white" },
-  won: { label: "Fechou", className: "bg-emerald-600 text-white" },
-  lost: { label: "Sem interesse", className: "bg-rose-500/15 text-rose-700 dark:text-rose-400" },
-};
 
 interface GoalProgress {
   userId: string;
@@ -162,6 +152,21 @@ export function TodooReferralsTab() {
   };
 
   const myGoal = goalsData?.myGoal;
+
+  // Clientes que mais indicaram no filtro atual (vinculadas pelo contato ou, nas antigas, pelo nome)
+  const topReferrers = useMemo(() => {
+    const groups: Record<string, { name: string; contactId: string | null; total: number; won: number }> = {};
+    for (const c of captures) {
+      if (c.origin !== "indicacao" || !c.referrer_name) continue;
+      const key = c.referrer_contact_id || `nome:${c.referrer_name.trim().toLowerCase()}`;
+      const g = (groups[key] ||= { name: c.referrer_name, contactId: c.referrer_contact_id, total: 0, won: 0 });
+      g.total += 1;
+      if (c.lead?.status === "won") g.won += 1;
+    }
+    return Object.values(groups)
+      .sort((a, b) => b.total - a.total || b.won - a.won || a.name.localeCompare(b.name, "pt-BR"))
+      .slice(0, 5);
+  }, [captures]);
 
   return (
     <div className="space-y-6">
@@ -313,6 +318,29 @@ export function TodooReferralsTab() {
         </div>
       </div>
 
+      {/* Clientes que mais indicaram */}
+      {topReferrers.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="flex items-center gap-1 text-[11px] font-semibold uppercase text-muted-foreground">
+            <Trophy className="h-3.5 w-3.5 text-amber-500" />
+            Quem mais indicou
+          </span>
+          {topReferrers.map((r, i) => (
+            <span
+              key={r.contactId || r.name}
+              className="flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs"
+            >
+              <span className="text-muted-foreground">{i + 1}º</span>
+              <TodooReferrerLink name={r.name} contactId={r.contactId} className="font-medium" />
+              <span className="text-muted-foreground">
+                · {r.total} indicaç{r.total > 1 ? "ões" : "ão"}
+                {r.won > 0 ? ` · ${r.won} fechou` : ""}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Lista */}
       {loadingCaptures ? (
         <div className="p-12 text-center text-xs text-muted-foreground">
@@ -346,7 +374,7 @@ export function TodooReferralsTab() {
       ) : (
         <div className="space-y-3">
           {captures.map((c) => {
-            const status = c.lead ? LEAD_STATUS[c.lead.status] : null;
+            const status = c.lead ? TODOO_LEAD_STATUS[c.lead.status] : null;
             return (
               <Card key={c.id} className="hover:border-primary/40 transition-all">
                 <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -361,7 +389,12 @@ export function TodooReferralsTab() {
                           className="text-[11px] font-normal gap-1 border-pink-500/30"
                         >
                           <Gift className="h-3 w-3 text-pink-600" />
-                          Indicada por: <strong>{c.referrer_name}</strong>
+                          Indicada por:{" "}
+                          <TodooReferrerLink
+                            name={c.referrer_name || "—"}
+                            contactId={c.referrer_contact_id}
+                            className="font-semibold"
+                          />
                         </Badge>
                       ) : (
                         <Badge variant="outline" className="text-[11px] font-normal gap-1">

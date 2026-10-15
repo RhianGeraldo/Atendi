@@ -40,6 +40,7 @@ import { TodooSectionHeader } from "./todoo-section-header";
 import { currentTodooMonth, formatTodooPhone, todooDayBounds } from "./todoo-period";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { TodooReferrerLink } from "./todoo-referrer-link";
 
 interface Props {
   /** Dia de outra pessoa (Painel da Equipe); sem valor, o dia de quem está logado */
@@ -683,7 +684,11 @@ function LeadRow({
               {lead.campaign.title}
             </span>
           )}
-          {referrer && <span className="text-[10px] text-muted-foreground">Indicada por {referrer}</span>}
+          {referrer && (
+            <span className="text-[10px] text-muted-foreground">
+              Indicada por <TodooReferrerLink name={referrer} contactId={lead.custom_fields?.indicadora_id} />
+            </span>
+          )}
           {interest && <span className="text-[10px] text-muted-foreground">Interesse: {interest}</span>}
           {detail}
         </div>
