@@ -13,6 +13,8 @@ import {
   Loader2,
   MessageSquare,
   RefreshCw,
+  Target,
+  Trophy,
   UserPlus,
   Users,
 } from "lucide-react";
@@ -37,6 +39,7 @@ import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { TodooLead, TodooOutcomeType } from "@/types/todoo";
 import { TodooOutcomeDialog } from "./todoo-outcome-dialog";
+import { TodooGoalsDialog } from "./todoo-goals-dialog";
 import { TodooSectionHeader } from "./todoo-section-header";
 import { currentTodooMonth, formatTodooPhone, todooDayBounds } from "./todoo-period";
 import { toast } from "sonner";
@@ -97,6 +100,7 @@ export function TodooMyDay({ onCreateContactsClick }: Props) {
   const [leadForOutcome, setLeadForOutcome] = useState<TodooLead | null>(null);
   const [outcomeType, setOutcomeType] = useState<TodooOutcomeType>("won");
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [goalsOpen, setGoalsOpen] = useState(false);
 
   const bounds = useMemo(() => todooDayBounds(), []);
   const month = currentTodooMonth();
@@ -150,18 +154,17 @@ export function TodooMyDay({ onCreateContactsClick }: Props) {
       if (onlyMine) tasksQuery = tasksQuery.eq("assigned_to", profile!.id);
       if (unitFilter) tasksQuery = tasksQuery.eq("unit_id", unitFilter);
 
-      let goalsQuery = (supabase.from("todoo_goals") as any)
-        .select("user_id, target_contacts, contacts_period")
+      // Metas e cadastros da equipe toda: o painel de metas mostra o ranking para todos
+      const goalsQuery = (supabase.from("todoo_goals") as any)
+        .select("user_id, target_contacts, contacts_period, user:profiles(id, name)")
         .eq("company_id", activeCompanyId)
         .eq("month_year", month)
         .gt("target_contacts", 0);
-      if (onlyMine) goalsQuery = goalsQuery.eq("user_id", profile!.id);
 
-      let capturesQuery = (supabase.from("todoo_referrals") as any)
+      const capturesQuery = (supabase.from("todoo_referrals") as any)
         .select("captured_by_user_id, created_at")
         .eq("company_id", activeCompanyId)
         .gte("created_at", bounds.monthStart);
-      if (onlyMine) capturesQuery = capturesQuery.eq("captured_by_user_id", profile!.id);
 
       const [leadsRes, tasksRes, goalsRes, capturesRes] = await Promise.all([
         leadsQuery,
@@ -177,7 +180,12 @@ export function TodooMyDay({ onCreateContactsClick }: Props) {
       return {
         leads: (leadsRes.data || []) as TodooLead[],
         tasks: (tasksRes.data || []) as CrmTask[],
-        goals: (goalsRes.data || []) as { user_id: string; target_contacts: number; contacts_period: string }[],
+        goals: (goalsRes.data || []) as {
+          user_id: string;
+          target_contacts: number;
+          contacts_period: string;
+          user?: { id: string; name: string } | null;
+        }[],
         captures: (capturesRes.data || []) as { captured_by_user_id: string | null; created_at: string }[],
       };
     },
@@ -250,6 +258,21 @@ export function TodooMyDay({ onCreateContactsClick }: Props) {
       .sort((a, b) => b.plan.total - b.plan.done - (a.plan.total - a.plan.done));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [consultants, data, isManagerOrAdmin]);
+
+  // Painel de metas de cadastro: quem tem meta no mês (gerente: só a sua equipe)
+  const goalRows = useMemo(() => {
+    if (!data) return [];
+    const visible = isManagerOrAdmin && !isCompanyAdmin ? new Set(consultants.map((c: any) => c.id)) : null;
+    return data.goals
+      .filter((g) => !visible || visible.has(g.user_id))
+      .map((g) => ({ id: g.user_id, name: g.user?.name || "—", plan: buildPlan(g.user_id) }))
+      .sort(
+        (a, b) =>
+          pct(b.plan.captureDone, b.plan.captureTarget) - pct(a.plan.captureDone, a.plan.captureTarget) ||
+          b.plan.captureMonthDone - a.plan.captureMonthDone,
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, consultants, isManagerOrAdmin, isCompanyAdmin]);
 
   const isTeamView = isManagerOrAdmin && viewUserId === TEAM_VIEW;
   const viewedUserId = isTeamView ? null : viewUserId || profile?.id || "";
@@ -352,6 +375,12 @@ export function TodooMyDay({ onCreateContactsClick }: Props) {
                 </SelectContent>
               </Select>
             )}
+            {isManagerOrAdmin && (
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={() => setGoalsOpen(true)}>
+                <Target className="h-3.5 w-3.5" />
+                Metas de Cadastro
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -371,10 +400,27 @@ export function TodooMyDay({ onCreateContactsClick }: Props) {
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : isTeamView ? (
-        <TeamOverview rows={teamRows} onSelect={setViewUserId} />
+        <>
+          <GoalsPanel
+            rows={goalRows}
+            highlightId={profile?.id}
+            daysLeft={bounds.daysLeftInMonth}
+            onConfigure={() => setGoalsOpen(true)}
+            onSelect={setViewUserId}
+          />
+          <TeamOverview rows={teamRows} onSelect={setViewUserId} />
+        </>
       ) : plan ? (
         <>
           <DaySummary plan={plan} />
+
+          <GoalsPanel
+            rows={goalRows}
+            highlightId={viewedUserId || undefined}
+            daysLeft={bounds.daysLeftInMonth}
+            onConfigure={isManagerOrAdmin ? () => setGoalsOpen(true) : undefined}
+            onSelect={isManagerOrAdmin ? setViewUserId : undefined}
+          />
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <CaptureCard plan={plan} canCreate={!viewingOther} onCreate={onCreateContactsClick} />
@@ -472,6 +518,15 @@ export function TodooMyDay({ onCreateContactsClick }: Props) {
           </div>
         </>
       ) : null}
+
+      <TodooGoalsDialog
+        open={goalsOpen}
+        onOpenChange={setGoalsOpen}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
+          queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] });
+        }}
+      />
 
       <TodooOutcomeDialog
         lead={leadForOutcome}
@@ -767,6 +822,100 @@ function TaskRow({
         <ContactChatButton contactId={task.contact_id} contactName={task.contacts?.name} phone={task.contacts?.phone} />
       )}
     </div>
+  );
+}
+
+function GoalsPanel({
+  rows,
+  highlightId,
+  daysLeft,
+  onConfigure,
+  onSelect,
+}: {
+  rows: { id: string; name: string; plan: DayPlan }[];
+  highlightId?: string;
+  daysLeft: number;
+  onConfigure?: () => void;
+  onSelect?: (id: string) => void;
+}) {
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <Target className="h-4 w-4 text-pink-500 shrink-0" />
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">Metas de cadastro</h3>
+            <p className="text-[11px] text-muted-foreground">
+              Prospecção ativa e indicações · faltam {daysLeft} {daysLeft === 1 ? "dia" : "dias"} no mês
+            </p>
+          </div>
+        </div>
+        {onConfigure && (
+          <Button size="sm" variant="ghost" className="h-7 text-xs gap-1.5" onClick={onConfigure}>
+            <Target className="h-3.5 w-3.5" />
+            {rows.length > 0 ? "Ajustar" : "Definir metas"}
+          </Button>
+        )}
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="text-xs text-muted-foreground py-1">
+          Nenhuma meta de cadastro definida para este mês.
+          {onConfigure ? " Defina a meta diária ou mensal de cada consultora." : ""}
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+          {rows.map(({ id, name, plan }, idx) => {
+            const monthly = plan.capturePeriod === "monthly";
+            const reached =
+              (plan.captureTarget > 0 && plan.captureDone >= plan.captureTarget) ||
+              (monthly && plan.captureMonthDone >= plan.captureMonthTarget);
+            return (
+              <div
+                key={id}
+                onClick={onSelect ? () => onSelect(id) : undefined}
+                className={cn(
+                  "rounded-lg border p-3 space-y-2",
+                  id === highlightId ? "border-primary/40 bg-primary/5" : "bg-card",
+                  onSelect && "cursor-pointer hover:border-primary/50",
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 text-sm font-medium truncate">
+                    {idx === 0 && reached && <Trophy className="h-3.5 w-3.5 text-amber-500 shrink-0" />}
+                    <span className="truncate">{name}</span>
+                  </span>
+                  <Badge variant="outline" className="text-[10px] shrink-0">
+                    {monthly ? `Mensal · ${plan.captureMonthTarget}` : `Diária · ${plan.captureTarget}`}
+                  </Badge>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-baseline justify-between text-[11px]">
+                    <span className="text-muted-foreground">Hoje</span>
+                    <span className={cn("font-semibold", reached && "text-emerald-600")}>
+                      {plan.captureDone} / {plan.captureTarget}
+                      {reached && <CheckCircle2 className="inline h-3 w-3 ml-1 -mt-0.5" />}
+                    </span>
+                  </div>
+                  <Progress value={pct(plan.captureDone, plan.captureTarget)} className="h-1.5" />
+                </div>
+                {monthly && (
+                  <div className="space-y-1">
+                    <div className="flex items-baseline justify-between text-[11px]">
+                      <span className="text-muted-foreground">No mês</span>
+                      <span className="font-semibold">
+                        {plan.captureMonthDone} / {plan.captureMonthTarget}
+                      </span>
+                    </div>
+                    <Progress value={pct(plan.captureMonthDone, plan.captureMonthTarget)} className="h-1.5" />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
   );
 }
 
