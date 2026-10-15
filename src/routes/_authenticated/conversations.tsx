@@ -369,7 +369,7 @@ function ConversationsPage() {
       }
 
       if (debouncedSearch) {
-        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`, {
+        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%,whatsapp_lid.ilike.%${debouncedSearch}%`, {
           foreignTable: "contact",
         });
       }
@@ -703,7 +703,7 @@ function ConversationsPage() {
       }
 
       if (debouncedSearch) {
-        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%`, {
+        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%,whatsapp_lid.ilike.%${debouncedSearch}%`, {
           foreignTable: "contact",
         });
       }
