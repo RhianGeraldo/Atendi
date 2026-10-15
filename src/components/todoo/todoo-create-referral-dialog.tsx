@@ -160,7 +160,7 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
       <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center gap-2">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-pink-500/10 text-pink-600">
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
               <UserPlus className="h-4 w-4" />
             </div>
             <div>
@@ -218,7 +218,7 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold uppercase text-muted-foreground flex items-center gap-1.5">
-                <Users className="h-3.5 w-3.5 text-pink-600" />
+                <Users className="h-3.5 w-3.5 text-primary" />
                 {origin === "indicacao" ? "Pessoas indicadas" : "Contatos"}
               </Label>
               <Button

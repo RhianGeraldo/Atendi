@@ -15,7 +15,8 @@ import { useUnit } from "@/lib/unit-context";
 import { TodooReferral, TodooGoalPeriod, TodooLeadStatus } from "@/types/todoo";
 import { TodooCreateReferralDialog } from "./todoo-create-referral-dialog";
 import { TodooGoalsDialog } from "./todoo-goals-dialog";
-import { currentTodooMonth, todooPeriodStarts } from "./todoo-period";
+import { currentTodooMonth, formatTodooPhone, todooPeriodStarts } from "./todoo-period";
+import { TodooSectionHeader } from "./todoo-section-header";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 
 type OriginFilter = "all" | "indicacao" | "prospeccao";
@@ -43,13 +44,6 @@ interface GoalProgress {
   period: TodooGoalPeriod;
   target: number;
   done: number;
-}
-
-function formatPhone(phone: string) {
-  const d = phone.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
-  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
-  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
-  return phone;
 }
 
 const periodLabel = (p: TodooGoalPeriod) => (p === "daily" ? "hoje" : "no mês");
@@ -171,6 +165,30 @@ export function TodooReferralsTab() {
 
   return (
     <div className="space-y-6">
+      <TodooSectionHeader
+        title="Cadastros & Metas"
+        description="Contatos de prospecção ativa e indicações que alimentam o Quadro Comercial."
+        actions={
+          <>
+            {canManage && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setGoalsDialogOpen(true)}
+                className="h-8 text-xs gap-1.5"
+              >
+                <Target className="h-3.5 w-3.5" />
+                Ajustar Metas
+              </Button>
+            )}
+            <Button size="sm" onClick={() => setCreateOpen(true)} className="h-8 text-xs gap-1.5">
+              <Plus className="h-3.5 w-3.5" />
+              Cadastrar Contatos
+            </Button>
+          </>
+        }
+      />
+
       {/* Metas de cadastro */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Minha meta */}
@@ -233,17 +251,6 @@ export function TodooReferralsTab() {
             <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
               Metas da equipe ({currentMonth})
             </span>
-            {canManage && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setGoalsDialogOpen(true)}
-                className="h-8 text-xs gap-1"
-              >
-                <Target className="h-3.5 w-3.5" />
-                Ajustar Metas
-              </Button>
-            )}
           </CardHeader>
           <CardContent className="p-4 pt-1">
             {!goalsData?.team.length ? (
@@ -270,7 +277,7 @@ export function TodooReferralsTab() {
       {/* Título, filtros e ação */}
       <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-foreground">Contatos Cadastrados</h3>
+          <h3 className="text-sm font-semibold text-foreground">Contatos Cadastrados</h3>
           <p className="text-xs text-muted-foreground">
             Prospecção ativa e indicações. O status acompanha o Quadro Comercial.
           </p>
@@ -303,13 +310,6 @@ export function TodooReferralsTab() {
               </TabsTrigger>
             </TabsList>
           </Tabs>
-          <Button
-            onClick={() => setCreateOpen(true)}
-            className="gap-2 bg-pink-600 hover:bg-pink-700 text-white shrink-0 h-8 text-xs"
-          >
-            <Plus className="h-4 w-4" />
-            Cadastrar Contatos
-          </Button>
         </div>
       </div>
 
@@ -327,7 +327,7 @@ export function TodooReferralsTab() {
         </Card>
       ) : captures.length === 0 ? (
         <Card className="p-12 text-center border-dashed">
-          <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-pink-500/10 text-pink-600">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-primary/10 text-primary">
             <UserPlus className="h-6 w-6" />
           </div>
           <h4 className="text-base font-semibold mt-3">Nenhum contato cadastrado neste filtro</h4>
@@ -337,7 +337,7 @@ export function TodooReferralsTab() {
           </p>
           <Button
             onClick={() => setCreateOpen(true)}
-            className="mt-4 gap-2 bg-pink-600 hover:bg-pink-700 text-white"
+            className="mt-4 gap-2"
           >
             <Plus className="h-4 w-4" />
             Cadastrar Contatos
@@ -377,7 +377,7 @@ export function TodooReferralsTab() {
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Phone className="h-3 w-3" />
-                        {formatPhone(c.referred_phone)}
+                        {formatTodooPhone(c.referred_phone)}
                       </span>
                       {c.interested_service && <span>Interesse: {c.interested_service}</span>}
                       {c.captured_by && <span>Captado por: {c.captured_by.name}</span>}

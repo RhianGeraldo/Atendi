@@ -23,3 +23,25 @@ export function todooPeriodStarts() {
     monthStart: new Date(`${today.slice(0, 7)}-01T00:00:00${TZ_OFFSET}`).toISOString(),
   };
 }
+
+export type TodooRangeKey = "month" | "last_month" | "all";
+
+/** Intervalo [from, to) em ISO para os filtros de período da Gincana e dos Indicadores. */
+export function todooRange(key: TodooRangeKey): { from: string | null; to: string | null } {
+  if (key === "all") return { from: null, to: null };
+  const [y, m] = currentTodooMonth().split("-").map(Number);
+  const monthStart = (year: number, month: number) =>
+    new Date(`${year}-${String(month).padStart(2, "0")}-01T00:00:00${TZ_OFFSET}`).toISOString();
+  const thisMonth = monthStart(y, m);
+  if (key === "month") return { from: thisMonth, to: null };
+  return { from: monthStart(m === 1 ? y - 1 : y, m === 1 ? 12 : m - 1), to: thisMonth };
+}
+
+/** Telefone para exibição: (27) 99648-6850. */
+export function formatTodooPhone(phone: string | null | undefined): string {
+  if (!phone) return "";
+  const d = phone.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return phone;
+}

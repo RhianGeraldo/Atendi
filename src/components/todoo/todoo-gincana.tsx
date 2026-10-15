@@ -18,18 +18,24 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { supabase } from "@/integrations/supabase/client";
 import { useActiveCompany } from "@/lib/active-company-context";
+import { useUnit } from "@/lib/unit-context";
 import { TodooConsultantScore } from "@/types/todoo";
+import { todooRange, type TodooRangeKey } from "./todoo-period";
+import { TodooRangeTabs, TodooSectionHeader } from "./todoo-section-header";
 
 export function TodooGincana() {
   const { activeCompanyId } = useActiveCompany();
+  const { selectedUnitId } = useUnit();
+  const [range, setRange] = useState<TodooRangeKey>("month");
 
   // Busca dados de desempenho para o ranking
   const { data: scores = [], isLoading } = useQuery({
-    queryKey: ["todoo-gincana-scores", activeCompanyId],
+    queryKey: ["todoo-gincana-scores", activeCompanyId, range, selectedUnitId],
     enabled: !!activeCompanyId,
     queryFn: async () => {
-      // 1. Busca todos os leads da empresa
-      const { data: leads, error } = await (supabase.from("todoo_leads") as any)
+      // 1. Leads da empresa que entraram no período (e na unidade selecionada)
+      const { from, to } = todooRange(range);
+      let query = (supabase.from("todoo_leads") as any)
         .select(`
           id,
           assigned_user_id,
@@ -40,7 +46,11 @@ export function TodooGincana() {
           assigned_user:profiles(id, name, avatar_url)
         `)
         .eq("company_id", activeCompanyId);
+      if (from) query = query.gte("assigned_at", from);
+      if (to) query = query.lt("assigned_at", to);
+      if (selectedUnitId) query = query.eq("unit_id", selectedUnitId);
 
+      const { data: leads, error } = await query;
       if (error) throw error;
 
       // 2. Agrupa por usuário
@@ -116,33 +126,29 @@ export function TodooGincana() {
 
   return (
     <div className="space-y-6">
-      {/* Banner da Gincana */}
-      <div className="bg-gradient-to-r from-amber-500/10 via-primary/10 to-transparent p-6 rounded-2xl border border-amber-500/20 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="space-y-1 text-center sm:text-left">
-          <div className="flex items-center justify-center sm:justify-start gap-2">
-            <Trophy className="h-6 w-6 text-amber-500" />
-            <h2 className="text-xl font-bold text-foreground">Gincana Comercial do Todoo</h2>
-          </div>
-          <p className="text-xs text-muted-foreground max-w-xl">
-            Competição saudável com base no manual operacional: premie resultados reais, agendamentos rápidos e cumprimento de SLA.
-          </p>
-        </div>
+      <TodooSectionHeader
+        title="Gincana & Ranking"
+        description="Competição saudável: premia resultados reais, agendamentos e cumprimento de SLA. Considera os leads recebidos no período."
+        actions={<TodooRangeTabs value={range} onChange={setRange} />}
+      />
 
-        {/* Regras de Pontuação */}
-        <div className="flex flex-wrap items-center justify-center gap-2 text-[11px]">
-          <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
-            Contrato Fechado: +10 pts
-          </Badge>
-          <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/30">
-            Agendamento: +5 pts
-          </Badge>
-          <Badge variant="outline" className="bg-purple-500/10 text-purple-600 border-purple-500/30">
-            SLA no Prazo: +2 pts
-          </Badge>
-          <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30">
-            SLA Vencido: -5 pts
-          </Badge>
-        </div>
+      {/* Regras de Pontuação */}
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
+          Contrato Fechado: +10 pts
+        </Badge>
+        <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/30">
+          Agendamento: +5 pts
+        </Badge>
+        <Badge variant="outline" className="bg-sky-500/10 text-sky-600 border-sky-500/30">
+          Orçamento: +2 pts
+        </Badge>
+        <Badge variant="outline" className="bg-purple-500/10 text-purple-600 border-purple-500/30">
+          SLA no Prazo: +2 pts
+        </Badge>
+        <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30">
+          SLA Vencido: -5 pts
+        </Badge>
       </div>
 
       {/* Pódio (Top 3) */}

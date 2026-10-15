@@ -49,6 +49,7 @@ import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { TodooCampaign } from "@/types/todoo";
 import { TodooEditCampaignDialog } from "./todoo-edit-campaign-dialog";
 import { Building2 } from "lucide-react";
+import { TodooSectionHeader } from "./todoo-section-header";
 import { toast } from "sonner";
 
 interface Props {
@@ -223,18 +224,16 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
   return (
     <div className="space-y-6">
       {/* Cabeçalho da Aba */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold text-foreground">Ações Comerciais & Listas Quentes</h2>
-          <p className="text-xs text-muted-foreground">
-            Gerencie as campanhas ativas, edite scripts, acompanhe a taxa de conversão e os resultados.
-          </p>
-        </div>
-        <Button onClick={onCreateClick} size="sm" className="gap-2 shrink-0 h-9 text-xs">
-          <Plus className="h-4 w-4" />
-          Nova Ação Comercial
-        </Button>
-      </div>
+      <TodooSectionHeader
+        title="Ações Comerciais"
+        description="Gerencie as campanhas ativas, edite scripts, acompanhe a taxa de conversão e os resultados."
+        actions={
+          <Button onClick={onCreateClick} size="sm" className="gap-1.5 h-8 text-xs">
+            <Plus className="h-3.5 w-3.5" />
+            Nova Ação Comercial
+          </Button>
+        }
+      />
 
       {/* Alerta de Unidade Ativa */}
       {activeUnit && (

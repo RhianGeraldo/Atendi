@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { useNavigate } from "@tanstack/react-router";
@@ -32,6 +32,9 @@ import {
   Trophy,
   History,
   Info,
+  Filter,
+  FilterX,
+  UserPlus,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -39,12 +42,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sheet,
   SheetContent,
@@ -60,12 +67,19 @@ import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { useWavoip } from "@/hooks/use-wavoip";
 import { TodooLead, TodooOutcomeType, TodooCampaign } from "@/types/todoo";
 import { TodooOutcomeDialog } from "./todoo-outcome-dialog";
+import { formatTodooPhone } from "./todoo-period";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface Props {
+  /** Abas da página do Todoo, exibidas na mesma barra dos controles do quadro */
+  tabs?: ReactNode;
   onCreateCampaignClick?: () => void;
+  onCreateContactsClick?: () => void;
 }
+
+// Leads fechados (venda / sem sucesso) aparecem no quadro por este período
+const CLOSED_LEADS_DAYS = 30;
 
 interface KanbanColumnConfig {
   id: string;
@@ -88,7 +102,14 @@ const KANBAN_COLUMNS: KanbanColumnConfig[] = [
     title: "Em Atendimento",
     color: "#8b5cf6", // Roxo
     icon: MessageSquare,
-    statusMatch: ["contacted", "in_progress", "scheduled", "quoted"],
+    statusMatch: ["contacted", "quoted"],
+  },
+  {
+    id: "scheduled",
+    title: "Agendado",
+    color: "#0ea5e9", // Azul céu
+    icon: Calendar,
+    statusMatch: ["scheduled"],
   },
   {
     id: "callback",
@@ -113,7 +134,7 @@ const KANBAN_COLUMNS: KanbanColumnConfig[] = [
   },
 ];
 
-export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
+export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsClick }: Props) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId, setSelectedUnitId } = useUnit();
@@ -189,6 +210,11 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
           unit:units(id, name, color)
         `)
         .eq("company_id", activeCompanyId)
+        .or(
+          `status.not.in.(won,lost),updated_at.gte.${new Date(
+            Date.now() - CLOSED_LEADS_DAYS * 24 * 60 * 60 * 1000,
+          ).toISOString()}`,
+        )
         .order("created_at", { ascending: false });
 
       // Se for consultor normal, apenas os seus leads
@@ -223,6 +249,20 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
     },
   });
 
+  const isManagerOrAdmin =
+    profile?.role === "admin_company" ||
+    profile?.role === "super_admin" ||
+    profile?.role === "manager";
+
+  const hasActiveFilters =
+    selectedCampaignId !== "all" || selectedConsultantId !== "all" || !!selectedUnitId;
+
+  const handleClearFilters = () => {
+    setSelectedCampaignId("all");
+    setSelectedConsultantId("all");
+    setSelectedUnitId(null);
+  };
+
   // Leads filtrados pelos controles da barra do Kanban
   const filteredLeads = useMemo(() => {
     return leads.filter((lead) => {
@@ -254,6 +294,7 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
     const map: Record<string, TodooLead[]> = {
       pending: [],
       in_progress: [],
+      scheduled: [],
       callback: [],
       won: [],
       lost: [],
@@ -262,7 +303,9 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
     filteredLeads.forEach((lead) => {
       if (lead.status === "pending") {
         map.pending.push(lead);
-      } else if (["in_progress", "contacted", "scheduled", "quoted"].includes(lead.status)) {
+      } else if (lead.status === "scheduled") {
+        map.scheduled.push(lead);
+      } else if (["contacted", "quoted"].includes(lead.status)) {
         map.in_progress.push(lead);
       } else if (lead.status === "callback") {
         map.callback.push(lead);
@@ -277,16 +320,6 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
 
     return map;
   }, [filteredLeads]);
-
-  // Indicadores de KPI rápidos do topo
-  const kpiStats = useMemo(() => {
-    const total = filteredLeads.length;
-    const inProgress = columnsData.in_progress.length;
-    const callbacks = columnsData.callback.length;
-    const won = columnsData.won.length;
-    const wonRevenue = columnsData.won.reduce((acc, curr) => acc + (Number(curr.outcome_value) || 0), 0);
-    return { total, inProgress, callbacks, won, wonRevenue };
-  }, [filteredLeads, columnsData]);
 
   // Drag and Drop Handler
   const handleDragEnd = async (result: DropResult) => {
@@ -308,6 +341,13 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
       return;
     }
 
+    if (targetColId === "scheduled") {
+      setLeadForOutcome(lead);
+      setOutcomeInitialType("scheduled");
+      setOutcomeDialogOpen(true);
+      return;
+    }
+
     if (targetColId === "callback") {
       setLeadForOutcome(lead);
       setOutcomeInitialType("callback");
@@ -323,7 +363,7 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
     }
 
     // Se arrastou para Em Atendimento ou Pendente -> Atualização direta otimista
-    const newStatus = targetColId === "pending" ? "pending" : "in_progress";
+    const newStatus = targetColId === "pending" ? "pending" : "contacted";
 
     // Atualização otimista no cache do React Query
     queryClient.setQueryData(
@@ -341,12 +381,13 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
           status: newStatus,
           last_interaction_at: now,
           updated_at: now,
+          ...(newStatus === "contacted" && !lead.first_contact_at ? { first_contact_at: now } : {}),
         })
         .eq("id", lead.id);
 
       if (error) throw error;
 
-      toast.success(newStatus === "in_progress" ? "Lead movido para Em Atendimento" : "Lead retornado para A Contatar");
+      toast.success(newStatus === "contacted" ? "Lead movido para Em Atendimento" : "Lead retornado para A Contatar");
       refetch();
     } catch (err: any) {
       toast.error("Erro ao mover lead: " + err.message);
@@ -523,153 +564,217 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
       {/* ======================================================== */}
       {/* BARRA SUPERIOR DE FILTROS & INDICADORES DO QUADRO KANBAN */}
       {/* ======================================================== */}
-      <header className="border-b border-border bg-card/60 backdrop-blur-xs px-4 py-3 shrink-0 flex flex-col gap-3">
+      <header className="border-b border-border bg-card/60 backdrop-blur-xs px-4 py-2.5 sm:px-6 shrink-0">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Título & KPIs Resumidos */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary grid place-items-center">
-                <Target className="h-4 w-4" />
-              </div>
-              <div>
-                <h1 className="text-sm font-bold text-foreground flex items-center gap-2">
-                  Quadro Comercial
-                  <Badge variant="secondary" className="text-[10px] px-1.5 h-4 font-semibold">
-                    {filteredLeads.length} leads
-                  </Badge>
-                </h1>
-                <p className="text-[11px] text-muted-foreground hidden sm:block">
-                  Arraste os cards para avançar os leads na esteira de vendas.
-                </p>
-              </div>
-            </div>
+          {/* Abas da página */}
+          {tabs}
 
-            {/* Badges de Resumo / Meta do Dia */}
-            <div className="hidden md:flex items-center gap-2 pl-3 border-l border-border/60 text-xs">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/70 text-muted-foreground">
-                <Flame className="h-3.5 w-3.5 text-blue-500" />
-                <span>A Contatar: <strong className="text-foreground">{columnsData.pending.length}</strong></span>
-              </div>
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/70 text-muted-foreground">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                <span>Ganhos: <strong className="text-foreground">{kpiStats.won}</strong></span>
-              </div>
-              {kpiStats.wonRevenue > 0 && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-medium">
-                  <DollarSign className="h-3.5 w-3.5" />
-                  <span>{formatCurrency(kpiStats.wonRevenue)}</span>
-                </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Campo de Busca */}
+            <div className="relative w-44 xl:w-56">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Buscar cliente ou telefone..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8 h-8 text-xs bg-background"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
               )}
             </div>
-          </div>
 
-          {/* Ação de Criar Ação Comercial */}
-          {onCreateCampaignClick && (
+            {/* Ícone de Filtro com Dropdown (mesmo padrão do CRM e Atendimento) */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="icon"
+                  variant={hasActiveFilters ? "default" : "outline"}
+                  className="h-8 w-8 shrink-0 relative cursor-pointer"
+                  title="Filtrar por Ação Comercial, Unidade e Consultora"
+                >
+                  <Filter className="h-3.5 w-3.5" />
+                  {hasActiveFilters && (
+                    <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background animate-pulse" />
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                {hasActiveFilters && (
+                  <>
+                    <DropdownMenuItem
+                      className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer font-medium text-xs flex items-center justify-between"
+                      onClick={handleClearFilters}
+                    >
+                      <span>Limpar Filtros</span>
+                      <FilterX className="h-3.5 w-3.5 text-destructive" />
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+
+                {/* Submenu 1: Ação Comercial */}
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="cursor-pointer text-xs">
+                    <span>Ação Comercial</span>
+                    {selectedCampaignId !== "all" && (
+                      <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent className="w-64 max-h-64 overflow-y-auto">
+                      <DropdownMenuItem
+                        onClick={() => setSelectedCampaignId("all")}
+                        className="cursor-pointer text-xs flex items-center justify-between"
+                      >
+                        <span>Todas as Ações</span>
+                        {selectedCampaignId === "all" && (
+                          <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {campaigns.map((camp) => (
+                        <DropdownMenuItem
+                          key={camp.id}
+                          onClick={() => setSelectedCampaignId(camp.id)}
+                          className="cursor-pointer text-xs flex items-center justify-between"
+                        >
+                          <span className="truncate max-w-[200px]">{camp.title}</span>
+                          {selectedCampaignId === camp.id && (
+                            <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary shrink-0" />
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+
+                {/* Submenu 2: Unidade */}
+                {allUnits.length > 0 && (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="cursor-pointer text-xs">
+                      <span>Unidade</span>
+                      {selectedUnitId && <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuPortal>
+                      <DropdownMenuSubContent className="w-56 max-h-64 overflow-y-auto">
+                        <DropdownMenuItem
+                          onClick={() => setSelectedUnitId(null)}
+                          className="cursor-pointer text-xs flex items-center justify-between"
+                        >
+                          <span>Todas as Unidades</span>
+                          {!selectedUnitId && (
+                            <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                          )}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {allUnits.map((u) => (
+                          <DropdownMenuItem
+                            key={u.id}
+                            onClick={() => setSelectedUnitId(u.id)}
+                            className="cursor-pointer text-xs flex items-center justify-between"
+                          >
+                            <span className="truncate max-w-[170px]">{u.name}</span>
+                            {selectedUnitId === u.id && (
+                              <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary shrink-0" />
+                            )}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuPortal>
+                  </DropdownMenuSub>
+                )}
+
+                {/* Submenu 3: Consultora (gestor ou admin) */}
+                {isManagerOrAdmin && (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="cursor-pointer text-xs">
+                      <span>Consultora</span>
+                      {selectedConsultantId !== "all" && (
+                        <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
+                      )}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuPortal>
+                      <DropdownMenuSubContent className="w-56 max-h-64 overflow-y-auto">
+                        <DropdownMenuItem
+                          onClick={() => setSelectedConsultantId("all")}
+                          className="cursor-pointer text-xs flex items-center justify-between"
+                        >
+                          <span>Todas as Consultoras</span>
+                          {selectedConsultantId === "all" && (
+                            <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                          )}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {consultants.map((c) => (
+                          <DropdownMenuItem
+                            key={c.id}
+                            onClick={() => setSelectedConsultantId(c.id)}
+                            className="cursor-pointer text-xs flex items-center justify-between"
+                          >
+                            <span className="truncate max-w-[170px]">{c.name}</span>
+                            {selectedConsultantId === c.id && (
+                              <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary shrink-0" />
+                            )}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuPortal>
+                  </DropdownMenuSub>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Botão Atualizar */}
             <Button
+              variant="outline"
               size="sm"
-              onClick={onCreateCampaignClick}
-              className="h-8 text-xs gap-1.5 shadow-xs shrink-0"
+              className="h-8 px-2.5 text-xs bg-background shrink-0"
+              onClick={() => refetch()}
+              title="Atualizar lista"
             >
-              <Plus className="h-3.5 w-3.5" />
-              <span>Nova Ação</span>
+              <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
             </Button>
-          )}
-        </div>
 
-        {/* Linha de Controles e Filtros Rápidos */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Filtro de Campanha */}
-          <div className="w-full sm:w-52">
-            <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
-              <SelectTrigger className="h-8 text-xs bg-background">
-                <SelectValue placeholder="Todas as Ações" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas as Ações Comerciais</SelectItem>
-                {campaigns.map((camp) => (
-                  <SelectItem key={camp.id} value={camp.id}>
-                    {camp.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="h-5 w-px bg-border/60 mx-0.5 shrink-0 hidden sm:block" />
 
-          {/* Filtro de Unidade */}
-          <div className="w-full sm:w-44">
-            <Select
-              value={selectedUnitId || "all"}
-              onValueChange={(val) => setSelectedUnitId(val === "all" ? null : val)}
-            >
-              <SelectTrigger className="h-8 text-xs bg-background">
-                <SelectValue placeholder="Todas as Unidades" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas as Unidades</SelectItem>
-                {allUnits.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Filtro de Consultora (se gestor ou admin) */}
-          {(profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager") && (
-            <div className="w-full sm:w-44">
-              <Select value={selectedConsultantId} onValueChange={setSelectedConsultantId}>
-                <SelectTrigger className="h-8 text-xs bg-background">
-                  <SelectValue placeholder="Todas Consultoras" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas Consultoras</SelectItem>
-                  {consultants.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {/* Campo de Busca */}
-          <div className="relative flex-1 min-w-[160px] sm:max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-            <Input
-              placeholder="Buscar cliente ou telefone..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8 h-8 text-xs bg-background"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            {/* Cadastro de Contatos (prospecção / indicação) */}
+            {onCreateContactsClick && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onCreateContactsClick}
+                className="h-8 text-xs gap-1.5 shrink-0 bg-background"
               >
-                <X className="h-3 w-3" />
-              </button>
+                <UserPlus className="h-3.5 w-3.5" />
+                <span>Cadastrar Contatos</span>
+              </Button>
+            )}
+
+            {/* Ação de Criar Ação Comercial */}
+            {onCreateCampaignClick && (
+              <Button
+                size="sm"
+                onClick={onCreateCampaignClick}
+                className="h-8 text-xs gap-1.5 shadow-xs shrink-0"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Nova Ação</span>
+              </Button>
             )}
           </div>
-
-          {/* Botão Atualizar */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 px-2.5 text-xs bg-background shrink-0"
-            onClick={() => refetch()}
-            title="Atualizar lista"
-          >
-            <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-          </Button>
         </div>
       </header>
 
       {/* ======================================================== */}
       {/* ÁREA PRINCIPAL DO KANBAN (DRAG & DROP CONTEXT)           */}
       {/* ======================================================== */}
-      <div className="flex-1 overflow-x-auto p-4 sm:p-5 scroll-smooth">
+      <div className="flex-1 overflow-x-auto p-4 sm:px-6 sm:py-5 scroll-smooth">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center h-64 text-center space-y-2">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -704,7 +809,7 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
                 return (
                   <div
                     key={column.id}
-                    className="flex h-full max-h-full w-[295px] sm:w-[315px] shrink-0 flex-col rounded-xl bg-card border border-border shadow-xs"
+                    className="flex h-full max-h-full min-w-[250px] flex-1 basis-0 flex-col rounded-xl bg-card border border-border shadow-xs"
                   >
                     {/* Cabeçalho da Coluna */}
                     <div
@@ -774,7 +879,7 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
                                             {lead.contact_name}
                                           </h4>
                                           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
-                                            <span className="font-mono">{lead.contact_phone}</span>
+                                            <span>{formatTodooPhone(lead.contact_phone)}</span>
                                             <button
                                               type="button"
                                               onClick={(e) => handleCopyPhone(lead.contact_phone, lead.id, e)}
@@ -822,7 +927,26 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
                                             {lead.campaign.title}
                                           </span>
                                         )}
+                                        {lead.status === "quoted" && (
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-sky-500/10 text-sky-700 dark:text-sky-400 border border-sky-500/30">
+                                            Orçamento enviado
+                                          </span>
+                                        )}
                                       </div>
+
+                                      {/* Origem do cadastro: quem indicou e interesse */}
+                                      {(lead.custom_fields?.indicadora || lead.custom_fields?.servico) && (
+                                        <div className="mt-1.5 text-[10px] text-muted-foreground space-y-0.5">
+                                          {lead.custom_fields?.indicadora && (
+                                            <p className="truncate">
+                                              Indicada por <strong className="text-foreground font-medium">{lead.custom_fields.indicadora}</strong>
+                                            </p>
+                                          )}
+                                          {lead.custom_fields?.servico && (
+                                            <p className="truncate">Interesse: {lead.custom_fields.servico}</p>
+                                          )}
+                                        </div>
+                                      )}
 
                                       {/* Informações Específicas da Etapa */}
                                       {lead.status === "callback" && lead.callback_scheduled_at ? (
@@ -928,7 +1052,7 @@ export function TodooDailyQueue({ onCreateCampaignClick }: Props) {
                 </SheetTitle>
 
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="font-mono">{selectedLeadForSheet.contact_phone}</span>
+                  <span>{formatTodooPhone(selectedLeadForSheet.contact_phone)}</span>
                   <Button
                     variant="ghost"
                     size="icon"

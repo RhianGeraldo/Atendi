@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   TrendingUp,
@@ -15,17 +16,29 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { useActiveCompany } from "@/lib/active-company-context";
+import { useUnit } from "@/lib/unit-context";
+import { todooRange, type TodooRangeKey } from "./todoo-period";
+import { TodooRangeTabs, TodooSectionHeader } from "./todoo-section-header";
 
 export function TodooMetrics() {
   const { activeCompanyId } = useActiveCompany();
+  const { selectedUnitId } = useUnit();
+  const [range, setRange] = useState<TodooRangeKey>("month");
 
   const { data: metrics, isLoading } = useQuery({
-    queryKey: ["todoo-overall-metrics", activeCompanyId],
+    queryKey: ["todoo-overall-metrics", activeCompanyId, range, selectedUnitId],
     enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data: leads, error } = await (supabase.from("todoo_leads") as any)
+      // Leads que entraram no período (e na unidade selecionada)
+      const { from, to } = todooRange(range);
+      let query = (supabase.from("todoo_leads") as any)
         .select("id, status, outcome_type, outcome_value, sla_breached, first_contact_at")
         .eq("company_id", activeCompanyId);
+      if (from) query = query.gte("assigned_at", from);
+      if (to) query = query.lt("assigned_at", to);
+      if (selectedUnitId) query = query.eq("unit_id", selectedUnitId);
+
+      const { data: leads, error } = await query;
 
       if (error) throw error;
 
@@ -65,12 +78,26 @@ export function TodooMetrics() {
     },
   });
 
+  const header = (
+    <TodooSectionHeader
+      title="Indicadores"
+      description="Taxas de contato, agendamento e conversão dos leads recebidos no período."
+      actions={<TodooRangeTabs value={range} onChange={setRange} />}
+    />
+  );
+
   if (isLoading || !metrics) {
-    return <div className="p-12 text-center text-xs text-muted-foreground">Calculando indicadores...</div>;
+    return (
+      <div className="space-y-6">
+        {header}
+        <div className="p-12 text-center text-xs text-muted-foreground">Calculando indicadores...</div>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-6">
+      {header}
       {/* 4 Cards Principais com Fórmulas do Manual Todoo */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
