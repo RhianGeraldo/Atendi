@@ -15,7 +15,6 @@ import {
   RefreshCw,
   Target,
   UserPlus,
-  Users,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +25,6 @@ import {
   Select,
   SelectContent,
   SelectItem,
-  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -34,7 +32,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
-import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { TodooLead, TodooOutcomeType } from "@/types/todoo";
 import { TodooOutcomeDialog } from "./todoo-outcome-dialog";
@@ -45,6 +42,10 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface Props {
+  /** Dia de outra pessoa (Painel da Equipe); sem valor, o dia de quem está logado */
+  userId?: string;
+  /** Dentro de outro painel: sem cabeçalho próprio */
+  embedded?: boolean;
   onCreateContactsClick?: () => void;
 }
 
@@ -52,8 +53,6 @@ interface Props {
 const FOLLOWUP_AFTER_HOURS = 48;
 // Itens exibidos por grupo antes do "Ver todos"
 const GROUP_PREVIEW = 8;
-
-const TEAM_VIEW = "team";
 
 interface CrmTask {
   id: string;
@@ -66,7 +65,7 @@ interface CrmTask {
   contacts?: { name: string | null; phone: string | null } | null;
 }
 
-interface DayPlan {
+export interface DayPlan {
   captureTarget: number;
   captureDone: number;
   capturePeriod: "daily" | "monthly" | null;
@@ -82,46 +81,20 @@ interface DayPlan {
   total: number;
 }
 
-const pct = (done: number, total: number) => (total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0);
+export const pct = (done: number, total: number) => (total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0);
 
-export function TodooMyDay({ onCreateContactsClick }: Props) {
+/**
+ * Dados do dia (leads, tarefas do CRM, metas e cadastros) e o cálculo do plano
+ * de cada pessoa. Gestores carregam a equipe toda; consultoras, só o que é delas.
+ */
+export function useTodooDayData() {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
-  const { unitIds: myUnitIds, isAdmin: isCompanyAdmin } = useAccessibleUnits();
-  const queryClient = useQueryClient();
-
   const isManagerOrAdmin =
     profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager";
-
-  // Gestores começam vendo a equipe; consultoras, o próprio dia
-  const [viewUserId, setViewUserId] = useState<string>(isManagerOrAdmin ? TEAM_VIEW : profile?.id || "");
-  const [leadForOutcome, setLeadForOutcome] = useState<TodooLead | null>(null);
-  const [outcomeType, setOutcomeType] = useState<TodooOutcomeType>("won");
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [goalsOpen, setGoalsOpen] = useState(false);
-
   const bounds = useMemo(() => todooDayBounds(), []);
   const month = currentTodooMonth();
-
-  // Consultoras visíveis (gerente: só a equipe das suas unidades)
-  const { data: consultants = [] } = useQuery({
-    queryKey: ["todoo-consultants-filter", activeCompanyId, isCompanyAdmin, myUnitIds.join(",")],
-    enabled: !!activeCompanyId && isManagerOrAdmin,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, name, avatar_url, user_units(unit_id)")
-        .eq("company_id", activeCompanyId!)
-        .order("name");
-      if (error) throw error;
-      const list = (data || []) as any[];
-      if (isCompanyAdmin) return list;
-      return list.filter(
-        (p) => p.id === profile?.id || (p.user_units || []).some((uu: any) => myUnitIds.includes(uu.unit_id)),
-      );
-    },
-  });
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["todoo-my-day", activeCompanyId, profile?.id, isManagerOrAdmin, selectedUnitId, bounds.dayStart],
@@ -245,22 +218,27 @@ export function TodooMyDay({ onCreateContactsClick }: Props) {
     };
   };
 
-  const teamRows = useMemo(() => {
-    if (!isManagerOrAdmin || !data) return [];
-    return consultants
-      .map((c: any) => ({ id: c.id as string, name: c.name as string, plan: buildPlan(c.id) }))
-      .filter((r) => r.plan.total > 0 || r.plan.captureMonthDone > 0)
-      .sort((a, b) => b.plan.total - b.plan.done - (a.plan.total - a.plan.done));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [consultants, data, isManagerOrAdmin]);
 
-  const isTeamView = isManagerOrAdmin && viewUserId === TEAM_VIEW;
-  const viewedUserId = isTeamView ? null : viewUserId || profile?.id || "";
+  return { data, isLoading, isFetching, refetch, buildPlan, bounds };
+}
+
+export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
+  const { profile } = useAuth();
+  const queryClient = useQueryClient();
+
+  const isManagerOrAdmin =
+    profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager";
+
+  const [leadForOutcome, setLeadForOutcome] = useState<TodooLead | null>(null);
+  const [outcomeType, setOutcomeType] = useState<TodooOutcomeType>("won");
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [goalsOpen, setGoalsOpen] = useState(false);
+
+  const { data, isLoading, isFetching, refetch, buildPlan, bounds } = useTodooDayData();
+
+  const viewedUserId = userId || profile?.id || "";
   const plan = viewedUserId && data ? buildPlan(viewedUserId) : null;
-  const viewingOther = !!viewedUserId && viewedUserId !== profile?.id;
-  const viewedName = viewingOther
-    ? consultants.find((c: any) => c.id === viewedUserId)?.name || "Consultora"
-    : null;
+  const viewingOther = viewedUserId !== profile?.id;
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
@@ -325,36 +303,11 @@ export function TodooMyDay({ onCreateContactsClick }: Props) {
 
   return (
     <div className="space-y-5">
-      <TodooSectionHeader
-        title={isTeamView ? "Dia da equipe" : viewingOther ? `Dia de ${viewedName}` : "Meu Dia"}
-        description={`${todayLabel.charAt(0).toUpperCase()}${todayLabel.slice(1)} · tarefas comerciais de hoje`}
-        actions={
-          <>
-            {isManagerOrAdmin && (
-              <Select value={viewUserId} onValueChange={setViewUserId}>
-                <SelectTrigger className="h-8 w-[200px] text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={TEAM_VIEW} className="text-xs">
-                    Equipe (resumo)
-                  </SelectItem>
-                  {profile?.id && (
-                    <SelectItem value={profile.id} className="text-xs">
-                      Meu dia
-                    </SelectItem>
-                  )}
-                  <SelectSeparator />
-                  {consultants
-                    .filter((c: any) => c.id !== profile?.id)
-                    .map((c: any) => (
-                      <SelectItem key={c.id} value={c.id} className="text-xs">
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            )}
+      {!embedded && (
+        <TodooSectionHeader
+          title="Meu Dia"
+          description={`${todayLabel.charAt(0).toUpperCase()}${todayLabel.slice(1)} · tarefas comerciais de hoje`}
+          actions={
             <Button
               variant="outline"
               size="sm"
@@ -365,21 +318,19 @@ export function TodooMyDay({ onCreateContactsClick }: Props) {
               <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
               Atualizar
             </Button>
-          </>
-        }
-      />
+          }
+        />
+      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
-      ) : isTeamView ? (
-        <TeamOverview rows={teamRows} onSelect={setViewUserId} />
       ) : plan ? (
         <>
           <DaySummary plan={plan} />
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className={cn("grid grid-cols-1 gap-4", !embedded && "xl:grid-cols-2")}>
             <CaptureCard
               plan={plan}
               canCreate={!viewingOther}
@@ -807,80 +758,5 @@ function TaskRow({
         <ContactChatButton contactId={task.contact_id} contactName={task.contacts?.name} phone={task.contacts?.phone} />
       )}
     </div>
-  );
-}
-
-function TeamOverview({
-  rows,
-  onSelect,
-}: {
-  rows: { id: string; name: string; plan: DayPlan }[];
-  onSelect: (id: string) => void;
-}) {
-  if (rows.length === 0) {
-    return (
-      <Card className="p-8 text-center space-y-2">
-        <Users className="h-8 w-8 mx-auto text-muted-foreground/60" />
-        <p className="text-sm text-muted-foreground">Nenhuma consultora com tarefas ou metas para hoje.</p>
-      </Card>
-    );
-  }
-  return (
-    <Card className="overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="bg-muted/50 text-muted-foreground">
-            <tr className="text-left">
-              <th className="px-3 py-2 font-medium">Consultora</th>
-              <th className="px-3 py-2 font-medium min-w-[160px]">Progresso do dia</th>
-              <th className="px-3 py-2 font-medium text-center">Cadastros</th>
-              <th className="px-3 py-2 font-medium text-center">Para chamar</th>
-              <th className="px-3 py-2 font-medium text-center">Retornos</th>
-              <th className="px-3 py-2 font-medium text-center">Follow-up</th>
-              <th className="px-3 py-2 font-medium text-center">Tarefas CRM</th>
-              <th className="px-3 py-2 font-medium text-center">Trabalhados</th>
-              <th className="px-3 py-2 font-medium text-center">Atrasados</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/60">
-            {rows.map(({ id, name, plan }) => {
-              const progress = pct(plan.done, plan.total);
-              return (
-                <tr
-                  key={id}
-                  className="hover:bg-muted/40 cursor-pointer"
-                  onClick={() => onSelect(id)}
-                  title="Ver o dia desta consultora"
-                >
-                  <td className="px-3 py-2.5 font-medium whitespace-nowrap">{name}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <Progress value={progress} className="h-1.5 flex-1" />
-                      <span className="text-muted-foreground w-9 text-right">{progress}%</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-center">
-                    {plan.capturePeriod ? `${plan.captureDone}/${plan.captureTarget}` : plan.captureDone}
-                  </td>
-                  <td className="px-3 py-2.5 text-center">{plan.toContact.length}</td>
-                  <td className="px-3 py-2.5 text-center">{plan.callbacks.length}</td>
-                  <td className="px-3 py-2.5 text-center">{plan.followups.length}</td>
-                  <td className="px-3 py-2.5 text-center">{plan.crmTasks.length}</td>
-                  <td className="px-3 py-2.5 text-center">{plan.workedToday}</td>
-                  <td
-                    className={cn(
-                      "px-3 py-2.5 text-center",
-                      plan.overdue > 0 && "text-destructive font-semibold",
-                    )}
-                  >
-                    {plan.overdue}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Card>
   );
 }
