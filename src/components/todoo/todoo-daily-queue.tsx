@@ -52,13 +52,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
@@ -109,9 +102,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   const [selectedConsultantId, setSelectedConsultantId] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
 
-  // Drawer / Sheet de detalhes do lead
-  const [selectedLeadForSheet, setSelectedLeadForSheet] = useState<TodooLead | null>(null);
-  const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   // Dialog de Desfecho
   const [leadForOutcome, setLeadForOutcome] = useState<TodooLead | null>(null);
@@ -126,7 +116,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   const canConfigureStages = profile?.role === "admin_company" || profile?.role === "super_admin";
 
   // Feedback de cópia
-  const [copiedScript, setCopiedScript] = useState(false);
   const [copiedPhoneId, setCopiedPhoneId] = useState<string | null>(null);
 
   // 1. Busca todas as campanhas para o filtro
@@ -202,20 +191,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
       const { data, error } = await query;
       if (error) throw error;
       return (data || []) as TodooLead[];
-    },
-  });
-
-  // 5. Histórico de eventos do lead para a gaveta lateral
-  const { data: leadEvents = [] } = useQuery({
-    queryKey: ["todoo-lead-events", selectedLeadForSheet?.id],
-    enabled: !!selectedLeadForSheet?.id,
-    queryFn: async () => {
-      const { data, error } = await (supabase.from("todoo_events") as any)
-        .select("*")
-        .eq("lead_id", selectedLeadForSheet!.id)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data || [];
     },
   });
 
@@ -390,13 +365,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     setTimeout(() => setCopiedPhoneId(null), 2000);
   };
 
-  const handleCopyScript = (script: string) => {
-    navigator.clipboard.writeText(script);
-    setCopiedScript(true);
-    toast.success("Script comercial copiado!");
-    setTimeout(() => setCopiedScript(false), 2000);
-  };
-
   const getInitials = (name: string) => {
     if (!name) return "?";
     return name
@@ -410,21 +378,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
   };
-
-  // Abre drawer de detalhes do lead
-  const handleOpenLeadSheet = (lead: TodooLead) => {
-    setSelectedLeadForSheet(lead);
-    setIsSheetOpen(true);
-  };
-
-  // Script personalizado com primeiro nome do lead
-  const personalizedScript = useMemo(() => {
-    if (!selectedLeadForSheet?.campaign?.message_template) return "";
-    const firstName = selectedLeadForSheet.contact_name ? selectedLeadForSheet.contact_name.split(" ")[0] : "Cliente";
-    return selectedLeadForSheet.campaign.message_template
-      .replace(/{nome}/gi, firstName)
-      .replace(/{cliente}/gi, firstName);
-  }, [selectedLeadForSheet]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
@@ -769,9 +722,8 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                       {...dragProvided.draggableProps}
                                       {...dragProvided.dragHandleProps}
                                       style={dragProvided.draggableProps.style}
-                                      onClick={() => handleOpenLeadSheet(lead)}
                                       className={cn(
-                                        "group rounded-xl border bg-card p-3 shadow-xs transition-all duration-200 cursor-pointer hover:border-primary/50 hover:shadow-md",
+                                        "group rounded-xl border bg-card p-3 shadow-xs transition-all duration-200 cursor-grab active:cursor-grabbing hover:border-primary/50 hover:shadow-md",
                                         dragSnapshot.isDragging
                                           ? "shadow-xl ring-2 ring-primary/60 z-50 opacity-95 scale-[1.02]"
                                           : "border-border/80"
@@ -927,9 +879,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                             <span className="truncate">{todooStageActionLabel(stage, stages)}</span>
                                             <ChevronRight className="h-3 w-3 shrink-0" />
                                           </Button>
-                                        ) : (
-                                          <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary transition-colors shrink-0" />
-                                        )}
+                                        ) : null}
                                       </div>
                                     </div>
                                   )}
@@ -948,204 +898,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
           </DragDropContext>
         )}
       </div>
-
-      {/* ======================================================== */}
-      {/* GAVETA LATERAL (SHEET) COM DETALHES DO LEAD & SCRIPT     */}
-      {/* ======================================================== */}
-      <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto p-5 space-y-5">
-          {selectedLeadForSheet && (
-            <>
-              <SheetHeader className="text-left space-y-1.5 pb-3 border-b border-border">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    {selectedLeadForSheet.unit && (
-                      <span
-                        className="text-[10px] px-2 py-0.5 rounded font-medium"
-                        style={{
-                          backgroundColor: selectedLeadForSheet.unit.color ? `${selectedLeadForSheet.unit.color}18` : undefined,
-                          color: selectedLeadForSheet.unit.color || undefined,
-                          border: `1px solid ${selectedLeadForSheet.unit.color ? `${selectedLeadForSheet.unit.color}35` : "var(--border)"}`,
-                        }}
-                      >
-                        {selectedLeadForSheet.unit.name}
-                      </span>
-                    )}
-                    <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-muted text-muted-foreground">
-                      {selectedLeadForSheet.campaign?.title}
-                    </span>
-                  </div>
-                </div>
-
-                <SheetTitle className="text-lg font-bold text-foreground">
-                  {selectedLeadForSheet.contact_name}
-                </SheetTitle>
-
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>{formatTodooPhone(selectedLeadForSheet.contact_phone)}</span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                    onClick={() => handleCopyPhone(selectedLeadForSheet.contact_phone, selectedLeadForSheet.id)}
-                    title="Copiar telefone"
-                  >
-                    {copiedPhoneId === selectedLeadForSheet.id ? (
-                      <Check className="h-3 w-3 text-emerald-600" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                  </Button>
-                </div>
-              </SheetHeader>
-
-              {/* Botões de Ação Imediata */}
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-2 text-xs h-9"
-                  onClick={() => handleCall(selectedLeadForSheet)}
-                >
-                  <Phone className="h-3.5 w-3.5 text-blue-500" />
-                  <span>Fazer Ligação</span>
-                </Button>
-
-                <ContactChatButton
-                  contactId={selectedLeadForSheet.contact_id}
-                  contactName={selectedLeadForSheet.contact_name}
-                  phone={selectedLeadForSheet.contact_phone}
-                  unitId={selectedLeadForSheet.unit_id}
-                  trigger={
-                    <Button size="sm" className="gap-2 text-xs h-9 bg-primary text-primary-foreground">
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      <span>Abrir Atendimento</span>
-                    </Button>
-                  }
-                />
-              </div>
-
-              {/* Oferta Comercial da Ação */}
-              {selectedLeadForSheet.campaign?.offer_details && (
-                <div className="p-3.5 rounded-xl bg-muted/50 border border-border space-y-1">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    <span>Oferta Comercial</span>
-                  </div>
-                  <p className="text-xs text-foreground/90 whitespace-pre-wrap">
-                    {selectedLeadForSheet.campaign.offer_details}
-                  </p>
-                </div>
-              )}
-
-              {/* Script Comercial Recomendado */}
-              {personalizedScript && (
-                <div className="p-3.5 rounded-xl bg-card border border-border space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                      <FileText className="h-3.5 w-3.5 text-primary" />
-                      <span>Script Sugerido</span>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-[11px] gap-1 text-primary hover:bg-primary/10"
-                      onClick={() => handleCopyScript(personalizedScript)}
-                    >
-                      {copiedScript ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                      <span>{copiedScript ? "Copiado!" : "Copiar Script"}</span>
-                    </Button>
-                  </div>
-                  <div className="p-3 rounded-lg bg-muted/40 border border-border/60 text-xs font-mono text-foreground/80 leading-relaxed whitespace-pre-wrap select-all">
-                    {personalizedScript}
-                  </div>
-                </div>
-              )}
-
-              {/* Desfecho Rápido (Se desejar mudar sem arrastar) */}
-              <div className="p-3.5 rounded-xl border border-border space-y-2">
-                <span className="text-xs font-semibold text-foreground block">
-                  Registrar Desfecho
-                </span>
-                <div className="grid grid-cols-3 gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-8 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border-emerald-500/30"
-                    onClick={() => {
-                      setLeadForOutcome(selectedLeadForSheet);
-                      setOutcomeInitialType("won");
-                      setOutcomeDialogOpen(true);
-                      setIsSheetOpen(false);
-                    }}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                    Ganho
-                  </Button>
-
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-8 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40 border-amber-500/30"
-                    onClick={() => {
-                      setLeadForOutcome(selectedLeadForSheet);
-                      setOutcomeInitialType("callback");
-                      setOutcomeDialogOpen(true);
-                      setIsSheetOpen(false);
-                    }}
-                  >
-                    <Clock className="h-3.5 w-3.5 mr-1" />
-                    Retorno
-                  </Button>
-
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-xs h-8 text-destructive hover:bg-destructive/10 border-destructive/30"
-                    onClick={() => {
-                      setLeadForOutcome(selectedLeadForSheet);
-                      setOutcomeInitialType("lost");
-                      setOutcomeDialogOpen(true);
-                      setIsSheetOpen(false);
-                    }}
-                  >
-                    <XCircle className="h-3.5 w-3.5 mr-1" />
-                    Perdido
-                  </Button>
-                </div>
-              </div>
-
-              {/* Histórico do Lead */}
-              <div className="space-y-2 pt-2 border-t border-border">
-                <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                  <History className="h-3.5 w-3.5 text-muted-foreground" />
-                  Histórico de Atividades
-                </span>
-
-                {leadEvents.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground italic">
-                    Nenhuma atividade registrada ainda para este lead.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {leadEvents.map((evt: any) => (
-                      <div key={evt.id} className="p-2.5 rounded-lg bg-muted/40 border border-border/50 text-[11px] space-y-0.5">
-                        <div className="flex items-center justify-between text-muted-foreground">
-                          <strong className="text-foreground capitalize">
-                            {evt.event_type.replace(/_/g, " ")}
-                          </strong>
-                          <span>{format(new Date(evt.created_at), "dd/MM HH:mm")}</span>
-                        </div>
-                        {evt.notes && <p className="text-foreground/80">{evt.notes}</p>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
 
       {/* Configuração do funil e diálogo de desfecho (Venda, Agendou, Retorno, Perdido) */}
       <TodooStagesDialog open={stagesDialogOpen} onOpenChange={setStagesDialogOpen} />
