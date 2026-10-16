@@ -93,7 +93,7 @@ const CLOSED_LEADS_DAYS = 30;
 export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsClick }: Props) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
-  const { selectedUnitId, setSelectedUnitId } = useUnit();
+  const { selectedUnitId } = useUnit();
   const queryClient = useQueryClient();
   const { startCall, instances: wavoipInstances } = useWavoip();
 
@@ -135,11 +135,24 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   });
 
   // 2. Unidades que o usuário pode ver
-  const { units: allUnits, unitIds: myUnitIds, isAdmin: isCompanyAdmin } = useAccessibleUnits();
+  const { unitIds: myUnitIds, isAdmin: isCompanyAdmin } = useAccessibleUnits();
+  const unitContext = selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null;
+
+  // Trocou a unidade na barra lateral: ação e consultora escolhidas podem não existir nela
+  useEffect(() => {
+    setSelectedCampaignId("all");
+    setSelectedConsultantId("all");
+  }, [unitContext]);
+
+  // Listas do filtro restritas à unidade do contexto
+  const unitCampaigns = useMemo(
+    () => (unitContext ? campaigns.filter((c) => !c.unit_id || c.unit_id === unitContext) : campaigns),
+    [campaigns, unitContext],
+  );
 
   // 3. Consultoras / usuários da empresa (gerente: só a equipe das suas unidades)
   const { data: consultants = [] } = useQuery({
-    queryKey: ["todoo-consultants-filter", activeCompanyId, isCompanyAdmin, myUnitIds.join(",")],
+    queryKey: ["todoo-consultants-filter", activeCompanyId, isCompanyAdmin, myUnitIds.join(","), unitContext],
     enabled: !!activeCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -149,10 +162,10 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
         .order("name");
       if (error) throw error;
       const list = (data || []) as any[];
+      const inUnits = (p: any, ids: string[]) => (p.user_units || []).some((uu: any) => ids.includes(uu.unit_id));
+      if (unitContext) return list.filter((p) => p.id === profile?.id || inUnits(p, [unitContext]));
       if (isCompanyAdmin) return list;
-      return list.filter(
-        (p) => p.id === profile?.id || (p.user_units || []).some((uu: any) => myUnitIds.includes(uu.unit_id)),
-      );
+      return list.filter((p) => p.id === profile?.id || inUnits(p, myUnitIds));
     },
   });
 
@@ -185,9 +198,12 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
         query = query.eq("assigned_user_id", profile?.id);
       }
 
-      // Filtro de unidade do seletor global (consultora vê todos os seus leads)
-      if (isManagerOrAdmin && selectedUnitId && selectedUnitId !== "all") {
-        query = query.eq("unit_id", selectedUnitId);
+      // Unidade do contexto (seletor da barra lateral), para todos: o quadro mostra só a unidade atual.
+      // A consultora também vê os leads dela que estão sem unidade.
+      if (selectedUnitId && selectedUnitId !== "all") {
+        query = isManagerOrAdmin
+          ? query.eq("unit_id", selectedUnitId)
+          : query.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
       }
 
       const { data, error } = await query;
@@ -201,13 +217,12 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     profile?.role === "super_admin" ||
     profile?.role === "manager";
 
-  const hasActiveFilters =
-    selectedCampaignId !== "all" || selectedConsultantId !== "all" || !!selectedUnitId;
+  // A unidade vem do contexto da barra lateral e não é filtro do quadro
+  const hasActiveFilters = selectedCampaignId !== "all" || selectedConsultantId !== "all";
 
   const handleClearFilters = () => {
     setSelectedCampaignId("all");
     setSelectedConsultantId("all");
-    setSelectedUnitId(null);
   };
 
   // Leads filtrados pelos controles da barra do Kanban
@@ -418,7 +433,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                   size="icon"
                   variant={hasActiveFilters ? "default" : "outline"}
                   className="h-8 w-8 shrink-0 relative cursor-pointer"
-                  title="Filtrar por Ação Comercial, Unidade e Consultora"
+                  title="Filtrar por Ação Comercial e Consultora"
                 >
                   <Filter className="h-3.5 w-3.5" />
                   {hasActiveFilters && (
@@ -460,7 +475,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                         )}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      {campaigns.map((camp) => (
+                      {unitCampaigns.map((camp) => (
                         <DropdownMenuItem
                           key={camp.id}
                           onClick={() => setSelectedCampaignId(camp.id)}
@@ -476,43 +491,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                   </DropdownMenuPortal>
                 </DropdownMenuSub>
 
-                {/* Submenu 2: Unidade */}
-                {allUnits.length > 0 && (
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger className="cursor-pointer text-xs">
-                      <span>Unidade</span>
-                      {selectedUnitId && <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />}
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuPortal>
-                      <DropdownMenuSubContent className="w-56 max-h-64 overflow-y-auto">
-                        <DropdownMenuItem
-                          onClick={() => setSelectedUnitId(null)}
-                          className="cursor-pointer text-xs flex items-center justify-between"
-                        >
-                          <span>Todas as Unidades</span>
-                          {!selectedUnitId && (
-                            <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {allUnits.map((u) => (
-                          <DropdownMenuItem
-                            key={u.id}
-                            onClick={() => setSelectedUnitId(u.id)}
-                            className="cursor-pointer text-xs flex items-center justify-between"
-                          >
-                            <span className="truncate max-w-[170px]">{u.name}</span>
-                            {selectedUnitId === u.id && (
-                              <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary shrink-0" />
-                            )}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuSubContent>
-                    </DropdownMenuPortal>
-                  </DropdownMenuSub>
-                )}
-
-                {/* Submenu 3: Consultora (gestor ou admin) */}
+                {/* Submenu 2: Consultora (gestor ou admin) */}
                 {isManagerOrAdmin && (
                   <DropdownMenuSub>
                     <DropdownMenuSubTrigger className="cursor-pointer text-xs">
@@ -769,7 +748,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
 
                                       {/* Tags: Unidade e Campanha */}
                                       <div className="flex flex-wrap items-center gap-1 mt-2">
-                                        {lead.unit && (
+                                        {lead.unit && !unitContext && (
                                           <span
                                             className="text-[9px] px-1.5 py-0.5 rounded font-medium truncate max-w-[120px]"
                                             style={{
