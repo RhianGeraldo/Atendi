@@ -1,22 +1,14 @@
-import { useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  Target,
-  Flame,
-  ListTodo,
-  Trophy,
-  BarChart3,
-  Plus,
-  Sparkles,
-  Gift,
-  UserPlus,
-} from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
+import { CalendarCheck, Flame, ListTodo, Trophy, BarChart3, UserPlus, Users } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
-import { useAuth } from "@/lib/auth-context";
 import { TodooDailyQueue } from "@/components/todoo/todoo-daily-queue";
+import { TodooMyDay } from "@/components/todoo/todoo-my-day";
+import { TodooTeamPanel } from "@/components/todoo/todoo-team-panel";
+import { useAuth } from "@/lib/auth-context";
+import { getTodooTabs, type TodooTab } from "@/lib/permissions";
 import { TodooCampaignsList } from "@/components/todoo/todoo-campaigns-list";
 import { TodooGincana } from "@/components/todoo/todoo-gincana";
 import { TodooMetrics } from "@/components/todoo/todoo-metrics";
@@ -28,98 +20,92 @@ export const Route = createFileRoute("/_authenticated/todoo")({
   component: TodooPage,
 });
 
+// Cada aba depende da permissão "todoo:<perm>" do cargo/perfil (Configurações → Cargos).
+// Operação: o dia a dia da consultora. Gestão: acompanhamento e configuração.
+const TABS: { value: string; perm: TodooTab; label: string; icon: typeof Flame; group: "operation" | "management" }[] = [
+  { value: "my-day", perm: "my_day", label: "Meu Dia", icon: CalendarCheck, group: "operation" },
+  { value: "queue", perm: "queue", label: "Quadro Comercial", icon: Flame, group: "operation" },
+  { value: "team", perm: "team", label: "Painel da Equipe", icon: Users, group: "management" },
+  { value: "referrals", perm: "referrals", label: "Cadastros & Metas", icon: UserPlus, group: "management" },
+  { value: "campaigns", perm: "campaigns", label: "Ações Comerciais", icon: ListTodo, group: "management" },
+  { value: "gincana", perm: "gincana", label: "Gincana & Ranking", icon: Trophy, group: "management" },
+  { value: "metrics", perm: "metrics", label: "Indicadores", icon: BarChart3, group: "management" },
+];
+
 function TodooPage() {
   const { profile } = useAuth();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState("queue");
+  const allowedTabs = useMemo(() => getTodooTabs(profile), [profile]);
+  const visibleTabs = TABS.filter((tab) => allowedTabs.includes(tab.perm));
+  const can = (perm: TodooTab) => allowedTabs.includes(perm);
+  const [activeTab, setActiveTab] = useState("my-day");
+
+  // Abre na primeira aba permitida
+  useEffect(() => {
+    if (visibleTabs.length > 0 && !visibleTabs.some((tab) => tab.value === activeTab)) {
+      setActiveTab(visibleTabs[0].value);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowedTabs.join(","), activeTab]);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createReferralOpen, setCreateReferralOpen] = useState(false);
 
-  const canManage =
-    profile?.role === "admin_company" ||
-    profile?.role === "super_admin" ||
-    profile?.role === "manager";
+  const tabs = (
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="max-w-full">
+      <TabsList className="h-auto p-1 bg-muted/70 max-w-full overflow-x-auto justify-start">
+        {visibleTabs.map((tab, index) => (
+          <Fragment key={tab.value}>
+            {/* Divisor entre as abas do dia a dia e as de gestão */}
+            {index > 0 && tab.group !== visibleTabs[index - 1].group && (
+              <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
+            )}
+            <TabsTrigger value={tab.value} className="gap-2 py-1.5 text-xs shrink-0">
+              <tab.icon className="h-3.5 w-3.5" />
+              <span>{tab.label}</span>
+            </TabsTrigger>
+          </Fragment>
+        ))}
+      </TabsList>
+    </Tabs>
+  );
 
   return (
     <ProtectedMenuRoute menuKey="todoo">
       <div className="flex flex-col h-full overflow-hidden bg-background">
-        {/* Barra Superior de Controles e Abas (Padrão limpo sem título duplicado) */}
-        <div className="border-b border-border bg-card/60 backdrop-blur-xs px-4 py-2.5 sm:px-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
-          <Tabs
-            value={activeTab}
-            onValueChange={setActiveTab}
-            className="w-full sm:w-auto"
-          >
-            <TabsList className="grid grid-cols-2 sm:grid-cols-5 w-full sm:w-auto h-auto p-1 bg-muted/70">
-              <TabsTrigger value="queue" className="gap-2 py-1.5 text-xs">
-                <Flame className="h-3.5 w-3.5 text-amber-500" />
-                <span>Quadro Comercial</span>
-              </TabsTrigger>
-
-              <TabsTrigger value="referrals" className="gap-2 py-1.5 text-xs">
-                <Gift className="h-3.5 w-3.5 text-pink-500" />
-                <span>Cadastros & Metas</span>
-              </TabsTrigger>
-
-              <TabsTrigger value="campaigns" className="gap-2 py-1.5 text-xs">
-                <ListTodo className="h-3.5 w-3.5 text-primary" />
-                <span>Ações Comerciais</span>
-              </TabsTrigger>
-
-              <TabsTrigger value="gincana" className="gap-2 py-1.5 text-xs">
-                <Trophy className="h-3.5 w-3.5 text-yellow-500" />
-                <span>Gincana & Ranking</span>
-              </TabsTrigger>
-
-              <TabsTrigger value="metrics" className="gap-2 py-1.5 text-xs">
-                <BarChart3 className="h-3.5 w-3.5 text-emerald-500" />
-                <span>Indicadores</span>
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCreateReferralOpen(true)}
-              className="gap-1.5 text-xs border-pink-500/30 text-pink-700 dark:text-pink-400 hover:bg-pink-50 dark:hover:bg-pink-950/40 shrink-0 h-8"
-            >
-              <UserPlus className="h-3.5 w-3.5 text-pink-600" />
-              Cadastrar Contatos
-            </Button>
-
-            {canManage && (
-              <Button
-                size="sm"
-                onClick={() => setCreateDialogOpen(true)}
-                className="gap-1.5 text-xs shadow-xs shrink-0 h-8"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Nova Ação Comercial
-              </Button>
-            )}
+        {visibleTabs.length === 0 ? (
+          <div className="flex-1 p-6 flex items-center justify-center text-center">
+            <p className="text-sm text-muted-foreground max-w-sm">
+              Seu cargo tem o Meu Todoo, mas nenhuma aba liberada. Peça a um administrador para ajustar em
+              Configurações → Cargos.
+            </p>
           </div>
-        </div>
-
-        {/* Conteúdo das Abas */}
-        {activeTab === "queue" ? (
+        ) : activeTab === "queue" && can("queue") ? (
+          // O Quadro Comercial monta uma barra única: abas + busca, filtros e ações
           <div className="flex-1 min-h-0 overflow-hidden">
             <TodooDailyQueue
-              onCreateCampaignClick={() => setCreateDialogOpen(true)}
+              tabs={tabs}
+              onCreateCampaignClick={can("campaigns") ? () => setCreateDialogOpen(true) : undefined}
+              onCreateContactsClick={() => setCreateReferralOpen(true)}
             />
           </div>
         ) : (
-          <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full">
-            {activeTab === "referrals" && <TodooReferralsTab />}
-            {activeTab === "campaigns" && (
-              <TodooCampaignsList
-                onCreateClick={() => setCreateDialogOpen(true)}
-              />
-            )}
-            {activeTab === "gincana" && <TodooGincana />}
-            {activeTab === "metrics" && <TodooMetrics />}
-          </div>
+          <>
+            <div className="border-b border-border bg-card/60 backdrop-blur-xs px-4 py-2.5 sm:px-6 shrink-0">
+              {tabs}
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 w-full">
+              {activeTab === "my-day" && can("my_day") && (
+                <TodooMyDay onCreateContactsClick={() => setCreateReferralOpen(true)} />
+              )}
+              {activeTab === "team" && can("team") && <TodooTeamPanel />}
+              {activeTab === "referrals" && can("referrals") && <TodooReferralsTab />}
+              {activeTab === "campaigns" && can("campaigns") && (
+                <TodooCampaignsList onCreateClick={() => setCreateDialogOpen(true)} />
+              )}
+              {activeTab === "gincana" && can("gincana") && <TodooGincana />}
+              {activeTab === "metrics" && can("metrics") && <TodooMetrics />}
+            </div>
+          </>
         )}
 
         {/* Wizard de Criação de Ação */}
@@ -136,10 +122,10 @@ function TodooPage() {
           open={createReferralOpen}
           onOpenChange={setCreateReferralOpen}
           onSuccess={() => {
-            setActiveTab("referrals");
             queryClient.invalidateQueries({ queryKey: ["todoo-referrals-list"] });
             queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] });
             queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
+            queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
           }}
         />
       </div>

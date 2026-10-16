@@ -58,6 +58,7 @@ import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { useWavoip } from "@/hooks/use-wavoip";
 import { cn } from "@/lib/utils";
+import { fillQuickMessageVariables } from "@/lib/quick-message-vars";
 import { TodooConversationBanner } from "@/components/todoo/todoo-conversation-banner";
 import { initials } from "@/lib/format";
 import { useSlaSettings } from "@/lib/use-sla";
@@ -969,75 +970,20 @@ export function ChatPanel({
     }
   };
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return "Bom dia";
-    if (hour < 18) return "Boa tarde";
-    return "Boa noite";
-  };
-
   const insertQuickMessage = (qm: { content: string; media_url?: string | null; media_type?: string | null }) => {
-    const now = new Date();
-    let t = qm.content || "";
-
-    const clientFullName =
-      conv.contact?.name && conv.contact.name !== "Desconhecido"
-        ? conv.contact.name.trim()
-        : "Cliente";
-    const clientFirstName =
-      clientFullName !== "Cliente" ? clientFullName.split(/\s+/)[0] : "Cliente";
-
-    const companyName =
-      companyData?.name ||
-      qc.getQueryData<string>(["company-name", targetCompanyId]) ||
-      "";
-
-    const unitName = conv.unit?.name || "";
-
-    // 1. Variáveis principais do sistema (case-insensitive com flag 'gi')
-    t = t.replace(/\{\{atendente\}\}/gi, profile?.name || "Atendente");
-    t = t.replace(/\{\{cliente\}\}/gi, clientFullName);
-    t = t.replace(/\{\{primeiro_nome\}\}/gi, clientFirstName);
-    t = t.replace(/\{\{primeiro_nome_cliente\}\}/gi, clientFirstName);
-    t = t.replace(/\{\{saudacao\}\}/gi, getGreeting());
-    t = t.replace(/\{\{telefone\}\}/gi, conv.contact?.phone || "");
-    t = t.replace(/\{\{protocolo\}\}/gi, conv.id.substring(0, 8).toUpperCase());
-    t = t.replace(/\{\{empresa\}\}/gi, companyName || "Empresa");
-    t = t.replace(/\{\{unidade\}\}/gi, unitName || "Unidade");
-    t = t.replace(/\{\{data\}\}/gi, now.toLocaleDateString("pt-BR"));
-    t = t.replace(/\{\{hora\}\}/gi, now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }));
-
-    if (conv.contact?.email) {
-      t = t.replace(/\{\{email\}\}/gi, conv.contact.email);
-    }
-    if (conv.department?.name) {
-      t = t.replace(/\{\{departamento\}\}/gi, conv.department.name);
-      t = t.replace(/\{\{setor\}\}/gi, conv.department.name);
-    }
-    if (conv.whatsapp_instance?.name) {
-      t = t.replace(/\{\{instancia\}\}/gi, conv.whatsapp_instance.name);
-      t = t.replace(/\{\{conexao\}\}/gi, conv.whatsapp_instance.name);
-    }
-
-    // 2. Variáveis personalizadas da Empresa (cadastradas nas configurações gerais)
-    if (companyData?.custom_variables && typeof companyData.custom_variables === "object") {
-      Object.entries(companyData.custom_variables).forEach(([key, val]) => {
-        if (typeof key === "string" && val !== null && val !== undefined) {
-          const regex = new RegExp(`\\{\\{${key}\\}\\}`, "gi");
-          t = t.replace(regex, String(val));
-        }
-      });
-    }
-
-    // 3. Variáveis personalizadas da Unidade (podem sobrescrever as globais)
-    if (conv.unit?.custom_variables && typeof conv.unit.custom_variables === "object") {
-      Object.entries(conv.unit.custom_variables).forEach(([key, val]) => {
-        if (typeof key === "string" && val !== null && val !== undefined) {
-          const regex = new RegExp(`\\{\\{${key}\\}\\}`, "gi");
-          t = t.replace(regex, String(val));
-        }
-      });
-    }
+    const t = fillQuickMessageVariables(qm.content || "", {
+      clientName: conv.contact?.name,
+      phone: conv.contact?.phone,
+      email: conv.contact?.email,
+      agentName: profile?.name,
+      companyName: companyData?.name || qc.getQueryData<string>(["company-name", targetCompanyId]) || "",
+      unitName: conv.unit?.name,
+      departmentName: conv.department?.name,
+      instanceName: conv.whatsapp_instance?.name,
+      protocol: conv.id.substring(0, 8).toUpperCase(),
+      companyVariables: companyData?.custom_variables,
+      unitVariables: conv.unit?.custom_variables,
+    });
 
     setText(t);
     setIsQuickMsgDismissed(true);

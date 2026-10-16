@@ -2,7 +2,13 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useActiveCompany } from "@/lib/active-company-context";
-import { ALL_MENU_PERMISSIONS, DEFAULT_ROLE_MENUS } from "@/lib/permissions";
+import {
+  ALL_MENU_PERMISSIONS,
+  DEFAULT_ROLE_MENUS,
+  DEFAULT_TODOO_TABS,
+  TODOO_TAB_PERMISSIONS,
+  countMainMenus,
+} from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -59,7 +65,7 @@ export function RolesTab() {
           name: "Administrador",
           description: "Acesso total a todas as configurações, relatórios e métricas da empresa.",
           base_role: "admin_company",
-          allowed_menus: ALL_MENU_PERMISSIONS.map((m) => m.key),
+          allowed_menus: [...ALL_MENU_PERMISSIONS.map((m) => m.key), ...DEFAULT_TODOO_TABS.admin_company],
         },
         {
           company_id: activeCompanyId!,
@@ -120,7 +126,7 @@ export function RolesTab() {
     setRoleName("");
     setRoleDescription("");
     setBaseRole("agent");
-    setSelectedMenus([...(DEFAULT_ROLE_MENUS.agent || [])]);
+    setSelectedMenus(withTodooTabs([...(DEFAULT_ROLE_MENUS.agent || [])], "agent"));
     setModalOpen(true);
   };
 
@@ -129,18 +135,30 @@ export function RolesTab() {
     setRoleName(role.name);
     setRoleDescription(role.description || "");
     setBaseRole(role.base_role);
-    setSelectedMenus(Array.isArray(role.allowed_menus) ? [...role.allowed_menus] : []);
+    setSelectedMenus(withTodooTabs(Array.isArray(role.allowed_menus) ? [...role.allowed_menus] : [], role.base_role));
     setModalOpen(true);
   };
 
+  // Com o Meu Todoo e nenhuma aba escolhida, mostra as abas padrão do nível (é o que vale hoje)
+  const withTodooTabs = (menus: string[], level: string) =>
+    menus.includes("todoo") && !menus.some((m) => m.startsWith("todoo:"))
+      ? [...menus, ...(DEFAULT_TODOO_TABS[level] || DEFAULT_TODOO_TABS.agent)]
+      : menus;
+
   const handleToggleMenu = (key: string) => {
-    setSelectedMenus((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
-    );
+    setSelectedMenus((prev) => {
+      if (key === "todoo") {
+        // Desmarcar o Todoo tira as abas; marcar traz as abas padrão do nível
+        return prev.includes("todoo")
+          ? prev.filter((k) => k !== "todoo" && !k.startsWith("todoo:"))
+          : withTodooTabs([...prev, "todoo"], baseRole);
+      }
+      return prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+    });
   };
 
   const handleSelectAllMenus = () => {
-    setSelectedMenus(ALL_MENU_PERMISSIONS.map((m) => m.key));
+    setSelectedMenus([...ALL_MENU_PERMISSIONS.map((m) => m.key), ...TODOO_TAB_PERMISSIONS.map((t) => t.key)]);
   };
 
   const handleDeselectAllMenus = () => {
@@ -151,6 +169,9 @@ export function RolesTab() {
   const saveRoleMutation = useMutation({
     mutationFn: async () => {
       if (!roleName.trim()) throw new Error("O nome do cargo é obrigatório.");
+      if (selectedMenus.includes("todoo") && !selectedMenus.some((m) => m.startsWith("todoo:"))) {
+        throw new Error("Escolha ao menos uma aba do Meu Todoo.");
+      }
 
       if (editingRole) {
         const { error } = await supabase
@@ -235,7 +256,8 @@ export function RolesTab() {
           </Card>
         ) : (
           roles.map((role) => {
-            const menuCount = role.allowed_menus?.length || 0;
+            const menuCount = countMainMenus(role.allowed_menus);
+            const todooTabs = TODOO_TAB_PERMISSIONS.filter((t) => role.allowed_menus?.includes(t.key));
             return (
               <Card key={role.id} className="relative flex flex-col justify-between overflow-hidden">
                 <CardHeader className="pb-3">
@@ -274,6 +296,15 @@ export function RolesTab() {
                       )
                     )}
                   </div>
+
+                  {role.allowed_menus?.includes("todoo") && (
+                    <p className="text-[11px] text-muted-foreground">
+                      <span className="font-medium text-foreground">Meu Todoo:</span>{" "}
+                      {todooTabs.length > 0
+                        ? todooTabs.map((t) => t.label).join(", ")
+                        : "abas padrão do nível"}
+                    </p>
+                  )}
 
                   <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
                     <Button
@@ -383,6 +414,7 @@ export function RolesTab() {
                       <Checkbox
                         checked={isChecked}
                         onCheckedChange={() => handleToggleMenu(menu.key)}
+                        onClick={(e) => e.stopPropagation()}
                         className="mt-0.5"
                       />
                       <div className="space-y-0.5">
@@ -395,6 +427,45 @@ export function RolesTab() {
                   );
                 })}
               </div>
+
+              {/* Abas do Meu Todoo */}
+              {selectedMenus.includes("todoo") && (
+                <div className="space-y-2 rounded-lg border border-primary/30 p-3 bg-primary/5">
+                  <div>
+                    <div className="text-xs font-semibold">Abas do Meu Todoo</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      O que este cargo vê dentro do Meu Todoo.
+                    </div>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {TODOO_TAB_PERMISSIONS.map((tab) => {
+                      const isChecked = selectedMenus.includes(tab.key);
+                      return (
+                        <div
+                          key={tab.key}
+                          onClick={() => handleToggleMenu(tab.key)}
+                          className={`flex items-start gap-2.5 p-2 rounded-md border transition-colors cursor-pointer ${
+                            isChecked
+                              ? "bg-background border-primary/40"
+                              : "bg-background/60 border-border hover:bg-accent/50"
+                          }`}
+                        >
+                          <Checkbox
+                            checked={isChecked}
+                            onCheckedChange={() => handleToggleMenu(tab.key)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-0.5"
+                          />
+                          <div className="space-y-0.5">
+                            <div className="text-xs font-semibold">{tab.label}</div>
+                            <div className="text-[11px] text-muted-foreground leading-tight">{tab.description}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

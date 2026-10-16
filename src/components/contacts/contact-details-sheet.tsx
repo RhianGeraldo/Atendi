@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, ChevronUp, XCircle, Check, Pencil, X } from "lucide-react";
+import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, ChevronUp, XCircle, Check, Pencil, X, Gift } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -48,6 +48,7 @@ import { MergeContactDialog } from "./merge-contact-dialog";
 import { ContactBlockDialog } from "./contact-block-dialog";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import { ContactChatButton } from "@/components/chat/contact-chat-button";
+import { TodooContactReferrals } from "@/components/todoo/todoo-contact-referrals";
 import { blockContactAction, unblockContactAction } from "@/lib/api/chat.functions";
 import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
@@ -1207,12 +1208,13 @@ export function ContactDetailsTabs({
 
   const totalOppValue = opportunities?.reduce((sum: number, opp: any) => sum + (Number(opp.value) || 0), 0) || 0;
 
-  const isMoreActive = ["jornada", "conversations", "ads"].includes(activeTab);
+  const isMoreActive = ["jornada", "conversations", "ads", "indicacoes"].includes(activeTab);
 
   const moreLabels: Record<string, { label: string; icon: any }> = {
     jornada: { label: "Jornada", icon: Map },
     conversations: { label: "Histórico", icon: MessageSquare },
     ads: { label: "Anúncios", icon: Megaphone },
+    indicacoes: { label: "Indicações", icon: Gift },
   };
 
   const activeMore = isMoreActive ? moreLabels[activeTab] : null;
@@ -1288,6 +1290,13 @@ export function ContactDetailsTabs({
               >
                 <Megaphone className="h-4 w-4" />
                 <span>Origem / Anúncios</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                onClick={() => setActiveTab("indicacoes")} 
+                className={cn("gap-2 text-xs cursor-pointer", activeTab === "indicacoes" && "bg-accent font-semibold text-primary")}
+              >
+                <Gift className="h-4 w-4" />
+                <span>Indicações</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1775,6 +1784,10 @@ export function ContactDetailsTabs({
 
         <TabsContent value="ads" className="mt-0">
           <ContactAdsHistory contactId={contactId} />
+        </TabsContent>
+
+        <TabsContent value="indicacoes" className="mt-0">
+          <TodooContactReferrals contactId={contactId} />
         </TabsContent>
       </div>
     </Tabs>

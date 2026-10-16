@@ -11,6 +11,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandInput,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Select,
   SelectContent,
@@ -28,6 +37,8 @@ import {
   Loader2,
   Megaphone,
   UserPlus,
+  Search,
+  Phone,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
@@ -35,6 +46,7 @@ import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { TodooCaptureOrigin } from "@/types/todoo";
 import { cn } from "@/lib/utils";
+import { formatTodooPhone } from "./todoo-period";
 import { toast } from "sonner";
 
 interface Props {
@@ -51,13 +63,18 @@ interface CapturedContact {
 
 const emptyContact = (): CapturedContact => ({ name: "", phone: "", service: "" });
 
+/** Cliente que indicou: contato da base ou nova cliente (nome + WhatsApp). */
+export type ReferrerValue =
+  | { mode: "existing"; id: string; name: string; phone: string | null; unitName?: string | null }
+  | { mode: "new"; name: string; phone: string };
+
 export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Props) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
 
   const [origin, setOrigin] = useState<TodooCaptureOrigin>("indicacao");
-  const [referrerName, setReferrerName] = useState("");
+  const [referrer, setReferrer] = useState<ReferrerValue | null>(null);
   const [contacts, setContacts] = useState<CapturedContact[]>([emptyContact()]);
   const [capturedById, setCapturedById] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
@@ -66,7 +83,7 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
   useEffect(() => {
     if (!open) return;
     setOrigin("indicacao");
-    setReferrerName("");
+    setReferrer(null);
     setContacts([emptyContact()]);
     setCapturedById(profile?.id || "");
   }, [open, profile?.id]);
@@ -93,9 +110,18 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
   const handleSubmit = async () => {
     if (!profile || !activeCompanyId) return;
 
-    if (origin === "indicacao" && !referrerName.trim()) {
-      toast.error("Informe o nome da cliente que está indicando.");
-      return;
+    if (origin === "indicacao") {
+      if (!referrer) {
+        toast.error("Busque e selecione a cliente que está indicando.");
+        return;
+      }
+      if (
+        referrer.mode === "new" &&
+        (!referrer.name.trim() || referrer.phone.replace(/\D/g, "").length < 10)
+      ) {
+        toast.error("Informe o nome e o WhatsApp com DDD da cliente que está indicando.");
+        return;
+      }
     }
 
     const filled = contacts.filter((c) => c.name.trim() || c.phone.trim());
@@ -114,7 +140,10 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
       const { data, error } = await (supabase.rpc as any)("todoo_register_contacts", {
         p_company_id: activeCompanyId,
         p_origin: origin,
-        p_referrer_name: origin === "indicacao" ? referrerName.trim() : null,
+        p_referrer_name: origin === "indicacao" && referrer ? referrer.name.trim() : null,
+        p_referrer_contact_id:
+          origin === "indicacao" && referrer?.mode === "existing" ? referrer.id : null,
+        p_referrer_phone: origin === "indicacao" && referrer?.mode === "new" ? referrer.phone : null,
         p_captured_by: capturedById || profile.id,
         p_unit_id: selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null,
         p_contacts: filled.map((c) => ({
@@ -160,7 +189,7 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
       <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center gap-2">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-pink-500/10 text-pink-600">
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">
               <UserPlus className="h-4 w-4" />
             </div>
             <div>
@@ -206,10 +235,11 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
                 <User className="h-3.5 w-3.5 text-primary" />
                 Cliente que está indicando *
               </Label>
-              <Input
-                placeholder="Ex: Maria Clara Silva"
-                value={referrerName}
-                onChange={(e) => setReferrerName(e.target.value)}
+              <ReferrerField
+                open={open}
+                companyId={activeCompanyId}
+                value={referrer}
+                onChange={setReferrer}
               />
             </div>
           )}
@@ -218,7 +248,7 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold uppercase text-muted-foreground flex items-center gap-1.5">
-                <Users className="h-3.5 w-3.5 text-pink-600" />
+                <Users className="h-3.5 w-3.5 text-primary" />
                 {origin === "indicacao" ? "Pessoas indicadas" : "Contatos"}
               </Label>
               <Button
@@ -323,5 +353,204 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ReferrerField({
+  open,
+  companyId,
+  value,
+  onChange,
+}: {
+  open: boolean;
+  companyId: string | null | undefined;
+  value: ReferrerValue | null;
+  onChange: (value: ReferrerValue | null) => void;
+}) {
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    if (!open) {
+      setSearch("");
+      setDebounced("");
+    }
+  }, [open]);
+
+  const { data: results = [], isFetching } = useQuery({
+    queryKey: ["todoo-referrer-search", companyId, debounced],
+    enabled: !!companyId && popoverOpen && debounced.length >= 2,
+    queryFn: async () => {
+      // Remove caracteres que quebram o filtro "or" do PostgREST
+      const term = debounced.replace(/[,()*%\\]/g, " ").trim();
+      const digits = debounced.replace(/\D/g, "");
+      const filters: string[] = [];
+      if (/[a-zA-ZÀ-ÿ]/.test(term)) filters.push(`name.ilike.%${term}%`);
+      if (digits.length >= 4) filters.push(`phone.ilike.%${digits}%`);
+      if (filters.length === 0) return [];
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("id, name, phone, unit:units(name)")
+        .eq("company_id", companyId!)
+        .is("merged_into_id", null)
+        .or(filters.join(","))
+        .order("name")
+        .limit(8);
+      if (error) throw error;
+      return (data || []) as any[];
+    },
+  });
+
+  const startNew = () => {
+    const digits = search.replace(/\D/g, "");
+    const isPhone = digits.length >= 8 && !/[a-zA-ZÀ-ÿ]/.test(search);
+    onChange({ mode: "new", name: isPhone ? "" : search.trim(), phone: isPhone ? digits : "" });
+    setPopoverOpen(false);
+  };
+
+  if (value?.mode === "existing") {
+    return (
+      <div className="flex items-center gap-2.5 rounded-lg border border-primary/30 bg-background p-2.5">
+        <div className="grid h-8 w-8 place-items-center rounded-full bg-primary/10 text-primary shrink-0">
+          <User className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium truncate">{value.name}</p>
+          <p className="text-[11px] text-muted-foreground truncate">
+            {formatTodooPhone(value.phone) || "Sem telefone"}
+            {value.unitName ? ` · ${value.unitName}` : ""}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={() => onChange(null)}
+        >
+          Trocar
+        </Button>
+      </div>
+    );
+  }
+
+  if (value?.mode === "new") {
+    return (
+      <div className="space-y-2 rounded-lg border border-dashed border-primary/40 bg-background p-2.5">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-medium text-primary">Nova cliente (será cadastrada na base)</p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-[11px] gap-1"
+            onClick={() => onChange(null)}
+          >
+            <Search className="h-3 w-3" />
+            Buscar na base
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <Input
+            placeholder="Nome da cliente"
+            value={value.name}
+            onChange={(e) => onChange({ ...value, name: e.target.value })}
+            className="text-xs h-8"
+            autoFocus={!value.name}
+          />
+          <Input
+            placeholder="WhatsApp (com DDD) *"
+            value={value.phone}
+            onChange={(e) => onChange({ ...value, phone: e.target.value })}
+            className="text-xs h-8"
+            autoFocus={!!value.name}
+          />
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          Se o WhatsApp já existir na base, a indicação é ligada a esse contato.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={popoverOpen}
+          className="w-full h-9 justify-start gap-2 font-normal text-muted-foreground bg-background"
+        >
+          <Search className="h-3.5 w-3.5 shrink-0" />
+          Buscar cliente por nome ou WhatsApp...
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Nome ou WhatsApp da cliente..."
+            value={search}
+            onValueChange={setSearch}
+          />
+          <CommandList>
+            {debounced.length < 2 ? (
+              <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                Digite ao menos 2 letras do nome ou 4 números do WhatsApp.
+              </div>
+            ) : isFetching && results.length === 0 ? (
+              <div className="flex items-center justify-center p-4">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              results.length === 0 && <CommandEmpty>Nenhuma cliente encontrada.</CommandEmpty>
+            )}
+            {results.length > 0 && (
+              <CommandGroup heading="Clientes na base">
+                {results.map((c) => (
+                  <CommandItem
+                    key={c.id}
+                    value={c.id}
+                    className="cursor-pointer"
+                    onSelect={() => {
+                      onChange({
+                        mode: "existing",
+                        id: c.id,
+                        name: c.name || formatTodooPhone(c.phone) || "Cliente",
+                        phone: c.phone,
+                        unitName: c.unit?.name ?? null,
+                      });
+                      setPopoverOpen(false);
+                    }}
+                  >
+                    <div className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium truncate">{c.name || "Sem nome"}</span>
+                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <Phone className="h-3 w-3" />
+                        {formatTodooPhone(c.phone) || "Sem telefone"}
+                        {c.unit?.name ? ` · ${c.unit.name}` : ""}
+                      </span>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+            <CommandGroup>
+              <CommandItem value="__new__" className="cursor-pointer text-primary" onSelect={startNew}>
+                <Plus className="mr-2 h-3.5 w-3.5" />
+                Cadastrar nova cliente{search.trim() ? `: "${search.trim()}"` : ""}
+              </CommandItem>
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -67,6 +67,14 @@ export interface TodooLead {
   sla_deadline: string | null;
   sla_breached: boolean;
   status: TodooLeadStatus;
+  /** Etapa da cadência no Quadro (todoo_stages) */
+  stage_id?: string | null;
+  /** Quando entrou na etapa atual */
+  stage_entered_at?: string | null;
+  /** Quando vence o próximo passo da cadência */
+  next_action_at?: string | null;
+  /** Status do card (todoo_card_statuses) */
+  card_status_id?: string | null;
   custom_fields: Record<string, any>;
   first_contact_at: string | null;
   last_interaction_at: string | null;
