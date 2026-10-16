@@ -19,6 +19,7 @@ import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { todooRange, type TodooRangeKey } from "./todoo-period";
 import { TodooRangeTabs, TodooSectionHeader } from "./todoo-section-header";
+import { TodooCadenceFunnel } from "./todoo-cadence-funnel";
 
 export function TodooMetrics() {
   const { activeCompanyId } = useActiveCompany();
@@ -81,7 +82,7 @@ export function TodooMetrics() {
   const header = (
     <TodooSectionHeader
       title="Indicadores"
-      description="Taxas de contato, agendamento e conversão dos leads recebidos no período."
+      description="Funil da cadência e taxas de contato, agendamento e conversão dos leads do período."
       actions={<TodooRangeTabs value={range} onChange={setRange} />}
     />
   );
@@ -98,6 +99,8 @@ export function TodooMetrics() {
   return (
     <div className="space-y-6">
       {header}
+      <TodooCadenceFunnel range={range} />
+
       {/* 4 Cards Principais com Fórmulas do Manual Todoo */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
