@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Copy, Plus, ChevronsUpDown, Check, Pencil, UserX, UserCheck } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ALL_MENU_PERMISSIONS } from "@/lib/permissions";
+import { ALL_MENU_PERMISSIONS, TODOO_TAB_PERMISSIONS } from "@/lib/permissions";
 import { createClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -888,6 +888,7 @@ export function UsersTab() {
                         <Checkbox
                           checked={isChecked}
                           onCheckedChange={() => toggleExtraMenu(menu.key)}
+                          onClick={(e) => e.stopPropagation()}
                           className="mt-0.5"
                         />
                         <div className="space-y-0.5">
@@ -899,6 +900,40 @@ export function UsersTab() {
                       </div>
                     );
                   })}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Abas extras do Meu Todoo</Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Valem junto com as abas do cargo, para quem tem o menu Meu Todoo.
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2 rounded-lg border border-border p-3 bg-muted/30">
+                    {TODOO_TAB_PERMISSIONS.map((tab) => {
+                      const isChecked = editExtraMenus.includes(tab.key);
+                      const toggleTab = () =>
+                        setEditExtraMenus((prev) =>
+                          prev.includes(tab.key) ? prev.filter((k) => k !== tab.key) : [...prev, tab.key],
+                        );
+                      return (
+                        <div
+                          key={tab.key}
+                          onClick={toggleTab}
+                          className={`flex items-center gap-2.5 p-2 rounded-md border transition-colors cursor-pointer ${
+                            isChecked
+                              ? "bg-primary/10 border-primary/40 text-foreground"
+                              : "bg-background border-border hover:bg-accent/50"
+                          }`}
+                        >
+                          <Checkbox
+                            checked={isChecked}
+                            onCheckedChange={toggleTab}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span className="text-xs font-semibold">{tab.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             )}

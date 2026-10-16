@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { canAccessTodooTab } from "@/lib/permissions";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { ContactChatButton } from "@/components/chat/contact-chat-button";
@@ -106,8 +107,12 @@ export function useTodooDayData() {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
+  // Carrega a equipe para gestoras e para quem tem a aba Painel da Equipe; senão, só o que é da pessoa
   const isManagerOrAdmin =
-    profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager";
+    profile?.role === "admin_company" ||
+    profile?.role === "super_admin" ||
+    profile?.role === "manager" ||
+    canAccessTodooTab("team", profile);
   const bounds = useMemo(() => todooDayBounds(), []);
   const month = currentTodooMonth();
   const { stages, statuses } = useTodooPipeline();
