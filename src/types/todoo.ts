@@ -67,6 +67,8 @@ export interface TodooLead {
   sla_deadline: string | null;
   sla_breached: boolean;
   status: TodooLeadStatus;
+  /** Etapa do Quadro escolhida (todoo_stages); null = etapa padrão do status */
+  stage_id?: string | null;
   custom_fields: Record<string, any>;
   first_contact_at: string | null;
   last_interaction_at: string | null;

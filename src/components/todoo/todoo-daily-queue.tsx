@@ -27,6 +27,7 @@ import {
   Sparkles,
   FileText,
   SlidersHorizontal,
+  Columns3,
   Target,
   Trophy,
   History,
@@ -71,6 +72,15 @@ import { formatTodooPhone } from "./todoo-period";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TodooReferrerLink } from "./todoo-referrer-link";
+import { TodooStagesDialog } from "./todoo-stages-dialog";
+import {
+  TODOO_KIND_STATUS,
+  TODOO_STAGE_KINDS,
+  resolveTodooLeadStage,
+  todooStageKey,
+  todooStatusKind,
+  useTodooStages,
+} from "./todoo-stages";
 
 interface Props {
   /** Abas da página do Todoo, exibidas na mesma barra dos controles do quadro */
@@ -81,59 +91,6 @@ interface Props {
 
 // Leads fechados (venda / sem sucesso) aparecem no quadro por este período
 const CLOSED_LEADS_DAYS = 30;
-
-interface KanbanColumnConfig {
-  id: string;
-  title: string;
-  color: string;
-  icon: any;
-  statusMatch: string[];
-}
-
-const KANBAN_COLUMNS: KanbanColumnConfig[] = [
-  {
-    id: "pending",
-    title: "A Contatar",
-    color: "#3b82f6", // Azul
-    icon: Flame,
-    statusMatch: ["pending"],
-  },
-  {
-    id: "in_progress",
-    title: "Em Atendimento",
-    color: "#8b5cf6", // Roxo
-    icon: MessageSquare,
-    statusMatch: ["contacted", "quoted"],
-  },
-  {
-    id: "scheduled",
-    title: "Agendado",
-    color: "#0ea5e9", // Azul céu
-    icon: Calendar,
-    statusMatch: ["scheduled"],
-  },
-  {
-    id: "callback",
-    title: "Retorno Agendado",
-    color: "#f59e0b", // Âmbar
-    icon: Clock,
-    statusMatch: ["callback"],
-  },
-  {
-    id: "won",
-    title: "Venda Realizada",
-    color: "#10b981", // Verde Esmeralda
-    icon: CheckCircle2,
-    statusMatch: ["won"],
-  },
-  {
-    id: "lost",
-    title: "Sem Sucesso",
-    color: "#ef4444", // Vermelho
-    icon: XCircle,
-    statusMatch: ["lost"],
-  },
-];
 
 export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsClick }: Props) {
   const { profile } = useAuth();
@@ -155,6 +112,13 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   const [leadForOutcome, setLeadForOutcome] = useState<TodooLead | null>(null);
   const [outcomeDialogOpen, setOutcomeDialogOpen] = useState(false);
   const [outcomeInitialType, setOutcomeInitialType] = useState<TodooOutcomeType>("won");
+  // Etapa de destino quando o desfecho vem de um arraste
+  const [outcomeStageId, setOutcomeStageId] = useState<string | null>(null);
+
+  // Etapas configuráveis do quadro
+  const { stages } = useTodooStages();
+  const [stagesDialogOpen, setStagesDialogOpen] = useState(false);
+  const canConfigureStages = profile?.role === "admin_company" || profile?.role === "super_admin";
 
   // Feedback de cópia
   const [copiedScript, setCopiedScript] = useState(false);
@@ -288,88 +252,58 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     });
   }, [leads, selectedCampaignId, selectedConsultantId, searchTerm]);
 
-  // Agrupamento dos leads por coluna do Kanban
+  // Agrupamento dos leads por etapa do Kanban
   const columnsData = useMemo(() => {
-    const map: Record<string, TodooLead[]> = {
-      pending: [],
-      in_progress: [],
-      scheduled: [],
-      callback: [],
-      won: [],
-      lost: [],
-    };
-
-    filteredLeads.forEach((lead) => {
-      if (lead.status === "pending") {
-        map.pending.push(lead);
-      } else if (lead.status === "scheduled") {
-        map.scheduled.push(lead);
-      } else if (["contacted", "quoted"].includes(lead.status)) {
-        map.in_progress.push(lead);
-      } else if (lead.status === "callback") {
-        map.callback.push(lead);
-      } else if (lead.status === "won") {
-        map.won.push(lead);
-      } else if (lead.status === "lost") {
-        map.lost.push(lead);
-      } else {
-        map.pending.push(lead);
-      }
+    const map: Record<string, TodooLead[]> = {};
+    stages.forEach((stage) => {
+      map[todooStageKey(stage)] = [];
     });
-
+    filteredLeads.forEach((lead) => {
+      const stage = resolveTodooLeadStage(lead, stages);
+      if (stage) map[todooStageKey(stage)].push(lead);
+    });
     return map;
-  }, [filteredLeads]);
+  }, [filteredLeads, stages]);
 
   // Drag and Drop Handler
   const handleDragEnd = async (result: DropResult) => {
     const { destination, source, draggableId } = result;
 
     if (!destination) return;
-    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+    // A ordem dentro da etapa não é salva: soltar na mesma coluna não muda nada
+    if (destination.droppableId === source.droppableId) return;
 
     const lead = leads.find((l) => l.id === draggableId);
     if (!lead) return;
 
-    const targetColId = destination.droppableId;
+    const target = stages.find((stage) => todooStageKey(stage) === destination.droppableId);
+    if (!target) return;
+    const leadKind = todooStatusKind(lead.status);
+    const outcome = TODOO_STAGE_KINDS[target.kind].outcome;
 
-    // Se arrastou para Venda, Retorno ou Perdido -> Abre o diálogo de desfecho
-    if (targetColId === "won") {
+    // Etapa de outro tipo com desfecho (Agendado, Retorno, Venda, Sem sucesso) -> diálogo de desfecho
+    if (target.kind !== leadKind && outcome) {
       setLeadForOutcome(lead);
-      setOutcomeInitialType("won");
+      setOutcomeInitialType(outcome);
+      setOutcomeStageId(target.id);
       setOutcomeDialogOpen(true);
       return;
     }
 
-    if (targetColId === "scheduled") {
-      setLeadForOutcome(lead);
-      setOutcomeInitialType("scheduled");
-      setOutcomeDialogOpen(true);
-      return;
-    }
-
-    if (targetColId === "callback") {
-      setLeadForOutcome(lead);
-      setOutcomeInitialType("callback");
-      setOutcomeDialogOpen(true);
-      return;
-    }
-
-    if (targetColId === "lost") {
-      setLeadForOutcome(lead);
-      setOutcomeInitialType("lost");
-      setOutcomeDialogOpen(true);
-      return;
-    }
-
-    // Se arrastou para Em Atendimento ou Pendente -> Atualização direta otimista
-    const newStatus = targetColId === "pending" ? "pending" : "contacted";
+    // Mesmo tipo: só troca a etapa. A Contatar / Em Atendimento: troca também o status.
+    const changeStatus = target.kind !== leadKind;
+    const newStatus = changeStatus
+      ? TODOO_KIND_STATUS[target.kind as "pending" | "in_progress"]
+      : lead.status;
 
     // Atualização otimista no cache do React Query
     queryClient.setQueryData(
       ["todoo-leads", activeCompanyId, profile?.id, selectedUnitId],
       (old: TodooLead[] | undefined) => {
         if (!old) return old;
-        return old.map((item) => (item.id === lead.id ? { ...item, status: newStatus as any } : item));
+        return old.map((item) =>
+          item.id === lead.id ? ({ ...item, status: newStatus, stage_id: target.id } as TodooLead) : item,
+        );
       }
     );
 
@@ -377,16 +311,21 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
       const now = new Date().toISOString();
       const { error } = await (supabase.from("todoo_leads") as any)
         .update({
-          status: newStatus,
-          last_interaction_at: now,
+          stage_id: target.id,
           updated_at: now,
-          ...(newStatus === "contacted" && !lead.first_contact_at ? { first_contact_at: now } : {}),
+          ...(changeStatus
+            ? {
+                status: newStatus,
+                last_interaction_at: now,
+                ...(newStatus === "contacted" && !lead.first_contact_at ? { first_contact_at: now } : {}),
+              }
+            : {}),
         })
         .eq("id", lead.id);
 
       if (error) throw error;
 
-      toast.success(newStatus === "contacted" ? "Lead movido para Em Atendimento" : "Lead retornado para A Contatar");
+      toast.success(`Lead movido para ${target.name}`);
       refetch();
     } catch (err: any) {
       toast.error("Erro ao mover lead: " + err.message);
@@ -644,6 +583,20 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
               </DropdownMenuContent>
             </DropdownMenu>
 
+            {/* Configurar etapas (admins) */}
+            {canConfigureStages && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-2.5 text-xs gap-1.5 bg-background shrink-0"
+                onClick={() => setStagesDialogOpen(true)}
+                title="Configurar etapas do quadro"
+              >
+                <Columns3 className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="hidden md:inline">Etapas</span>
+              </Button>
+            )}
+
             {/* Botão Atualizar */}
             <Button
               variant="outline"
@@ -713,9 +666,16 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
         ) : (
           <DragDropContext onDragEnd={handleDragEnd}>
             <div className="flex h-full items-start gap-4 pb-4">
-              {KANBAN_COLUMNS.map((column) => {
-                const columnLeads = columnsData[column.id] || [];
-                const columnRevenue = column.id === "won"
+              {stages.map((stage) => {
+                const columnKey = todooStageKey(stage);
+                const column = {
+                  id: columnKey,
+                  title: stage.name,
+                  color: stage.color,
+                  icon: TODOO_STAGE_KINDS[stage.kind].icon,
+                };
+                const columnLeads = columnsData[columnKey] || [];
+                const columnRevenue = stage.kind === "won"
                   ? columnLeads.reduce((acc, curr) => acc + (Number(curr.outcome_value) || 0), 0)
                   : 0;
                 const IconComponent = column.icon;
@@ -741,7 +701,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                       </div>
 
                       {/* Totalizador de R$ Ganho */}
-                      {column.id === "won" && columnRevenue > 0 && (
+                      {stage.kind === "won" && columnRevenue > 0 && (
                         <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
                           {formatCurrency(columnRevenue)}
                         </span>
@@ -1144,12 +1104,24 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
       </Sheet>
 
       {/* Dialog para registrar desfecho (Venda, Retorno Agendado, Perdido) */}
+      <TodooStagesDialog open={stagesDialogOpen} onOpenChange={setStagesDialogOpen} />
+
       <TodooOutcomeDialog
         lead={leadForOutcome}
         open={outcomeDialogOpen}
-        onOpenChange={setOutcomeDialogOpen}
         initialType={outcomeInitialType}
-        onSuccess={() => {
+        onOpenChange={(open) => {
+          setOutcomeDialogOpen(open);
+          if (!open) setOutcomeStageId(null);
+        }}
+        onSuccess={async () => {
+          // Desfecho vindo de arraste: grava a etapa escolhida (o status já foi salvo pelo diálogo)
+          if (outcomeStageId && leadForOutcome) {
+            await (supabase.from("todoo_leads") as any)
+              .update({ stage_id: outcomeStageId })
+              .eq("id", leadForOutcome.id);
+          }
+          setOutcomeStageId(null);
           refetch();
           queryClient.invalidateQueries({ queryKey: ["todoo-campaigns-list"] });
           queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
