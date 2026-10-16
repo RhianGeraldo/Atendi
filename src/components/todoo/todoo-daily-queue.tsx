@@ -74,12 +74,17 @@ import { cn } from "@/lib/utils";
 import { TodooReferrerLink } from "./todoo-referrer-link";
 import { TodooStagesDialog } from "./todoo-stages-dialog";
 import {
-  TODOO_KIND_STATUS,
+  TODOO_CARD_BEHAVIORS,
   TODOO_STAGE_KINDS,
+  nextTodooStage,
+  refreshTodooCadence,
+  resolveTodooCardStatus,
   resolveTodooLeadStage,
-  todooStageKey,
-  todooStatusKind,
-  useTodooStages,
+  todooCadenceInfo,
+  todooStageActionLabel,
+  useTodooPipeline,
+  type TodooCardStatus,
+  type TodooStage,
 } from "./todoo-stages";
 
 interface Props {
@@ -112,11 +117,11 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   const [leadForOutcome, setLeadForOutcome] = useState<TodooLead | null>(null);
   const [outcomeDialogOpen, setOutcomeDialogOpen] = useState(false);
   const [outcomeInitialType, setOutcomeInitialType] = useState<TodooOutcomeType>("won");
-  // Etapa de destino quando o desfecho vem de um arraste
-  const [outcomeStageId, setOutcomeStageId] = useState<string | null>(null);
+  // Status do card escolhido quando ele pede desfecho (Agendado, Comprou, Sem interesse)
+  const [outcomeCardStatusId, setOutcomeCardStatusId] = useState<string | null>(null);
 
-  // Etapas configuráveis do quadro
-  const { stages } = useTodooStages();
+  // Funil de prospecção (etapas da cadência e status dos cards)
+  const { stages, statuses } = useTodooPipeline();
   const [stagesDialogOpen, setStagesDialogOpen] = useState(false);
   const canConfigureStages = profile?.role === "admin_company" || profile?.role === "super_admin";
 
@@ -165,6 +170,8 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     queryKey: ["todoo-leads", activeCompanyId, profile?.id, selectedUnitId],
     enabled: !!activeCompanyId,
     queryFn: async () => {
+      // Quarentena vencida volta para o início antes de montar o quadro
+      await refreshTodooCadence(activeCompanyId!);
       let query = (supabase.from("todoo_leads") as any)
         .select(`
           *,
@@ -256,11 +263,11 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   const columnsData = useMemo(() => {
     const map: Record<string, TodooLead[]> = {};
     stages.forEach((stage) => {
-      map[todooStageKey(stage)] = [];
+      map[stage.id] = [];
     });
     filteredLeads.forEach((lead) => {
       const stage = resolveTodooLeadStage(lead, stages);
-      if (stage) map[todooStageKey(stage)].push(lead);
+      if (stage) map[stage.id].push(lead);
     });
     return map;
   }, [filteredLeads, stages]);
@@ -276,60 +283,67 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     const lead = leads.find((l) => l.id === draggableId);
     if (!lead) return;
 
-    const target = stages.find((stage) => todooStageKey(stage) === destination.droppableId);
+    const target = stages.find((stage) => stage.id === destination.droppableId);
     if (!target) return;
-    const leadKind = todooStatusKind(lead.status);
-    const outcome = TODOO_STAGE_KINDS[target.kind].outcome;
+    await moveLeadToStage(lead, target);
+  };
 
-    // Etapa de outro tipo com desfecho (Agendado, Retorno, Venda, Sem sucesso) -> diálogo de desfecho
-    if (target.kind !== leadKind && outcome) {
-      setLeadForOutcome(lead);
-      setOutcomeInitialType(outcome);
-      setOutcomeStageId(target.id);
-      setOutcomeDialogOpen(true);
-      return;
-    }
-
-    // Mesmo tipo: só troca a etapa. A Contatar / Em Atendimento: troca também o status.
-    const changeStatus = target.kind !== leadKind;
-    const newStatus = changeStatus
-      ? TODOO_KIND_STATUS[target.kind as "pending" | "in_progress"]
-      : lead.status;
-
-    // Atualização otimista no cache do React Query
+  // Move o card na cadência (a etapa, o prazo e o status são ajustados no banco)
+  const moveLeadToStage = async (lead: TodooLead, target: TodooStage) => {
     queryClient.setQueryData(
       ["todoo-leads", activeCompanyId, profile?.id, selectedUnitId],
-      (old: TodooLead[] | undefined) => {
-        if (!old) return old;
-        return old.map((item) =>
-          item.id === lead.id ? ({ ...item, status: newStatus, stage_id: target.id } as TodooLead) : item,
-        );
-      }
+      (old: TodooLead[] | undefined) =>
+        old?.map((item) => (item.id === lead.id ? ({ ...item, stage_id: target.id } as TodooLead) : item)),
     );
 
     try {
-      const now = new Date().toISOString();
       const { error } = await (supabase.from("todoo_leads") as any)
-        .update({
-          stage_id: target.id,
-          updated_at: now,
-          ...(changeStatus
-            ? {
-                status: newStatus,
-                last_interaction_at: now,
-                ...(newStatus === "contacted" && !lead.first_contact_at ? { first_contact_at: now } : {}),
-              }
-            : {}),
-        })
+        .update({ stage_id: target.id, updated_at: new Date().toISOString() })
         .eq("id", lead.id);
-
       if (error) throw error;
 
-      toast.success(`Lead movido para ${target.name}`);
-      refetch();
+      if (profile) {
+        await (supabase.from("todoo_events") as any).insert({
+          lead_id: lead.id,
+          campaign_id: lead.campaign_id,
+          company_id: lead.company_id,
+          user_id: profile.id,
+          event_type: target.kind === "attempt" ? "cadence_attempt" : "cadence_moved",
+          notes: `Movido para ${target.name}`,
+          metadata: { from: lead.stage_id ?? null, to: target.id },
+        });
+      }
+
+      toast.success(`${lead.contact_name}: ${target.name}`);
     } catch (err: any) {
       toast.error("Erro ao mover lead: " + err.message);
+    } finally {
       refetch();
+      queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
+    }
+  };
+
+  // Troca o status do card; Agendado, Comprou e Sem interesse pedem o desfecho
+  const changeCardStatus = async (lead: TodooLead, status: TodooCardStatus) => {
+    const outcome = TODOO_CARD_BEHAVIORS[status.behavior].outcome;
+    if (outcome && lead.status !== outcome) {
+      setLeadForOutcome(lead);
+      setOutcomeInitialType(outcome);
+      setOutcomeCardStatusId(status.id);
+      setOutcomeDialogOpen(true);
+      return;
+    }
+    try {
+      const { error } = await (supabase.from("todoo_leads") as any)
+        .update({ card_status_id: status.id, updated_at: new Date().toISOString() })
+        .eq("id", lead.id);
+      if (error) throw error;
+      toast.success(`${lead.contact_name}: ${status.name}`);
+    } catch (err: any) {
+      toast.error("Erro ao mudar status: " + err.message);
+    } finally {
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
     }
   };
 
@@ -667,7 +681,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
           <DragDropContext onDragEnd={handleDragEnd}>
             <div className="flex h-full items-start gap-4 pb-4">
               {stages.map((stage) => {
-                const columnKey = todooStageKey(stage);
+                const columnKey = stage.id;
                 const column = {
                   id: columnKey,
                   title: stage.name,
@@ -675,9 +689,13 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                   icon: TODOO_STAGE_KINDS[stage.kind].icon,
                 };
                 const columnLeads = columnsData[columnKey] || [];
-                const columnRevenue = stage.kind === "won"
-                  ? columnLeads.reduce((acc, curr) => acc + (Number(curr.outcome_value) || 0), 0)
-                  : 0;
+                const columnRevenue = columnLeads
+                  .filter((l) => l.status === "won")
+                  .reduce((acc, curr) => acc + (Number(curr.outcome_value) || 0), 0);
+                const columnOverdue = columnLeads.filter(
+                  (l) =>
+                    todooCadenceInfo(l, stage, resolveTodooCardStatus(l, statuses)).state === "overdue",
+                ).length;
                 const IconComponent = column.icon;
 
                 return (
@@ -700,12 +718,23 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                         </Badge>
                       </div>
 
-                      {/* Totalizador de R$ Ganho */}
-                      {stage.kind === "won" && columnRevenue > 0 && (
-                        <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
-                          {formatCurrency(columnRevenue)}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {columnOverdue > 0 && (
+                          <span
+                            className="flex items-center gap-0.5 text-[10px] font-semibold text-destructive"
+                            title="Tentativas atrasadas nesta etapa"
+                          >
+                            <AlertTriangle className="h-3 w-3" />
+                            {columnOverdue}
+                          </span>
+                        )}
+                        {/* Totalizador de R$ das vendas da etapa */}
+                        {columnRevenue > 0 && (
+                          <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                            {formatCurrency(columnRevenue)}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Área Droppable da Coluna */}
@@ -728,7 +757,9 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                             </div>
                           ) : (
                             columnLeads.map((lead, index) => {
-                              const isBreached = lead.sla_deadline && new Date(lead.sla_deadline) < new Date();
+                              const cardStatus = resolveTodooCardStatus(lead, statuses);
+                              const cadence = todooCadenceInfo(lead, stage, cardStatus);
+                              const nextStage = nextTodooStage(stage, stages);
 
                               return (
                                 <Draggable key={lead.id} draggableId={lead.id} index={index}>
@@ -827,28 +858,24 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                         </div>
                                       )}
 
-                                      {/* Informações Específicas da Etapa */}
+                                      {/* Status do card e prazo da cadência */}
+                                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                        <CardStatusMenu
+                                          status={cardStatus}
+                                          statuses={statuses}
+                                          onChange={(st) => changeCardStatus(lead, st)}
+                                        />
+                                        <CadenceBadge info={cadence} stage={stage} />
+                                      </div>
                                       {lead.status === "callback" && lead.callback_scheduled_at ? (
-                                        <div className="mt-2 text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded">
+                                        <div className="mt-1.5 text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded">
                                           <Clock className="h-3 w-3" />
                                           Retorno: {format(new Date(lead.callback_scheduled_at), "dd/MM 'às' HH:mm")}
                                         </div>
                                       ) : lead.status === "won" && lead.outcome_value ? (
-                                        <div className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded">
+                                        <div className="mt-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded">
                                           <DollarSign className="h-3 w-3" />
                                           {formatCurrency(Number(lead.outcome_value))}
-                                        </div>
-                                      ) : lead.sla_deadline && !["won", "lost"].includes(lead.status) ? (
-                                        <div className="mt-2 text-[10px] text-muted-foreground flex items-center justify-between">
-                                          {isBreached ? (
-                                            <span className="text-destructive font-medium flex items-center gap-1">
-                                              <AlertTriangle className="h-3 w-3" /> SLA Atrasado
-                                            </span>
-                                          ) : (
-                                            <span className="opacity-80">
-                                              SLA {formatDistanceToNow(new Date(lead.sla_deadline), { addSuffix: true, locale: ptBR })}
-                                            </span>
-                                          )}
                                         </div>
                                       ) : null}
 
@@ -885,7 +912,30 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                           />
                                         </div>
 
-                                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary transition-colors shrink-0" />
+                                        {nextStage && stage.kind !== "failed" ? (
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className={cn(
+                                              "h-6 px-2 text-[11px] gap-1 shrink-0",
+                                              cadence.state === "overdue"
+                                                ? "text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                : "text-primary hover:text-primary hover:bg-primary/10",
+                                            )}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              moveLeadToStage(lead, nextStage);
+                                            }}
+                                            title={`Mover para ${nextStage.name}`}
+                                          >
+                                            <ChevronRight className="h-3 w-3" />
+                                            <span className="truncate max-w-[110px]">
+                                              {todooStageActionLabel(stage, stages)}
+                                            </span>
+                                          </Button>
+                                        ) : (
+                                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary transition-colors shrink-0" />
+                                        )}
                                       </div>
                                     </div>
                                   )}
@@ -1103,7 +1153,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
         </SheetContent>
       </Sheet>
 
-      {/* Dialog para registrar desfecho (Venda, Retorno Agendado, Perdido) */}
+      {/* Configuração do funil e diálogo de desfecho (Venda, Agendou, Retorno, Perdido) */}
       <TodooStagesDialog open={stagesDialogOpen} onOpenChange={setStagesDialogOpen} />
 
       <TodooOutcomeDialog
@@ -1112,21 +1162,106 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
         initialType={outcomeInitialType}
         onOpenChange={(open) => {
           setOutcomeDialogOpen(open);
-          if (!open) setOutcomeStageId(null);
+          if (!open) setOutcomeCardStatusId(null);
         }}
         onSuccess={async () => {
-          // Desfecho vindo de arraste: grava a etapa escolhida (o status já foi salvo pelo diálogo)
-          if (outcomeStageId && leadForOutcome) {
+          // Desfecho pedido pelo status do card: grava o status escolhido
+          if (outcomeCardStatusId && leadForOutcome) {
             await (supabase.from("todoo_leads") as any)
-              .update({ stage_id: outcomeStageId })
+              .update({ card_status_id: outcomeCardStatusId })
               .eq("id", leadForOutcome.id);
           }
-          setOutcomeStageId(null);
+          setOutcomeCardStatusId(null);
+          queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
           refetch();
           queryClient.invalidateQueries({ queryKey: ["todoo-campaigns-list"] });
           queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
         }}
       />
     </div>
+  );
+}
+
+/** Etiqueta do status do card; clicando, troca o status. */
+function CardStatusMenu({
+  status,
+  statuses,
+  onChange,
+}: {
+  status: TodooCardStatus | undefined;
+  statuses: TodooCardStatus[];
+  onChange: (status: TodooCardStatus) => void;
+}) {
+  if (!status) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold border hover:opacity-80"
+          style={{ color: status.color, backgroundColor: `${status.color}15`, borderColor: `${status.color}40` }}
+          title="Mudar status"
+        >
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: status.color }} />
+          {status.name}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48" onClick={(e) => e.stopPropagation()}>
+        {statuses.map((st) => {
+          const Icon = TODOO_CARD_BEHAVIORS[st.behavior].icon;
+          return (
+            <DropdownMenuItem
+              key={st.id}
+              className="text-xs cursor-pointer gap-2"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (st.id !== status.id) onChange(st);
+              }}
+            >
+              <Icon className="h-3.5 w-3.5" style={{ color: st.color }} />
+              <span className="flex-1">{st.name}</span>
+              {st.id === status.id && <Check className="h-3.5 w-3.5 text-primary" />}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Prazo da cadência: próxima tentativa, atraso ou volta da quarentena. */
+function CadenceBadge({
+  info,
+  stage,
+}: {
+  info: ReturnType<typeof todooCadenceInfo>;
+  stage: TodooStage | undefined;
+}) {
+  if (info.state === "stopped" || !info.dueAt) return null;
+  const distance = formatDistanceToNow(new Date(info.dueAt), { locale: ptBR });
+  if (stage?.kind === "failed") {
+    return (
+      <span className="text-[10px] text-muted-foreground" title={format(new Date(info.dueAt), "dd/MM/yyyy HH:mm")}>
+        Volta para o início em {distance}
+      </span>
+    );
+  }
+  const what = stage?.kind === "start" ? "1ª tentativa" : "Próxima tentativa";
+  if (info.state === "overdue") {
+    return (
+      <span
+        className="flex items-center gap-1 text-[10px] font-semibold text-destructive"
+        title={format(new Date(info.dueAt), "dd/MM/yyyy HH:mm")}
+      >
+        <AlertTriangle className="h-3 w-3" />
+        {what} atrasada há {distance}
+      </span>
+    );
+  }
+  return (
+    <span className="text-[10px] text-muted-foreground" title={format(new Date(info.dueAt), "dd/MM/yyyy HH:mm")}>
+      {what} em {distance}
+    </span>
   );
 }

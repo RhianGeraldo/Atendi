@@ -11,6 +11,7 @@ import {
   Clock,
   Flame,
   Loader2,
+  Repeat,
   MessageSquare,
   RefreshCw,
   Target,
@@ -41,6 +42,14 @@ import { currentTodooMonth, formatTodooPhone, todooDayBounds } from "./todoo-per
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TodooReferrerLink } from "./todoo-referrer-link";
+import {
+  nextTodooStage,
+  refreshTodooCadence,
+  resolveTodooCardStatus,
+  resolveTodooLeadStage,
+  todooStageActionLabel,
+  useTodooPipeline,
+} from "./todoo-stages";
 
 interface Props {
   /** Dia de outra pessoa (Painel da Equipe); sem valor, o dia de quem está logado */
@@ -50,7 +59,7 @@ interface Props {
   onCreateContactsClick?: () => void;
 }
 
-// Lead em atendimento sem nenhuma interação há este tempo vira tarefa de follow-up
+// Lead em conversa (cadência pausada) sem nenhuma interação há este tempo vira follow-up
 const FOLLOWUP_AFTER_HOURS = 48;
 // Itens exibidos por grupo antes do "Ver todos"
 const GROUP_PREVIEW = 8;
@@ -73,7 +82,11 @@ export interface DayPlan {
   captureMonthTarget: number;
   captureMonthDone: number;
   callbacks: TodooLead[];
+  /** A contatar: 1ª tentativa da cadência */
   toContact: TodooLead[];
+  /** Próximas tentativas da cadência que vencem até o fim de hoje */
+  attempts: TodooLead[];
+  /** Em conversa (cadência pausada) e parados há 48h */
   followups: TodooLead[];
   crmTasks: CrmTask[];
   workedToday: number;
@@ -96,11 +109,14 @@ export function useTodooDayData() {
     profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager";
   const bounds = useMemo(() => todooDayBounds(), []);
   const month = currentTodooMonth();
+  const { stages, statuses } = useTodooPipeline();
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["todoo-my-day", activeCompanyId, profile?.id, isManagerOrAdmin, selectedUnitId, bounds.dayStart],
     enabled: !!activeCompanyId && !!profile?.id,
     queryFn: async () => {
+      // Quarentena vencida volta para A contatar antes de montar o dia
+      await refreshTodooCadence(activeCompanyId!);
       const onlyMine = !isManagerOrAdmin;
       const unitFilter = isManagerOrAdmin && selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null;
 
@@ -169,13 +185,33 @@ export function useTodooDayData() {
     const callbacks = leads
       .filter((l) => l.status === "callback" && (!l.callback_scheduled_at || l.callback_scheduled_at < bounds.dayEnd))
       .sort((a, b) => (a.callback_scheduled_at || "").localeCompare(b.callback_scheduled_at || ""));
-    const toContact = leads.filter((l) => l.status === "pending");
-    const followups = leads
+    // Cadência: etapa e status do card de cada lead
+    const cadence = leads.map((l) => ({
+      lead: l,
+      stage: resolveTodooLeadStage(l, stages),
+      behavior: resolveTodooCardStatus(l, statuses)?.behavior ?? (l.status === "pending" ? "active" : "paused"),
+    }));
+    const toContact = cadence
+      .filter((c) => c.behavior === "active" && (c.stage ? c.stage.kind === "start" : c.lead.status === "pending"))
+      .map((c) => c.lead);
+    const attempts = cadence
       .filter(
-        (l) =>
-          (l.status === "contacted" || l.status === "quoted") &&
-          (!l.last_interaction_at || new Date(l.last_interaction_at).getTime() < followupLimit),
+        (c) =>
+          c.behavior === "active" &&
+          c.stage?.kind === "attempt" &&
+          !!c.lead.next_action_at &&
+          c.lead.next_action_at < bounds.dayEnd,
       )
+      .map((c) => c.lead)
+      .sort((a, b) => (a.next_action_at || "").localeCompare(b.next_action_at || ""));
+    const followups = cadence
+      .filter(
+        (c) =>
+          c.behavior === "paused" &&
+          c.lead.status !== "callback" &&
+          (!c.lead.last_interaction_at || new Date(c.lead.last_interaction_at).getTime() < followupLimit),
+      )
+      .map((c) => c.lead)
       .sort((a, b) => (a.last_interaction_at || "").localeCompare(b.last_interaction_at || ""));
     const workedToday = leads.filter((l) => l.last_interaction_at && l.last_interaction_at >= bounds.dayStart).length;
     const crmTasks = (data?.tasks || []).filter((t) => t.assigned_to === userId);
@@ -195,11 +231,13 @@ export function useTodooDayData() {
 
     const overdue =
       toContact.filter((l) => l.sla_deadline && new Date(l.sla_deadline).getTime() < now).length +
+      attempts.filter((l) => l.next_action_at && new Date(l.next_action_at).getTime() < now).length +
       callbacks.filter((l) => l.callback_scheduled_at && new Date(l.callback_scheduled_at).getTime() < now).length +
       crmTasks.filter((t) => t.due_date && t.due_date < bounds.dayStart).length;
 
     const captureRemaining = Math.max(0, captureTarget - captureDone);
-    const pending = callbacks.length + toContact.length + followups.length + crmTasks.length + captureRemaining;
+    const pending =
+      callbacks.length + toContact.length + attempts.length + followups.length + crmTasks.length + captureRemaining;
     const done = workedToday + Math.min(captureDone, captureTarget);
 
     return {
@@ -210,6 +248,7 @@ export function useTodooDayData() {
       captureMonthDone,
       callbacks,
       toContact,
+      attempts,
       followups,
       crmTasks,
       workedToday,
@@ -220,7 +259,7 @@ export function useTodooDayData() {
   };
 
 
-  return { data, isLoading, isFetching, refetch, buildPlan, bounds };
+  return { data, isLoading, isFetching, refetch, buildPlan, bounds, stages };
 }
 
 export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
@@ -235,7 +274,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [goalsOpen, setGoalsOpen] = useState(false);
 
-  const { data, isLoading, isFetching, refetch, buildPlan, bounds } = useTodooDayData();
+  const { data, isLoading, isFetching, refetch, buildPlan, bounds, stages } = useTodooDayData();
 
   const viewedUserId = userId || profile?.id || "";
   const plan = viewedUserId && data ? buildPlan(viewedUserId) : null;
@@ -279,6 +318,40 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
       setSavingId(null);
     }
   };
+
+  // Tentativa feita: o card avança uma etapa na cadência (o banco ajusta prazo e status)
+  const advanceLead = async (lead: TodooLead) => {
+    if (!profile) return;
+    const next = nextTodooStage(resolveTodooLeadStage(lead, stages), stages);
+    if (!next) {
+      await markContacted(lead);
+      return;
+    }
+    setSavingId(lead.id);
+    try {
+      const { error } = await (supabase.from("todoo_leads") as any)
+        .update({ stage_id: next.id, updated_at: new Date().toISOString() })
+        .eq("id", lead.id);
+      if (error) throw error;
+      await (supabase.from("todoo_events") as any).insert({
+        lead_id: lead.id,
+        campaign_id: lead.campaign_id,
+        company_id: lead.company_id,
+        user_id: profile.id,
+        event_type: next.kind === "attempt" ? "cadence_attempt" : "cadence_moved",
+        notes: `Movido para ${next.name} pelo Meu Dia`,
+        metadata: { from: lead.stage_id ?? null, to: next.id },
+      });
+      toast.success(`${lead.contact_name}: ${next.name}`);
+      refresh();
+    } catch (err: any) {
+      toast.error("Erro ao registrar tentativa: " + err.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const attemptLabel = (lead: TodooLead) => todooStageActionLabel(resolveTodooLeadStage(lead, stages), stages);
 
   const completeTask = async (task: CrmTask) => {
     setSavingId(task.id);
@@ -366,7 +439,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
             <TaskGroup
               icon={<Flame className="h-4 w-4 text-blue-500" />}
               title="Contatos para chamar"
-              hint="Ações comerciais, base inativa e cadastros na sua fila"
+              hint="A contatar: faça a 1ª tentativa"
               count={plan.toContact.length}
               emptyText="Fila zerada. Nenhum contato aguardando."
             >
@@ -376,17 +449,52 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
                   lead={lead}
                   detail={lead.sla_deadline ? <DueBadge date={lead.sla_deadline} prefix="Prazo" /> : null}
                   saving={savingId === lead.id}
-                  doneLabel="Chamei"
-                  onDone={() => markContacted(lead)}
+                  doneLabel={attemptLabel(lead)}
+                  onDone={() => advanceLead(lead)}
                   onOutcome={(t) => openOutcome(lead, t)}
                 />
               ))}
             </TaskGroup>
 
             <TaskGroup
+              icon={<Repeat className="h-4 w-4 text-orange-500" />}
+              title="Próximas tentativas"
+              hint="Cadência: contatos que ainda não responderam"
+              count={plan.attempts.length}
+              emptyText="Nenhuma tentativa vencendo hoje."
+            >
+              {plan.attempts.map((lead) => {
+                const stage = resolveTodooLeadStage(lead, stages);
+                return (
+                  <LeadRow
+                    key={lead.id}
+                    lead={lead}
+                    detail={
+                      <>
+                        {stage && (
+                          <span
+                            className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                            style={{ color: stage.color, backgroundColor: `${stage.color}15` }}
+                          >
+                            Feita: {stage.name}
+                          </span>
+                        )}
+                        {lead.next_action_at && <DueBadge date={lead.next_action_at} prefix="Vence" />}
+                      </>
+                    }
+                    saving={savingId === lead.id}
+                    doneLabel={attemptLabel(lead)}
+                    onDone={() => advanceLead(lead)}
+                    onOutcome={(t) => openOutcome(lead, t)}
+                  />
+                );
+              })}
+            </TaskGroup>
+
+            <TaskGroup
               icon={<MessageSquare className="h-4 w-4 text-violet-500" />}
-              title="Follow-up de negociações"
-              hint={`Em atendimento sem interação há mais de ${FOLLOWUP_AFTER_HOURS / 24} dias`}
+              title="Follow-up de conversas"
+              hint={`Em conversa sem interação há mais de ${FOLLOWUP_AFTER_HOURS / 24} dias`}
               count={plan.followups.length}
               emptyText="Nenhuma negociação parada."
             >

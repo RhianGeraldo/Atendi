@@ -80,7 +80,7 @@ export function TodooTeamPanel() {
       worked: sum((p) => p.workedToday),
       captures: sum((p) => p.captureDone),
       captureTarget: sum((p) => p.captureTarget),
-      toContact: sum((p) => p.toContact.length),
+      toContact: sum((p) => p.toContact.length + p.attempts.length),
       overdue: sum((p) => p.overdue),
       done: sum((p) => p.done),
       total: sum((p) => p.total),
@@ -160,6 +160,7 @@ export function TodooTeamPanel() {
                       <th className="px-3 py-2 font-medium text-center">Trabalhados</th>
                       <th className="px-3 py-2 font-medium text-center">Para chamar</th>
                       <th className="px-3 py-2 font-medium text-center">Retornos</th>
+                      <th className="px-3 py-2 font-medium text-center">Tentativas</th>
                       <th className="px-3 py-2 font-medium text-center">Follow-up</th>
                       <th className="px-3 py-2 font-medium text-center">Tarefas CRM</th>
                       <th className="px-3 py-2 font-medium text-center">Atrasados</th>
@@ -199,6 +200,7 @@ export function TodooTeamPanel() {
                           <td className="px-3 py-2.5 text-center">{plan.workedToday}</td>
                           <td className="px-3 py-2.5 text-center">{plan.toContact.length}</td>
                           <td className="px-3 py-2.5 text-center">{plan.callbacks.length}</td>
+                          <td className="px-3 py-2.5 text-center">{plan.attempts.length}</td>
                           <td className="px-3 py-2.5 text-center">{plan.followups.length}</td>
                           <td className="px-3 py-2.5 text-center">{plan.crmTasks.length}</td>
                           <td
