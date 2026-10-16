@@ -880,44 +880,40 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                       ) : null}
 
                                       {/* Ações Rápidas no Rodapé do Card */}
-                                      <div className="mt-2.5 pt-2 border-t border-border/60 flex items-center justify-between gap-1">
-                                        <div className="flex items-center gap-1">
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            className="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground hover:bg-muted"
-                                            onClick={(e) => handleCall(lead, e)}
-                                            title="Fazer ligação"
-                                          >
-                                            <Phone className="h-3 w-3 text-blue-500" />
-                                            <span>Ligar</span>
-                                          </Button>
+                                      <div className="mt-2.5 pt-2 border-t border-border/60 flex items-center gap-1 min-w-0">
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted"
+                                          onClick={(e) => handleCall(lead, e)}
+                                          title="Ligar"
+                                        >
+                                          <Phone className="h-3.5 w-3.5 text-blue-500" />
+                                        </Button>
 
-                                          <ContactChatButton
-                                            contactId={lead.contact_id}
-                                            contactName={lead.contact_name}
-                                            phone={lead.contact_phone}
-                                            unitId={lead.unit_id}
-                                            trigger={
-                                              <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                className="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground hover:bg-muted"
-                                                title="Abrir no atendimento"
-                                              >
-                                                <MessageSquare className="h-3 w-3 text-emerald-500" />
-                                                <span>Mensagem</span>
-                                              </Button>
-                                            }
-                                          />
-                                        </div>
+                                        <ContactChatButton
+                                          contactId={lead.contact_id}
+                                          contactName={lead.contact_name}
+                                          phone={lead.contact_phone}
+                                          unitId={lead.unit_id}
+                                          trigger={
+                                            <Button
+                                              size="icon"
+                                              variant="ghost"
+                                              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted"
+                                              title="Abrir conversa"
+                                            >
+                                              <MessageSquare className="h-3.5 w-3.5 text-emerald-500" />
+                                            </Button>
+                                          }
+                                        />
 
                                         {nextStage && stage.kind !== "failed" ? (
                                           <Button
                                             size="sm"
                                             variant="ghost"
                                             className={cn(
-                                              "h-6 px-2 text-[11px] gap-1 shrink-0",
+                                              "ml-auto h-6 min-w-0 px-2 text-[11px] font-medium gap-0.5",
                                               cadence.state === "overdue"
                                                 ? "text-destructive hover:text-destructive hover:bg-destructive/10"
                                                 : "text-primary hover:text-primary hover:bg-primary/10",
@@ -928,13 +924,11 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                             }}
                                             title={`Mover para ${nextStage.name}`}
                                           >
-                                            <ChevronRight className="h-3 w-3" />
-                                            <span className="truncate max-w-[110px]">
-                                              {todooStageActionLabel(stage, stages)}
-                                            </span>
+                                            <span className="truncate">{todooStageActionLabel(stage, stages)}</span>
+                                            <ChevronRight className="h-3 w-3 shrink-0" />
                                           </Button>
                                         ) : (
-                                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary transition-colors shrink-0" />
+                                          <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary transition-colors shrink-0" />
                                         )}
                                       </div>
                                     </div>
@@ -1243,11 +1237,11 @@ function CadenceBadge({
   if (stage?.kind === "failed") {
     return (
       <span className="text-[10px] text-muted-foreground" title={format(new Date(info.dueAt), "dd/MM/yyyy HH:mm")}>
-        Volta para o início em {distance}
+        Volta em {distance}
       </span>
     );
   }
-  const what = stage?.kind === "start" ? "1ª tentativa" : "Próxima tentativa";
+  const what = stage?.kind === "start" ? "1ª tentativa" : "Próxima";
   if (info.state === "overdue") {
     return (
       <span
@@ -1255,7 +1249,7 @@ function CadenceBadge({
         title={format(new Date(info.dueAt), "dd/MM/yyyy HH:mm")}
       >
         <AlertTriangle className="h-3 w-3" />
-        {what} atrasada há {distance}
+        Atrasada há {distance}
       </span>
     );
   }

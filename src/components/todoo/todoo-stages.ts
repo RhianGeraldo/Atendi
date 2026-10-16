@@ -116,7 +116,7 @@ export function todooStageActionLabel(stage: TodooStage | undefined, stages: Tod
   if (!stage) return "Avançar";
   if (stage.kind === "failed") return "Voltar ao início";
   if (!next) return "Avançar";
-  if (next.kind === "failed") return `Encerrar: ${next.name}`;
+  if (next.kind === "failed") return next.name;
   return `Fiz a ${next.name}`;
 }
 
