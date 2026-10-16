@@ -595,22 +595,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
             <p className="text-xs text-muted-foreground">Carregando quadro comercial...</p>
           </div>
-        ) : leads.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full p-8 text-center max-w-md mx-auto">
-            <div className="h-14 w-14 rounded-2xl bg-primary/10 text-primary grid place-items-center mb-3">
-              <Target className="h-7 w-7" />
-            </div>
-            <h3 className="text-base font-bold text-foreground">Nenhum lead na fila comercial</h3>
-            <p className="text-xs text-muted-foreground mt-1">
-              Crie uma Ação Comercial ou importe sua lista de contatos para abastecer a esteira diária de vendas.
-            </p>
-            {onCreateCampaignClick && (
-              <Button size="sm" onClick={onCreateCampaignClick} className="mt-4 gap-2 text-xs">
-                <Plus className="h-3.5 w-3.5" />
-                Criar Ação Comercial
-              </Button>
-            )}
-          </div>
         ) : (
           <DragDropContext onDragEnd={handleDragEnd}>
             <div className="flex h-full items-start gap-4 pb-4">
