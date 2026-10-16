@@ -42,6 +42,7 @@ import { currentTodooMonth, formatTodooPhone, todooDayBounds } from "./todoo-per
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TodooReferrerLink } from "./todoo-referrer-link";
+import { TodooSendMessageDialog } from "./todoo-send-message-dialog";
 import {
   nextTodooStage,
   refreshTodooCadence,
@@ -259,7 +260,7 @@ export function useTodooDayData() {
   };
 
 
-  return { data, isLoading, isFetching, refetch, buildPlan, bounds, stages };
+  return { data, isLoading, isFetching, refetch, buildPlan, bounds, stages, statuses };
 }
 
 export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
@@ -274,7 +275,16 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [goalsOpen, setGoalsOpen] = useState(false);
 
-  const { data, isLoading, isFetching, refetch, buildPlan, bounds, stages } = useTodooDayData();
+  const { data, isLoading, isFetching, refetch, buildPlan, bounds, stages, statuses } = useTodooDayData();
+  const [messageLead, setMessageLead] = useState<TodooLead | null>(null);
+  // Com cadência ativa, a mensagem pode registrar a próxima tentativa
+  const messageNextStage = useMemo(() => {
+    if (!messageLead) return null;
+    const stage = resolveTodooLeadStage(messageLead, stages);
+    const behavior = resolveTodooCardStatus(messageLead, statuses)?.behavior;
+    if (behavior !== "active" || !stage || stage.kind === "failed") return null;
+    return nextTodooStage(stage, stages) ?? null;
+  }, [messageLead, stages, statuses]);
 
   const viewedUserId = userId || profile?.id || "";
   const plan = viewedUserId && data ? buildPlan(viewedUserId) : null;
@@ -423,6 +433,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
                 <LeadRow
                   key={lead.id}
                   lead={lead}
+                  onMessage={() => setMessageLead(lead)}
                   detail={
                     lead.callback_scheduled_at ? (
                       <DueBadge date={lead.callback_scheduled_at} prefix="Retorno" />
@@ -447,6 +458,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
                 <LeadRow
                   key={lead.id}
                   lead={lead}
+                  onMessage={() => setMessageLead(lead)}
                   detail={lead.sla_deadline ? <DueBadge date={lead.sla_deadline} prefix="Prazo" /> : null}
                   saving={savingId === lead.id}
                   doneLabel={attemptLabel(lead)}
@@ -469,6 +481,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
                   <LeadRow
                     key={lead.id}
                     lead={lead}
+                    onMessage={() => setMessageLead(lead)}
                     detail={
                       <>
                         {stage && (
@@ -502,6 +515,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
                 <LeadRow
                   key={lead.id}
                   lead={lead}
+                  onMessage={() => setMessageLead(lead)}
                   detail={
                     <span className="text-[10px] text-muted-foreground">
                       {lead.last_interaction_at
@@ -548,6 +562,14 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
           queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
           queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] });
         }}
+      />
+
+      <TodooSendMessageDialog
+        lead={messageLead}
+        nextStage={messageNextStage}
+        open={!!messageLead}
+        onOpenChange={(open) => !open && setMessageLead(null)}
+        onSent={refresh}
       />
 
       <TodooOutcomeDialog
@@ -769,6 +791,7 @@ function LeadRow({
   doneLabel,
   onDone,
   onOutcome,
+  onMessage,
 }: {
   lead: TodooLead;
   detail: ReactNode;
@@ -776,6 +799,7 @@ function LeadRow({
   doneLabel: string;
   onDone: () => void;
   onOutcome: (type: TodooOutcomeType) => void;
+  onMessage: () => void;
 }) {
   const referrer = lead.custom_fields?.indicadora;
   const interest = lead.custom_fields?.servico;
@@ -802,18 +826,10 @@ function LeadRow({
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <ContactChatButton
-          contactId={lead.contact_id}
-          contactName={lead.contact_name}
-          phone={lead.contact_phone}
-          unitId={lead.unit_id}
-          trigger={
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" title="Abrir conversa">
-              <MessageSquare className="h-3.5 w-3.5 text-emerald-500" />
-              Conversa
-            </Button>
-          }
-        />
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" title="Enviar mensagem" onClick={onMessage}>
+          <MessageSquare className="h-3.5 w-3.5 text-emerald-500" />
+          Mensagem
+        </Button>
         <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={onDone} disabled={saving}>
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
           {doneLabel}

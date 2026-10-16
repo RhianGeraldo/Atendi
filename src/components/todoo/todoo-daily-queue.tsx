@@ -60,12 +60,12 @@ import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { useWavoip } from "@/hooks/use-wavoip";
 import { TodooLead, TodooOutcomeType, TodooCampaign } from "@/types/todoo";
 import { TodooOutcomeDialog } from "./todoo-outcome-dialog";
-import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { formatTodooPhone } from "./todoo-period";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TodooReferrerLink } from "./todoo-referrer-link";
 import { TodooStagesDialog } from "./todoo-stages-dialog";
+import { TodooSendMessageDialog } from "./todoo-send-message-dialog";
 import {
   TODOO_CARD_BEHAVIORS,
   TODOO_STAGE_KINDS,
@@ -113,6 +113,8 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   // Funil de prospecção (etapas da cadência e status dos cards)
   const { stages, statuses } = useTodooPipeline();
   const [stagesDialogOpen, setStagesDialogOpen] = useState(false);
+  // Enviar mensagem sem sair do Quadro (com a próxima etapa, para registrar a tentativa)
+  const [messageTarget, setMessageTarget] = useState<{ lead: TodooLead; nextStage: TodooStage | null } | null>(null);
   const canConfigureStages = profile?.role === "admin_company" || profile?.role === "super_admin";
 
   // Feedback de cópia
@@ -843,22 +845,24 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                           <Phone className="h-3.5 w-3.5 text-blue-500" />
                                         </Button>
 
-                                        <ContactChatButton
-                                          contactId={lead.contact_id}
-                                          contactName={lead.contact_name}
-                                          phone={lead.contact_phone}
-                                          unitId={lead.unit_id}
-                                          trigger={
-                                            <Button
-                                              size="icon"
-                                              variant="ghost"
-                                              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted"
-                                              title="Abrir conversa"
-                                            >
-                                              <MessageSquare className="h-3.5 w-3.5 text-emerald-500" />
-                                            </Button>
-                                          }
-                                        />
+                                        <Button
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground hover:bg-muted"
+                                          title="Enviar mensagem"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setMessageTarget({
+                                              lead,
+                                              nextStage:
+                                                cardStatus?.behavior === "active" && stage.kind !== "failed"
+                                                  ? nextStage ?? null
+                                                  : null,
+                                            });
+                                          }}
+                                        >
+                                          <MessageSquare className="h-3.5 w-3.5 text-emerald-500" />
+                                        </Button>
 
                                         {nextStage && stage.kind !== "failed" ? (
                                           <Button
@@ -901,6 +905,14 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
 
       {/* Configuração do funil e diálogo de desfecho (Venda, Agendou, Retorno, Perdido) */}
       <TodooStagesDialog open={stagesDialogOpen} onOpenChange={setStagesDialogOpen} />
+
+      <TodooSendMessageDialog
+        lead={messageTarget?.lead ?? null}
+        nextStage={messageTarget?.nextStage}
+        open={!!messageTarget}
+        onOpenChange={(open) => !open && setMessageTarget(null)}
+        onSent={() => refetch()}
+      />
 
       <TodooOutcomeDialog
         lead={leadForOutcome}
