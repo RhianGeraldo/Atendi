@@ -30,6 +30,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
+import { useUnit } from "@/lib/unit-context";
+import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import { sendMessageAction, sendProactiveMessageAction } from "@/lib/api/chat.functions";
 import { fillQuickMessageVariables } from "@/lib/quick-message-vars";
 import { ContactChatButton } from "@/components/chat/contact-chat-button";
@@ -83,6 +85,8 @@ interface Props {
 export function TodooSendMessageDialog({ lead, open, onOpenChange, nextStage, onSent }: Props) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
+  const { selectedUnitId } = useUnit();
+  const { unitIds: myUnitIds } = useAccessibleUnits();
   const queryClient = useQueryClient();
 
   const [instanceName, setInstanceName] = useState("");
@@ -106,7 +110,15 @@ export function TodooSendMessageDialog({ lead, open, onOpenChange, nextStage, on
 
   // Números de WhatsApp: os da unidade do lead (ou, sem unidade, os que a pessoa pode usar)
   const { data: instances = [], isLoading: loadingInstances } = useQuery({
-    queryKey: ["todoo-send-instances", activeCompanyId, lead?.unit_id ?? null, profile?.id, profile?.department_id],
+    queryKey: [
+      "todoo-send-instances",
+      activeCompanyId,
+      lead?.unit_id ?? null,
+      selectedUnitId,
+      myUnitIds.join(","),
+      profile?.id,
+      profile?.department_id,
+    ],
     enabled: open && !!activeCompanyId && !!lead,
     queryFn: async () => {
       // "network" ainda não está nos tipos gerados do Supabase
@@ -116,7 +128,14 @@ export function TodooSendMessageDialog({ lead, open, onOpenChange, nextStage, on
         .order("name", { ascending: true });
       if (lead?.unit_id) {
         query = query.eq("unit_id", lead.unit_id);
+      } else if (selectedUnitId && selectedUnitId !== "all") {
+        // Lead sem unidade: o número da unidade selecionada no topo
+        query = query.eq("unit_id", selectedUnitId);
       } else if (!isManagement) {
+        // Consultora: só os números das unidades dela (ou sem unidade), do seu departamento
+        query = query.or(
+          myUnitIds.length > 0 ? `unit_id.in.(${myUnitIds.join(",")}),unit_id.is.null` : "unit_id.is.null",
+        );
         query = profile?.department_id
           ? query.or(`department_id.eq.${profile.department_id},department_id.is.null`)
           : query.is("department_id", null);
