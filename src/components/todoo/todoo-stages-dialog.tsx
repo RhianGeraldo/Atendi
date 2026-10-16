@@ -223,7 +223,7 @@ export function TodooStagesDialog({ open, onOpenChange }: { open: boolean; onOpe
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] grid-cols-1 overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="text-base">Funil de prospecção</DialogTitle>
           <DialogDescription className="text-xs">

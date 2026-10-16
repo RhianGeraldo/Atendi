@@ -319,7 +319,7 @@ export function TodooSendMessageDialog({ lead, open, onOpenChange, nextStage, on
 
   return (
     <Dialog open={open} onOpenChange={(o) => !sending && onOpenChange(o)}>
-      <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <DialogContent className="max-w-lg max-h-[92vh] grid-cols-1 overflow-y-auto overflow-x-hidden" onClick={(e) => e.stopPropagation()}>
         <DialogHeader>
           <DialogTitle className="text-base">Enviar mensagem</DialogTitle>
           <DialogDescription className="text-xs">
