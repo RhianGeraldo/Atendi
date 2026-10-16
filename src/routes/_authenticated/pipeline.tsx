@@ -35,7 +35,8 @@ import {
   AlertTriangle,
   Filter,
 } from "lucide-react";
-import { format } from "date-fns";
+import { format, isSameDay, startOfMonth, subDays } from "date-fns";
+import type { DateRange } from "react-day-picker";
 import { ptBR } from "date-fns/locale";
 import { calculateOpportunitySla, formatSlaDuration, type SlaStatus } from "@/types/crm-sla";
 
@@ -63,6 +64,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as DateRangeCalendar } from "@/components/ui/calendar";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -118,6 +122,8 @@ function PipelinePage() {
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
   const [slaFilter, setSlaFilter] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  // Período de entrada da oportunidade no funil (created_at)
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
   const [showMetrics, setShowMetrics] = useState<boolean>(false);
   const [tableSortField, setTableSortField] = useState<
@@ -141,7 +147,7 @@ function PipelinePage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("opportunities")
-        .select("id, stage_id, status, pipeline_stages(pipeline_id)")
+        .select("id, stage_id, status, created_at, pipeline_stages(pipeline_id)")
         .eq("id", search.opportunityId!)
         .maybeSingle();
       if (error) throw error;
@@ -159,6 +165,16 @@ function PipelinePage() {
       if (targetOpp.status && statusFilter !== "all" && targetOpp.status !== statusFilter) {
         setStatusFilter("all");
       }
+      // Garante que o período não esconda a oportunidade aberta pelo link
+      setDateRange((range) => {
+        if (!range?.from || !targetOpp.created_at) return range;
+        const createdAt = new Date(targetOpp.created_at);
+        const fromDate = new Date(range.from);
+        fromDate.setHours(0, 0, 0, 0);
+        const toDate = new Date(range.to ?? range.from);
+        toDate.setHours(23, 59, 59, 999);
+        return createdAt < fromDate || createdAt > toDate ? undefined : range;
+      });
     }
   }, [targetOpp]);
 
@@ -240,6 +256,8 @@ function PipelinePage() {
       selectedUnitId,
       statusFilter,
       ownerFilter,
+      dateRange?.from?.toISOString(),
+      dateRange?.to?.toISOString(),
     ],
     enabled:
       !!selectedPipelineId && !!stages && stages.length > 0 && !!profile?.id && !!activeCompanyId,
@@ -275,6 +293,15 @@ function PipelinePage() {
       // Filtra pela unidade selecionada no painel superior
       if (selectedUnitId) {
         query = query.eq("unit_id", selectedUnitId);
+      }
+
+      if (dateRange?.from) {
+        const fromDate = new Date(dateRange.from);
+        fromDate.setHours(0, 0, 0, 0);
+        query = query.gte("created_at", fromDate.toISOString());
+        const toDate = new Date(dateRange.to ?? dateRange.from);
+        toDate.setHours(23, 59, 59, 999);
+        query = query.lte("created_at", toDate.toISOString());
       }
 
       const { data, error } = await query;
@@ -431,14 +458,23 @@ function PipelinePage() {
     searchTerm.trim() !== "" ||
     statusFilter !== "open" ||
     ownerFilter !== "all" ||
-    slaFilter !== "all";
+    slaFilter !== "all" ||
+    !!dateRange?.from;
 
   const handleClearFilters = () => {
     setSearchTerm("");
     setStatusFilter("open");
     setOwnerFilter("all");
     setSlaFilter("all");
+    setDateRange(undefined);
   };
+
+  const datePresets: { label: string; range: () => DateRange }[] = [
+    { label: "Hoje", range: () => ({ from: new Date(), to: new Date() }) },
+    { label: "Últimos 7 dias", range: () => ({ from: subDays(new Date(), 6), to: new Date() }) },
+    { label: "Últimos 30 dias", range: () => ({ from: subDays(new Date(), 29), to: new Date() }) },
+    { label: "Este mês", range: () => ({ from: startOfMonth(new Date()), to: new Date() }) },
+  ];
 
   // Organize opportunities by stage
   const columns = useMemo(() => {
@@ -842,6 +878,70 @@ function PipelinePage() {
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Filtro de Período (data de entrada da oportunidade) */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant={dateRange?.from ? "secondary" : "outline"}
+                size="sm"
+                className={cn(
+                  "h-8 text-xs font-normal gap-1.5 shrink-0 cursor-pointer px-2.5",
+                  !dateRange?.from && "text-muted-foreground",
+                )}
+                title="Filtrar pela data de entrada no funil"
+              >
+                <Calendar className="h-3.5 w-3.5" />
+                {dateRange?.from ? (
+                  dateRange.to && !isSameDay(dateRange.to, dateRange.from) ? (
+                    <>
+                      {format(dateRange.from, "dd/MM/yy")} - {format(dateRange.to, "dd/MM/yy")}
+                    </>
+                  ) : (
+                    format(dateRange.from, "dd/MM/yyyy")
+                  )
+                ) : (
+                  <span className="hidden sm:inline">Período</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <div className="flex flex-col sm:flex-row">
+                <div className="flex sm:flex-col gap-1 p-2 border-b sm:border-b-0 sm:border-r flex-wrap">
+                  {datePresets.map((preset) => (
+                    <Button
+                      key={preset.label}
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 justify-start text-xs cursor-pointer"
+                      onClick={() => setDateRange(preset.range())}
+                    >
+                      {preset.label}
+                    </Button>
+                  ))}
+                  {dateRange?.from && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 justify-start text-xs text-destructive hover:text-destructive cursor-pointer"
+                      onClick={() => setDateRange(undefined)}
+                    >
+                      Limpar período
+                    </Button>
+                  )}
+                </div>
+                <DateRangeCalendar
+                  initialFocus
+                  mode="range"
+                  locale={ptBR}
+                  defaultMonth={dateRange?.from}
+                  selected={dateRange}
+                  onSelect={setDateRange}
+                  numberOfMonths={2}
+                />
+              </div>
+            </PopoverContent>
+          </Popover>
 
           {/* Contador de Filtrados se houver filtro ativo */}
           {hasActiveFilters && (
