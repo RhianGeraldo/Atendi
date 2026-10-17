@@ -113,6 +113,10 @@ function TodooPage() {
           open={createDialogOpen}
           onOpenChange={setCreateDialogOpen}
           onSuccess={() => {
+            // O cache de 5 min esconderia os leads novos no Quadro
+            for (const key of ["todoo-leads", "todoo-my-day", "todoo-campaigns-list", "todoo-campaigns-filter"]) {
+              queryClient.invalidateQueries({ queryKey: [key] });
+            }
             setActiveTab("queue");
           }}
         />

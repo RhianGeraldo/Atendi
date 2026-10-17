@@ -301,10 +301,11 @@ export function TodooConversationBanner({ conv }: Props) {
         lead={todooLead}
         open={outcomeDialogOpen}
         onOpenChange={setOutcomeDialogOpen}
+        initialType={outcomeType}
         onSuccess={() => {
           refetchLead();
-          queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
-          queryClient.invalidateQueries({ queryKey: ["todoo-metrics"] });
+          // Quadro, Meu Dia, Indicadores, Gincana e Ações Comerciais leem o desfecho
+          queryClient.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("todoo-") });
         }}
       />
     </div>

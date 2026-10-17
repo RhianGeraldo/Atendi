@@ -885,12 +885,16 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
           setOutcomeDialogOpen(open);
           if (!open) setOutcomeCardStatusId(null);
         }}
-        onSuccess={async () => {
-          // Desfecho pedido pelo status do card: grava o status escolhido
-          if (outcomeCardStatusId && leadForOutcome) {
-            await (supabase.from("todoo_leads") as any)
-              .update({ card_status_id: outcomeCardStatusId })
+        onSuccess={async (savedType) => {
+          // Desfecho pedido pelo status do card: grava o card escolhido só se o desfecho
+          // salvo for o mesmo do card. Se a consultora trocou o tipo no diálogo, o trigger
+          // já sincroniza o card pelo status salvo.
+          const chosenCard = statuses.find((s) => s.id === outcomeCardStatusId);
+          if (chosenCard && leadForOutcome && TODOO_CARD_BEHAVIORS[chosenCard.behavior].outcome === savedType) {
+            const { error } = await (supabase.from("todoo_leads") as any)
+              .update({ card_status_id: chosenCard.id, updated_at: new Date().toISOString() })
               .eq("id", leadForOutcome.id);
+            if (error) toast.error("Desfecho salvo, mas o status do card não foi atualizado: " + error.message);
           }
           setOutcomeCardStatusId(null);
           queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });

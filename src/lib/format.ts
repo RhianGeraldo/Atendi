@@ -78,6 +78,26 @@ export function formatBRL(value: number | null | undefined): string {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+/**
+ * Lê um valor em reais digitado pelo usuário ("1.500,00", "1500,5", "R$ 1.500", "1500.50").
+ * Retorna null quando o texto não é um número.
+ */
+export function parseBRL(input: string | null | undefined): number | null {
+  if (input == null) return null;
+  let s = input.replace(/R\$/gi, "").replace(/\s/g, "");
+  if (!s) return null;
+  if (s.includes(",")) {
+    // Vírgula é o decimal; pontos são milhar
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+    // Só pontos em grupos de 3 dígitos: milhar ("1.500", "1.500.000")
+    s = s.replace(/\./g, "");
+  }
+  if (!/^-?\d+(\.\d+)?$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function initials(name?: string | null): string {
   if (!name) return "?";
   return name

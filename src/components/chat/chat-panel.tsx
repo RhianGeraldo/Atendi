@@ -60,6 +60,7 @@ import { useWavoip } from "@/hooks/use-wavoip";
 import { cn } from "@/lib/utils";
 import { fillQuickMessageVariables } from "@/lib/quick-message-vars";
 import { TodooConversationBanner } from "@/components/todoo/todoo-conversation-banner";
+import { canAccessMenu } from "@/lib/permissions";
 import { initials, formatDayLabel } from "@/lib/format";
 import { useSlaSettings } from "@/lib/use-sla";
 import { calculateConversationSla } from "@/lib/sla";
@@ -1446,7 +1447,7 @@ export function ChatPanel({
         </header>
 
         {/* Banner Inteligente do Todoo (se o cliente estiver em campanha ativa) */}
-        <TodooConversationBanner conv={conv} />
+        {canAccessMenu("todoo", profile) && <TodooConversationBanner conv={conv} />}
 
         {/* Messages History */}
         {loadingMessages && (!messages || messages.length === 0) ? (

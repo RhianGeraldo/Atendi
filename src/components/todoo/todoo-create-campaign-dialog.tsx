@@ -1,4 +1,4 @@
-import { useState, useId } from "react";
+import { useState, useId, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -42,6 +42,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
+import { parseBRL } from "@/lib/format";
 import { TodooCampaignType, TodooDistributionMode } from "@/types/todoo";
 import { toast } from "sonner";
 
@@ -152,6 +153,41 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
   // Consultoras participantes
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Toda abertura começa do zero: sem isso o assistente reabria no último passo com a
+  // lista anterior, e um clique em "Criar" duplicava a ação e todos os leads.
+  useEffect(() => {
+    if (!open) return;
+    setStep(1);
+    setCampaignType("retention_saldo");
+    setTitle("Clube de Manutenção Anual (Saldo ≤ 3)");
+    setDescription("");
+    setScript(TEMPLATES[0].defaultScript);
+    setOfferDetails(TEMPLATES[0].defaultOffer);
+    setSlaHours(24);
+    setRedistributeOnSla(true);
+    setDistributionMode("round_robin");
+    setTargetRevenue("");
+    setSourceType("internal_crm");
+    setCrmInactivityDays("30");
+    setCrmStatusFilter("resolved");
+    setCrmSelectedReason("all");
+    setCrmUnitId("all");
+    setCrmMatchedCount(null);
+    setCrmLoadingCount(false);
+    setCrmLeadsData([]);
+    setImportedRows([]);
+    setColumnHeaders([]);
+    setColName("");
+    setColPhone("");
+    setColUnit("");
+    setDefaultUnitId("all");
+    setColSaldo("");
+    setColZona("");
+    setColUltimaSessao("");
+    setSelectedUserIds([]);
+    setSubmitting(false);
+  }, [open]);
 
   // Unidades que o usuário pode ver (admin: todas; demais: as suas)
   const { units: companyUnits, unitIds: myUnitIds, isAdmin: isCompanyAdmin, hasRedeAccess } = useAccessibleUnits();
@@ -350,10 +386,16 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
 
   // Submissão Final e Distribuição Round-Robin Inteligente por Unidade
   const handleCreateCampaign = async () => {
-    if (!profile || !activeCompanyId) return;
+    if (!profile || !activeCompanyId || submitting) return;
     setSubmitting(true);
+    let createdCampaignId: string | null = null;
 
     try {
+      const parsedRevenue = targetRevenue.trim() ? parseBRL(targetRevenue) : 0;
+      if (parsedRevenue === null) {
+        throw new Error("Meta de faturamento inválida. Use o formato 50.000,00.");
+      }
+
       // 1. Prepara a lista consolidada de leads
       let finalLeads: Array<{
         name: string;
@@ -447,13 +489,14 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
           redistribute_on_sla_breach: redistributeOnSla,
           distribution_mode: distributionMode,
           target_count: finalLeads.length,
-          target_revenue: targetRevenue ? parseFloat(targetRevenue.replace(",", ".")) : 0,
+          target_revenue: parsedRevenue,
           created_by: profile.id,
         })
         .select()
         .single();
 
       if (campaignErr) throw campaignErr;
+      createdCampaignId = campaignData.id;
 
       // 3. Distribuição Round-Robin Inteligente por Unidade
       const selectedConsultants = teamMembers.filter((m: any) =>
@@ -515,7 +558,23 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
       onSuccess();
     } catch (err: any) {
       console.error(err);
-      toast.error(err.message || "Erro ao criar campanha.");
+      // Falhou depois de criar a ação: desfaz para não deixar uma ação com parte dos leads
+      // (os leads já inseridos saem junto pelo ON DELETE CASCADE)
+      if (createdCampaignId) {
+        const { error: rollbackErr } = await (supabase.from("todoo_campaigns") as any)
+          .delete()
+          .eq("id", createdCampaignId);
+        if (rollbackErr) {
+          console.error("Erro ao desfazer a ação comercial:", rollbackErr);
+          toast.error(
+            `Erro ao criar a ação: ${err.message}. Ela ficou incompleta; exclua "${title}" em Ações Comerciais.`,
+          );
+          return;
+        }
+        toast.error(`Nada foi criado: ${err.message || "erro ao inserir os leads."}`);
+        return;
+      }
+      toast.error(err.message || "Erro ao criar a ação comercial.");
     } finally {
       setSubmitting(false);
     }
