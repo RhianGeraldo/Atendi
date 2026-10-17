@@ -19,7 +19,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatMessageTime } from "@/lib/format";
+import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -976,7 +976,7 @@ export function MessageBubble({
           )}
         >
           {m.is_edited && <span className="italic">Editado</span>}
-          <span>{formatMessageTime(m.created_at)}</span>
+          <span>{m.created_at && !isNaN(new Date(m.created_at).getTime()) ? format(new Date(m.created_at), "HH:mm") : "—"}</span>
         </div>
 
         {m.reactions && Object.keys(m.reactions).length > 0 && (

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { calculateConversationSla, DEFAULT_SLA_SETTINGS, type SlaSettings } from "@/lib/sla";
+import { loadSlaLastMessages } from "@/lib/server/sla-last-message";
 import type { McpContext, McpToolDefinition } from "../types";
 
 export const analyticsTools: McpToolDefinition[] = [
@@ -64,7 +65,6 @@ export const analyticsTools: McpToolDefinition[] = [
           id,
           status,
           channel,
-          last_message,
           last_message_at,
           last_message_preview,
           started_at,
@@ -121,6 +121,8 @@ export const analyticsTools: McpToolDefinition[] = [
         ...(customVars.sla || {}),
       };
 
+      const slaLastByConv = await loadSlaLastMessages((resSlaConvs.data || []).map((c: any) => c.id));
+
       let breachedCount = 0;
       let warningCount = 0;
       let okCount = 0;
@@ -130,8 +132,10 @@ export const analyticsTools: McpToolDefinition[] = [
         const isGroup = phone.startsWith("120363") || (phone.includes("-") && phone.length > 18);
         if (isGroup) continue;
 
+        const slaLast = slaLastByConv.get(c.id);
         const convRow: any = {
           ...c,
+          last_message: slaLast ? [slaLast] : [],
           contact: c.contacts,
         };
 

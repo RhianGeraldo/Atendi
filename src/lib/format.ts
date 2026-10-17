@@ -1,4 +1,4 @@
-import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
+import { formatDistanceToNow, format, isToday, isYesterday, differenceInCalendarDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export function formatRelative(date: string | Date | null | undefined): string {
@@ -18,6 +18,21 @@ export function formatMessageTime(date: string | Date | null | undefined): strin
   } else {
     return format(d, "dd/MM/yyyy HH:mm");
   }
+}
+
+/**
+ * Rótulo do separador de dia no chat (estilo WhatsApp: Hoje, Ontem, Anteontem, 20/01/2026).
+ */
+export function formatDayLabel(date: string | Date | null | undefined): string {
+  if (!date) return "";
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (isNaN(d.getTime())) return "";
+
+  const diff = differenceInCalendarDays(new Date(), d);
+  if (diff === 0) return "Hoje";
+  if (diff === 1) return "Ontem";
+  if (diff === 2) return "Anteontem";
+  return format(d, "dd/MM/yyyy");
 }
 
 /**

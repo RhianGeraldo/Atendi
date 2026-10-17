@@ -60,7 +60,7 @@ import { useWavoip } from "@/hooks/use-wavoip";
 import { cn } from "@/lib/utils";
 import { fillQuickMessageVariables } from "@/lib/quick-message-vars";
 import { TodooConversationBanner } from "@/components/todoo/todoo-conversation-banner";
-import { initials } from "@/lib/format";
+import { initials, formatDayLabel } from "@/lib/format";
 import { useSlaSettings } from "@/lib/use-sla";
 import { calculateConversationSla } from "@/lib/sla";
 
@@ -339,18 +339,24 @@ export function ChatPanel({
   const { slaSettings } = useSlaSettings();
   const { lastExternalMsg, waitingSinceDate } = useMemo(() => {
     if (!messages || messages.length === 0) {
-      const lm = conv.last_message?.find((m) => !m.is_internal) || conv.last_message?.[0] || null;
-      return { 
-        lastExternalMsg: lm, 
-        waitingSinceDate: lm?.waiting_since || (conv.status === "waiting" ? conv.started_at : null)
+      const lm =
+        conv.last_message?.find(
+          (m) => !m.is_internal && (m.sender_type === "contact" || m.sender_type === "agent"),
+        ) || null;
+      return {
+        lastExternalMsg: lm,
+        waitingSinceDate: lm?.sender_type === "contact" ? lm.waiting_since || lm.created_at : null,
       };
     }
 
     // Procura a última mensagem externa (não interna)
     let lastExt: MessageRow | null = null;
     let lastExtIndex = -1;
+    // Só contato e atendente contam para o SLA (notas internas e avisos do sistema não)
+    const countsForSla = (m: MessageRow) =>
+      !m.is_internal && (m.sender_type === "contact" || m.sender_type === "agent");
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (!messages[i].is_internal) {
+      if (countsForSla(messages[i])) {
         lastExt = messages[i];
         lastExtIndex = i;
         break;
@@ -364,22 +370,15 @@ export function ChatPanel({
     // Se a última mensagem for do contato, retrocedemos para encontrar
     // a PRIMEIRA mensagem do contato nesta sequência ininterrupta sem resposta do atendente
     let oldestContactMsg = lastExt;
-    let foundAgent = false;
     for (let i = lastExtIndex - 1; i >= 0; i--) {
       const m = messages[i];
-      if (m.is_internal) continue;
-      if (m.sender_type === "contact") {
-        oldestContactMsg = m;
-      } else {
-        foundAgent = true;
-        break;
-      }
+      if (!countsForSla(m)) continue;
+      if (m.sender_type !== "contact") break;
+      oldestContactMsg = m;
     }
 
-    let startWaiting = oldestContactMsg.created_at;
-    if (!foundAgent && conv.started_at && new Date(conv.started_at) < new Date(startWaiting)) {
-      startWaiting = conv.started_at;
-    }
+    // Não recua para started_at: ele não muda quando a conversa resolvida é reaberta
+    const startWaiting = oldestContactMsg.created_at;
 
     return {
       lastExternalMsg: {
@@ -388,7 +387,7 @@ export function ChatPanel({
       },
       waitingSinceDate: startWaiting,
     };
-  }, [messages, conv.last_message, conv.started_at, conv.status]);
+  }, [messages, conv.last_message, conv.last_message_at, conv.status]);
 
   const [slaTick, setSlaTick] = useState(0);
   useEffect(() => {
@@ -1507,22 +1506,43 @@ export function ChatPanel({
                 </div>
               )}
 
-              {messages?.map((m) => (
-                <MessageBubble 
-                  key={m.id} 
-                  m={m} 
-                  isGroup={isGroup}
-                  onReact={(emoji) => {
-                    const isAlreadyActive = m.reactions && Boolean(m.reactions[emoji]);
-                    react.mutate({ messageId: m.id, emoji: isAlreadyActive ? "" : emoji });
-                  }} 
-                  onReply={(msg) => { setReplyingTo(msg); document.getElementById("chat-input")?.focus(); }}
-                  onEdit={startEdit}
-                  onDelete={(msg) => deleteMsg.mutate(msg.id)}
-                  onTranscribe={(id) => transcribeAudio.mutate(id)}
-                  isTranscribingId={transcribeAudio.isPending ? transcribeAudio.variables : null}
-                />
-              ))}
+              {(messages ?? [])
+                .reduce<{ day: string; key: string; items: NonNullable<typeof messages> }[]>((groups, m) => {
+                  const key = new Date(m.created_at).toDateString();
+                  const last = groups[groups.length - 1];
+                  if (last && last.day === key) last.items.push(m);
+                  else {
+                    // Mensagem fora de ordem (realtime/otimista) pode repetir o dia: a key precisa ser única
+                    const repeat = groups.filter((g) => g.day === key).length;
+                    groups.push({ day: key, key: repeat ? `${key}-${repeat}` : key, items: [m] });
+                  }
+                  return groups;
+                }, [])
+                .map((group) => (
+                  <div key={group.key} className="space-y-3">
+                    <div className="sticky top-0 z-10 flex justify-center py-1 pointer-events-none">
+                      <span className="rounded-md border border-border/40 bg-background/95 px-3 py-1 text-[11px] font-medium text-muted-foreground shadow-xs backdrop-blur-sm">
+                        {formatDayLabel(group.items[0].created_at)}
+                      </span>
+                    </div>
+                    {group.items.map((m) => (
+                    <MessageBubble 
+                      key={m.id} 
+                      m={m} 
+                      isGroup={isGroup}
+                      onReact={(emoji) => {
+                        const isAlreadyActive = m.reactions && Boolean(m.reactions[emoji]);
+                        react.mutate({ messageId: m.id, emoji: isAlreadyActive ? "" : emoji });
+                      }} 
+                      onReply={(msg) => { setReplyingTo(msg); document.getElementById("chat-input")?.focus(); }}
+                      onEdit={startEdit}
+                      onDelete={(msg) => deleteMsg.mutate(msg.id)}
+                      onTranscribe={(id) => transcribeAudio.mutate(id)}
+                      isTranscribingId={transcribeAudio.isPending ? transcribeAudio.variables : null}
+                    />
+                    ))}
+                  </div>
+                ))}
             </div>
 
             {/* Botão flutuante para rolar para as mensagens mais recentes */}

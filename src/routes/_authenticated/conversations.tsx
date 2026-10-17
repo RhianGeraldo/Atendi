@@ -42,7 +42,7 @@ import { ContactSidebar } from "@/components/chat/contact-sidebar";
 import { ChatPanel } from "@/components/chat/chat-panel";
 import { EmptyChat } from "@/components/chat/empty-chat";
 import { useSlaSettings } from "@/lib/use-sla";
-import { calculateConversationSla } from "@/lib/sla";
+import { calculateConversationSla, buildSlaLastMessage, SLA_SENDER_TYPES } from "@/lib/sla";
 import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 import { useTeamChat } from "@/components/team-chat/use-team-chat";
 import { TeamChannelsSidebar } from "@/components/team-chat/team-channels-sidebar";
@@ -461,6 +461,7 @@ function ConversationsPage() {
           .select("conversation_id, sender_type, created_at, is_internal")
           .in("conversation_id", convIds)
           .eq("is_internal", false)
+          .in("sender_type", [...SLA_SENDER_TYPES])
           .order("created_at", { ascending: false })
           .limit(convIds.length * 5);
 
@@ -481,45 +482,35 @@ function ConversationsPage() {
           }
         }
 
+        // O limite do lote é dividido entre as conversas: uma muito movimentada pode deixar outras
+        // sem nenhuma mensagem carregada. Essas são buscadas individualmente.
+        const missingIds = convIds.filter((id) => !msgsByConv.has(id));
+        if (missingIds.length > 0) {
+          const extra = await Promise.all(
+            missingIds.map((id) =>
+              supabase
+                .from("messages")
+                .select("conversation_id, sender_type, created_at")
+                .eq("conversation_id", id)
+                .eq("is_internal", false)
+                .in("sender_type", [...SLA_SENDER_TYPES])
+                .order("created_at", { ascending: false })
+                .limit(5),
+            ),
+          );
+          extra.forEach(({ data: msgs }, idx) => {
+            if (msgs && msgs.length > 0) {
+              msgsByConv.set(
+                missingIds[idx],
+                msgs.map((m) => ({ sender_type: m.sender_type, created_at: m.created_at })),
+              );
+            }
+          });
+        }
+
         rows = rows.map((c) => {
-          const convMsgs = msgsByConv.get(c.id);
-          if (!convMsgs || convMsgs.length === 0) {
-            return {
-              ...c,
-              last_message: [],
-            };
-          }
-
-          const newest = convMsgs[0];
-          let waitingSince = newest.created_at;
-          if (newest.sender_type === "contact") {
-            let oldestInTurn = newest;
-            let foundAgent = false;
-            for (let i = 1; i < convMsgs.length; i++) {
-              const msg = convMsgs[i];
-              if (msg.sender_type === "contact") {
-                oldestInTurn = msg;
-              } else {
-                foundAgent = true;
-                break;
-              }
-            }
-            waitingSince = oldestInTurn.created_at;
-            if (!foundAgent && c.started_at && new Date(c.started_at) < new Date(waitingSince)) {
-              waitingSince = c.started_at;
-            }
-          }
-
-          return {
-            ...c,
-            last_message: [
-              {
-                sender_type: newest.sender_type,
-                created_at: newest.created_at,
-                waiting_since: waitingSince,
-              },
-            ],
-          };
+          const slaLast = buildSlaLastMessage(msgsByConv.get(c.id));
+          return { ...c, last_message: slaLast ? [slaLast] : [] };
         });
       }
 
@@ -559,7 +550,7 @@ function ConversationsPage() {
       supabase
         .from("notifications" as any)
         .update({ is_read: true })
-        .eq("link", `/conversations?id=${searchConvId}`)
+        .in("link", [`/conversations?c=${searchConvId}`, `/conversations?id=${searchConvId}`])
         .eq("is_read", false)
         .then(() => {});
     }
@@ -587,35 +578,12 @@ function ConversationsPage() {
         .select("sender_type, created_at, is_internal")
         .eq("conversation_id", selectedId)
         .eq("is_internal", false)
+        .in("sender_type", [...SLA_SENDER_TYPES])
         .order("created_at", { ascending: false })
         .limit(5);
 
-      let lastMsgFormatted: { sender_type: string; created_at: string; waiting_since?: string } | null = null;
-      if (recentDirectMsgs && recentDirectMsgs.length > 0) {
-        const newest = recentDirectMsgs[0];
-        let waitingSince = newest.created_at;
-        if (newest.sender_type === "contact") {
-          let oldestInTurn = newest;
-          let foundAgent = false;
-          for (let i = 1; i < recentDirectMsgs.length; i++) {
-            if (recentDirectMsgs[i].sender_type === "contact") {
-              oldestInTurn = recentDirectMsgs[i];
-            } else {
-              foundAgent = true;
-              break;
-            }
-          }
-          waitingSince = oldestInTurn.created_at;
-          if (!foundAgent && data.started_at && new Date(data.started_at) < new Date(waitingSince)) {
-            waitingSince = data.started_at;
-          }
-        }
-        lastMsgFormatted = {
-          sender_type: newest.sender_type,
-          created_at: newest.created_at,
-          waiting_since: waitingSince,
-        };
-      }
+      // Mesma regra da lista
+      const lastMsgFormatted = buildSlaLastMessage(recentDirectMsgs);
 
       return {
         ...data,
@@ -1102,18 +1070,19 @@ function ConversationsPage() {
           }
         }
 
-        const { data: lastMsg } = await supabase
+        const { data: recentMsgs } = await supabase
           .from("messages")
-          .select("sender_type, created_at, is_internal")
+          .select("sender_type, created_at")
           .eq("conversation_id", convId)
           .eq("is_internal", false)
+          .in("sender_type", [...SLA_SENDER_TYPES])
           .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(5);
+        const slaLast = buildSlaLastMessage(recentMsgs);
 
         const fullConv: ConvRow = {
           ...(data as unknown as ConvRow),
-          last_message: lastMsg ? [lastMsg] : [],
+          last_message: slaLast ? [slaLast] : [],
         };
 
         const isGroup = !!(
@@ -1374,10 +1343,9 @@ function ConversationsPage() {
               let currentWaitingSince = newMsg.created_at;
               if (isFromContact) {
                 const prevLast = (existingConv as ConvRow).last_message?.[0];
+                // Cliente já aguardando: mantém o início do turno; senão a espera começa nesta mensagem
                 if (prevLast && prevLast.sender_type === "contact") {
                   currentWaitingSince = prevLast.waiting_since || prevLast.created_at;
-                } else if ((existingConv as ConvRow).status === "waiting" && (existingConv as ConvRow).started_at) {
-                  currentWaitingSince = (existingConv as ConvRow).started_at;
                 }
               }
 
@@ -1389,14 +1357,19 @@ function ConversationsPage() {
                   unread_count: nextUnread,
                   status:
                     targetStatus === "groups" ? (existingConv as ConvRow).status : targetStatus,
-                  last_message: [
-                    {
-                      sender_type: newMsg.sender_type,
-                      created_at: newMsg.created_at,
-                      is_internal: newMsg.is_internal,
-                      waiting_since: isFromContact ? currentWaitingSince : undefined,
-                    },
-                  ],
+                  // Nota interna e aviso do sistema não respondem nem fazem o cliente esperar:
+                  // mantêm a última mensagem que conta para o SLA
+                  last_message:
+                    newMsg.is_internal || (newMsg.sender_type !== "contact" && newMsg.sender_type !== "agent")
+                      ? (existingConv as ConvRow).last_message
+                      : [
+                          {
+                            sender_type: newMsg.sender_type,
+                            created_at: newMsg.created_at,
+                            is_internal: newMsg.is_internal,
+                            waiting_since: isFromContact ? currentWaitingSince : undefined,
+                          },
+                        ],
                 },
                 { moveToTop: true, status: targetStatus },
               );
@@ -1585,7 +1558,22 @@ function ConversationsPage() {
         return sla.status === slaFilter;
       });
     }
-    return list;
+
+    // SLA mais antigo primeiro: quem aguarda resposta há mais tempo sobe para o topo.
+    // As demais (respondidas, resolvidas, grupos) mantêm a ordem por última mensagem.
+    const waitingSinceOf = new Map<string, number>();
+    for (const c of list) {
+      const sla = calculateConversationSla(c, slaSettings);
+      if (sla.isWaiting && sla.waitingSince) waitingSinceOf.set(c.id, sla.waitingSince.getTime());
+    }
+    return [...list].sort((a, b) => {
+      const wa = waitingSinceOf.get(a.id);
+      const wb = waitingSinceOf.get(b.id);
+      if (wa === undefined && wb === undefined) return 0;
+      if (wa === undefined) return 1;
+      if (wb === undefined) return -1;
+      return wa - wb;
+    });
   }, [
     conversations,
     instanceFilter,
