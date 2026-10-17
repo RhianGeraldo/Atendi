@@ -29,94 +29,38 @@ export function TodooGincana() {
   const [range, setRange] = useState<TodooRangeKey>("month");
 
   // Busca dados de desempenho para o ranking
-  const { data: scores = [], isLoading } = useQuery({
+  const { data: scores = [], isLoading, isError } = useQuery({
     queryKey: ["todoo-gincana-scores", activeCompanyId, range, selectedUnitId],
     enabled: !!activeCompanyId,
-    queryFn: async () => {
-      // 1. Leads da empresa que entraram no período (e na unidade selecionada)
+    queryFn: async (): Promise<TodooConsultantScore[]> => {
+      // Pontuação calculada no banco (todoo_ranking), sobre os leads recebidos no período.
+      // Conta o que aconteceu (agendou alguma vez, orçamento alguma vez), não só o status atual.
       const { from, to } = todooRange(range);
-      let query = (supabase.from("todoo_leads") as any)
-        .select(`
-          id,
-          assigned_user_id,
-          status,
-          outcome_value,
-          sla_breached,
-          first_contact_at,
-          assigned_user:profiles(id, name, avatar_url)
-        `)
-        .eq("company_id", activeCompanyId);
-      if (from) query = query.gte("assigned_at", from);
-      if (to) query = query.lt("assigned_at", to);
-      if (selectedUnitId) query = query.eq("unit_id", selectedUnitId);
-
-      const { data: leads, error } = await query;
+      const { data, error } = await (supabase.rpc as any)("todoo_ranking", {
+        p_company_id: activeCompanyId,
+        p_unit_id: selectedUnitId || null,
+        p_from: from,
+        p_to: to,
+      });
       if (error) throw error;
 
-      // 2. Agrupa por usuário
-      const userMap = new Map<string, TodooConsultantScore>();
-
-      (leads || []).forEach((lead: any) => {
-        if (!lead.assigned_user_id || !lead.assigned_user) return;
-
-        const uid = lead.assigned_user_id;
-        if (!userMap.has(uid)) {
-          userMap.set(uid, {
-            userId: uid,
-            userName: lead.assigned_user.name || "Consultora",
-            userAvatar: lead.assigned_user.avatar_url,
-            leadsAssigned: 0,
-            leadsContacted: 0,
-            leadsWon: 0,
-            leadsScheduled: 0,
-            revenueWon: 0,
-            slaBreaches: 0,
-            conversionRate: 0,
-            totalPoints: 0,
-          });
-        }
-
-        const score = userMap.get(uid)!;
-        score.leadsAssigned += 1;
-
-        if (lead.status !== "pending") {
-          score.leadsContacted += 1;
-        }
-
-        if (lead.status === "won") {
-          score.leadsWon += 1;
-          score.revenueWon += Number(lead.outcome_value) || 0;
-          score.totalPoints += 10; // +10 por fechamento
-        }
-
-        if (lead.status === "scheduled") {
-          score.leadsScheduled += 1;
-          score.totalPoints += 5; // +5 por agendamento
-        }
-
-        if (lead.status === "quoted") {
-          score.totalPoints += 2; // +2 por proposta
-        }
-
-        // Bônus SLA cumprido
-        if (lead.first_contact_at && !lead.sla_breached) {
-          score.totalPoints += 2;
-        }
-
-        // Penalidade SLA estourado
-        if (lead.sla_breached) {
-          score.slaBreaches += 1;
-          score.totalPoints = Math.max(0, score.totalPoints - 5);
-        }
+      return (data || []).map((r: any) => {
+        const contacted = Number(r.contacted) || 0;
+        const won = Number(r.won) || 0;
+        return {
+          userId: r.user_id,
+          userName: r.user_name || "Consultora",
+          userAvatar: r.user_avatar,
+          leadsAssigned: Number(r.assigned) || 0,
+          leadsContacted: contacted,
+          leadsWon: won,
+          leadsScheduled: Number(r.scheduled) || 0,
+          revenueWon: Number(r.revenue) || 0,
+          slaBreaches: Number(r.sla_late) || 0,
+          conversionRate: contacted > 0 ? Math.round((won / contacted) * 100) : 0,
+          totalPoints: Number(r.points) || 0,
+        };
       });
-
-      // Calcula taxa de conversão e ordena por pontos
-      const scoreList = Array.from(userMap.values()).map((s) => ({
-        ...s,
-        conversionRate: s.leadsContacted > 0 ? Math.round((s.leadsWon / s.leadsContacted) * 100) : 0,
-      }));
-
-      return scoreList.sort((a, b) => b.totalPoints - a.totalPoints || b.revenueWon - a.revenueWon);
     },
   });
 
@@ -144,10 +88,10 @@ export function TodooGincana() {
           Orçamento: +2 pts
         </Badge>
         <Badge variant="outline" className="bg-purple-500/10 text-purple-600 border-purple-500/30">
-          SLA no Prazo: +2 pts
+          1º contato no prazo: +2 pts
         </Badge>
         <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30">
-          SLA Vencido: -5 pts
+          1º contato atrasado: -5 pts
         </Badge>
       </div>
 
@@ -240,6 +184,10 @@ export function TodooGincana() {
           {isLoading ? (
             <div className="p-8 text-center text-xs text-muted-foreground">
               Carregando pontuações da gincana...
+            </div>
+          ) : isError ? (
+            <div className="p-8 text-center text-xs text-destructive">
+              Não foi possível carregar o ranking. Tente novamente em instantes.
             </div>
           ) : scores.length === 0 ? (
             <div className="p-8 text-center text-xs text-muted-foreground">

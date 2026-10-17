@@ -153,10 +153,21 @@ export function useTodooPipeline() {
   };
 }
 
+// O cron do servidor roda a cadência a cada 15 min; a tela só complementa (e cria o funil
+// de uma empresa nova), no máximo a cada 5 min por empresa nesta aba.
+const REFRESH_EVERY_MS = 5 * 60 * 1000;
+const lastRefresh = new Map<string, number>();
+
 /** Roda a rotina da cadência (quarentena vencida e atrasos) antes de carregar os leads. */
 export async function refreshTodooCadence(companyId: string) {
+  const last = lastRefresh.get(companyId);
+  if (last && Date.now() - last < REFRESH_EVERY_MS) return;
+  lastRefresh.set(companyId, Date.now());
   const { error } = await (supabase.rpc as any)("todoo_refresh_cadence", { p_company_id: companyId });
-  if (error) console.warn("[todoo] refresh cadence:", error.message);
+  if (error) {
+    lastRefresh.delete(companyId);
+    console.warn("[todoo] refresh cadence:", error.message);
+  }
 }
 
 /** Minutos em texto: "48h", "7 dias", "15 dias". */

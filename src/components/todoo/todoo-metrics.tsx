@@ -26,40 +26,38 @@ export function TodooMetrics() {
   const { selectedUnitId } = useUnit();
   const [range, setRange] = useState<TodooRangeKey>("month");
 
-  const { data: metrics, isLoading } = useQuery({
+  const { data: metrics, isLoading, isError } = useQuery({
     queryKey: ["todoo-overall-metrics", activeCompanyId, range, selectedUnitId],
     enabled: !!activeCompanyId,
     queryFn: async () => {
-      // Leads que entraram no período (e na unidade selecionada)
+      // Leads que entraram no período (e na unidade selecionada), agregados no banco.
+      // Agendados e orçamentos contam quem passou pela etapa, mesmo que depois tenha fechado.
       const { from, to } = todooRange(range);
-      let query = (supabase.from("todoo_leads") as any)
-        .select("id, status, outcome_type, outcome_value, sla_breached, first_contact_at")
-        .eq("company_id", activeCompanyId);
-      if (from) query = query.gte("assigned_at", from);
-      if (to) query = query.lt("assigned_at", to);
-      if (selectedUnitId) query = query.eq("unit_id", selectedUnitId);
-
-      const { data: leads, error } = await query;
-
+      const { data: m, error } = await (supabase.rpc as any)("todoo_metrics", {
+        p_company_id: activeCompanyId,
+        p_unit_id: selectedUnitId || null,
+        p_from: from,
+        p_to: to,
+      });
       if (error) throw error;
 
-      const totalLeads = leads?.length || 0;
-      const contactedLeads = leads?.filter((l: any) => l.status !== "pending").length || 0;
-      const scheduledLeads = leads?.filter((l: any) => l.status === "scheduled").length || 0;
-      const quotedLeads = leads?.filter((l: any) => l.status === "quoted").length || 0;
-      const wonLeads = leads?.filter((l: any) => l.status === "won").length || 0;
-      const lostLeads = leads?.filter((l: any) => l.status === "lost").length || 0;
-      const slaBreachedCount = leads?.filter((l: any) => l.sla_breached).length || 0;
-
-      const totalRevenue = leads
-        ?.filter((l: any) => l.status === "won")
-        .reduce((acc: number, curr: any) => acc + (Number(curr.outcome_value) || 0), 0) || 0;
+      const totalLeads = Number(m?.total) || 0;
+      const contactedLeads = Number(m?.contacted) || 0;
+      const scheduledLeads = Number(m?.scheduled) || 0;
+      const quotedLeads = Number(m?.quoted) || 0;
+      const wonLeads = Number(m?.won) || 0;
+      const lostLeads = Number(m?.lost) || 0;
+      const totalRevenue = Number(m?.revenue) || 0;
+      const slaOnTime = Number(m?.sla_on_time) || 0;
+      const slaBreachedCount = Number(m?.sla_late) || 0;
 
       const contactRate = totalLeads > 0 ? Math.round((contactedLeads / totalLeads) * 100) : 0;
       const scheduleRate = contactedLeads > 0 ? Math.round((scheduledLeads / contactedLeads) * 100) : 0;
       const conversionRate = contactedLeads > 0 ? Math.round((wonLeads / contactedLeads) * 100) : 0;
       const averageTicket = wonLeads > 0 ? totalRevenue / wonLeads : 0;
-      const slaOnTimeRate = contactedLeads > 0 ? Math.round(((contactedLeads - slaBreachedCount) / contactedLeads) * 100) : 100;
+      // SLA do 1º contato: no prazo ÷ (no prazo + atrasados); leads ainda dentro do prazo ficam fora
+      const slaJudged = slaOnTime + slaBreachedCount;
+      const slaOnTimeRate = slaJudged > 0 ? Math.round((slaOnTime / slaJudged) * 100) : 100;
 
       return {
         totalLeads,
@@ -86,6 +84,17 @@ export function TodooMetrics() {
       actions={<TodooRangeTabs value={range} onChange={setRange} />}
     />
   );
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        {header}
+        <div className="p-12 text-center text-xs text-destructive">
+          Não foi possível calcular os indicadores. Tente novamente em instantes.
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading || !metrics) {
     return (
@@ -195,7 +204,7 @@ export function TodooMetrics() {
             <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-300">
               <span className="text-xs block opacity-80">4. Orçamentos</span>
               <strong className="text-2xl font-bold mt-1 block">{metrics.quotedLeads}</strong>
-              <span className="text-[11px] opacity-80">propostas ativas</span>
+              <span className="text-[11px] opacity-80">receberam orçamento</span>
             </div>
 
             <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-900 dark:text-emerald-300">
@@ -220,13 +229,13 @@ export function TodooMetrics() {
             <div className="space-y-1 text-center sm:text-left">
               <h3 className="text-3xl font-black text-foreground">{metrics.slaOnTimeRate}%</h3>
               <p className="text-xs text-muted-foreground">
-                dos contatos foram iniciados dentro da janela estipulada de SLA (12h ou 24h).
+                dos primeiros contatos foram feitos dentro do SLA da ação comercial.
               </p>
             </div>
 
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <span className="text-xs text-muted-foreground block">Leads com SLA Estourado:</span>
+                <span className="text-xs text-muted-foreground block">1º contato atrasado:</span>
                 <strong className="text-sm font-semibold text-destructive">{metrics.slaBreachedCount} leads</strong>
               </div>
             </div>

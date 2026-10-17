@@ -11,6 +11,22 @@ import { todooRange, type TodooRangeKey } from "./todoo-period";
 import { useTodooPipeline } from "./todoo-stages";
 import { cn } from "@/lib/utils";
 
+// O PostgREST devolve no máximo 1.000 linhas por consulta: busca em páginas até acabar.
+// A consulta precisa de uma ordem estável (created_at/occurred_at + id).
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 50;
+
+async function fetchAllPages(build: () => any): Promise<{ data: any[]; error: any }> {
+  const rows: any[] = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data, error } = await build().range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    if (error) return { data: rows, error };
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return { data: rows, error: null };
+}
+
 interface CohortLead {
   id: string;
   created_at: string;
@@ -57,29 +73,36 @@ export function TodooCadenceFunnel({ range }: { range: TodooRangeKey }) {
     enabled: !!activeCompanyId,
     queryFn: async () => {
       const { from, to } = todooRange(range);
-      let leadsQuery = (supabase.from("todoo_leads") as any)
-        .select(
-          "id, created_at, assigned_user_id, stage_id, status, outcome_value, custom_fields, cadence_round, first_attempt_at, responded_at, scheduled_at, won_at",
-        )
-        .eq("company_id", activeCompanyId)
-        .limit(5000);
-      if (from) leadsQuery = leadsQuery.gte("created_at", from);
-      if (to) leadsQuery = leadsQuery.lt("created_at", to);
-      if (selectedUnitId) leadsQuery = leadsQuery.eq("unit_id", selectedUnitId);
+      const leadsQuery = () => {
+        let q = (supabase.from("todoo_leads") as any)
+          .select(
+            "id, created_at, assigned_user_id, stage_id, status, outcome_value, custom_fields, cadence_round, first_attempt_at, responded_at, scheduled_at, won_at",
+          )
+          .eq("company_id", activeCompanyId)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true });
+        if (from) q = q.gte("created_at", from);
+        if (to) q = q.lt("created_at", to);
+        if (selectedUnitId) q = q.eq("unit_id", selectedUnitId);
+        return q;
+      };
 
-      let historyQuery = (supabase.from("todoo_lead_history") as any)
-        .select(
-          "lead_id, event, occurred_at, actor_id, to_stage_id, to_stage_kind, from_stage_kind, to_stage_name, from_card_behavior, to_card_behavior, late_seconds, due_at",
-        )
-        .eq("company_id", activeCompanyId)
-        .order("occurred_at", { ascending: true })
-        .limit(20000);
-      if (from) historyQuery = historyQuery.gte("occurred_at", from);
-      if (selectedUnitId) historyQuery = historyQuery.eq("unit_id", selectedUnitId);
+      const historyQuery = () => {
+        let q = (supabase.from("todoo_lead_history") as any)
+          .select(
+            "lead_id, event, occurred_at, actor_id, to_stage_id, to_stage_kind, from_stage_kind, to_stage_name, from_card_behavior, to_card_behavior, late_seconds, due_at",
+          )
+          .eq("company_id", activeCompanyId)
+          .order("occurred_at", { ascending: true })
+          .order("id", { ascending: true });
+        if (from) q = q.gte("occurred_at", from);
+        if (selectedUnitId) q = q.eq("unit_id", selectedUnitId);
+        return q;
+      };
 
       const [leadsRes, historyRes, profilesRes] = await Promise.all([
-        leadsQuery,
-        historyQuery,
+        fetchAllPages(leadsQuery),
+        fetchAllPages(historyQuery),
         supabase.from("profiles").select("id, name").eq("company_id", activeCompanyId!),
       ]);
       if (leadsRes.error) throw leadsRes.error;

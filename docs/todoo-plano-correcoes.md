@@ -10,7 +10,7 @@
 | 1 | ✅ Commit `a5f7093`. Falta o teste manual no app (roteiro abaixo). |
 | 2 | ✅ Aplicada em produção (`20261017120000_todoo_cadence_guard`). Verificação prévia: 0 leads reciclados por engano, 0 empresas com etapas duplicadas. |
 | 3 | ✅ 3.1: proteções nas 5 migrations antigas (validadas com parser). 3.2 + 3.3: aplicadas em produção (`20261017130000_todoo_register_and_notifications_guard`). A policy de INSERT em `notifications` foi removida, porque só o servidor cria notificações. O índice em `contacts(phone)` não foi criado: são 5,7 mil linhas e é tabela quente. |
-| 4 | Pendente |
+| 4 | ⚠️ Código pronto no commit da Fase 4, mas a migration `20261017140000_todoo_metrics_rpcs.sql` **ainda não foi aplicada** (a aplicação foi bloqueada pelo modo automático). Aplicar **antes** do deploy do front: sem ela, Gincana, Indicadores e Ações Comerciais mostram erro. Ficou de fora: 4.5 (o tsc trava com os tipos do Supabase) e 4.6 (uma RPC única estouraria o timeout de 8s em listas grandes; o desfazer da 1.3 cobre a falha). O pg_cron não está instalado, então a cadência roda no cron do servidor (`src/lib/server/cron.ts`). |
 | 5 | Pendente (decisões) |
 
 ## Visão geral
