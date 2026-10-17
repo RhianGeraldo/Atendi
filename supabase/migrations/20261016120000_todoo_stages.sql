@@ -75,7 +75,16 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS todoo_leads_sync_stage ON public.todoo_leads;
-CREATE TRIGGER todoo_leads_sync_stage
-  BEFORE UPDATE OF status ON public.todoo_leads
-  FOR EACH ROW EXECUTE FUNCTION public.todoo_leads_sync_stage();
+-- Proteção contra reexecução: este gatilho foi removido em 20261016150000_todoo_cadence.sql
+-- (compara tipos de etapa antigos e zeraria a etapa dos leads). Só é criado num banco
+-- novo, antes de a cadência existir.
+DO $guard$
+BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'todoo_leads_cadence') THEN
+  DROP TRIGGER IF EXISTS todoo_leads_sync_stage ON public.todoo_leads;
+  CREATE TRIGGER todoo_leads_sync_stage
+    BEFORE UPDATE OF status ON public.todoo_leads
+    FOR EACH ROW EXECUTE FUNCTION public.todoo_leads_sync_stage();
+END IF;
+END
+$guard$;

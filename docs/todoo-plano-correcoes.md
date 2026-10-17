@@ -3,6 +3,16 @@
 > Base: análise de 17/10/2026 (banco, front e produto) na branch `feat/todoo-layout`.
 > Cada causa abaixo foi conferida no código antes de entrar no plano.
 
+## Status (17/10/2026)
+
+| Fase | Situação |
+|---|---|
+| 1 | ✅ Commit `a5f7093`. Falta o teste manual no app (roteiro abaixo). |
+| 2 | ✅ Aplicada em produção (`20261017120000_todoo_cadence_guard`). Verificação prévia: 0 leads reciclados por engano, 0 empresas com etapas duplicadas. |
+| 3 | ✅ 3.1: proteções nas 5 migrations antigas (validadas com parser). 3.2 + 3.3: aplicadas em produção (`20261017130000_todoo_register_and_notifications_guard`). A policy de INSERT em `notifications` foi removida, porque só o servidor cria notificações. O índice em `contacts(phone)` não foi criado: são 5,7 mil linhas e é tabela quente. |
+| 4 | Pendente |
+| 5 | Pendente (decisões) |
+
 ## Visão geral
 
 | Fase | O quê | Onde | Risco | Entrega |
