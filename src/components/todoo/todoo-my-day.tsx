@@ -63,8 +63,6 @@ interface Props {
 
 // Lead em conversa (cadência pausada) sem nenhuma interação há este tempo vira follow-up
 const FOLLOWUP_AFTER_HOURS = 48;
-// Itens exibidos na fila antes do "Ver mais"
-const QUEUE_PAGE = 15;
 
 interface CrmTask {
   id: string;
@@ -407,7 +405,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   const todayLabel = format(new Date(), "EEEE, d 'de' MMMM", { locale: ptBR });
 
   return (
-    <div className="space-y-5">
+    <div className={cn("flex flex-col gap-5", !embedded && "lg:h-full lg:min-h-0")}>
       {!embedded && (
         <TodooSectionHeader
           title="Meu Dia"
@@ -433,19 +431,14 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
         </div>
       ) : plan ? (
         <>
-          <div className={cn("grid grid-cols-1 gap-4", !embedded && "xl:grid-cols-3")}>
-            <div className={cn(!embedded && "xl:col-span-2")}>
-              <DaySummary plan={plan} />
-            </div>
-            <CaptureCard
-              plan={plan}
-              canCreate={!viewingOther}
-              onCreate={onCreateContactsClick}
-              onConfigure={isManagerOrAdmin ? () => setGoalsOpen(true) : undefined}
-            />
-          </div>
-
+          <div
+            className={cn(
+              "grid grid-cols-1 gap-4",
+              !embedded && "lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_340px]",
+            )}
+          >
           <DayQueue
+            fill={!embedded}
             items={queue}
             renderRow={(item) => {
               if (item.kind === "task") {
@@ -474,6 +467,17 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
               );
             }}
           />
+
+            <div className="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto">
+              <DaySummary plan={plan} />
+              <CaptureCard
+                plan={plan}
+                canCreate={!viewingOther}
+                onCreate={onCreateContactsClick}
+                onConfigure={isManagerOrAdmin ? () => setGoalsOpen(true) : undefined}
+              />
+            </div>
+          </div>
         </>
       ) : null}
 
@@ -508,33 +512,35 @@ function DaySummary({ plan }: { plan: DayPlan }) {
   const progress = pct(plan.done, plan.total);
   const remaining = plan.total - plan.done;
   return (
-    <Card className="p-4 bg-primary/5 border-primary/20">
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
-            <CalendarCheck className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-sm font-semibold">
-                {plan.total === 0
-                  ? "Nenhuma tarefa para hoje"
-                  : remaining === 0
-                    ? "Dia concluído!"
-                    : `${remaining} ${remaining === 1 ? "tarefa pendente" : "tarefas pendentes"}`}
-              </span>
-              <span className="text-xs text-muted-foreground shrink-0">
-                {plan.done} de {plan.total} · {progress}%
-              </span>
-            </div>
-            <Progress value={progress} className="h-2" />
-          </div>
+    <Card className="p-4 space-y-3 bg-primary/5 border-primary/20">
+      <div className="flex items-center gap-3">
+        <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
+          <CalendarCheck className="h-5 w-5" />
         </div>
-        <div className="grid grid-cols-3 gap-2 sm:w-auto shrink-0">
-          <SummaryStat label="Trabalhados hoje" value={plan.workedToday} />
-          <SummaryStat label="Cadastros hoje" value={plan.captureDone} />
-          <SummaryStat label="Atrasados" value={plan.overdue} danger={plan.overdue > 0} />
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">Meta do dia</h3>
+          <p className="text-[11px] text-muted-foreground">
+            {plan.total === 0
+              ? "Nenhuma tarefa para hoje"
+              : remaining === 0
+                ? "Dia concluído!"
+                : `${remaining} ${remaining === 1 ? "tarefa pendente" : "tarefas pendentes"}`}
+          </p>
         </div>
+      </div>
+      <div className="space-y-1">
+        <Progress value={progress} className="h-2" />
+        <div className="flex justify-between text-[11px] text-muted-foreground">
+          <span>
+            {plan.done} de {plan.total}
+          </span>
+          <span className="font-medium text-foreground">{progress}%</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <SummaryStat label="Trabalhados" value={plan.workedToday} />
+        <SummaryStat label="Cadastros" value={plan.captureDone} />
+        <SummaryStat label="Atrasados" value={plan.overdue} danger={plan.overdue > 0} />
       </div>
     </Card>
   );
@@ -542,7 +548,7 @@ function DaySummary({ plan }: { plan: DayPlan }) {
 
 function SummaryStat({ label, value, danger }: { label: string; value: number; danger?: boolean }) {
   return (
-    <div className="rounded-lg border bg-card px-3 py-1.5 text-center min-w-[92px]">
+    <div className="rounded-lg border bg-card px-2 py-1.5 text-center">
       <div className={cn("text-lg font-bold leading-tight", danger && "text-destructive")}>{value}</div>
       <div className="text-[10px] text-muted-foreground whitespace-nowrap">{label}</div>
     </div>
@@ -693,29 +699,27 @@ function buildQueue(plan: DayPlan, stages: ReturnType<typeof useTodooPipeline>["
 function DayQueue({
   items,
   renderRow,
+  fill,
 }: {
   items: QueueItem[];
   renderRow: (item: QueueItem) => ReactNode;
+  /** Ocupa a altura disponível e rola por dentro (tela do Meu Dia) */
+  fill?: boolean;
 }) {
   const [filter, setFilter] = useState<QueueKind | "all">("all");
-  const [limit, setLimit] = useState(QUEUE_PAGE);
   const counts = useMemo(() => {
     const c: Record<QueueKind, number> = { callback: 0, first: 0, attempt: 0, followup: 0, task: 0 };
     for (const item of items) c[item.kind] += 1;
     return c;
   }, [items]);
   const filtered = filter === "all" ? items : items.filter((item) => item.kind === filter);
-  const visible = filtered.slice(0, limit);
   const overdue = items.filter((item) => item.due && new Date(item.due).getTime() < Date.now()).length;
 
   const chip = (value: QueueKind | "all", label: string, count: number) => (
     <button
       key={value}
       type="button"
-      onClick={() => {
-        setFilter(value);
-        setLimit(QUEUE_PAGE);
-      }}
+      onClick={() => setFilter(value)}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
         filter === value
@@ -729,8 +733,8 @@ function DayQueue({
   );
 
   return (
-    <Card className="overflow-hidden">
-      <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <Card className={cn("flex flex-col overflow-hidden", fill && "lg:min-h-0 lg:h-full")}>
+      <div className="flex shrink-0 flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold">Fila de hoje</h3>
           <p className="text-[11px] text-muted-foreground">
@@ -751,17 +755,8 @@ function DayQueue({
           {items.length === 0 ? "Nada pendente para hoje." : "Nada pendente neste filtro."}
         </p>
       ) : (
-        <div className="divide-y divide-border/60">
-          {visible.map(renderRow)}
-          {filtered.length > visible.length && (
-            <button
-              type="button"
-              className="w-full py-2.5 text-xs font-medium text-primary hover:bg-muted/50"
-              onClick={() => setLimit((v) => v + QUEUE_PAGE)}
-            >
-              Ver mais ({filtered.length - visible.length})
-            </button>
-          )}
+        <div className={cn("divide-y divide-border/60", fill && "lg:min-h-0 lg:flex-1 lg:overflow-y-auto")}>
+          {filtered.map(renderRow)}
         </div>
       )}
     </Card>
@@ -818,7 +813,7 @@ function QueueRow({
   const interest = lead?.custom_fields?.servico;
 
   return (
-    <div className="flex flex-col gap-2 px-4 py-2.5 lg:flex-row lg:items-center lg:gap-4">
+    <div className="flex flex-col gap-2 px-4 py-2.5 2xl:flex-row 2xl:items-center 2xl:gap-4">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <span
           className={cn(
@@ -849,7 +844,7 @@ function QueueRow({
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-1 pl-[116px] lg:pl-0">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 pl-[116px] 2xl:pl-0">
         {(contactId || phone) && (
           <ContactChatButton
             contactId={contactId}
