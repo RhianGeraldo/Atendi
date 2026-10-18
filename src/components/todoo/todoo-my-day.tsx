@@ -94,7 +94,8 @@ export interface DayPlan {
   total: number;
 }
 
-export const pct = (done: number, total: number) => (total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0);
+export const pct = (done: number, total: number) =>
+  total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
 
 /**
  * Dados do dia (leads, tarefas do CRM, metas e cadastros) e o cálculo do plano
@@ -116,31 +117,45 @@ export function useTodooDayData() {
   const { stages, statuses } = useTodooPipeline();
 
   const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ["todoo-my-day", activeCompanyId, profile?.id, isManagerOrAdmin, selectedUnitId, bounds.dayStart],
+    queryKey: [
+      "todoo-my-day",
+      activeCompanyId,
+      profile?.id,
+      isManagerOrAdmin,
+      selectedUnitId,
+      bounds.dayStart,
+    ],
     enabled: !!activeCompanyId && !!profile?.id,
     queryFn: async () => {
       // Quarentena vencida volta para A contatar antes de montar o dia
       await refreshTodooCadence(activeCompanyId!);
       const onlyMine = !isManagerOrAdmin;
-      const unitFilter = isManagerOrAdmin && selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null;
+      const unitFilter =
+        isManagerOrAdmin && selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null;
 
       let leadsQuery = (supabase.from("todoo_leads") as any)
-        .select(`
+        .select(
+          `
           *,
           campaign:todoo_campaigns!inner(id, title, type, status, message_template, offer_details, sla_hours),
           unit:units(id, name, color)
-        `)
+        `,
+        )
         .eq("company_id", activeCompanyId)
         // Ação pausada ou concluída sai da fila até ser retomada
         .eq("campaign.status", "active")
-        .or(`status.in.(pending,contacted,quoted,callback),last_interaction_at.gte.${bounds.dayStart}`)
+        .or(
+          `status.in.(pending,contacted,quoted,callback),last_interaction_at.gte.${bounds.dayStart}`,
+        )
         .order("sla_deadline", { ascending: true, nullsFirst: false });
       if (onlyMine) leadsQuery = leadsQuery.eq("assigned_user_id", profile!.id);
       if (unitFilter) leadsQuery = leadsQuery.eq("unit_id", unitFilter);
 
       // Tarefas do CRM vencidas ou para hoje (as de retorno do Todoo já aparecem como lead)
       let tasksQuery = (supabase.from("tasks") as any)
-        .select("id, title, description, due_date, contact_id, assigned_to, unit_id, contacts(name, phone)")
+        .select(
+          "id, title, description, due_date, contact_id, assigned_to, unit_id, contacts(name, phone)",
+        )
         .eq("company_id", activeCompanyId)
         .eq("status", "pending")
         .lt("due_date", bounds.dayEnd)
@@ -176,8 +191,15 @@ export function useTodooDayData() {
       return {
         leads: (leadsRes.data || []) as TodooLead[],
         tasks: (tasksRes.data || []) as CrmTask[],
-        goals: (goalsRes.data || []) as { user_id: string; target_contacts: number; contacts_period: string }[],
-        captures: (capturesRes.data || []) as { captured_by_user_id: string | null; created_at: string }[],
+        goals: (goalsRes.data || []) as {
+          user_id: string;
+          target_contacts: number;
+          contacts_period: string;
+        }[],
+        captures: (capturesRes.data || []) as {
+          captured_by_user_id: string | null;
+          created_at: string;
+        }[],
       };
     },
   });
@@ -189,16 +211,26 @@ export function useTodooDayData() {
     const leads = (data?.leads || []).filter((l) => l.assigned_user_id === userId);
 
     const callbacks = leads
-      .filter((l) => l.status === "callback" && (!l.callback_scheduled_at || l.callback_scheduled_at < bounds.dayEnd))
+      .filter(
+        (l) =>
+          l.status === "callback" &&
+          (!l.callback_scheduled_at || l.callback_scheduled_at < bounds.dayEnd),
+      )
       .sort((a, b) => (a.callback_scheduled_at || "").localeCompare(b.callback_scheduled_at || ""));
     // Cadência: etapa e status do card de cada lead
     const cadence = leads.map((l) => ({
       lead: l,
       stage: resolveTodooLeadStage(l, stages),
-      behavior: resolveTodooCardStatus(l, statuses)?.behavior ?? (l.status === "pending" ? "active" : "paused"),
+      behavior:
+        resolveTodooCardStatus(l, statuses)?.behavior ??
+        (l.status === "pending" ? "active" : "paused"),
     }));
     const toContact = cadence
-      .filter((c) => c.behavior === "active" && (c.stage ? c.stage.kind === "start" : c.lead.status === "pending"))
+      .filter(
+        (c) =>
+          c.behavior === "active" &&
+          (c.stage ? c.stage.kind === "start" : c.lead.status === "pending"),
+      )
       .map((c) => c.lead);
     const attempts = cadence
       .filter(
@@ -215,11 +247,14 @@ export function useTodooDayData() {
         (c) =>
           c.behavior === "paused" &&
           c.lead.status !== "callback" &&
-          (!c.lead.last_interaction_at || new Date(c.lead.last_interaction_at).getTime() < followupLimit),
+          (!c.lead.last_interaction_at ||
+            new Date(c.lead.last_interaction_at).getTime() < followupLimit),
       )
       .map((c) => c.lead)
       .sort((a, b) => (a.last_interaction_at || "").localeCompare(b.last_interaction_at || ""));
-    const workedToday = leads.filter((l) => l.last_interaction_at && l.last_interaction_at >= bounds.dayStart).length;
+    const workedToday = leads.filter(
+      (l) => l.last_interaction_at && l.last_interaction_at >= bounds.dayStart,
+    ).length;
     const crmTasks = (data?.tasks || []).filter((t) => t.assigned_to === userId);
 
     const goal = (data?.goals || []).find((g) => g.user_id === userId);
@@ -237,13 +272,21 @@ export function useTodooDayData() {
 
     const overdue =
       toContact.filter((l) => l.sla_deadline && new Date(l.sla_deadline).getTime() < now).length +
-      attempts.filter((l) => l.next_action_at && new Date(l.next_action_at).getTime() < now).length +
-      callbacks.filter((l) => l.callback_scheduled_at && new Date(l.callback_scheduled_at).getTime() < now).length +
+      attempts.filter((l) => l.next_action_at && new Date(l.next_action_at).getTime() < now)
+        .length +
+      callbacks.filter(
+        (l) => l.callback_scheduled_at && new Date(l.callback_scheduled_at).getTime() < now,
+      ).length +
       crmTasks.filter((t) => t.due_date && t.due_date < bounds.dayStart).length;
 
     const captureRemaining = Math.max(0, captureTarget - captureDone);
     const pending =
-      callbacks.length + toContact.length + attempts.length + followups.length + crmTasks.length + captureRemaining;
+      callbacks.length +
+      toContact.length +
+      attempts.length +
+      followups.length +
+      crmTasks.length +
+      captureRemaining;
     const done = workedToday + Math.min(captureDone, captureTarget);
 
     return {
@@ -264,7 +307,6 @@ export function useTodooDayData() {
     };
   };
 
-
   return { data, isLoading, isFetching, refetch, buildPlan, bounds, stages, statuses };
 }
 
@@ -273,7 +315,9 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   const queryClient = useQueryClient();
 
   const isManagerOrAdmin =
-    profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager";
+    profile?.role === "admin_company" ||
+    profile?.role === "super_admin" ||
+    profile?.role === "manager";
 
   const [leadForOutcome, setLeadForOutcome] = useState<TodooLead | null>(null);
   const [outcomeType, setOutcomeType] = useState<TodooOutcomeType>("won");
@@ -288,7 +332,8 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
     });
   const [goalsOpen, setGoalsOpen] = useState(false);
 
-  const { data, isLoading, isFetching, refetch, buildPlan, bounds, stages, statuses } = useTodooDayData();
+  const { data, isLoading, isFetching, refetch, buildPlan, bounds, stages, statuses } =
+    useTodooDayData();
   const [messageLead, setMessageLead] = useState<TodooLead | null>(null);
   // Com cadência ativa, a mensagem pode registrar a próxima tentativa
   const messageNextStage = useMemo(() => {
@@ -333,7 +378,8 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
         company_id: lead.company_id,
         user_id: profile.id,
         event_type: "status_changed",
-        notes: lead.status === "callback" ? "Retorno feito pelo Meu Dia" : "Contato feito pelo Meu Dia",
+        notes:
+          lead.status === "callback" ? "Retorno feito pelo Meu Dia" : "Contato feito pelo Meu Dia",
         metadata: { from: lead.status, to: "contacted" },
       });
       toast.success(`${lead.contact_name}: contato registrado`);
@@ -378,7 +424,8 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
     }
   };
 
-  const attemptLabel = (lead: TodooLead) => todooStageActionLabel(resolveTodooLeadStage(lead, stages), stages);
+  const attemptLabel = (lead: TodooLead) =>
+    todooStageActionLabel(resolveTodooLeadStage(lead, stages), stages);
 
   const completeTask = async (task: CrmTask) => {
     if (savingIds.has(task.id)) return;
@@ -404,7 +451,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   const todayLabel = format(new Date(), "EEEE, d 'de' MMMM", { locale: ptBR });
 
   return (
-    <div className={cn("flex flex-col gap-5", !embedded && "lg:h-full lg:min-h-0")}>
+    <div className={cn("flex flex-col gap-5", !embedded && "xl:h-full xl:min-h-0")}>
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -414,45 +461,53 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
           <div
             className={cn(
               "grid grid-cols-1 gap-4",
-              !embedded && "lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_340px]",
+              !embedded && "xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_320px]",
             )}
           >
-          <DayQueue
-            fill={!embedded}
-            title={embedded ? "Fila de hoje" : "Meu Dia"}
-            dateLabel={embedded ? undefined : `${todayLabel.charAt(0).toUpperCase()}${todayLabel.slice(1)}`}
-            refreshing={isFetching}
-            onRefresh={() => refetch()}
-            items={queue}
-            renderRow={(item) => {
-              if (item.kind === "task") {
+            <DayQueue
+              fill={!embedded}
+              title={embedded ? "Fila de hoje" : "Meu Dia"}
+              dateLabel={
+                embedded ? undefined : `${todayLabel.charAt(0).toUpperCase()}${todayLabel.slice(1)}`
+              }
+              refreshing={isFetching}
+              onRefresh={() => refetch()}
+              items={queue}
+              renderRow={(item) => {
+                if (item.kind === "task") {
+                  return (
+                    <QueueRow
+                      key={`task-${item.task.id}`}
+                      item={item}
+                      saving={savingIds.has(item.task.id)}
+                      doneLabel="Concluir"
+                      onDone={() => completeTask(item.task)}
+                    />
+                  );
+                }
+                const lead = item.lead;
+                const isCadence = item.kind === "first" || item.kind === "attempt";
                 return (
                   <QueueRow
-                    key={`task-${item.task.id}`}
+                    key={`lead-${lead.id}`}
                     item={item}
-                    saving={savingIds.has(item.task.id)}
-                    doneLabel="Concluir"
-                    onDone={() => completeTask(item.task)}
+                    saving={savingIds.has(lead.id)}
+                    doneLabel={
+                      isCadence
+                        ? attemptLabel(lead)
+                        : item.kind === "callback"
+                          ? "Retornei"
+                          : "Chamei"
+                    }
+                    onDone={() => (isCadence ? advanceLead(lead) : markContacted(lead))}
+                    onMessage={() => setMessageLead(lead)}
+                    onOutcome={(t) => openOutcome(lead, t)}
                   />
                 );
-              }
-              const lead = item.lead;
-              const isCadence = item.kind === "first" || item.kind === "attempt";
-              return (
-                <QueueRow
-                  key={`lead-${lead.id}`}
-                  item={item}
-                  saving={savingIds.has(lead.id)}
-                  doneLabel={isCadence ? attemptLabel(lead) : item.kind === "callback" ? "Retornei" : "Chamei"}
-                  onDone={() => (isCadence ? advanceLead(lead) : markContacted(lead))}
-                  onMessage={() => setMessageLead(lead)}
-                  onOutcome={(t) => openOutcome(lead, t)}
-                />
-              );
-            }}
-          />
+              }}
+            />
 
-            <div className="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto">
+            <div className="flex flex-col gap-4 xl:min-h-0 xl:overflow-y-auto">
               <DaySummary plan={plan} />
               <CaptureCard
                 plan={plan}
@@ -521,9 +576,8 @@ function DaySummary({ plan }: { plan: DayPlan }) {
           <span className="font-medium text-foreground">{progress}%</span>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-2">
-        <SummaryStat label="Trabalhados" value={plan.workedToday} />
-        <SummaryStat label="Cadastros" value={plan.captureDone} />
+      <div className="grid grid-cols-2 gap-2">
+        <SummaryStat label="Trabalhados hoje" value={plan.workedToday} />
         <SummaryStat label="Atrasados" value={plan.overdue} danger={plan.overdue > 0} />
       </div>
     </Card>
@@ -533,7 +587,9 @@ function DaySummary({ plan }: { plan: DayPlan }) {
 function SummaryStat({ label, value, danger }: { label: string; value: number; danger?: boolean }) {
   return (
     <div className="rounded-lg border bg-card px-2 py-1.5 text-center">
-      <div className={cn("text-lg font-bold leading-tight", danger && "text-destructive")}>{value}</div>
+      <div className={cn("text-lg font-bold leading-tight", danger && "text-destructive")}>
+        {value}
+      </div>
       <div className="text-[10px] text-muted-foreground whitespace-nowrap">{label}</div>
     </div>
   );
@@ -554,43 +610,48 @@ function CaptureCard({
   const monthly = plan.capturePeriod === "monthly";
   const reached =
     hasGoal &&
-    (monthly ? plan.captureMonthDone >= plan.captureMonthTarget : plan.captureDone >= plan.captureTarget);
+    (monthly
+      ? plan.captureMonthDone >= plan.captureMonthTarget
+      : plan.captureDone >= plan.captureTarget);
   const remaining = Math.max(0, plan.captureTarget - plan.captureDone);
   return (
     <Card className="p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <UserPlus className="h-4 w-4 text-pink-500 shrink-0" />
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-pink-500/10 text-pink-500">
+            <UserPlus className="h-5 w-5" />
+          </div>
           <div className="min-w-0">
             <h3 className="text-sm font-semibold">Cadastrar contatos</h3>
             <p className="text-[11px] text-muted-foreground">
-              {hasGoal ? `Meta ${monthly ? "mensal" : "diária"} · prospecção e indicações` : "Prospecção ativa e indicações"}
+              {hasGoal
+                ? `Meta ${monthly ? "mensal" : "diária"} · prospecção e indicações`
+                : "Prospecção e indicações"}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {onConfigure && (
-            <Button size="sm" variant="ghost" className="h-7 text-xs gap-1.5" onClick={onConfigure}>
-              <Target className="h-3.5 w-3.5" />
-              {hasGoal ? "Ajustar meta" : "Definir meta"}
-            </Button>
-          )}
-          {canCreate && onCreate && (
-            <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={onCreate}>
-              <UserPlus className="h-3.5 w-3.5" />
-              Cadastrar
-            </Button>
-          )}
-        </div>
+        {onConfigure && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 shrink-0"
+            title={hasGoal ? "Ajustar meta" : "Definir meta"}
+            onClick={onConfigure}
+          >
+            <Target className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-lg border bg-muted/30 px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Meta {monthly ? "de hoje" : "do dia"}</div>
-          <div className="text-xl font-bold leading-tight">{hasGoal ? plan.captureTarget : "—"}</div>
+          <div className="text-[11px] text-muted-foreground">Meta de hoje</div>
+          <div className="text-xl font-bold leading-tight">
+            {hasGoal ? plan.captureTarget : "—"}
+          </div>
         </div>
         <div className="rounded-lg border bg-muted/30 px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Cadastrados hoje</div>
+          <div className="text-[11px] text-muted-foreground">Cadastrados hoje</div>
           <div className={cn("text-xl font-bold leading-tight", reached && "text-emerald-600")}>
             {plan.captureDone}
           </div>
@@ -603,7 +664,8 @@ function CaptureCard({
           <div className="flex items-baseline justify-between text-[11px]">
             {reached ? (
               <span className="flex items-center gap-1 text-emerald-600 font-medium">
-                <CheckCircle2 className="h-3.5 w-3.5" /> {monthly ? "Meta do mês batida" : "Meta do dia batida"}
+                <CheckCircle2 className="h-3.5 w-3.5" />{" "}
+                {monthly ? "Meta do mês batida" : "Meta do dia batida"}
               </span>
             ) : (
               <span className="text-muted-foreground">
@@ -612,7 +674,8 @@ function CaptureCard({
             )}
             {monthly && (
               <span className="text-muted-foreground">
-                Mês: <strong className="text-foreground">{plan.captureMonthDone}</strong> / {plan.captureMonthTarget}
+                Mês: <strong className="text-foreground">{plan.captureMonthDone}</strong> /{" "}
+                {plan.captureMonthTarget}
               </span>
             )}
           </div>
@@ -622,6 +685,13 @@ function CaptureCard({
           Sem meta de cadastros definida para este mês · {plan.captureMonthDone} no mês.
         </p>
       )}
+
+      {canCreate && onCreate && (
+        <Button size="sm" className="h-8 w-full gap-1.5 text-xs" onClick={onCreate}>
+          <UserPlus className="h-3.5 w-3.5" />
+          Cadastrar contato
+        </Button>
+      )}
     </Card>
   );
 }
@@ -629,15 +699,41 @@ function CaptureCard({
 type QueueKind = "callback" | "first" | "attempt" | "followup" | "task";
 
 type QueueItem =
-  | { kind: Exclude<QueueKind, "task">; lead: TodooLead; due: string | null; tag: string; stage?: string }
+  | {
+      kind: Exclude<QueueKind, "task">;
+      lead: TodooLead;
+      due: string | null;
+      tag: string;
+      stage?: string;
+    }
   | { kind: "task"; task: CrmTask; due: string | null; tag: string };
 
 const QUEUE_KINDS: Record<QueueKind, { label: string; icon: typeof Clock; className: string }> = {
-  callback: { label: "Retornos", icon: Clock, className: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  first: { label: "A contatar", icon: Flame, className: "bg-blue-500/10 text-blue-700 dark:text-blue-400" },
-  attempt: { label: "Tentativas", icon: Repeat, className: "bg-orange-500/10 text-orange-700 dark:text-orange-400" },
-  followup: { label: "Follow-up", icon: MessageSquare, className: "bg-violet-500/10 text-violet-700 dark:text-violet-400" },
-  task: { label: "Tarefas", icon: ClipboardList, className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
+  callback: {
+    label: "Retornos",
+    icon: Clock,
+    className: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  first: {
+    label: "A contatar",
+    icon: Flame,
+    className: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  },
+  attempt: {
+    label: "Tentativas",
+    icon: Repeat,
+    className: "bg-orange-500/10 text-orange-700 dark:text-orange-400",
+  },
+  followup: {
+    label: "Follow-up",
+    icon: MessageSquare,
+    className: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  },
+  task: {
+    label: "Tarefas",
+    icon: ClipboardList,
+    className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
 };
 const QUEUE_ORDER: QueueKind[] = ["callback", "first", "attempt", "followup", "task"];
 
@@ -646,10 +742,15 @@ const QUEUE_ORDER: QueueKind[] = ["callback", "first", "attempt", "followup", "t
  * (atrasados primeiro). Na cadência a tag é a etapa em que o lead está; retorno e
  * follow-up mostram a etapa ao lado do prazo.
  */
-function buildQueue(plan: DayPlan, stages: ReturnType<typeof useTodooPipeline>["stages"]): QueueItem[] {
+function buildQueue(
+  plan: DayPlan,
+  stages: ReturnType<typeof useTodooPipeline>["stages"],
+): QueueItem[] {
   const followupDue = (lead: TodooLead) =>
     lead.last_interaction_at
-      ? new Date(new Date(lead.last_interaction_at).getTime() + FOLLOWUP_AFTER_HOURS * 3600 * 1000).toISOString()
+      ? new Date(
+          new Date(lead.last_interaction_at).getTime() + FOLLOWUP_AFTER_HOURS * 3600 * 1000,
+        ).toISOString()
       : null;
   const stageName = (lead: TodooLead) => resolveTodooLeadStage(lead, stages)?.name;
 
@@ -680,12 +781,19 @@ function buildQueue(plan: DayPlan, stages: ReturnType<typeof useTodooPipeline>["
       tag: "Follow-up",
       stage: stageName(lead),
     })),
-    ...plan.crmTasks.map((task) => ({ kind: "task" as const, task, due: task.due_date, tag: "Tarefa" })),
+    ...plan.crmTasks.map((task) => ({
+      kind: "task" as const,
+      task,
+      due: task.due_date,
+      tag: "Tarefa",
+    })),
   ];
 
   // Sem prazo conta como "agora"; empate segue a ordem dos tipos
   const time = (item: QueueItem) => (item.due ? new Date(item.due).getTime() : Date.now());
-  return items.sort((a, b) => time(a) - time(b) || QUEUE_ORDER.indexOf(a.kind) - QUEUE_ORDER.indexOf(b.kind));
+  return items.sort(
+    (a, b) => time(a) - time(b) || QUEUE_ORDER.indexOf(a.kind) - QUEUE_ORDER.indexOf(b.kind),
+  );
 }
 
 function DayQueue({
@@ -709,12 +817,20 @@ function DayQueue({
 }) {
   const [filter, setFilter] = useState<QueueKind | "all">("all");
   const counts = useMemo(() => {
-    const c: Record<QueueKind, number> = { callback: 0, first: 0, attempt: 0, followup: 0, task: 0 };
+    const c: Record<QueueKind, number> = {
+      callback: 0,
+      first: 0,
+      attempt: 0,
+      followup: 0,
+      task: 0,
+    };
     for (const item of items) c[item.kind] += 1;
     return c;
   }, [items]);
   const filtered = filter === "all" ? items : items.filter((item) => item.kind === filter);
-  const overdue = items.filter((item) => item.due && new Date(item.due).getTime() < Date.now()).length;
+  const overdue = items.filter(
+    (item) => item.due && new Date(item.due).getTime() < Date.now(),
+  ).length;
 
   const chip = (value: QueueKind | "all", label: string, count: number) => (
     <button
@@ -729,35 +845,39 @@ function DayQueue({
       )}
     >
       {label}
-      <span className={cn("tabular-nums font-semibold", filter !== value && "text-foreground")}>{count}</span>
+      <span className={cn("tabular-nums font-semibold", filter !== value && "text-foreground")}>
+        {count}
+      </span>
     </button>
   );
 
   return (
-    <Card className={cn("flex flex-col overflow-hidden", fill && "lg:min-h-0 lg:h-full")}>
-      <div className="flex shrink-0 flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold leading-tight">{title}</h2>
-          <p className="text-[11px] text-muted-foreground">
-            {dateLabel ? `${dateLabel} · ` : ""}tarefas comerciais de hoje pela ordem do prazo
-            {overdue > 0 ? ` · ${overdue} atrasado${overdue > 1 ? "s" : ""} no topo` : ""}
-          </p>
+    <Card className={cn("flex flex-col overflow-hidden", fill && "xl:min-h-0 xl:h-full")}>
+      <div className="flex shrink-0 flex-col gap-3 border-b px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold leading-tight">{title}</h2>
+            <p className="text-[11px] text-muted-foreground">
+              {dateLabel ? `${dateLabel} · ` : ""}tarefas comerciais de hoje pela ordem do prazo
+              {overdue > 0 ? ` · ${overdue} atrasado${overdue > 1 ? "s" : ""} no topo` : ""}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            title="Atualizar"
+            onClick={onRefresh}
+            disabled={refreshing}
+          >
+            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+          </Button>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {chip("all", "Todos", items.length)}
           {QUEUE_ORDER.filter((kind) => counts[kind] > 0).map((kind) =>
             chip(kind, QUEUE_KINDS[kind].label, counts[kind]),
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            title="Atualizar"
-            onClick={onRefresh}
-            disabled={refreshing}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
-          </Button>
         </div>
       </div>
 
@@ -767,7 +887,12 @@ function DayQueue({
           {items.length === 0 ? "Nada pendente para hoje." : "Nada pendente neste filtro."}
         </p>
       ) : (
-        <div className={cn("divide-y divide-border/60", fill && "lg:min-h-0 lg:flex-1 lg:overflow-y-auto")}>
+        <div
+          className={cn(
+            "divide-y divide-border/60",
+            fill && "xl:min-h-0 xl:flex-1 xl:overflow-y-auto",
+          )}
+        >
           {filtered.map(renderRow)}
         </div>
       )}
@@ -791,9 +916,16 @@ function DueText({ item }: { item: QueueItem }) {
   const late = date.getTime() < Date.now();
   const prefix = item.kind === "callback" ? "Retornar" : item.kind === "task" ? "Vence" : "Prazo";
   return (
-    <span className={cn("inline-flex items-center gap-1 text-[11px]", late ? "font-medium text-destructive" : "text-muted-foreground")}>
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-[11px]",
+        late ? "font-medium text-destructive" : "text-muted-foreground",
+      )}
+    >
       {late && <AlertTriangle className="h-3 w-3" />}
-      {late ? `Atrasado desde ${format(date, "dd/MM 'às' HH:mm")}` : `${prefix} ${format(date, "dd/MM 'às' HH:mm")}`}
+      {late
+        ? `Atrasado desde ${format(date, "dd/MM 'às' HH:mm")}`
+        : `${prefix} ${format(date, "dd/MM 'às' HH:mm")}`}
     </span>
   );
 }
@@ -834,22 +966,31 @@ function QueueRow({
           )}
         >
           <Icon className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate" title={item.tag}>{item.tag}</span>
+          <span className="truncate" title={item.tag}>
+            {item.tag}
+          </span>
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <span className="truncate text-sm font-medium">{name}</span>
-            {phone && <span className="shrink-0 text-[11px] text-muted-foreground">{formatTodooPhone(phone)}</span>}
+            {phone && (
+              <span className="shrink-0 text-[11px] text-muted-foreground">
+                {formatTodooPhone(phone)}
+              </span>
+            )}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
             <DueText item={item} />
             {item.kind !== "task" && item.stage && <span>· Etapa: {item.stage}</span>}
             {task && task.contacts?.name && <span className="truncate">{task.title}</span>}
-            {task?.description && <span className="max-w-[260px] truncate">{task.description}</span>}
+            {task?.description && (
+              <span className="max-w-[260px] truncate">{task.description}</span>
+            )}
             {lead?.campaign?.title && <span>· {lead.campaign.title}</span>}
             {referrer && (
               <span>
-                · Indicada por <TodooReferrerLink name={referrer} contactId={lead?.custom_fields?.indicadora_id} />
+                · Indicada por{" "}
+                <TodooReferrerLink name={referrer} contactId={lead?.custom_fields?.indicadora_id} />
               </span>
             )}
             {interest && <span>· Interesse: {interest}</span>}
@@ -857,7 +998,7 @@ function QueueRow({
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-1 pl-[116px] 2xl:pl-0">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 sm:pl-[116px] 2xl:pl-0">
         {(contactId || phone) && (
           <ContactChatButton
             contactId={contactId}
@@ -865,7 +1006,12 @@ function QueueRow({
             phone={phone}
             unitId={lead?.unit_id ?? task?.unit_id}
             trigger={
-              <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" title="Abrir a conversa">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1 px-2 text-xs"
+                title="Abrir a conversa"
+              >
                 <MessageCircle className="h-3.5 w-3.5 text-primary" />
                 Conversa
               </Button>
@@ -873,13 +1019,29 @@ function QueueRow({
           />
         )}
         {onMessage && (
-          <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" title="Enviar mensagem" onClick={onMessage}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1 px-2 text-xs"
+            title="Enviar mensagem"
+            onClick={onMessage}
+          >
             <Send className="h-3.5 w-3.5 text-emerald-500" />
             Mensagem
           </Button>
         )}
-        <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={onDone} disabled={saving}>
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 px-2 text-xs"
+          onClick={onDone}
+          disabled={saving}
+        >
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
           {doneLabel}
         </Button>
         {onOutcome && (
@@ -888,11 +1050,21 @@ function QueueRow({
               <SelectValue placeholder="Desfecho" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="scheduled" className="text-xs">Agendou</SelectItem>
-              <SelectItem value="won" className="text-xs">Fechou</SelectItem>
-              <SelectItem value="quoted" className="text-xs">Orçamento</SelectItem>
-              <SelectItem value="callback" className="text-xs">Retornar</SelectItem>
-              <SelectItem value="lost" className="text-xs">Sem interesse</SelectItem>
+              <SelectItem value="scheduled" className="text-xs">
+                Agendou
+              </SelectItem>
+              <SelectItem value="won" className="text-xs">
+                Fechou
+              </SelectItem>
+              <SelectItem value="quoted" className="text-xs">
+                Orçamento
+              </SelectItem>
+              <SelectItem value="callback" className="text-xs">
+                Retornar
+              </SelectItem>
+              <SelectItem value="lost" className="text-xs">
+                Sem interesse
+              </SelectItem>
             </SelectContent>
           </Select>
         )}
