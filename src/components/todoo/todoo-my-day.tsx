@@ -129,10 +129,12 @@ export function useTodooDayData() {
       let leadsQuery = (supabase.from("todoo_leads") as any)
         .select(`
           *,
-          campaign:todoo_campaigns(id, title, type, message_template, offer_details, sla_hours),
+          campaign:todoo_campaigns!inner(id, title, type, status, message_template, offer_details, sla_hours),
           unit:units(id, name, color)
         `)
         .eq("company_id", activeCompanyId)
+        // Ação pausada ou concluída sai da fila até ser retomada
+        .eq("campaign.status", "active")
         .or(`status.in.(pending,contacted,quoted,callback),last_interaction_at.gte.${bounds.dayStart}`)
         .order("sla_deadline", { ascending: true, nullsFirst: false });
       if (onlyMine) leadsQuery = leadsQuery.eq("assigned_user_id", profile!.id);
@@ -844,10 +846,10 @@ function LeadRow({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="scheduled" className="text-xs">Agendou</SelectItem>
-            <SelectItem value="won" className="text-xs">Fechou venda</SelectItem>
-            <SelectItem value="quoted" className="text-xs">Enviou orçamento</SelectItem>
-            <SelectItem value="callback" className="text-xs">Retornar depois</SelectItem>
-            <SelectItem value="lost" className="text-xs">Sem sucesso</SelectItem>
+            <SelectItem value="won" className="text-xs">Fechou</SelectItem>
+            <SelectItem value="quoted" className="text-xs">Orçamento</SelectItem>
+            <SelectItem value="callback" className="text-xs">Retornar</SelectItem>
+            <SelectItem value="lost" className="text-xs">Sem interesse</SelectItem>
           </SelectContent>
         </Select>
       </div>

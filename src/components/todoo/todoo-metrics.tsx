@@ -162,7 +162,7 @@ export function TodooMetrics() {
               <h3 className="text-2xl font-bold text-foreground">
                 {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(metrics.averageTicket)}
               </h3>
-              <span className="text-xs text-muted-foreground">Receita/Contrato</span>
+              <span className="text-xs text-muted-foreground">Faturado ÷ fechamentos</span>
             </div>
             <div className="pt-2 text-[11px] text-muted-foreground">
               Total Faturado:{" "}
@@ -179,7 +179,7 @@ export function TodooMetrics() {
         <CardHeader className="p-4 border-b border-border">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
             <TrendingUp className="h-4 w-4 text-primary" />
-            Funil de Execução Comercial das Campanhas
+            Funil das Ações Comerciais
           </CardTitle>
         </CardHeader>
         <CardContent className="p-6">

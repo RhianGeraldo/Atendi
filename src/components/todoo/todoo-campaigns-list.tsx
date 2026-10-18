@@ -143,8 +143,15 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
 
       if (error) throw error;
       if (!data || data.length === 0) throw new Error("Você não tem permissão para alterar esta ação.");
-      toast.success(nextStatus === "active" ? "Ação comercial retomada!" : "Ação comercial pausada.");
+      toast.success(
+        nextStatus === "active"
+          ? "Ação comercial retomada! Os leads voltaram para a fila."
+          : "Ação comercial pausada. Os leads saíram da fila até ser retomada.",
+      );
       refetch();
+      for (const key of ["todoo-leads", "todoo-my-day", "todoo-campaigns-filter"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
     } catch (err: any) {
       toast.error("Erro ao alterar status: " + err.message);
     }
@@ -220,7 +227,7 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
       {/* Cabeçalho da Aba */}
       <TodooSectionHeader
         title="Ações Comerciais"
-        description="Gerencie as campanhas ativas, edite scripts, acompanhe a taxa de conversão e os resultados."
+        description="Gerencie as ações comerciais, edite scripts, acompanhe a taxa de conversão e os resultados."
         actions={
           <Button onClick={onCreateClick} size="sm" className="gap-1.5 h-8 text-xs">
             <Plus className="h-3.5 w-3.5" />
@@ -234,7 +241,7 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs text-primary">
           <Building2 className="h-4 w-4 shrink-0" />
           <span>
-            Exibindo métricas da unidade <strong>{activeUnit.name}</strong>. Campanhas corporativas exibem apenas os contatos desta filial.
+            Exibindo métricas da unidade <strong>{activeUnit.name}</strong>. Ações gerais da empresa exibem apenas os contatos desta filial.
           </span>
         </div>
       )}

@@ -45,8 +45,8 @@ export const TODOO_CARD_BEHAVIORS: Record<
   active: { label: "Cadência segue", hint: "As tentativas continuam sendo cobradas", icon: Circle },
   paused: { label: "Pausa a cadência", hint: "O contato respondeu", icon: PauseCircle },
   scheduled: { label: "Agendou", hint: "Para a cadência e conta agendamento", icon: CalendarCheck, outcome: "scheduled" },
-  won: { label: "Comprou", hint: "Para a cadência e pede o valor", icon: CheckCircle2, outcome: "won" },
-  lost: { label: "Perdido", hint: "Vai para Sem sucesso (quarentena)", icon: XCircle, outcome: "lost" },
+  won: { label: "Fechou", hint: "Para a cadência e pede o valor", icon: CheckCircle2, outcome: "won" },
+  lost: { label: "Sem interesse", hint: "Vai para Sem sucesso (quarentena)", icon: XCircle, outcome: "lost" },
 };
 
 export const TODOO_CARD_BEHAVIOR_ORDER: TodooCardBehavior[] = ["active", "paused", "scheduled", "won", "lost"];

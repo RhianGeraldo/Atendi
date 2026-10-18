@@ -128,6 +128,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
       const { data, error } = await (supabase.from("todoo_campaigns") as any)
         .select("id, title, type, status, unit_id")
         .eq("company_id", activeCompanyId)
+        .eq("status", "active")
         .order("title");
       if (error) throw error;
       return (data || []) as TodooCampaign[];
@@ -179,11 +180,13 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
       let query = (supabase.from("todoo_leads") as any)
         .select(`
           *,
-          campaign:todoo_campaigns(id, title, type, message_template, offer_details, sla_hours),
+          campaign:todoo_campaigns!inner(id, title, type, status, message_template, offer_details, sla_hours),
           assigned_user:profiles(id, name, avatar_url),
           unit:units(id, name, color)
         `)
         .eq("company_id", activeCompanyId)
+        // Ação pausada ou concluída sai da fila até ser retomada
+        .eq("campaign.status", "active")
         .or(
           `status.not.in.(won,lost),updated_at.gte.${new Date(
             Date.now() - CLOSED_LEADS_DAYS * 24 * 60 * 60 * 1000,

@@ -11,7 +11,7 @@
 | 2 | ✅ Aplicada em produção (`20261017120000_todoo_cadence_guard`). Verificação prévia: 0 leads reciclados por engano, 0 empresas com etapas duplicadas. |
 | 3 | ✅ 3.1: proteções nas 5 migrations antigas (validadas com parser). 3.2 + 3.3: aplicadas em produção (`20261017130000_todoo_register_and_notifications_guard`). A policy de INSERT em `notifications` foi removida, porque só o servidor cria notificações. O índice em `contacts(phone)` não foi criado: são 5,7 mil linhas e é tabela quente. |
 | 4 | ✅ Aplicada em produção (`20261017140000_todoo_metrics_rpcs`). Funções testadas: 271 leads, 188 com 1º contato no prazo e 82 atrasados. Ficaram de fora a 4.5 (tsc) e a 4.6 (RPC única de criação). A cadência roda no cron do servidor (`src/lib/server/cron.ts`). |
-| 5 | Pendente (decisões) |
+| 5 | Código no commit da Fase 5. A migration `20261017150000_todoo_phase5_rules.sql` ainda falta aplicar. Decisões: redistribuição por SLA implementada (uma vez por lead, só prazos que vencerem depois de ligar, sem Indicações/Prospecção); ação pausada sai da fila; quarentena devolve só quem esgotou as tentativas ("Sem interesse" fica para ações próprias); Gincana −2 por atraso; textos padronizados. |
 
 ## Visão geral
 

@@ -79,7 +79,7 @@ export function TodooGincana() {
       {/* Regras de Pontuação */}
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30">
-          Contrato Fechado: +10 pts
+          Fechou: +10 pts
         </Badge>
         <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/30">
           Agendamento: +5 pts
@@ -91,7 +91,7 @@ export function TodooGincana() {
           1º contato no prazo: +2 pts
         </Badge>
         <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30">
-          1º contato atrasado: -5 pts
+          1º contato atrasado: -2 pts
         </Badge>
       </div>
 

@@ -465,7 +465,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
           .map((l) => ({ ...l, unit_id: l.unit_id && myUnitIds.includes(l.unit_id) ? l.unit_id : fallbackUnit }))
           .filter((l) => !!l.unit_id);
         if (finalLeads.length === 0) {
-          throw new Error("Selecione uma unidade padrão para os leads desta campanha.");
+          throw new Error("Selecione uma unidade padrão para os leads desta ação.");
         }
       }
 
@@ -1055,7 +1055,7 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
               </div>
 
               <div>
-                <Label className="text-xs">Meta de Vendas da Campanha (R$)</Label>
+                <Label className="text-xs">Meta de Faturamento da Ação (R$)</Label>
                 <Input
                   className="mt-1"
                   placeholder="Ex: 50.000,00"
@@ -1072,7 +1072,8 @@ export function TodooCreateCampaignDialog({ open, onOpenChange, onSuccess }: Pro
                 onCheckedChange={(c: any) => setRedistributeOnSla(c)}
               />
               <Label htmlFor="redistribute" className="text-xs cursor-pointer">
-                <strong>Regra de Ouro:</strong> Redistribuir lead para a próxima consultora se o SLA expirar
+                <strong>Regra de Ouro:</strong> Redistribuir o lead para outra consultora da ação se o prazo do 1º
+                contato expirar (uma vez por lead)
               </Label>
             </div>
           </div>

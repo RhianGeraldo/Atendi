@@ -117,7 +117,7 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
           assigned_to: profile.id,
           created_by: profile.id,
           title: `[Todoo] Retornar para ${lead.contact_name}`,
-          description: `Retorno de campanha Todoo.\nTelefone: ${lead.contact_phone}\nObs: ${outcomeNotes || "Sem notas adicionais"}`,
+          description: `Retorno de ação comercial do Todoo.\nTelefone: ${lead.contact_phone}\nObs: ${outcomeNotes || "Sem notas adicionais"}`,
           due_date: new Date(callbackDate).toISOString(),
           status: "pending",
         });
@@ -169,8 +169,8 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
               >
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                 <span className="text-left leading-tight">
-                  <strong className="block text-xs">Fechou!</strong>
-                  <span className="text-[10px] opacity-80">Contrato ganho</span>
+                  <strong className="block text-xs">Fechou</strong>
+                  <span className="text-[10px] opacity-80">Venda fechada</span>
                 </span>
               </Button>
 
@@ -229,7 +229,7 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
               >
                 <XCircle className="h-4 w-4 text-rose-300" />
                 <span className="text-left leading-tight">
-                  <strong className="block text-xs">Sem Interesse</strong>
+                  <strong className="block text-xs">Sem interesse</strong>
                   <span className="text-[10px] opacity-80">Recusou</span>
                 </span>
               </Button>
