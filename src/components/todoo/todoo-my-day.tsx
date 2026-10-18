@@ -12,15 +12,15 @@ import {
   Flame,
   Loader2,
   Repeat,
+  MessageCircle,
   MessageSquare,
+  Send,
   RefreshCw,
   Target,
   UserPlus,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import {
   Select,
@@ -63,8 +63,8 @@ interface Props {
 
 // Lead em conversa (cadência pausada) sem nenhuma interação há este tempo vira follow-up
 const FOLLOWUP_AFTER_HOURS = 48;
-// Itens exibidos por grupo antes do "Ver todos"
-const GROUP_PREVIEW = 8;
+// Itens exibidos na fila antes do "Ver mais"
+const QUEUE_PAGE = 15;
 
 interface CrmTask {
   id: string;
@@ -113,7 +113,8 @@ export function useTodooDayData() {
     profile?.role === "super_admin" ||
     profile?.role === "manager" ||
     canAccessTodooTab("team", profile);
-  const bounds = useMemo(() => todooDayBounds(), []);
+  // Recalcula a cada render: com a aba aberta depois da meia-noite, o dia muda junto
+  const bounds = todooDayBounds();
   const month = currentTodooMonth();
   const { stages, statuses } = useTodooPipeline();
 
@@ -279,7 +280,15 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
 
   const [leadForOutcome, setLeadForOutcome] = useState<TodooLead | null>(null);
   const [outcomeType, setOutcomeType] = useState<TodooOutcomeType>("won");
-  const [savingId, setSavingId] = useState<string | null>(null);
+  // Itens salvando agora (evita clique duplo e não libera o botão de outro item)
+  const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+  const setSaving = (id: string, on: boolean) =>
+    setSavingIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   const [goalsOpen, setGoalsOpen] = useState(false);
 
   const { data, isLoading, isFetching, refetch, buildPlan, bounds, stages, statuses } = useTodooDayData();
@@ -297,6 +306,8 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   const plan = viewedUserId && data ? buildPlan(viewedUserId) : null;
   const viewingOther = viewedUserId !== profile?.id;
 
+  const queue = useMemo(() => (plan ? buildQueue(plan, stages) : []), [plan, stages]);
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
     queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
@@ -305,7 +316,8 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   // Marca o lead como trabalhado agora (contato feito)
   const markContacted = async (lead: TodooLead) => {
     if (!profile) return;
-    setSavingId(lead.id);
+    if (savingIds.has(lead.id)) return;
+    setSaving(lead.id, true);
     try {
       const now = new Date().toISOString();
       const { error } = await (supabase.from("todoo_leads") as any)
@@ -332,7 +344,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
     } catch (err: any) {
       toast.error("Erro ao registrar contato: " + err.message);
     } finally {
-      setSavingId(null);
+      setSaving(lead.id, false);
     }
   };
 
@@ -344,7 +356,8 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
       await markContacted(lead);
       return;
     }
-    setSavingId(lead.id);
+    if (savingIds.has(lead.id)) return;
+    setSaving(lead.id, true);
     try {
       const { error } = await (supabase.from("todoo_leads") as any)
         .update({ stage_id: next.id, updated_at: new Date().toISOString() })
@@ -364,14 +377,15 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
     } catch (err: any) {
       toast.error("Erro ao registrar tentativa: " + err.message);
     } finally {
-      setSavingId(null);
+      setSaving(lead.id, false);
     }
   };
 
   const attemptLabel = (lead: TodooLead) => todooStageActionLabel(resolveTodooLeadStage(lead, stages), stages);
 
   const completeTask = async (task: CrmTask) => {
-    setSavingId(task.id);
+    if (savingIds.has(task.id)) return;
+    setSaving(task.id, true);
     try {
       const { error } = await supabase.from("tasks").update({ status: "done" }).eq("id", task.id);
       if (error) throw error;
@@ -381,7 +395,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
     } catch (err: any) {
       toast.error("Erro ao concluir tarefa: " + err.message);
     } finally {
-      setSavingId(null);
+      setSaving(task.id, false);
     }
   };
 
@@ -419,146 +433,47 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
         </div>
       ) : plan ? (
         <>
-          <DaySummary plan={plan} />
-
-          <div className={cn("grid grid-cols-1 gap-4", !embedded && "xl:grid-cols-2")}>
+          <div className={cn("grid grid-cols-1 gap-4", !embedded && "xl:grid-cols-3")}>
+            <div className={cn(!embedded && "xl:col-span-2")}>
+              <DaySummary plan={plan} />
+            </div>
             <CaptureCard
               plan={plan}
               canCreate={!viewingOther}
               onCreate={onCreateContactsClick}
               onConfigure={isManagerOrAdmin ? () => setGoalsOpen(true) : undefined}
             />
+          </div>
 
-            <TaskGroup
-              icon={<Clock className="h-4 w-4 text-amber-500" />}
-              title="Retornos de hoje"
-              hint="Clientes que pediram para você retornar"
-              count={plan.callbacks.length}
-              emptyText="Nenhum retorno agendado para hoje."
-            >
-              {plan.callbacks.map((lead) => (
-                <LeadRow
-                  key={lead.id}
-                  lead={lead}
-                  onMessage={() => setMessageLead(lead)}
-                  detail={
-                    lead.callback_scheduled_at ? (
-                      <DueBadge date={lead.callback_scheduled_at} prefix="Retorno" />
-                    ) : null
-                  }
-                  saving={savingId === lead.id}
-                  doneLabel="Retornei"
-                  onDone={() => markContacted(lead)}
-                  onOutcome={(t) => openOutcome(lead, t)}
-                />
-              ))}
-            </TaskGroup>
-
-            <TaskGroup
-              icon={<Flame className="h-4 w-4 text-blue-500" />}
-              title="Contatos para chamar"
-              hint="A contatar: faça a 1ª tentativa"
-              count={plan.toContact.length}
-              emptyText="Fila zerada. Nenhum contato aguardando."
-            >
-              {plan.toContact.map((lead) => (
-                <LeadRow
-                  key={lead.id}
-                  lead={lead}
-                  onMessage={() => setMessageLead(lead)}
-                  detail={lead.sla_deadline ? <DueBadge date={lead.sla_deadline} prefix="Prazo" /> : null}
-                  saving={savingId === lead.id}
-                  doneLabel={attemptLabel(lead)}
-                  onDone={() => advanceLead(lead)}
-                  onOutcome={(t) => openOutcome(lead, t)}
-                />
-              ))}
-            </TaskGroup>
-
-            <TaskGroup
-              icon={<Repeat className="h-4 w-4 text-orange-500" />}
-              title="Próximas tentativas"
-              hint="Cadência: contatos que ainda não responderam"
-              count={plan.attempts.length}
-              emptyText="Nenhuma tentativa vencendo hoje."
-            >
-              {plan.attempts.map((lead) => {
-                const stage = resolveTodooLeadStage(lead, stages);
+          <DayQueue
+            items={queue}
+            renderRow={(item) => {
+              if (item.kind === "task") {
                 return (
-                  <LeadRow
-                    key={lead.id}
-                    lead={lead}
-                    onMessage={() => setMessageLead(lead)}
-                    detail={
-                      <>
-                        {stage && (
-                          <span
-                            className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                            style={{ color: stage.color, backgroundColor: `${stage.color}15` }}
-                          >
-                            Feita: {stage.name}
-                          </span>
-                        )}
-                        {lead.next_action_at && <DueBadge date={lead.next_action_at} prefix="Vence" />}
-                      </>
-                    }
-                    saving={savingId === lead.id}
-                    doneLabel={attemptLabel(lead)}
-                    onDone={() => advanceLead(lead)}
-                    onOutcome={(t) => openOutcome(lead, t)}
+                  <QueueRow
+                    key={`task-${item.task.id}`}
+                    item={item}
+                    saving={savingIds.has(item.task.id)}
+                    doneLabel="Concluir"
+                    onDone={() => completeTask(item.task)}
                   />
                 );
-              })}
-            </TaskGroup>
-
-            <TaskGroup
-              icon={<MessageSquare className="h-4 w-4 text-violet-500" />}
-              title="Follow-up de conversas"
-              hint={`Em conversa sem interação há mais de ${FOLLOWUP_AFTER_HOURS / 24} dias`}
-              count={plan.followups.length}
-              emptyText="Nenhuma negociação parada."
-            >
-              {plan.followups.map((lead) => (
-                <LeadRow
-                  key={lead.id}
-                  lead={lead}
+              }
+              const lead = item.lead;
+              const isCadence = item.kind === "first" || item.kind === "attempt";
+              return (
+                <QueueRow
+                  key={`lead-${lead.id}`}
+                  item={item}
+                  saving={savingIds.has(lead.id)}
+                  doneLabel={isCadence ? attemptLabel(lead) : item.kind === "callback" ? "Retornei" : "Chamei"}
+                  onDone={() => (isCadence ? advanceLead(lead) : markContacted(lead))}
                   onMessage={() => setMessageLead(lead)}
-                  detail={
-                    <span className="text-[10px] text-muted-foreground">
-                      {lead.last_interaction_at
-                        ? `Último contato ${formatDistanceToNow(new Date(lead.last_interaction_at), {
-                            addSuffix: true,
-                            locale: ptBR,
-                          })}`
-                        : "Sem contato registrado"}
-                    </span>
-                  }
-                  saving={savingId === lead.id}
-                  doneLabel="Chamei"
-                  onDone={() => markContacted(lead)}
                   onOutcome={(t) => openOutcome(lead, t)}
                 />
-              ))}
-            </TaskGroup>
-
-            <TaskGroup
-              icon={<ClipboardList className="h-4 w-4 text-emerald-500" />}
-              title="Tarefas do CRM"
-              hint="Vencidas ou com vencimento hoje"
-              count={plan.crmTasks.length}
-              emptyText="Nenhuma tarefa do CRM para hoje."
-            >
-              {plan.crmTasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  dayStart={bounds.dayStart}
-                  saving={savingId === task.id}
-                  onDone={() => completeTask(task)}
-                />
-              ))}
-            </TaskGroup>
-          </div>
+              );
+            }}
+          />
         </>
       ) : null}
 
@@ -721,52 +636,130 @@ function CaptureCard({
   );
 }
 
-function TaskGroup({
-  icon,
-  title,
-  hint,
-  count,
-  emptyText,
-  children,
+type QueueKind = "callback" | "first" | "attempt" | "followup" | "task";
+
+type QueueItem =
+  | { kind: Exclude<QueueKind, "task">; lead: TodooLead; due: string | null; tag: string }
+  | { kind: "task"; task: CrmTask; due: string | null; tag: string };
+
+const QUEUE_KINDS: Record<QueueKind, { label: string; icon: typeof Clock; className: string }> = {
+  callback: { label: "Retornos", icon: Clock, className: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+  first: { label: "1ª tentativa", icon: Flame, className: "bg-blue-500/10 text-blue-700 dark:text-blue-400" },
+  attempt: { label: "Tentativas", icon: Repeat, className: "bg-orange-500/10 text-orange-700 dark:text-orange-400" },
+  followup: { label: "Follow-up", icon: MessageSquare, className: "bg-violet-500/10 text-violet-700 dark:text-violet-400" },
+  task: { label: "Tarefas", icon: ClipboardList, className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
+};
+const QUEUE_ORDER: QueueKind[] = ["callback", "first", "attempt", "followup", "task"];
+
+/**
+ * Tudo o que a pessoa tem para fazer hoje numa fila só, pela ordem do prazo
+ * (atrasados primeiro). Cada item diz o motivo (retorno, tentativa, follow-up, tarefa).
+ */
+function buildQueue(plan: DayPlan, stages: ReturnType<typeof useTodooPipeline>["stages"]): QueueItem[] {
+  const followupDue = (lead: TodooLead) =>
+    lead.last_interaction_at
+      ? new Date(new Date(lead.last_interaction_at).getTime() + FOLLOWUP_AFTER_HOURS * 3600 * 1000).toISOString()
+      : null;
+  const nextName = (lead: TodooLead) => nextTodooStage(resolveTodooLeadStage(lead, stages), stages)?.name;
+
+  const items: QueueItem[] = [
+    ...plan.callbacks.map((lead) => ({
+      kind: "callback" as const,
+      lead,
+      due: lead.callback_scheduled_at,
+      tag: "Retorno",
+    })),
+    ...plan.toContact.map((lead) => ({
+      kind: "first" as const,
+      lead,
+      due: lead.sla_deadline,
+      tag: nextName(lead) || "1ª tentativa",
+    })),
+    ...plan.attempts.map((lead) => ({
+      kind: "attempt" as const,
+      lead,
+      due: lead.next_action_at,
+      tag: nextName(lead) || "Tentativa",
+    })),
+    ...plan.followups.map((lead) => ({ kind: "followup" as const, lead, due: followupDue(lead), tag: "Follow-up" })),
+    ...plan.crmTasks.map((task) => ({ kind: "task" as const, task, due: task.due_date, tag: "Tarefa" })),
+  ];
+
+  // Sem prazo conta como "agora"; empate segue a ordem dos tipos
+  const time = (item: QueueItem) => (item.due ? new Date(item.due).getTime() : Date.now());
+  return items.sort((a, b) => time(a) - time(b) || QUEUE_ORDER.indexOf(a.kind) - QUEUE_ORDER.indexOf(b.kind));
+}
+
+function DayQueue({
+  items,
+  renderRow,
 }: {
-  icon: ReactNode;
-  title: string;
-  hint: string;
-  count: number;
-  emptyText: string;
-  children: ReactNode[];
+  items: QueueItem[];
+  renderRow: (item: QueueItem) => ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const items = expanded ? children : children.slice(0, GROUP_PREVIEW);
+  const [filter, setFilter] = useState<QueueKind | "all">("all");
+  const [limit, setLimit] = useState(QUEUE_PAGE);
+  const counts = useMemo(() => {
+    const c: Record<QueueKind, number> = { callback: 0, first: 0, attempt: 0, followup: 0, task: 0 };
+    for (const item of items) c[item.kind] += 1;
+    return c;
+  }, [items]);
+  const filtered = filter === "all" ? items : items.filter((item) => item.kind === filter);
+  const visible = filtered.slice(0, limit);
+  const overdue = items.filter((item) => item.due && new Date(item.due).getTime() < Date.now()).length;
+
+  const chip = (value: QueueKind | "all", label: string, count: number) => (
+    <button
+      key={value}
+      type="button"
+      onClick={() => {
+        setFilter(value);
+        setLimit(QUEUE_PAGE);
+      }}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+        filter === value
+          ? "border-primary bg-primary text-primary-foreground"
+          : "bg-card text-muted-foreground hover:bg-muted",
+      )}
+    >
+      {label}
+      <span className={cn("tabular-nums font-semibold", filter !== value && "text-foreground")}>{count}</span>
+    </button>
+  );
+
   return (
-    <Card className="p-4 space-y-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="shrink-0">{icon}</span>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold">{title}</h3>
-            <p className="text-[11px] text-muted-foreground">{hint}</p>
-          </div>
+    <Card className="overflow-hidden">
+      <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">Fila de hoje</h3>
+          <p className="text-[11px] text-muted-foreground">
+            Pela ordem do prazo{overdue > 0 ? ` · ${overdue} atrasado${overdue > 1 ? "s" : ""} no topo` : ""}
+          </p>
         </div>
-        <Badge variant={count > 0 ? "secondary" : "outline"} className="text-xs shrink-0">
-          {count}
-        </Badge>
+        <div className="flex flex-wrap gap-1.5">
+          {chip("all", "Todos", items.length)}
+          {QUEUE_ORDER.filter((kind) => counts[kind] > 0).map((kind) =>
+            chip(kind, QUEUE_KINDS[kind].label, counts[kind]),
+          )}
+        </div>
       </div>
-      {count === 0 ? (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground py-2">
-          <Check className="h-3.5 w-3.5 text-emerald-500" />
-          {emptyText}
+
+      {filtered.length === 0 ? (
+        <p className="flex items-center justify-center gap-1.5 px-4 py-10 text-sm text-muted-foreground">
+          <Check className="h-4 w-4 text-emerald-500" />
+          {items.length === 0 ? "Nada pendente para hoje." : "Nada pendente neste filtro."}
         </p>
       ) : (
-        <div className="divide-y divide-border/60 -mx-1">
-          {items}
-          {children.length > GROUP_PREVIEW && (
+        <div className="divide-y divide-border/60">
+          {visible.map(renderRow)}
+          {filtered.length > visible.length && (
             <button
               type="button"
-              className="w-full pt-2 text-xs text-primary font-medium hover:underline"
-              onClick={() => setExpanded((v) => !v)}
+              className="w-full py-2.5 text-xs font-medium text-primary hover:bg-muted/50"
+              onClick={() => setLimit((v) => v + QUEUE_PAGE)}
             >
-              {expanded ? "Mostrar menos" : `Ver todos (${children.length})`}
+              Ver mais ({filtered.length - visible.length})
             </button>
           )}
         </div>
@@ -775,123 +768,127 @@ function TaskGroup({
   );
 }
 
-function DueBadge({ date, prefix }: { date: string; prefix: string }) {
-  const late = new Date(date).getTime() < Date.now();
+function DueText({ item }: { item: QueueItem }) {
+  if (item.kind === "followup") {
+    const last = item.lead.last_interaction_at;
+    return (
+      <span className="text-[11px] text-muted-foreground">
+        {last
+          ? `Último contato ${formatDistanceToNow(new Date(last), { addSuffix: true, locale: ptBR })}`
+          : "Sem contato registrado"}
+      </span>
+    );
+  }
+  if (!item.due) return null;
+  const date = new Date(item.due);
+  const late = date.getTime() < Date.now();
+  const prefix = item.kind === "callback" ? "Retornar" : item.kind === "task" ? "Vence" : "Prazo";
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 text-[10px] font-medium",
-        late ? "text-destructive" : "text-muted-foreground",
-      )}
-    >
+    <span className={cn("inline-flex items-center gap-1 text-[11px]", late ? "font-medium text-destructive" : "text-muted-foreground")}>
       {late && <AlertTriangle className="h-3 w-3" />}
-      {prefix} {late ? "vencido" : ""} {format(new Date(date), "dd/MM 'às' HH:mm")}
+      {late ? `Atrasado desde ${format(date, "dd/MM 'às' HH:mm")}` : `${prefix} ${format(date, "dd/MM 'às' HH:mm")}`}
     </span>
   );
 }
 
-function LeadRow({
-  lead,
-  detail,
+function QueueRow({
+  item,
   saving,
   doneLabel,
   onDone,
-  onOutcome,
   onMessage,
+  onOutcome,
 }: {
-  lead: TodooLead;
-  detail: ReactNode;
+  item: QueueItem;
   saving: boolean;
   doneLabel: string;
   onDone: () => void;
-  onOutcome: (type: TodooOutcomeType) => void;
-  onMessage: () => void;
+  onMessage?: () => void;
+  onOutcome?: (type: TodooOutcomeType) => void;
 }) {
-  const referrer = lead.custom_fields?.indicadora;
-  const interest = lead.custom_fields?.servico;
+  const kind = QUEUE_KINDS[item.kind];
+  const Icon = kind.icon;
+  const lead = item.kind === "task" ? null : item.lead;
+  const task = item.kind === "task" ? item.task : null;
+
+  const name = lead ? lead.contact_name : task?.contacts?.name || task?.title || "Tarefa";
+  const phone = lead ? lead.contact_phone : task?.contacts?.phone;
+  const contactId = lead ? lead.contact_id : task?.contact_id;
+  const referrer = lead?.custom_fields?.indicadora;
+  const interest = lead?.custom_fields?.servico;
+
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center gap-2 px-1 py-2">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-sm font-medium truncate">{lead.contact_name}</span>
-          <span className="text-[11px] text-muted-foreground shrink-0">{formatTodooPhone(lead.contact_phone)}</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
-          {lead.campaign?.title && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-              {lead.campaign.title}
-            </span>
+    <div className="flex flex-col gap-2 px-4 py-2.5 lg:flex-row lg:items-center lg:gap-4">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <span
+          className={cn(
+            "mt-0.5 inline-flex w-[104px] shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium",
+            kind.className,
           )}
-          {referrer && (
-            <span className="text-[10px] text-muted-foreground">
-              Indicada por <TodooReferrerLink name={referrer} contactId={lead.custom_fields?.indicadora_id} />
-            </span>
-          )}
-          {interest && <span className="text-[10px] text-muted-foreground">Interesse: {interest}</span>}
-          {detail}
+        >
+          <Icon className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{item.tag}</span>
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-sm font-medium">{name}</span>
+            {phone && <span className="shrink-0 text-[11px] text-muted-foreground">{formatTodooPhone(phone)}</span>}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+            <DueText item={item} />
+            {task && task.contacts?.name && <span className="truncate">{task.title}</span>}
+            {task?.description && <span className="max-w-[260px] truncate">{task.description}</span>}
+            {lead?.campaign?.title && <span>· {lead.campaign.title}</span>}
+            {referrer && (
+              <span>
+                · Indicada por <TodooReferrerLink name={referrer} contactId={lead?.custom_fields?.indicadora_id} />
+              </span>
+            )}
+            {interest && <span>· Interesse: {interest}</span>}
+          </div>
         </div>
       </div>
-      <div className="flex items-center gap-1 shrink-0">
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" title="Enviar mensagem" onClick={onMessage}>
-          <MessageSquare className="h-3.5 w-3.5 text-emerald-500" />
-          Mensagem
-        </Button>
-        <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={onDone} disabled={saving}>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-1 pl-[116px] lg:pl-0">
+        {(contactId || phone) && (
+          <ContactChatButton
+            contactId={contactId}
+            contactName={name}
+            phone={phone}
+            unitId={lead?.unit_id ?? task?.unit_id}
+            trigger={
+              <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" title="Abrir a conversa">
+                <MessageCircle className="h-3.5 w-3.5 text-primary" />
+                Conversa
+              </Button>
+            }
+          />
+        )}
+        {onMessage && (
+          <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs" title="Enviar mensagem" onClick={onMessage}>
+            <Send className="h-3.5 w-3.5 text-emerald-500" />
+            Mensagem
+          </Button>
+        )}
+        <Button size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={onDone} disabled={saving}>
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
           {doneLabel}
         </Button>
-        <Select value="" onValueChange={(v) => onOutcome(v as TodooOutcomeType)}>
-          <SelectTrigger className="h-7 w-[104px] text-xs">
-            <SelectValue placeholder="Desfecho" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="scheduled" className="text-xs">Agendou</SelectItem>
-            <SelectItem value="won" className="text-xs">Fechou</SelectItem>
-            <SelectItem value="quoted" className="text-xs">Orçamento</SelectItem>
-            <SelectItem value="callback" className="text-xs">Retornar</SelectItem>
-            <SelectItem value="lost" className="text-xs">Sem interesse</SelectItem>
-          </SelectContent>
-        </Select>
+        {onOutcome && (
+          <Select value="" onValueChange={(v) => onOutcome(v as TodooOutcomeType)}>
+            <SelectTrigger className="h-7 w-[104px] text-xs">
+              <SelectValue placeholder="Desfecho" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="scheduled" className="text-xs">Agendou</SelectItem>
+              <SelectItem value="won" className="text-xs">Fechou</SelectItem>
+              <SelectItem value="quoted" className="text-xs">Orçamento</SelectItem>
+              <SelectItem value="callback" className="text-xs">Retornar</SelectItem>
+              <SelectItem value="lost" className="text-xs">Sem interesse</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </div>
-    </div>
-  );
-}
-
-function TaskRow({
-  task,
-  dayStart,
-  saving,
-  onDone,
-}: {
-  task: CrmTask;
-  dayStart: string;
-  saving: boolean;
-  onDone: () => void;
-}) {
-  const late = !!task.due_date && task.due_date < dayStart;
-  return (
-    <div className="flex items-center gap-2.5 px-1 py-2">
-      {saving ? (
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
-      ) : (
-        <Checkbox checked={false} onCheckedChange={onDone} aria-label="Concluir tarefa" className="shrink-0" />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{task.title}</div>
-        <div className="flex flex-wrap items-center gap-x-2 text-[10px] text-muted-foreground">
-          {task.contacts?.name && <span>{task.contacts.name}</span>}
-          {task.due_date && (
-            <span className={cn(late && "text-destructive font-medium")}>
-              {late ? "Venceu " : "Vence "}
-              {format(new Date(task.due_date), "dd/MM 'às' HH:mm")}
-            </span>
-          )}
-          {task.description && <span className="truncate max-w-[220px]">{task.description}</span>}
-        </div>
-      </div>
-      {task.contact_id && (
-        <ContactChatButton contactId={task.contact_id} contactName={task.contacts?.name} phone={task.contacts?.phone} />
-      )}
     </div>
   );
 }
