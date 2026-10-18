@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { CalendarCheck, Flame, ListTodo, Trophy, BarChart3, UserPlus, Users } from "lucide-react";
+import { CalendarCheck, Flame, ListTodo, Trophy, BarChart3, Users } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 import { TodooDailyQueue } from "@/components/todoo/todoo-daily-queue";
@@ -12,7 +12,6 @@ import { getTodooTabs, type TodooTab } from "@/lib/permissions";
 import { TodooCampaignsList } from "@/components/todoo/todoo-campaigns-list";
 import { TodooGincana } from "@/components/todoo/todoo-gincana";
 import { TodooMetrics } from "@/components/todoo/todoo-metrics";
-import { TodooReferralsTab } from "@/components/todoo/todoo-referrals-tab";
 import { TodooCreateCampaignDialog } from "@/components/todoo/todoo-create-campaign-dialog";
 import { TodooCreateReferralDialog } from "@/components/todoo/todoo-create-referral-dialog";
 
@@ -26,7 +25,6 @@ const TABS: { value: string; perm: TodooTab; label: string; icon: typeof Flame; 
   { value: "my-day", perm: "my_day", label: "Meu Dia", icon: CalendarCheck, group: "operation" },
   { value: "queue", perm: "queue", label: "Quadro Comercial", icon: Flame, group: "operation" },
   { value: "team", perm: "team", label: "Painel da Equipe", icon: Users, group: "management" },
-  { value: "referrals", perm: "referrals", label: "Cadastros & Metas", icon: UserPlus, group: "management" },
   { value: "campaigns", perm: "campaigns", label: "Ações Comerciais", icon: ListTodo, group: "management" },
   { value: "gincana", perm: "gincana", label: "Gincana & Ranking", icon: Trophy, group: "management" },
   { value: "metrics", perm: "metrics", label: "Indicadores", icon: BarChart3, group: "management" },
@@ -98,7 +96,6 @@ function TodooPage() {
                 <TodooMyDay onCreateContactsClick={() => setCreateReferralOpen(true)} />
               )}
               {activeTab === "team" && can("team") && <TodooTeamPanel />}
-              {activeTab === "referrals" && can("referrals") && <TodooReferralsTab />}
               {activeTab === "campaigns" && can("campaigns") && (
                 <TodooCampaignsList onCreateClick={() => setCreateDialogOpen(true)} />
               )}
@@ -126,8 +123,7 @@ function TodooPage() {
           open={createReferralOpen}
           onOpenChange={setCreateReferralOpen}
           onSuccess={() => {
-            queryClient.invalidateQueries({ queryKey: ["todoo-referrals-list"] });
-            queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] });
+            queryClient.invalidateQueries({ queryKey: ["todoo-top-referrers"] });
             queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
             queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
           }}

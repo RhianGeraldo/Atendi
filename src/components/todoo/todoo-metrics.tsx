@@ -20,6 +20,7 @@ import { useUnit } from "@/lib/unit-context";
 import { todooRange, type TodooRangeKey } from "./todoo-period";
 import { TodooRangeTabs, TodooSectionHeader } from "./todoo-section-header";
 import { TodooCadenceFunnel } from "./todoo-cadence-funnel";
+import { TodooTopReferrers } from "./todoo-top-referrers";
 
 export function TodooMetrics() {
   const { activeCompanyId } = useActiveCompany();
@@ -242,6 +243,8 @@ export function TodooMetrics() {
           </div>
         </CardContent>
       </Card>
+
+      <TodooTopReferrers range={range} />
     </div>
   );
 }

@@ -565,7 +565,6 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
         onOpenChange={setGoalsOpen}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
-          queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] });
         }}
       />
 

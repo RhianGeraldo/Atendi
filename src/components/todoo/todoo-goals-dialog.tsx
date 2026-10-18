@@ -131,7 +131,6 @@ export function TodooGoalsDialog({ open, onOpenChange, onSuccess }: Props) {
       if (error) throw error;
 
       toast.success("Metas de cadastros salvas com sucesso!");
-      queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] });
       onOpenChange(false);
       onSuccess();
     } catch (err: any) {
