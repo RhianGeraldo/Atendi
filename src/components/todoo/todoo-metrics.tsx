@@ -21,6 +21,7 @@ import { todooRange, type TodooRangeKey } from "./todoo-period";
 import { TodooRangeTabs, TodooSectionHeader } from "./todoo-section-header";
 import { TodooCadenceFunnel } from "./todoo-cadence-funnel";
 import { TodooTopReferrers } from "./todoo-top-referrers";
+import { TodooDailyProgress } from "./todoo-daily-progress";
 
 export function TodooMetrics() {
   const { activeCompanyId } = useActiveCompany();
@@ -109,6 +110,7 @@ export function TodooMetrics() {
   return (
     <div className="space-y-6">
       {header}
+      <TodooDailyProgress range={range} />
       <TodooCadenceFunnel range={range} />
 
       {/* 4 Cards Principais com Fórmulas do Manual Todoo */}
