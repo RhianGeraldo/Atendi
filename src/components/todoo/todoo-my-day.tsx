@@ -645,12 +645,12 @@ function CaptureCard({
 type QueueKind = "callback" | "first" | "attempt" | "followup" | "task";
 
 type QueueItem =
-  | { kind: Exclude<QueueKind, "task">; lead: TodooLead; due: string | null; tag: string }
+  | { kind: Exclude<QueueKind, "task">; lead: TodooLead; due: string | null; tag: string; stage?: string }
   | { kind: "task"; task: CrmTask; due: string | null; tag: string };
 
 const QUEUE_KINDS: Record<QueueKind, { label: string; icon: typeof Clock; className: string }> = {
   callback: { label: "Retornos", icon: Clock, className: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  first: { label: "1ª tentativa", icon: Flame, className: "bg-blue-500/10 text-blue-700 dark:text-blue-400" },
+  first: { label: "A contatar", icon: Flame, className: "bg-blue-500/10 text-blue-700 dark:text-blue-400" },
   attempt: { label: "Tentativas", icon: Repeat, className: "bg-orange-500/10 text-orange-700 dark:text-orange-400" },
   followup: { label: "Follow-up", icon: MessageSquare, className: "bg-violet-500/10 text-violet-700 dark:text-violet-400" },
   task: { label: "Tarefas", icon: ClipboardList, className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
@@ -659,14 +659,15 @@ const QUEUE_ORDER: QueueKind[] = ["callback", "first", "attempt", "followup", "t
 
 /**
  * Tudo o que a pessoa tem para fazer hoje numa fila só, pela ordem do prazo
- * (atrasados primeiro). Cada item diz o motivo (retorno, tentativa, follow-up, tarefa).
+ * (atrasados primeiro). Na cadência a tag é a etapa em que o lead está; retorno e
+ * follow-up mostram a etapa ao lado do prazo.
  */
 function buildQueue(plan: DayPlan, stages: ReturnType<typeof useTodooPipeline>["stages"]): QueueItem[] {
   const followupDue = (lead: TodooLead) =>
     lead.last_interaction_at
       ? new Date(new Date(lead.last_interaction_at).getTime() + FOLLOWUP_AFTER_HOURS * 3600 * 1000).toISOString()
       : null;
-  const nextName = (lead: TodooLead) => nextTodooStage(resolveTodooLeadStage(lead, stages), stages)?.name;
+  const stageName = (lead: TodooLead) => resolveTodooLeadStage(lead, stages)?.name;
 
   const items: QueueItem[] = [
     ...plan.callbacks.map((lead) => ({
@@ -674,20 +675,27 @@ function buildQueue(plan: DayPlan, stages: ReturnType<typeof useTodooPipeline>["
       lead,
       due: lead.callback_scheduled_at,
       tag: "Retorno",
+      stage: stageName(lead),
     })),
     ...plan.toContact.map((lead) => ({
       kind: "first" as const,
       lead,
       due: lead.sla_deadline,
-      tag: nextName(lead) || "1ª tentativa",
+      tag: stageName(lead) || "A contatar",
     })),
     ...plan.attempts.map((lead) => ({
       kind: "attempt" as const,
       lead,
       due: lead.next_action_at,
-      tag: nextName(lead) || "Tentativa",
+      tag: stageName(lead) || "Tentativa",
     })),
-    ...plan.followups.map((lead) => ({ kind: "followup" as const, lead, due: followupDue(lead), tag: "Follow-up" })),
+    ...plan.followups.map((lead) => ({
+      kind: "followup" as const,
+      lead,
+      due: followupDue(lead),
+      tag: "Follow-up",
+      stage: stageName(lead),
+    })),
     ...plan.crmTasks.map((task) => ({ kind: "task" as const, task, due: task.due_date, tag: "Tarefa" })),
   ];
 
@@ -822,7 +830,7 @@ function QueueRow({
           )}
         >
           <Icon className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{item.tag}</span>
+          <span className="truncate" title={item.tag}>{item.tag}</span>
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2">
@@ -831,6 +839,7 @@ function QueueRow({
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
             <DueText item={item} />
+            {item.kind !== "task" && item.stage && <span>· Etapa: {item.stage}</span>}
             {task && task.contacts?.name && <span className="truncate">{task.title}</span>}
             {task?.description && <span className="max-w-[260px] truncate">{task.description}</span>}
             {lead?.campaign?.title && <span>· {lead.campaign.title}</span>}
