@@ -38,7 +38,6 @@ import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { TodooLead, TodooOutcomeType } from "@/types/todoo";
 import { TodooOutcomeDialog } from "./todoo-outcome-dialog";
 import { TodooGoalsDialog } from "./todoo-goals-dialog";
-import { TodooSectionHeader } from "./todoo-section-header";
 import { currentTodooMonth, formatTodooPhone, todooDayBounds } from "./todoo-period";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -406,25 +405,6 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
 
   return (
     <div className={cn("flex flex-col gap-5", !embedded && "lg:h-full lg:min-h-0")}>
-      {!embedded && (
-        <TodooSectionHeader
-          title="Meu Dia"
-          description={`${todayLabel.charAt(0).toUpperCase()}${todayLabel.slice(1)} · tarefas comerciais de hoje`}
-          actions={
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs gap-1.5"
-              onClick={() => refetch()}
-              disabled={isFetching}
-            >
-              <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
-              Atualizar
-            </Button>
-          }
-        />
-      )}
-
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -439,6 +419,10 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
           >
           <DayQueue
             fill={!embedded}
+            title={embedded ? "Fila de hoje" : "Meu Dia"}
+            dateLabel={embedded ? undefined : `${todayLabel.charAt(0).toUpperCase()}${todayLabel.slice(1)}`}
+            refreshing={isFetching}
+            onRefresh={() => refetch()}
             items={queue}
             renderRow={(item) => {
               if (item.kind === "task") {
@@ -708,11 +692,20 @@ function DayQueue({
   items,
   renderRow,
   fill,
+  title,
+  dateLabel,
+  refreshing,
+  onRefresh,
 }: {
   items: QueueItem[];
   renderRow: (item: QueueItem) => ReactNode;
   /** Ocupa a altura disponível e rola por dentro (tela do Meu Dia) */
   fill?: boolean;
+  title: string;
+  /** Data por extenso; no Painel da Equipe fica de fora */
+  dateLabel?: string;
+  refreshing: boolean;
+  onRefresh: () => void;
 }) {
   const [filter, setFilter] = useState<QueueKind | "all">("all");
   const counts = useMemo(() => {
@@ -744,16 +737,27 @@ function DayQueue({
     <Card className={cn("flex flex-col overflow-hidden", fill && "lg:min-h-0 lg:h-full")}>
       <div className="flex shrink-0 flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold">Fila de hoje</h3>
+          <h2 className="text-base font-semibold leading-tight">{title}</h2>
           <p className="text-[11px] text-muted-foreground">
-            Pela ordem do prazo{overdue > 0 ? ` · ${overdue} atrasado${overdue > 1 ? "s" : ""} no topo` : ""}
+            {dateLabel ? `${dateLabel} · ` : ""}tarefas comerciais de hoje pela ordem do prazo
+            {overdue > 0 ? ` · ${overdue} atrasado${overdue > 1 ? "s" : ""} no topo` : ""}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {chip("all", "Todos", items.length)}
           {QUEUE_ORDER.filter((kind) => counts[kind] > 0).map((kind) =>
             chip(kind, QUEUE_KINDS[kind].label, counts[kind]),
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            title="Atualizar"
+            onClick={onRefresh}
+            disabled={refreshing}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+          </Button>
         </div>
       </div>
 
