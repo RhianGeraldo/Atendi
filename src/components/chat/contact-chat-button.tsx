@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { 
@@ -68,6 +68,8 @@ export function ContactChatButton({
   const [resolvedPhone, setResolvedPhone] = useState<string>(phone || "");
   const [resolvedContactName, setResolvedContactName] = useState<string>(contactName || "");
   const [resolvedUnitId, setResolvedUnitId] = useState<string | null>(unitId || null);
+  // Ctrl/Cmd + clique ou clique do meio: abre a conversa em outra aba
+  const openInNewTabRef = useRef(false);
 
   const getTabForStatus = (status?: string): "waiting" | "active" | "resolved" => {
     if (status === "resolved") return "resolved";
@@ -76,6 +78,12 @@ export function ContactChatButton({
   };
 
   const executeNavigation = (convId: string, status?: string) => {
+    if (openInNewTabRef.current) {
+      const params = new URLSearchParams({ c: convId, tab: getTabForStatus(status) });
+      const tab = window.open(`/conversations?${params.toString()}`, "_blank");
+      if (tab) return;
+      // Navegador bloqueou a nova aba: segue na mesma
+    }
     if (onNavigate) onNavigate();
     if (onOpen) onOpen();
     navigate({
@@ -87,6 +95,7 @@ export function ContactChatButton({
   const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
+    openInNewTabRef.current = e.ctrlKey || e.metaKey || e.button === 1;
 
     if (!contactId && !phone && !conversationId) {
       toast.error("Contato sem número de telefone ou identificador.");
@@ -324,7 +333,12 @@ export function ContactChatButton({
     }
   };
 
-  const handleSelectInstance = (option: InstanceOption) => {
+  const handleAuxClick = (e: React.MouseEvent) => {
+    if (e.button === 1) handleClick(e);
+  };
+
+  const handleSelectInstance = (option: InstanceOption, e?: React.MouseEvent) => {
+    if (e && (e.ctrlKey || e.metaKey)) openInNewTabRef.current = true;
     const targetConv = option.conversation;
     setSelectorOpen(false);
     executeNavigation(targetConv.id, targetConv.status);
@@ -339,10 +353,11 @@ export function ContactChatButton({
             (trigger as any).props?.onClick?.(e);
             handleClick(e);
           },
+          onAuxClick: handleAuxClick,
           disabled: isLoading || (trigger as any).props?.disabled,
         })
       ) : trigger ? (
-        <span onClick={handleClick} className={className}>
+        <span onClick={handleClick} onAuxClick={handleAuxClick} className={className}>
           {trigger}
         </span>
       ) : (
@@ -351,6 +366,7 @@ export function ContactChatButton({
           size="icon"
           className={className || "h-7 w-7 rounded-full shadow-sm bg-background border hover:bg-primary hover:text-primary-foreground transition-colors"}
           onClick={handleClick}
+          onAuxClick={handleAuxClick}
           disabled={isLoading}
           title={tooltipText}
         >
@@ -384,7 +400,7 @@ export function ContactChatButton({
               return (
                 <div
                   key={opt.instanceId}
-                  onClick={() => handleSelectInstance(opt)}
+                  onClick={(e) => handleSelectInstance(opt, e)}
                   className="group flex flex-col p-3 rounded-xl border border-border/70 bg-card hover:border-primary hover:bg-primary/5 transition-all cursor-pointer shadow-xs"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -450,9 +466,7 @@ export function ContactChatButton({
         unitId={resolvedUnitId || unitId}
         onCreated={(id) => {
           setStartConvOpen(false);
-          if (onNavigate) onNavigate();
-          if (onOpen) onOpen();
-          navigate({ to: "/conversations", search: { c: id, tab: "active" } as any });
+          executeNavigation(id, "active");
         }}
       />
     </>
