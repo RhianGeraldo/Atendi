@@ -11,5 +11,13 @@ export async function fetchAllPages(build: () => any): Promise<{ data: any[]; er
     rows.push(...(data || []));
     if (!data || data.length < PAGE_SIZE) break;
   }
-  return { data: rows, error: null };
+  // Linha inserida ou apagada entre as páginas desloca as seguintes e pode repetir uma linha
+  const seen = new Set<unknown>();
+  const unique = rows.filter((row) => {
+    if (row?.id === undefined) return true;
+    if (seen.has(row.id)) return false;
+    seen.add(row.id);
+    return true;
+  });
+  return { data: unique, error: null };
 }

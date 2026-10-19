@@ -221,7 +221,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     if (selectedConsultantId !== "all") query = query.eq("assigned_user_id", selectedConsultantId);
 
     // Busca por nome ou telefone (vírgula e parênteses quebram o filtro "or" do PostgREST)
-    const term = debouncedSearch.replace(/[,()*%\\]/g, " ").trim();
+    const term = debouncedSearch.replace(/[,()*%\\"]/g, " ").trim();
     if (term) {
       const digits = term.replace(/\D/g, "");
       query = query.or(
@@ -283,7 +283,16 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     queries: stages.map((stage) => {
       const limit = stageLimits[stage.id] ?? BOARD_PAGE_SIZE;
       return {
-        queryKey: [...boardKey, stage.id, limit, statuses.map((st) => st.id).join(",")],
+        // Etapa e status entram na chave: mudar o tipo da etapa ou o comportamento de um
+        // status muda a contagem de atrasados
+        queryKey: [
+          ...boardKey,
+          stage.id,
+          stage.kind,
+          stage.id === stages[0]?.id,
+          limit,
+          statuses.map((st) => `${st.id}:${st.behavior}:${st.is_default ? 1 : 0}`).join(","),
+        ],
         enabled: !!activeCompanyId && !!profile?.id,
         placeholderData: keepPreviousData,
         queryFn: async () => {
@@ -433,6 +442,8 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
       // Só solta o card depois que todas as colunas recarregaram do banco
       await refetch();
       setMovedLeads((prev) => {
+        // Movido de novo enquanto recarregava: a posição nova é de outro movimento
+        if (prev[lead.id] !== target.id) return prev;
         const next = { ...prev };
         delete next[lead.id];
         return next;

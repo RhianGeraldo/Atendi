@@ -345,6 +345,18 @@ function PipelinePage() {
   useEffect(() => {
     if (!activeCompanyId) return;
 
+    // Várias mudanças seguidas (automação, arrastar) viram uma recarga só: sem isso cada
+    // evento cancelava a busca do funil inteiro em andamento e começava de novo
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const reloadOpportunities = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ["opportunities"] });
+        qc.invalidateQueries({ queryKey: ["target-opportunity-lookup"] });
+        qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
+      }, 800);
+    };
+
     const channelName = `pipeline-realtime-${activeCompanyId}`;
     const channel = supabase
       .channel(channelName)
@@ -355,11 +367,7 @@ function PipelinePage() {
           schema: "public",
           table: "opportunities",
         },
-        () => {
-          qc.invalidateQueries({ queryKey: ["opportunities"] });
-          qc.invalidateQueries({ queryKey: ["target-opportunity-lookup"] });
-          qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
-        },
+        reloadOpportunities,
       )
       .on(
         "postgres_changes",
@@ -370,12 +378,13 @@ function PipelinePage() {
         },
         () => {
           qc.invalidateQueries({ queryKey: ["pipeline-stages"] });
-          qc.invalidateQueries({ queryKey: ["opportunities"] });
+          reloadOpportunities();
         },
       )
       .subscribe();
 
     return () => {
+      if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };
   }, [activeCompanyId, qc]);
@@ -540,6 +549,8 @@ function PipelinePage() {
   const detailQueries = useQueries({
     queries: detailChunks.map((ids) => ({
       queryKey: ["opportunities", "details", ids.join(",")],
+      // Blocos mudam de chave quando a coluna muda: os antigos saem logo do cache
+      gcTime: 60_000,
       queryFn: async () => {
         const { data, error } = await supabase
           .from("opportunities")
@@ -574,7 +585,8 @@ function PipelinePage() {
   // Etapa e status vêm da versão leve, que é a que o arrastar atualiza na hora.
   const withDetails = (opp: OpportunityRow): OpportunityRow => {
     const full = detailsById.get(opp.id);
-    return full ? { ...full, stage_id: opp.stage_id, status: opp.status } : opp;
+    // Campos da lista leve (mais nova) por cima; do bloco só vêm tarefas, notas, responsável e unidade
+    return full ? { ...full, ...opp } : opp;
   };
 
   // Oportunidade aberta pelo link fora da primeira página da coluna: abre a coluna até ela
