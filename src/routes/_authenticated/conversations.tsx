@@ -15,6 +15,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { cn } from "@/lib/utils";
 import { useUnit } from "@/lib/unit-context";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import {
   DropdownMenu,
@@ -633,10 +634,14 @@ function ConversationsPage() {
         selectString = selectString.replace("contact:contacts(", "contact:contacts!inner(");
       }
 
+      // A empresa passa de 1.000 conversas (limite por consulta do banco): sem as páginas, só
+      // as mais recentes eram contadas e as antigas em Aguardando ficavam fora do número da aba
+      const build = () => {
       let query = supabase
         .from("conversations")
         .select(selectString)
-        .order("last_message_at", { ascending: false });
+        .order("last_message_at", { ascending: false })
+        .order("id", { ascending: false });
 
       if (activeCompanyId) {
         query = query.eq("contact.company_id", activeCompanyId);
@@ -675,6 +680,8 @@ function ConversationsPage() {
           foreignTable: "contact",
         });
       }
+      return query;
+      };
 
       const counts = {
         waiting: { total: 0, unread: 0 },
@@ -684,7 +691,7 @@ function ConversationsPage() {
       };
 
       try {
-        const { data, error } = await query;
+        const { data, error } = await fetchAllPages(build);
         if (error) {
           console.warn("[Conversations] unread-counts query warning:", error);
           const cached = qc.getQueryData<typeof counts>([
