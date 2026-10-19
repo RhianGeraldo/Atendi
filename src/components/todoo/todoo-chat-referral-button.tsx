@@ -9,6 +9,10 @@ import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import { formatTodooPhone } from "./todoo-period";
 
+// Cartão recente: quem virou contato depois dele ainda pode ser indicação. Cartão antigo:
+// vale quem é contato hoje (quem chegou sozinha nesse meio tempo não conta como indicação)
+const RECENT_CARD_MS = 7 * 24 * 60 * 60 * 1000;
+
 const formatShortDate = (iso: string) =>
   new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
 
@@ -51,11 +55,13 @@ export function TodooChatReferralButton({ contact, referrer, receivedAt, mine }:
   const digits = (contact.waid || contact.phone || "").replace(/\D/g, "");
   const variants = phoneVariants(digits);
   const isSelf = phoneVariants(referrer.phone).some((v) => variants.includes(v));
+  const before =
+    receivedAt && Date.now() - new Date(receivedAt).getTime() <= RECENT_CARD_MS ? receivedAt : null;
 
   // O que já existe com esse número: indicação (de qualquer cliente), card aberto no Todoo
   // e contato na base (o banco responde por todas as unidades, sem revelar qual)
   const { data: status, isLoading, isError, refetch } = useQuery({
-    queryKey: ["todoo-chat-referral", activeCompanyId, digits, receivedAt],
+    queryKey: ["todoo-chat-referral", activeCompanyId, digits, before],
     enabled: !!activeCompanyId && variants.length > 0 && !isSelf,
     queryFn: async () => {
       const [referrals, leads, isContact] = await Promise.all([
@@ -76,7 +82,7 @@ export function TodooChatReferralButton({ contact, referrer, receivedAt, mine }:
           p_company_id: activeCompanyId,
           p_phone: digits,
           // Contato criado depois do cartão (conversa iniciada, mensagem dela) não conta
-          p_before: receivedAt ?? null,
+          p_before: before,
         }),
       ]);
       if (referrals.error) throw referrals.error;
@@ -112,7 +118,7 @@ export function TodooChatReferralButton({ contact, referrer, receivedAt, mine }:
         p_unit_id: referrer.unitId,
         p_name: name,
         p_phone: digits,
-        p_before: receivedAt ?? null,
+        p_before: before,
       });
       if (error) throw error;
       if (data?.already_contact) {
