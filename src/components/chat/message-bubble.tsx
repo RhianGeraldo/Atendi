@@ -37,6 +37,10 @@ import {
 import { LinkPreview } from "@/components/chat/link-preview";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import type { MessageRow } from "./conversation-types";
+import {
+  TodooChatReferralButton,
+  type TodooChatReferrer,
+} from "@/components/todoo/todoo-chat-referral-button";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -195,6 +199,8 @@ interface MessageBubbleProps {
   onDelete?: (m: MessageRow) => void;
   onTranscribe?: (id: string) => void;
   isTranscribingId?: string | null;
+  /** Cliente da conversa: com ele, contato recebido ganha o botão "+ Indicação" do Todoo */
+  todooReferrer?: TodooChatReferrer | null;
 }
 
 export function MessageBubble({
@@ -206,6 +212,7 @@ export function MessageBubble({
   onDelete,
   onTranscribe,
   isTranscribingId,
+  todooReferrer,
 }: MessageBubbleProps) {
   const [showMobileActions, setShowMobileActions] = useState(false);
 
@@ -817,6 +824,9 @@ export function MessageBubble({
                           </Button>
                         }
                       />
+                      {todooReferrer && !mine && (
+                        <TodooChatReferralButton contact={contact} referrer={todooReferrer} />
+                      )}
                     </div>
                   )}
                 </div>

@@ -1185,6 +1185,11 @@ export function ChatPanel({
   });
 
   const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith("120363") || (conv.contact.phone.includes("-") && conv.contact.phone.length > 18)));
+  // Contato recebido nesta conversa vira indicação da cliente no Todoo ("+ Indicação")
+  const todooReferrer =
+    !isGroup && conv.contact?.id && canAccessMenu("todoo", profile)
+      ? { contactId: conv.contact.id, phone: conv.contact.phone, unitId: conv.unit_id || null }
+      : null;
   const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
   // Detecção da Janela de 24 horas da Meta WhatsApp
@@ -1540,6 +1545,7 @@ export function ChatPanel({
                       onDelete={(msg) => deleteMsg.mutate(msg.id)}
                       onTranscribe={(id) => transcribeAudio.mutate(id)}
                       isTranscribingId={transcribeAudio.isPending ? transcribeAudio.variables : null}
+                      todooReferrer={todooReferrer}
                     />
                     ))}
                   </div>
