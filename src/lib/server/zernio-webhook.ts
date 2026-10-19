@@ -75,27 +75,19 @@ export async function handleZernioWebhook(request: Request): Promise<Response> {
     });
   }
 
-  // Se não localizou a empresa pelas chaves, tenta encontrar pela instância informada no corpo
+  // Sem empresa pela URL (/zernio/:companyId?k=) o evento é descartado. Antes a empresa era
+  // procurada pelo accountId do corpo, mas aí a porta já tinha passado sem segredo: qualquer um
+  // com a URL podia inserir mensagens falsas numa conta real. Os webhooks que nós registramos
+  // na Zernio sempre trazem a empresa e o ?k= na URL.
   if (!company) {
-    const accId = body.account?.accountId || body.account?.id;
-    if (accId) {
-      const { data: inst } = await supabaseAdmin
-        .from("whatsapp_instances")
-        .select("company_id")
-        .eq("zernio_account_id", String(accId))
-        .limit(1)
-        .maybeSingle();
-
-      if (inst?.company_id) {
-        companyId = inst.company_id;
-        const { data: compData } = await supabaseAdmin
-          .from("companies")
-          .select("id, zernio_api_key, zernio_base_url, zernio_webhook_secret, zernio_signature_secret")
-          .eq("id", companyId)
-          .single();
-        company = compData;
-      }
-    }
+    const accId = body?.account?.accountId || body?.account?.id || body?.accountId || null;
+    console.warn(
+      `[zernio:webhook] Evento descartado: empresa não identificada pela URL (accountId: ${accId}, rota: ${url.pathname})`,
+    );
+    return new Response(JSON.stringify({ ok: true, note: "unknown_company_ignored" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   // 3. RETORNAR 200 IMEDIATO (§7.2, §7.3)
@@ -208,7 +200,17 @@ async function processarMensagem(
     .maybeSingle();
 
   if (instErr || !instance) {
-    console.warn(`[zernio:webhook] Instância não encontrada para accountId: ${evento.accountId}`);
+    console.warn(
+      `[zernio:webhook] Instância não encontrada para accountId: ${evento.accountId} (empresa da URL: ${company?.id ?? "?"}, rede: ${evento.rede}, remetente: ${evento.remetente?.username || evento.remetente?.identificador || "?"})`,
+    );
+    return;
+  }
+
+  // A conta tem que ser da empresa da URL: o ?k= de uma empresa não vale para a conta de outra
+  if (company?.id && instance.company_id !== company.id) {
+    console.warn(
+      `[zernio:webhook] accountId ${evento.accountId} é de outra empresa (URL: ${company.id}); evento descartado`,
+    );
     return;
   }
 
