@@ -356,12 +356,6 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     );
   }, [columnQueries, movedLeads]);
 
-  // Coluna recarregada do banco: o card movido já está no lugar certo
-  const columnsUpdatedAt = columnQueries.map((q) => q.dataUpdatedAt).join(",");
-  useEffect(() => {
-    setMovedLeads((prev) => (Object.keys(prev).length ? {} : prev));
-  }, [columnsUpdatedAt]);
-
   // A unidade vem do contexto da barra lateral e não é filtro do quadro
   const hasActiveFilters = selectedCampaignId !== "all" || selectedConsultantId !== "all";
 
@@ -435,8 +429,14 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     } catch (err: any) {
       toast.error("Erro ao mover lead: " + err.message);
     } finally {
-      refetch();
       queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
+      // Só solta o card depois que todas as colunas recarregaram do banco
+      await refetch();
+      setMovedLeads((prev) => {
+        const next = { ...prev };
+        delete next[lead.id];
+        return next;
+      });
     }
   };
 

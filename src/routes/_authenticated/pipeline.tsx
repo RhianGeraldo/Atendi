@@ -560,8 +560,12 @@ function PipelinePage() {
     })),
   });
 
+  // Cards completos já buscados ficam guardados: quando a coluna muda (card arrastado,
+  // oportunidade nova no topo) os blocos mudam de chave, e o card mantém a versão anterior
+  // até o bloco novo chegar, em vez de piscar sem tarefas e responsável
+  const detailsCacheRef = useRef(new Map<string, OpportunityRow>());
   const detailsById = useMemo(() => {
-    const map = new Map<string, OpportunityRow>();
+    const map = detailsCacheRef.current;
     for (const q of detailQueries) for (const opp of q.data || []) map.set(opp.id, opp);
     return map;
   }, [detailQueries]);

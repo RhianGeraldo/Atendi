@@ -157,17 +157,27 @@ export function useTodooPipeline() {
 // de uma empresa nova), no máximo a cada 5 min por empresa nesta aba.
 const REFRESH_EVERY_MS = 5 * 60 * 1000;
 const lastRefresh = new Map<string, number>();
+const inFlight = new Map<string, Promise<void>>();
 
 /** Roda a rotina da cadência (quarentena vencida e atrasos) antes de carregar os leads. */
-export async function refreshTodooCadence(companyId: string) {
+export function refreshTodooCadence(companyId: string): Promise<void> {
+  // As colunas do quadro chamam juntas: todas esperam a mesma chamada
+  const running = inFlight.get(companyId);
+  if (running) return running;
   const last = lastRefresh.get(companyId);
-  if (last && Date.now() - last < REFRESH_EVERY_MS) return;
+  if (last && Date.now() - last < REFRESH_EVERY_MS) return Promise.resolve();
   lastRefresh.set(companyId, Date.now());
-  const { error } = await (supabase.rpc as any)("todoo_refresh_cadence", { p_company_id: companyId });
-  if (error) {
-    lastRefresh.delete(companyId);
-    console.warn("[todoo] refresh cadence:", error.message);
-  }
+  const promise = (async () => {
+    const { error } = await (supabase.rpc as any)("todoo_refresh_cadence", {
+      p_company_id: companyId,
+    });
+    if (error) {
+      lastRefresh.delete(companyId);
+      console.warn("[todoo] refresh cadence:", error.message);
+    }
+  })().finally(() => inFlight.delete(companyId));
+  inFlight.set(companyId, promise);
+  return promise;
 }
 
 /** Minutos em texto: "48h", "7 dias", "15 dias". */
