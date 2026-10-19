@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -41,6 +41,7 @@ import { TodooGoalsDialog } from "./todoo-goals-dialog";
 import { currentTodooMonth, formatTodooPhone, todooDayBounds } from "./todoo-period";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 import { TodooReferrerLink } from "./todoo-referrer-link";
 import { TodooSendMessageDialog } from "./todoo-send-message-dialog";
 import {
@@ -111,7 +112,13 @@ export function useTodooDayData() {
     profile?.role === "super_admin" ||
     profile?.role === "manager" ||
     canAccessTodooTab("team", profile);
-  // Recalcula a cada render: com a aba aberta depois da meia-noite, o dia muda junto
+  // Redesenha a cada minuto: o que passou do horário vai para Atrasados e, depois da
+  // meia-noite, o dia muda junto (bounds é recalculado a cada render)
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const bounds = todooDayBounds();
   const month = currentTodooMonth();
   const { stages, statuses } = useTodooPipeline();
@@ -133,36 +140,45 @@ export function useTodooDayData() {
       const unitFilter =
         isManagerOrAdmin && selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null;
 
-      let leadsQuery = (supabase.from("todoo_leads") as any)
-        .select(
-          `
+      // Gestoras carregam a empresa toda: as listas passam de 1.000 linhas, então vêm em páginas
+      const buildLeads = () => {
+        let leadsQuery = (supabase.from("todoo_leads") as any)
+          .select(
+            `
           *,
           campaign:todoo_campaigns!inner(id, title, type, status, message_template, offer_details, sla_hours),
           unit:units(id, name, color)
         `,
-        )
-        .eq("company_id", activeCompanyId)
-        // Ação pausada ou concluída sai da fila até ser retomada
-        .eq("campaign.status", "active")
-        .or(
-          `status.in.(pending,contacted,quoted,callback),last_interaction_at.gte.${bounds.dayStart}`,
-        )
-        .order("sla_deadline", { ascending: true, nullsFirst: false });
-      if (onlyMine) leadsQuery = leadsQuery.eq("assigned_user_id", profile!.id);
-      if (unitFilter) leadsQuery = leadsQuery.eq("unit_id", unitFilter);
+          )
+          .eq("company_id", activeCompanyId)
+          // Ação pausada ou concluída sai da fila até ser retomada
+          .eq("campaign.status", "active")
+          .or(
+            `status.in.(pending,contacted,quoted,callback),last_interaction_at.gte.${bounds.dayStart}`,
+          )
+          .order("sla_deadline", { ascending: true, nullsFirst: false })
+          .order("id", { ascending: true });
+        if (onlyMine) leadsQuery = leadsQuery.eq("assigned_user_id", profile!.id);
+        if (unitFilter) leadsQuery = leadsQuery.eq("unit_id", unitFilter);
+        return leadsQuery;
+      };
 
       // Tarefas do CRM vencidas ou para hoje (as de retorno do Todoo já aparecem como lead)
-      let tasksQuery = (supabase.from("tasks") as any)
-        .select(
-          "id, title, description, due_date, contact_id, assigned_to, unit_id, contacts(name, phone)",
-        )
-        .eq("company_id", activeCompanyId)
-        .eq("status", "pending")
-        .lt("due_date", bounds.dayEnd)
-        .not("title", "ilike", "[Todoo]%")
-        .order("due_date", { ascending: true });
-      if (onlyMine) tasksQuery = tasksQuery.eq("assigned_to", profile!.id);
-      if (unitFilter) tasksQuery = tasksQuery.eq("unit_id", unitFilter);
+      const buildTasks = () => {
+        let tasksQuery = (supabase.from("tasks") as any)
+          .select(
+            "id, title, description, due_date, contact_id, assigned_to, unit_id, contacts(name, phone)",
+          )
+          .eq("company_id", activeCompanyId)
+          .eq("status", "pending")
+          .lt("due_date", bounds.dayEnd)
+          .not("title", "ilike", "[Todoo]%")
+          .order("due_date", { ascending: true })
+          .order("id", { ascending: true });
+        if (onlyMine) tasksQuery = tasksQuery.eq("assigned_to", profile!.id);
+        if (unitFilter) tasksQuery = tasksQuery.eq("unit_id", unitFilter);
+        return tasksQuery;
+      };
 
       let goalsQuery = (supabase.from("todoo_goals") as any)
         .select("user_id, target_contacts, contacts_period")
@@ -171,17 +187,22 @@ export function useTodooDayData() {
         .gt("target_contacts", 0);
       if (onlyMine) goalsQuery = goalsQuery.eq("user_id", profile!.id);
 
-      let capturesQuery = (supabase.from("todoo_referrals") as any)
-        .select("captured_by_user_id, created_at")
-        .eq("company_id", activeCompanyId)
-        .gte("created_at", bounds.monthStart);
-      if (onlyMine) capturesQuery = capturesQuery.eq("captured_by_user_id", profile!.id);
+      const buildCaptures = () => {
+        let capturesQuery = (supabase.from("todoo_referrals") as any)
+          .select("captured_by_user_id, created_at")
+          .eq("company_id", activeCompanyId)
+          .gte("created_at", bounds.monthStart)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true });
+        if (onlyMine) capturesQuery = capturesQuery.eq("captured_by_user_id", profile!.id);
+        return capturesQuery;
+      };
 
       const [leadsRes, tasksRes, goalsRes, capturesRes] = await Promise.all([
-        leadsQuery,
-        tasksQuery,
+        fetchAllPages(buildLeads),
+        fetchAllPages(buildTasks),
         goalsQuery,
-        capturesQuery,
+        fetchAllPages(buildCaptures),
       ]);
       if (leadsRes.error) throw leadsRes.error;
       if (tasksRes.error) throw tasksRes.error;
@@ -277,7 +298,7 @@ export function useTodooDayData() {
       callbacks.filter(
         (l) => l.callback_scheduled_at && new Date(l.callback_scheduled_at).getTime() < now,
       ).length +
-      crmTasks.filter((t) => t.due_date && t.due_date < bounds.dayStart).length;
+      crmTasks.filter((t) => t.due_date && new Date(t.due_date).getTime() < now).length;
 
     const captureRemaining = Math.max(0, captureTarget - captureDone);
     const pending =
@@ -827,7 +848,10 @@ function DayQueue({
     for (const item of items) c[item.kind] += 1;
     return c;
   }, [items]);
-  const filtered = filter === "all" ? items : items.filter((item) => item.kind === filter);
+  // Tipo filtrado que acabou (último item concluído) volta para Todos
+  const activeFilter = filter !== "all" && counts[filter] === 0 ? "all" : filter;
+  const filtered =
+    activeFilter === "all" ? items : items.filter((item) => item.kind === activeFilter);
   const overdue = items.filter(isLate).length;
   // Atrasados primeiro, depois o que vence hoje (a fila já vem pela ordem do prazo)
   const sections = [
@@ -842,7 +866,7 @@ function DayQueue({
       onClick={() => setFilter(value)}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
-        filter === value
+        activeFilter === value
           ? "border-primary bg-primary text-primary-foreground"
           : "bg-card text-muted-foreground hover:bg-muted",
       )}
