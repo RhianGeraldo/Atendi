@@ -193,30 +193,28 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
     );
   }
 
+  // Já é contato da base: não é indicação nova, só avisa
   const base = status?.baseContact;
+  if (base) {
+    return chip(
+      `Já é contato desde ${formatShortDate(base.created_at)}${base.unit?.name ? ` · ${base.unit.name}` : ""}${base.source ? ` · ${base.source}` : ""}`,
+    );
+  }
+
   return (
-    <div className="flex flex-col items-start gap-1">
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={saving}
-        onClick={save}
-        className={cn("h-6 text-[10px] px-2 w-fit", tone)}
-      >
-        {saving ? (
-          <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-        ) : (
-          <Gift className="h-3 w-3 mr-1.5" />
-        )}
-        + Indicação
-      </Button>
-      {base && (
-        <span className="text-[10px] leading-tight opacity-70">
-          Já é contato desde {formatShortDate(base.created_at)}
-          {base.unit?.name ? ` · ${base.unit.name}` : ""}
-          {base.source ? ` · ${base.source}` : ""}
-        </span>
+    <Button
+      size="sm"
+      variant="secondary"
+      disabled={saving}
+      onClick={save}
+      className={cn("h-6 text-[10px] px-2 w-fit", tone)}
+    >
+      {saving ? (
+        <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+      ) : (
+        <Gift className="h-3 w-3 mr-1.5" />
       )}
-    </div>
+      + Indicação
+    </Button>
   );
 }
