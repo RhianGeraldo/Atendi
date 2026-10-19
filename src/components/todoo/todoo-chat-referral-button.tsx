@@ -53,7 +53,7 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
   // O que já existe com esse número: indicação (de qualquer cliente), card aberto no Todoo
   // e contato na base. O nome do cartão é o da agenda de quem enviou ("E&L - Patrícia"),
   // o da base é o limpo.
-  const { data: status, isLoading } = useQuery({
+  const { data: status, isLoading, isError, refetch } = useQuery({
     queryKey: ["todoo-chat-referral", activeCompanyId, digits],
     enabled: !!activeCompanyId && variants.length > 0 && !isSelf,
     queryFn: async () => {
@@ -72,15 +72,17 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
           .order("created_at", { ascending: false })
           .limit(1),
         (supabase.from("contacts") as any)
-          .select("name")
+          .select("name, merged_into_id")
           .eq("company_id", activeCompanyId)
-          .is("merged_into_id", null)
           .in("phone", variants)
+          // Contato mesclado também conta como "já é contato"; o principal vem primeiro
+          .order("merged_into_id", { ascending: true, nullsFirst: true })
           .order("created_at", { ascending: true })
           .limit(1),
       ]);
       if (referrals.error) throw referrals.error;
       if (leads.error) throw leads.error;
+      if (contacts.error) throw contacts.error;
       return {
         referral: (referrals.data?.[0] ?? null) as {
           referrer_name: string | null;
@@ -165,6 +167,19 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
 
   if (isLoading) {
     return <Loader2 className="h-3 w-3 animate-spin opacity-60" />;
+  }
+
+  // Sem a checagem não dá para saber se já é contato: não oferece o botão às cegas
+  if (isError) {
+    return (
+      <button
+        type="button"
+        onClick={() => refetch()}
+        className="text-[10px] underline opacity-60 hover:opacity-100"
+      >
+        Não foi possível verificar o contato. Tentar de novo
+      </button>
+    );
   }
 
   // Já indicada: o primeiro que salvou fica com a indicação; os próximos só veem o aviso
