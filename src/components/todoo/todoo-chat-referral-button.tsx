@@ -72,7 +72,7 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
           .order("created_at", { ascending: false })
           .limit(1),
         (supabase.from("contacts") as any)
-          .select("name, created_at, source, unit:units(name)")
+          .select("name")
           .eq("company_id", activeCompanyId)
           .is("merged_into_id", null)
           .in("phone", variants)
@@ -93,12 +93,7 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
           assigned_user: { name: string | null } | null;
         } | null,
         // Contato de outra unidade pode não aparecer (permissão); aí só não mostra o aviso
-        baseContact: (contacts.data?.[0] ?? null) as {
-          name: string | null;
-          created_at: string;
-          source: string | null;
-          unit: { name: string | null } | null;
-        } | null,
+        baseContact: (contacts.data?.[0] ?? null) as { name: string | null } | null,
       };
     },
   });
@@ -196,9 +191,7 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
   // Já é contato da base: não é indicação nova, só avisa
   const base = status?.baseContact;
   if (base) {
-    return chip(
-      `Já é contato desde ${formatShortDate(base.created_at)}${base.unit?.name ? ` · ${base.unit.name}` : ""}${base.source ? ` · ${base.source}` : ""}`,
-    );
+    return chip("Já é contato");
   }
 
   return (
