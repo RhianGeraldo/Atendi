@@ -86,7 +86,19 @@ export function TodooDailyProgress({ range }: { range: TodooRangeKey }) {
             "created_at",
           ),
         ),
-        leadsBy("first_attempt_at"),
+        // 1º contato como nos Indicadores (todoo_metrics): o primeiro entre contato, tentativa
+        // e resposta. Lead fechado direto de "A contatar" não tem first_attempt_at.
+        fetchAllPages(() => {
+          let q = (supabase.from("todoo_leads") as any)
+            .select("id, first_contact_at, first_attempt_at, responded_at")
+            .eq("company_id", activeCompanyId)
+            .or(
+              `first_contact_at.gte.${from},first_attempt_at.gte.${from},responded_at.gte.${from}`,
+            )
+            .order("id", { ascending: true });
+          if (selectedUnitId) q = q.eq("unit_id", selectedUnitId);
+          return q;
+        }),
         leadsBy("scheduled_at"),
         leadsBy("won_at"),
         (supabase.from("todoo_goals") as any)
@@ -114,7 +126,19 @@ export function TodooDailyProgress({ range }: { range: TodooRangeKey }) {
         }
       };
       count(capturesRes.data, "created_at", "captures");
-      count(contactsRes.data, "first_attempt_at", "contacts");
+      // Conta pelo primeiro dos três; quem teve o 1º contato antes do período fica de fora
+      count(
+        contactsRes.data
+          .map((r: any) => ({
+            at: r.first_contact_at || r.first_attempt_at || r.responded_at,
+          }))
+          .filter((r: { at: string }) => {
+            const t = new Date(r.at).getTime();
+            return t >= new Date(from!).getTime() && (!to || t < new Date(to).getTime());
+          }),
+        "at",
+        "contacts",
+      );
       count(scheduledRes.data, "scheduled_at", "scheduled");
       count(wonRes.data, "won_at", "won");
 
