@@ -1,5 +1,8 @@
 -- Migration: Módulo de Indicações (Member-Get-Member / Pedir Indique) e Metas de Cadastro de Contatos do Todoo
 
+SET lock_timeout = '3s';
+SET statement_timeout = '30s';
+
 -- 1. Tabela de Indicações (todoo_referrals)
 CREATE TABLE IF NOT EXISTS public.todoo_referrals (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -58,6 +61,15 @@ CREATE INDEX IF NOT EXISTS idx_todoo_goals_user ON public.todoo_goals(user_id);
 ALTER TABLE public.todoo_referrals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.todoo_goals ENABLE ROW LEVEL SECURITY;
 
+-- Proteção contra reexecução: as policies abaixo são as originais (com has_matriz_access,
+-- sem unidade) e foram substituídas em 20261014230000_todoo_units.sql. Só são criadas
+-- num banco novo, onde a tabela ainda não tem nenhuma policy.
+DO $guard$
+BEGIN
+IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'todoo_referrals') THEN
+  RETURN;
+END IF;
+
 CREATE POLICY "todoo_referrals_select" ON public.todoo_referrals
     FOR SELECT USING (
         company_id = public.current_company_id() 
@@ -113,3 +125,6 @@ CREATE POLICY "todoo_goals_delete" ON public.todoo_goals
         OR public.has_matriz_access()
         OR (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'super_admin'
     );
+
+END
+$guard$;

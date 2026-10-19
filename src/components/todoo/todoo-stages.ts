@@ -45,8 +45,8 @@ export const TODOO_CARD_BEHAVIORS: Record<
   active: { label: "Cadência segue", hint: "As tentativas continuam sendo cobradas", icon: Circle },
   paused: { label: "Pausa a cadência", hint: "O contato respondeu", icon: PauseCircle },
   scheduled: { label: "Agendou", hint: "Para a cadência e conta agendamento", icon: CalendarCheck, outcome: "scheduled" },
-  won: { label: "Comprou", hint: "Para a cadência e pede o valor", icon: CheckCircle2, outcome: "won" },
-  lost: { label: "Perdido", hint: "Vai para Sem sucesso (quarentena)", icon: XCircle, outcome: "lost" },
+  won: { label: "Fechou", hint: "Para a cadência e pede o valor", icon: CheckCircle2, outcome: "won" },
+  lost: { label: "Sem interesse", hint: "Vai para Sem sucesso (quarentena)", icon: XCircle, outcome: "lost" },
 };
 
 export const TODOO_CARD_BEHAVIOR_ORDER: TodooCardBehavior[] = ["active", "paused", "scheduled", "won", "lost"];
@@ -153,10 +153,31 @@ export function useTodooPipeline() {
   };
 }
 
+// O cron do servidor roda a cadência a cada 15 min; a tela só complementa (e cria o funil
+// de uma empresa nova), no máximo a cada 5 min por empresa nesta aba.
+const REFRESH_EVERY_MS = 5 * 60 * 1000;
+const lastRefresh = new Map<string, number>();
+const inFlight = new Map<string, Promise<void>>();
+
 /** Roda a rotina da cadência (quarentena vencida e atrasos) antes de carregar os leads. */
-export async function refreshTodooCadence(companyId: string) {
-  const { error } = await (supabase.rpc as any)("todoo_refresh_cadence", { p_company_id: companyId });
-  if (error) console.warn("[todoo] refresh cadence:", error.message);
+export function refreshTodooCadence(companyId: string): Promise<void> {
+  // As colunas do quadro chamam juntas: todas esperam a mesma chamada
+  const running = inFlight.get(companyId);
+  if (running) return running;
+  const last = lastRefresh.get(companyId);
+  if (last && Date.now() - last < REFRESH_EVERY_MS) return Promise.resolve();
+  lastRefresh.set(companyId, Date.now());
+  const promise = (async () => {
+    const { error } = await (supabase.rpc as any)("todoo_refresh_cadence", {
+      p_company_id: companyId,
+    });
+    if (error) {
+      lastRefresh.delete(companyId);
+      console.warn("[todoo] refresh cadence:", error.message);
+    }
+  })().finally(() => inFlight.delete(companyId));
+  inFlight.set(companyId, promise);
+  return promise;
 }
 
 /** Minutos em texto: "48h", "7 dias", "15 dias". */
@@ -166,3 +187,5 @@ export function formatWait(minutes: number | null | undefined) {
   if (minutes % 60 === 0) return `${minutes / 60}h`;
   return `${minutes} min`;
 }
+
+export { fetchAllPages } from "@/lib/fetch-all-pages";

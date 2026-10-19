@@ -156,7 +156,7 @@ export function TodooConversationBanner({ conv }: Props) {
           className="text-[11px] font-medium py-0 px-1.5 gap-1 border-primary/30 text-primary bg-primary/5 shrink-0"
         >
           <Target className="h-3 w-3 text-primary" />
-          <span>{todooLead.campaign?.title || "Campanha Todoo"}</span>
+          <span>{todooLead.campaign?.title || "Ação Comercial"}</span>
         </Badge>
 
         {todooLead.campaign?.offer_details && (
@@ -190,7 +190,7 @@ export function TodooConversationBanner({ conv }: Props) {
             <div className="flex items-center justify-between pb-1.5 border-b border-border">
               <span className="font-semibold text-foreground flex items-center gap-1.5 text-xs">
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
-                Script da Campanha
+                Script da Ação
               </span>
               <Badge variant="secondary" className="text-[10px] font-normal">
                 {todooLead.campaign?.title}
@@ -256,7 +256,7 @@ export function TodooConversationBanner({ conv }: Props) {
               onClick={() => handleOpenOutcome("won")}
             >
               <DollarSign className="h-4 w-4" />
-              <span>Fechou Venda! 🎉</span>
+              <span>Fechou 🎉</span>
             </DropdownMenuItem>
 
             <DropdownMenuItem
@@ -264,7 +264,7 @@ export function TodooConversationBanner({ conv }: Props) {
               onClick={() => handleOpenOutcome("scheduled")}
             >
               <Calendar className="h-4 w-4 text-blue-500" />
-              <span>Agendou Visita 📅</span>
+              <span>Agendou 📅</span>
             </DropdownMenuItem>
 
             <DropdownMenuItem
@@ -272,7 +272,7 @@ export function TodooConversationBanner({ conv }: Props) {
               onClick={() => handleOpenOutcome("quoted")}
             >
               <TrendingUp className="h-4 w-4 text-indigo-500" />
-              <span>Em Negociação 💬</span>
+              <span>Orçamento 💬</span>
             </DropdownMenuItem>
 
             <DropdownMenuItem
@@ -280,7 +280,7 @@ export function TodooConversationBanner({ conv }: Props) {
               onClick={() => handleOpenOutcome("callback")}
             >
               <Clock className="h-4 w-4 text-amber-500" />
-              <span>Agendar Retorno ⏰</span>
+              <span>Retornar ⏰</span>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
@@ -290,7 +290,7 @@ export function TodooConversationBanner({ conv }: Props) {
               onClick={() => handleOpenOutcome("lost")}
             >
               <XCircle className="h-4 w-4" />
-              <span>Não Teve Interesse ❌</span>
+              <span>Sem interesse ❌</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -301,10 +301,11 @@ export function TodooConversationBanner({ conv }: Props) {
         lead={todooLead}
         open={outcomeDialogOpen}
         onOpenChange={setOutcomeDialogOpen}
+        initialType={outcomeType}
         onSuccess={() => {
           refetchLead();
-          queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
-          queryClient.invalidateQueries({ queryKey: ["todoo-metrics"] });
+          // Quadro, Meu Dia, Indicadores, Gincana e Ações Comerciais leem o desfecho
+          queryClient.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("todoo-") });
         }}
       />
     </div>

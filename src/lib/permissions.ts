@@ -74,13 +74,12 @@ export const TODOO_TAB_PERMISSIONS: MenuItemPermission[] = [
   { key: "todoo:my_day", label: "Meu Dia", description: "Tarefas comerciais do dia da consultora" },
   { key: "todoo:queue", label: "Quadro Comercial", description: "Cadência de prospecção dos contatos" },
   { key: "todoo:team", label: "Painel da Equipe", description: "Andamento do dia de cada pessoa" },
-  { key: "todoo:referrals", label: "Cadastros & Metas", description: "Lista de cadastros e metas da equipe" },
   { key: "todoo:campaigns", label: "Ações Comerciais", description: "Criar e editar ações comerciais" },
   { key: "todoo:gincana", label: "Gincana & Ranking", description: "Pontuação e ranking da equipe" },
   { key: "todoo:metrics", label: "Indicadores", description: "Funil da cadência e indicadores" },
 ];
 
-export type TodooTab = "my_day" | "queue" | "team" | "referrals" | "campaigns" | "gincana" | "metrics";
+export type TodooTab = "my_day" | "queue" | "team" | "campaigns" | "gincana" | "metrics";
 
 /** Abas padrão por nível, para cargos que ainda não escolheram as abas do Todoo. */
 export const DEFAULT_TODOO_TABS: Record<string, string[]> = {
@@ -90,7 +89,9 @@ export const DEFAULT_TODOO_TABS: Record<string, string[]> = {
   agent: ["todoo:my_day", "todoo:queue"],
 };
 
-const isTodooTabKey = (key: string) => key.startsWith("todoo:");
+// Só abas que ainda existem: "todoo:referrals" (Cadastros & Metas, removida) pode continuar
+// salva em cargos antigos e é ignorada; sem nenhuma aba válida, o cargo usa as padrão do nível.
+const isTodooTabKey = (key: string) => TODOO_TAB_PERMISSIONS.some((t) => t.key === key);
 
 /** Abas do Meu Todoo que o usuário pode ver (vazio se não tem o menu). */
 export function getTodooTabs(profile: Profile | null): TodooTab[] {

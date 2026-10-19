@@ -1666,7 +1666,7 @@ export const transferConversationAction = createServerFn({ method: "POST" })
     // Atualiza a sessão e gera evento na jornada
     const { data: conv } = await supabaseAdmin
       .from("conversations")
-      .select("current_session_id")
+      .select("current_session_id, contact_id, whatsapp_instance_id")
       .eq("id", data.conversationId)
       .single();
     let targetName = null;
@@ -1739,31 +1739,14 @@ export const transferConversationAction = createServerFn({ method: "POST" })
       }
     }
 
-    // Criar notificação para o atendente recebendo
-    if (data.targetType === "agent") {
-      const { data: actorProfile } = await supabaseAdmin
-        .from("profiles")
-        .select("name")
-        .eq("id", userId)
-        .single();
-      const { data: convData } = await supabaseAdmin
-        .from("conversations")
-        .select("channel, contacts(company_id, name, phone)")
-        .eq("id", data.conversationId)
-        .single();
-
-      if (convData && actorProfile && convData.contacts?.company_id) {
-        const contactName = convData.contacts?.name || convData.contacts?.phone || "um contato";
-        await supabaseAdmin.from("notifications" as any).insert({
-          company_id: convData.contacts.company_id,
-          user_id: data.targetId,
-          type: `transfer_${convData.channel || "whatsapp"}`,
-          title: "Novo Atendimento",
-          message: `${actorProfile.name} transferiu o contato ${contactName} para você.`,
-          link: `/conversations?c=${data.conversationId}`,
-        });
-      }
-    }
+    // Notifica o atendente que recebeu (direto ou pela roleta do departamento)
+    const { notifyTransferReceiver } = await import("../server/transfer-notifications");
+    await notifyTransferReceiver({
+      conversationId: data.conversationId,
+      receiverId: updateData.assigned_agent_id,
+      actorId: userId,
+      departmentName: data.targetType === "department" ? targetName : null,
+    });
 
     return { success: true };
   });

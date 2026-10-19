@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { TodooLead, TodooOutcomeType } from "@/types/todoo";
 import { supabase } from "@/integrations/supabase/client";
+import { parseBRL } from "@/lib/format";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 
@@ -29,7 +30,8 @@ interface Props {
   lead: TodooLead | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSuccess: () => void;
+  /** Recebe o tipo de desfecho que foi salvo (pode ser diferente do initialType) */
+  onSuccess: (type: TodooOutcomeType) => void;
   initialType?: TodooOutcomeType;
 }
 
@@ -52,12 +54,17 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
 
   if (!lead) return null;
 
+  const needsValue = outcomeType === "won" || outcomeType === "quoted";
+  const parsedValue = needsValue && outcomeValue.trim() ? parseBRL(outcomeValue) : 0;
+  const invalidValue = parsedValue === null;
+  const missingCallbackDate = outcomeType === "callback" && !callbackDate;
+
   const handleSave = async () => {
-    if (!profile) return;
+    if (!profile || invalidValue || missingCallbackDate) return;
     setSaving(true);
 
     try {
-      const numericValue = outcomeValue ? parseFloat(outcomeValue.replace(",", ".")) : 0;
+      const numericValue = parsedValue ?? 0;
       const statusMap: Record<TodooOutcomeType, string> = {
         won: "won",
         scheduled: "scheduled",
@@ -84,8 +91,8 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
 
       if (leadErr) throw leadErr;
 
-      // Registra evento de auditoria
-      await (supabase.from("todoo_events") as any).insert({
+      // Registra evento de auditoria (o desfecho já foi salvo; falha aqui só avisa)
+      const { error: eventErr } = await (supabase.from("todoo_events") as any).insert({
         lead_id: lead.id,
         campaign_id: lead.campaign_id,
         company_id: lead.company_id,
@@ -98,25 +105,35 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
           callback_date: callbackDate || null,
         },
       });
+      if (eventErr) console.error("Erro ao registrar evento do desfecho:", eventErr);
 
       // Se pediu para retornar (callback), cria automaticamente uma tarefa no Atendi
+      let taskFailed = false;
       if (outcomeType === "callback" && callbackDate) {
-        await supabase.from("tasks").insert({
+        const { error: taskErr } = await supabase.from("tasks").insert({
           company_id: lead.company_id,
           unit_id: lead.unit_id,
           contact_id: lead.contact_id || undefined,
           assigned_to: profile.id,
           created_by: profile.id,
           title: `[Todoo] Retornar para ${lead.contact_name}`,
-          description: `Retorno de campanha Todoo.\nTelefone: ${lead.contact_phone}\nObs: ${outcomeNotes || "Sem notas adicionais"}`,
+          description: `Retorno de ação comercial do Todoo.\nTelefone: ${lead.contact_phone}\nObs: ${outcomeNotes || "Sem notas adicionais"}`,
           due_date: new Date(callbackDate).toISOString(),
           status: "pending",
         });
+        if (taskErr) {
+          console.error("Erro ao criar tarefa de retorno:", taskErr);
+          taskFailed = true;
+        }
       }
 
-      toast.success("Desfecho registrado com sucesso!");
+      if (taskFailed) {
+        toast.warning("Desfecho salvo, mas a tarefa de retorno não foi criada. Crie a tarefa manualmente.");
+      } else {
+        toast.success("Desfecho registrado com sucesso!");
+      }
       onOpenChange(false);
-      onSuccess();
+      onSuccess(outcomeType);
     } catch (err: any) {
       console.error("Erro ao salvar desfecho:", err);
       toast.error(err.message || "Erro ao salvar desfecho do lead.");
@@ -152,8 +169,8 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
               >
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                 <span className="text-left leading-tight">
-                  <strong className="block text-xs">Fechou!</strong>
-                  <span className="text-[10px] opacity-80">Contrato ganho</span>
+                  <strong className="block text-xs">Fechou</strong>
+                  <span className="text-[10px] opacity-80">Venda fechada</span>
                 </span>
               </Button>
 
@@ -212,7 +229,7 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
               >
                 <XCircle className="h-4 w-4 text-rose-300" />
                 <span className="text-left leading-tight">
-                  <strong className="block text-xs">Sem Interesse</strong>
+                  <strong className="block text-xs">Sem interesse</strong>
                   <span className="text-[10px] opacity-80">Recusou</span>
                 </span>
               </Button>
@@ -233,8 +250,12 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
                   value={outcomeValue}
                   onChange={(e) => setOutcomeValue(e.target.value)}
                   className="pl-8"
+                  aria-invalid={invalidValue}
                 />
               </div>
+              {invalidValue && (
+                <p className="text-[11px] text-destructive">Valor inválido. Use o formato 1.500,00.</p>
+              )}
             </div>
           )}
 
@@ -250,8 +271,10 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
                 value={callbackDate}
                 onChange={(e) => setCallbackDate(e.target.value)}
               />
-              <p className="text-[11px] text-muted-foreground">
-                Uma tarefa comercial será criada automaticamente para você nesta data.
+              <p className={`text-[11px] ${missingCallbackDate ? "text-destructive" : "text-muted-foreground"}`}>
+                {missingCallbackDate
+                  ? "Informe a data do retorno."
+                  : "Uma tarefa comercial será criada automaticamente para você nesta data."}
               </p>
             </div>
           )}
@@ -281,7 +304,7 @@ export function TodooOutcomeDialog({ lead, open, onOpenChange, onSuccess, initia
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancelar
           </Button>
-          <Button type="button" onClick={handleSave} disabled={saving}>
+          <Button type="button" onClick={handleSave} disabled={saving || invalidValue || missingCallbackDate}>
             {saving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

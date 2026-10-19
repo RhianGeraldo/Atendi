@@ -19,7 +19,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatMessageTime } from "@/lib/format";
+import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -37,6 +37,10 @@ import {
 import { LinkPreview } from "@/components/chat/link-preview";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
 import type { MessageRow } from "./conversation-types";
+import {
+  TodooChatReferralButton,
+  type TodooChatReferrer,
+} from "@/components/todoo/todoo-chat-referral-button";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -195,6 +199,8 @@ interface MessageBubbleProps {
   onDelete?: (m: MessageRow) => void;
   onTranscribe?: (id: string) => void;
   isTranscribingId?: string | null;
+  /** Cliente da conversa: com ele, contato recebido ganha o botão "+ Indicação" do Todoo */
+  todooReferrer?: TodooChatReferrer | null;
 }
 
 export function MessageBubble({
@@ -206,6 +212,7 @@ export function MessageBubble({
   onDelete,
   onTranscribe,
   isTranscribingId,
+  todooReferrer,
 }: MessageBubbleProps) {
   const [showMobileActions, setShowMobileActions] = useState(false);
 
@@ -817,6 +824,14 @@ export function MessageBubble({
                           </Button>
                         }
                       />
+                      {todooReferrer && !mine && (
+                        <TodooChatReferralButton
+                          contact={contact}
+                          referrer={todooReferrer}
+                          messageId={m.id}
+                          receivedAt={m.created_at}
+                        />
+                      )}
                     </div>
                   )}
                 </div>
@@ -976,7 +991,7 @@ export function MessageBubble({
           )}
         >
           {m.is_edited && <span className="italic">Editado</span>}
-          <span>{formatMessageTime(m.created_at)}</span>
+          <span>{m.created_at && !isNaN(new Date(m.created_at).getTime()) ? format(new Date(m.created_at), "HH:mm") : "—"}</span>
         </div>
 
         {m.reactions && Object.keys(m.reactions).length > 0 && (

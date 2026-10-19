@@ -1257,6 +1257,14 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
       await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
 
+      const { notifyTransferReceiver } = await import("./transfer-notifications");
+      await notifyTransferReceiver({
+        conversationId,
+        receiverId: updatePayload.assigned_agent_id,
+        actorLabel: agent.name ? `A IA ${agent.name}` : "A IA",
+        departmentName: deptName,
+      });
+
       const systemMsg = deptName
         ? `Atendimento transferido pela IA para o departamento: ${deptName}`
         : `Atendimento transferido pela IA para a fila de espera.`;

@@ -57,6 +57,35 @@ export function formatMinutesFriendly(minutes: number): string {
   return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
 }
 
+/** Remetentes que contam para o SLA (notas internas e avisos do sistema não contam) */
+export const SLA_SENDER_TYPES = ["contact", "agent"] as const;
+
+/**
+ * Monta o `last_message` usado pelo SLA a partir das mensagens mais recentes da conversa
+ * (ordem decrescente, só contato/atendente, sem internas). Se a última é do contato,
+ * `waiting_since` é a 1ª mensagem do contato do turno sem resposta. Nunca usa started_at:
+ * ele não muda quando a conversa resolvida é reaberta.
+ */
+export function buildSlaLastMessage(
+  recentDesc: { sender_type: string; created_at: string }[] | null | undefined,
+): { sender_type: string; created_at: string; waiting_since?: string } | null {
+  if (!recentDesc || recentDesc.length === 0) return null;
+  const newest = recentDesc[0];
+  if (newest.sender_type !== "contact") {
+    return { sender_type: newest.sender_type, created_at: newest.created_at };
+  }
+  let oldestInTurn = newest;
+  for (let i = 1; i < recentDesc.length; i++) {
+    if (recentDesc[i].sender_type !== "contact") break;
+    oldestInTurn = recentDesc[i];
+  }
+  return {
+    sender_type: newest.sender_type,
+    created_at: newest.created_at,
+    waiting_since: oldestInTurn.created_at,
+  };
+}
+
 /**
  * Calcula o status de SLA para uma conversa de forma contínua:
  * 0 a 2 min: Verde (ok / no prazo)
@@ -93,15 +122,18 @@ export function calculateConversationSla(
     };
   }
 
-  // Identifica a última mensagem externa (não interna)
+  // Última mensagem que conta para o SLA: do contato ou do atendente (humano ou IA).
+  // Notas internas e avisos do sistema não respondem o cliente nem o fazem esperar.
   const lastMsg =
     overrideLastMessage !== undefined && overrideLastMessage !== null
       ? overrideLastMessage
-      : conv.last_message?.find((m) => !m.is_internal) || conv.last_message?.[0];
+      : conv.last_message?.find(
+          (m) => !m.is_internal && (m.sender_type === "contact" || m.sender_type === "agent"),
+        );
 
-  // Se a última mensagem externa foi enviada por um atendente/agente (humano ou IA):
-  // O cliente foi respondido e NÃO está aguardando resposta!
-  if (lastMsg && lastMsg.sender_type === "agent") {
+  // REGRA: o SLA só corre quando a última mensagem é do contato. Respondida (ou sem
+  // mensagem conhecida) não está aguardando.
+  if (!lastMsg || lastMsg.sender_type !== "contact") {
     return {
       isWaiting: false,
       isFirstResponse: false,
@@ -138,39 +170,12 @@ export function calculateConversationSla(
   // Determina quando o cliente começou a aguardar (waitingSinceDate)
   // REGRA DE CONTINUIDADE:
   // A espera NUNCA reinicia quando o cliente envia mensagens adicionais.
-  // Começa na primeira mensagem sem resposta deste turno (ou na criação da conversa se nunca foi respondida).
-  let isWaiting = false;
-  let isFirstResponse = false;
-  let waitingDateStr: string | null = null;
+  // Começa na primeira mensagem do contato sem resposta deste turno.
+  const isFirstResponse = conv.status === "waiting";
+  const waitingDateStr: string | null =
+    overrideWaitingSince || lastMsg.waiting_since || lastMsg.created_at || null;
 
-  if (overrideWaitingSince) {
-    isWaiting = true;
-    isFirstResponse = conv.status === "waiting";
-    waitingDateStr = overrideWaitingSince;
-  } else if (lastMsg?.waiting_since) {
-    isWaiting = true;
-    isFirstResponse = conv.status === "waiting";
-    waitingDateStr = lastMsg.waiting_since;
-  } else if (conv.status === "waiting") {
-    // Na fila de espera: aguarda primeiro atendimento
-    isWaiting = true;
-    isFirstResponse = true;
-    waitingDateStr = conv.started_at || lastMsg?.created_at || conv.last_message_at;
-  } else if (conv.status === "active") {
-    // Em andamento:
-    if (lastMsg && lastMsg.sender_type === "contact") {
-      isWaiting = true;
-      isFirstResponse = false;
-      waitingDateStr = lastMsg.waiting_since || lastMsg.created_at || conv.last_message_at;
-    } else if (!lastMsg) {
-      // Fallback caso lastMsg não tenha sido carregado individualmente ainda
-      isWaiting = true;
-      isFirstResponse = false;
-      waitingDateStr = conv.started_at || conv.last_message_at;
-    }
-  }
-
-  if (!isWaiting || !waitingDateStr) {
+  if (!waitingDateStr) {
     return {
       isWaiting: false,
       isFirstResponse,

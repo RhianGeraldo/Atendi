@@ -563,7 +563,81 @@ export function useGlobalNotifications() {
           }
         }
       )
-      // 3. Atualizações de Membros e Silenciamento da Equipe (tabela 'internal_channel_members')
+      // 3. Transferências de atendimento para o usuário (tabela 'notifications', type 'transfer_<canal>')
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` },
+        async (payload) => {
+          const notif = payload.new as any;
+          if (!notif || !String(notif.type || "").startsWith("transfer_")) return;
+          if (notif.company_id && userCompanyId && notif.company_id !== userCompanyId) return;
+
+          const convId = String(notif.link || "").match(/[?&](?:c|id)=([^&]+)/)?.[1] ?? null;
+
+          let convDetail: {
+            channel: string | null;
+            contact: { name: string | null; phone: string | null; profile_picture_url: string | null } | null;
+          } | null = null;
+          if (convId) {
+            try {
+              const { data } = await supabase
+                .from("conversations")
+                .select("channel, contact:contacts(name, phone, profile_picture_url)")
+                .eq("id", convId)
+                .maybeSingle();
+              convDetail = data as any;
+            } catch (e) {
+              console.warn("[GlobalNotifications] Falha ao consultar conversa transferida:", e);
+            }
+          }
+
+          const contactName = convDetail?.contact?.name || convDetail?.contact?.phone || "Cliente";
+          const channelKey = convDetail?.channel || String(notif.type).replace("transfer_", "") || "whatsapp";
+          const previewText = notif.message || "Um atendimento foi transferido para você";
+
+          const openConversation = () => {
+            void supabase.from("notifications" as any).update({ is_read: true }).eq("id", notif.id);
+            if (convId) {
+              navigate({ to: "/conversations", search: { mode: "clients", c: convId } as any });
+            }
+          };
+
+          const currentPath = pathnameRef.current;
+          const currentSearch = (searchRef.current as any)?.c;
+          const isViewingThisChat =
+            currentPath === "/conversations" &&
+            currentSearch === convId &&
+            typeof document !== "undefined" &&
+            !document.hidden &&
+            document.hasFocus();
+          if (isViewingThisChat) return;
+
+          playClientMessageSound();
+          handleBackgroundTitle(contactName);
+
+          triggerBrowserNotification({
+            title: `🔄 ${notif.title || "Novo Atendimento"} • ${contactName}`,
+            body: previewText,
+            icon: convDetail?.contact?.profile_picture_url || "/favicon.ico",
+            tag: `transfer-${convId || notif.id}`,
+            onClick: openConversation,
+          });
+
+          showStackedMessageToast({
+            key: `transfer-${convId || notif.id}`,
+            messageId: String(notif.id),
+            type: "client",
+            senderName: contactName,
+            avatarUrl: convDetail?.contact?.profile_picture_url,
+            channel: channelKey as any,
+            badgeLabel: "Transferido para você",
+            isTransfer: true,
+            previewText,
+            onOpen: openConversation,
+          });
+        }
+      )
+      // 4. Atualizações de Membros e Silenciamento da Equipe (tabela 'internal_channel_members')
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "internal_channel_members" },

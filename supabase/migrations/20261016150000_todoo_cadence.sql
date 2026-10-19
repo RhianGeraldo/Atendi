@@ -145,7 +145,8 @@ SET stage_id = CASE
         END
     )
 FROM st
-WHERE st.company_id = l.company_id;
+WHERE st.company_id = l.company_id
+  AND l.stage_id IS NULL; -- só leads ainda fora da cadência (reexecução não refaz o SLA)
 
 -- =====================================================================
 -- 6. Gatilho da cadência

@@ -261,7 +261,9 @@ FROM public.todoo_events e
 JOIN public.todoo_leads l ON l.id = e.lead_id
 LEFT JOIN public.todoo_stages fs ON fs.id::text = e.metadata->>'from'
 LEFT JOIN public.todoo_stages ts ON ts.id::text = e.metadata->>'to'
-WHERE e.event_type IN ('cadence_attempt', 'cadence_moved');
+WHERE e.event_type IN ('cadence_attempt', 'cadence_moved')
+  AND NOT EXISTS (SELECT 1 FROM public.todoo_lead_history h
+                  WHERE h.lead_id = e.lead_id AND h.metadata->>'event_id' = e.id::text);
 
 -- Trocas de status antigas (Chamei / desfecho)
 INSERT INTO public.todoo_lead_history (
@@ -273,7 +275,9 @@ SELECT e.lead_id, l.company_id, l.unit_id, l.campaign_id, l.custom_fields->>'ori
        jsonb_build_object('imported', true, 'event_id', e.id)
 FROM public.todoo_events e
 JOIN public.todoo_leads l ON l.id = e.lead_id
-WHERE e.event_type = 'status_changed' AND e.metadata ? 'to';
+WHERE e.event_type = 'status_changed' AND e.metadata ? 'to'
+  AND NOT EXISTS (SELECT 1 FROM public.todoo_lead_history h
+                  WHERE h.lead_id = e.lead_id AND h.metadata->>'event_id' = e.id::text);
 
 -- Marcos a partir do que já se sabe
 UPDATE public.todoo_leads l

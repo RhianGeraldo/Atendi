@@ -15,6 +15,8 @@ interface MessageNotificationToastProps {
   previewText: string;
   messages?: string[];
   isMention?: boolean;
+  /** Atendimento transferido para o usuário: card em laranja, como a tag "Transferido" */
+  isTransfer?: boolean;
   onOpen: () => void;
   onDismiss: () => void;
 }
@@ -28,6 +30,7 @@ export function MessageNotificationToast({
   previewText,
   messages,
   isMention = false,
+  isTransfer = false,
   onOpen,
   onDismiss,
 }: MessageNotificationToastProps) {
@@ -52,6 +55,8 @@ export function MessageNotificationToast({
           "absolute top-0 left-0 right-0 h-1",
           isMention
             ? "bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500"
+            : isTransfer
+            ? "bg-gradient-to-r from-orange-500 via-orange-400 to-orange-500"
             : isClient
             ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500"
             : "bg-gradient-to-r from-primary via-indigo-400 to-primary"
@@ -66,7 +71,9 @@ export function MessageNotificationToast({
             <AvatarFallback
               className={cn(
                 "text-xs font-bold text-white",
-                isClient
+                isTransfer
+                  ? "bg-gradient-to-br from-orange-500 to-orange-600"
+                  : isClient
                   ? "bg-gradient-to-br from-emerald-600 to-teal-700"
                   : "bg-gradient-to-br from-primary to-indigo-600"
               )}
@@ -107,7 +114,9 @@ export function MessageNotificationToast({
               <span
                 className={cn(
                   "inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium border",
-                  isClient
+                  isTransfer
+                    ? "bg-orange-500 text-white border-orange-500"
+                    : isClient
                     ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
                     : "bg-primary/10 text-primary border-primary/20"
                 )}

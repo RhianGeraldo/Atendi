@@ -50,6 +50,13 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
       console.error("[cron] Exception during SLA active rotation:", slaEx);
     }
 
+    // Todoo: quarentena vencida volta para A contatar e atrasos marcados (a cada 15 min)
+    try {
+      await handleCronTodooCadence();
+    } catch (todooEx) {
+      console.error("[cron] Exception during Todoo cadence:", todooEx);
+    }
+
     console.log("[cron] Starting follow-up scan...");
 
     // Find active conversations that are handled by AI
@@ -209,6 +216,24 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
  * Realiza a varredura de conversas em andamento ('active') que excederam o SLA
  * de retorno do cliente (ex: 8 minutos) e rotaciona para outro atendente ONLINE.
  */
+const TODOO_CADENCE_EVERY_MS = 15 * 60 * 1000;
+let todooCadenceLastRun = 0;
+
+/** Roda a cadência do Todoo em todas as empresas que usam o funil (todoo_refresh_cadence_all). */
+export async function handleCronTodooCadence(): Promise<void> {
+  if (Date.now() - todooCadenceLastRun < TODOO_CADENCE_EVERY_MS) return;
+  todooCadenceLastRun = Date.now();
+
+  const { data, error } = await (supabaseAdmin.rpc as any)("todoo_refresh_cadence_all");
+  if (error) {
+    console.error("[cron] Todoo cadence error:", error.message);
+    return;
+  }
+  if (data && (data.recycled > 0 || data.breached > 0)) {
+    console.log(`[cron] Todoo cadence: ${data.recycled} reciclados, ${data.breached} atrasados (${data.companies} empresas)`);
+  }
+}
+
 export async function handleCronSlaActiveRotation(): Promise<{ rotatedCount: number }> {
   try {
     // 1. Buscar empresas com SLA ativo e com auto_rotate_active_breached = true

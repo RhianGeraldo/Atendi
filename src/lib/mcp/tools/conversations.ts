@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { notifyTransferReceiver } from "@/lib/server/transfer-notifications";
+import { loadSlaLastMessages } from "@/lib/server/sla-last-message";
 import { sendPlatformMessage } from "@/lib/server/message-sender";
 import { calculateConversationSla, DEFAULT_SLA_SETTINGS, type SlaSettings } from "@/lib/sla";
 import type { McpContext, McpToolDefinition } from "../types";
@@ -128,7 +130,6 @@ export const conversationsTools: McpToolDefinition[] = [
           id,
           status,
           channel,
-          last_message,
           last_message_at,
           last_message_preview,
           started_at,
@@ -137,12 +138,13 @@ export const conversationsTools: McpToolDefinition[] = [
           unit_id,
           contacts!inner(id, name, phone, company_id, source, source_details),
           units(name, slug),
-          profiles(name)
+          profiles!conversations_assigned_agent_id_fkey(name)
         `,
         )
         .eq("contacts.company_id", context.companyId)
         .order("last_message_at", { ascending: false, nullsFirst: false })
-        .limit(limit * 2); // Busca mais para aplicar filtros de grupo/SLA com precisão
+        // Com filtro de SLA busca mais: os SLAs mais atrasados têm a última mensagem mais antiga
+        .limit(slaFilter !== "all" ? 200 : limit * 2);
 
       if (targetStatus !== "all") {
         query = query.eq("status", targetStatus);
@@ -166,7 +168,10 @@ export const conversationsTools: McpToolDefinition[] = [
         throw new Error(`Erro ao listar conversas: ${error.message}`);
       }
 
+      const slaLastByConv = await loadSlaLastMessages((convs || []).map((c: any) => c.id));
+
       let processed = (convs || []).map((c: any) => {
+        const slaLast = slaLastByConv.get(c.id);
         const contactPhone = c.contacts?.phone || "";
         const isGroup =
           contactPhone.startsWith("120363") ||
@@ -177,7 +182,7 @@ export const conversationsTools: McpToolDefinition[] = [
           id: c.id,
           channel: c.channel,
           status: c.status,
-          last_message: c.last_message,
+          last_message: slaLast ? [slaLast] : [],
           last_message_at: c.last_message_at,
           last_message_preview: c.last_message_preview,
           started_at: c.started_at,
@@ -203,7 +208,8 @@ export const conversationsTools: McpToolDefinition[] = [
           },
           unidade: c.units?.name || "Geral",
           atendente: c.profiles?.name || (c.ai_active ? "IA Atendi" : "Não atribuído"),
-          ultima_mensagem: c.last_message,
+          ultima_mensagem: c.last_message_preview || null,
+          ultima_mensagem_de: slaLast ? (slaLast.sender_type === "contact" ? "contato" : "atendente") : null,
           data_ultima_mensagem: c.last_message_at,
           nao_lidas: c.unread_count || 0,
           sla: {
@@ -230,6 +236,11 @@ export const conversationsTools: McpToolDefinition[] = [
         processed = processed.filter((c) => c.sla.status === "ok");
       } else if (slaFilter === "waiting") {
         processed = processed.filter((c) => c.sla.aguardando_resposta);
+      }
+
+      // Com filtro de SLA, quem espera há mais tempo vem primeiro (como na tela de conversas)
+      if (slaFilter !== "all") {
+        processed = [...processed].sort((a, b) => b.sla.minutos_espera - a.sla.minutos_espera);
       }
 
       const finalResults = processed.slice(0, limit);
@@ -634,6 +645,15 @@ export const conversationsTools: McpToolDefinition[] = [
 
       if (error) {
         throw new Error(`Erro ao transferir conversa: ${error.message}`);
+      }
+
+      if (tipo_destino === "atendente") {
+        await notifyTransferReceiver({
+          conversationId: convId,
+          receiverId: destino_id,
+          actorId: context.userId,
+          actorLabel: context.userName || context.keyName,
+        });
       }
 
       return {

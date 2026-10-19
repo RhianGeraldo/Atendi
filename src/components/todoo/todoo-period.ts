@@ -62,14 +62,14 @@ export function formatTodooPhone(phone: string | null | undefined): string {
 export const TODOO_LEAD_STATUS: Record<TodooLeadStatus, { label: string; className: string }> = {
   pending: { label: "Aguardando contato", className: "bg-muted text-muted-foreground" },
   contacted: {
-    label: "Em negociação",
+    label: "Em contato",
     className: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
   },
   callback: {
     label: "Retornar depois",
     className: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
   },
-  quoted: { label: "Orçamento enviado", className: "bg-sky-500/15 text-sky-700 dark:text-sky-400" },
+  quoted: { label: "Orçamento", className: "bg-sky-500/15 text-sky-700 dark:text-sky-400" },
   scheduled: { label: "Agendou avaliação", className: "bg-blue-600 text-white" },
   won: { label: "Fechou", className: "bg-emerald-600 text-white" },
   lost: { label: "Sem interesse", className: "bg-rose-500/15 text-rose-700 dark:text-rose-400" },

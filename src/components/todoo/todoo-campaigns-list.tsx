@@ -95,18 +95,24 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
     queryKey: ["todoo-campaigns-list", activeCompanyId, selectedUnitId],
     enabled: !!activeCompanyId,
     queryFn: async () => {
-      const { data: rawCampaigns, error } = await (supabase.from("todoo_campaigns") as any)
-        .select(`
-          *,
-          unit:units(id, name, color),
-          leads:todoo_leads(id, status, outcome_value, sla_breached, unit_id)
-        `)
-        .eq("company_id", activeCompanyId)
-        .order("created_at", { ascending: false });
+      // Números de cada ação agregados no banco (todoo_campaign_stats), na unidade selecionada.
+      // Antes, todos os leads de todas as ações vinham para o navegador.
+      const [campaignsRes, statsRes] = await Promise.all([
+        (supabase.from("todoo_campaigns") as any)
+          .select("*, unit:units(id, name, color)")
+          .eq("company_id", activeCompanyId)
+          .order("created_at", { ascending: false }),
+        (supabase.rpc as any)("todoo_campaign_stats", {
+          p_company_id: activeCompanyId,
+          p_unit_id: selectedUnitId || null,
+        }),
+      ]);
+      if (campaignsRes.error) throw campaignsRes.error;
+      if (statsRes.error) throw statsRes.error;
 
-      if (error) throw error;
+      const stats = new Map<string, any>((statsRes.data || []).map((s: any) => [s.campaign_id, s]));
 
-      return (rawCampaigns || [])
+      return (campaignsRes.data || [])
         .filter((c: any) => {
           if (!selectedUnitId) return true;
           // Se a ação for exclusiva de outra unidade, não exibe
@@ -114,26 +120,14 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
           return true;
         })
         .map((c: any) => {
-          const allLeads = c.leads || [];
-          const leads = selectedUnitId
-            ? allLeads.filter((l: any) => l.unit_id === selectedUnitId)
-            : allLeads;
-
-          const total = leads.length;
-          const won = leads.filter((l: any) => l.status === "won").length;
-          const worked = leads.filter((l: any) => l.status !== "pending").length;
-          const revenue = leads
-            .filter((l: any) => l.status === "won")
-            .reduce((acc: number, curr: any) => acc + (Number(curr.outcome_value) || 0), 0);
-
+          const s = stats.get(c.id);
           return {
             ...c,
-            total_leads: total,
-            completed_leads: worked,
-            won_leads: won,
-            won_revenue: revenue,
-            raw_total_leads: allLeads.length,
-          } as TodooCampaign & { raw_total_leads: number };
+            total_leads: Number(s?.total) || 0,
+            completed_leads: Number(s?.worked) || 0,
+            won_leads: Number(s?.won) || 0,
+            won_revenue: Number(s?.revenue) || 0,
+          } as TodooCampaign;
         });
     },
   });
@@ -149,8 +143,15 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
 
       if (error) throw error;
       if (!data || data.length === 0) throw new Error("Você não tem permissão para alterar esta ação.");
-      toast.success(nextStatus === "active" ? "Ação comercial retomada!" : "Ação comercial pausada.");
+      toast.success(
+        nextStatus === "active"
+          ? "Ação comercial retomada! Os leads voltaram para a fila."
+          : "Ação comercial pausada. Os leads saíram da fila até ser retomada.",
+      );
       refetch();
+      for (const key of ["todoo-leads", "todoo-my-day", "todoo-campaigns-filter"]) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
     } catch (err: any) {
       toast.error("Erro ao alterar status: " + err.message);
     }
@@ -226,7 +227,7 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
       {/* Cabeçalho da Aba */}
       <TodooSectionHeader
         title="Ações Comerciais"
-        description="Gerencie as campanhas ativas, edite scripts, acompanhe a taxa de conversão e os resultados."
+        description="Gerencie as ações comerciais, edite scripts, acompanhe a taxa de conversão e os resultados."
         actions={
           <Button onClick={onCreateClick} size="sm" className="gap-1.5 h-8 text-xs">
             <Plus className="h-3.5 w-3.5" />
@@ -240,7 +241,7 @@ export function TodooCampaignsList({ onCreateClick }: Props) {
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs text-primary">
           <Building2 className="h-4 w-4 shrink-0" />
           <span>
-            Exibindo métricas da unidade <strong>{activeUnit.name}</strong>. Campanhas corporativas exibem apenas os contatos desta filial.
+            Exibindo métricas da unidade <strong>{activeUnit.name}</strong>. Ações gerais da empresa exibem apenas os contatos desta filial.
           </span>
         </div>
       )}

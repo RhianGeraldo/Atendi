@@ -1,6 +1,9 @@
 -- Migration: Sistema Meu Todoo (CRM de Execução Comercial Diária)
 -- Modelo operacional baseado nos manuais de Todoo e Estética/Laser
 
+SET lock_timeout = '3s';
+SET statement_timeout = '30s';
+
 -- 1. Tabela de Campanhas / Ações Comerciais do Todoo
 CREATE TABLE IF NOT EXISTS public.todoo_campaigns (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -115,6 +118,15 @@ ALTER TABLE public.todoo_campaigns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.todoo_leads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.todoo_events ENABLE ROW LEVEL SECURITY;
 
+-- Proteção contra reexecução: as policies abaixo são as originais (com has_matriz_access,
+-- sem unidade) e foram substituídas em 20261014230000_todoo_units.sql. Só são criadas
+-- num banco novo, onde a tabela ainda não tem nenhuma policy.
+DO $guard$
+BEGIN
+IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'todoo_campaigns') THEN
+  RETURN;
+END IF;
+
 -- Políticas para todoo_campaigns
 CREATE POLICY "todoo_campaigns_select_company" ON public.todoo_campaigns
     FOR SELECT USING (
@@ -187,3 +199,6 @@ CREATE POLICY "todoo_events_insert_company" ON public.todoo_events
         OR public.has_matriz_access()
         OR (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'super_admin'
     );
+
+END
+$guard$;

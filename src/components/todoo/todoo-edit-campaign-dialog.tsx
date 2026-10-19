@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -45,6 +46,7 @@ export function TodooEditCampaignDialog({
   const [status, setStatus] = useState<TodooCampaignStatus>("active");
   const [targetCount, setTargetCount] = useState<number>(0);
   const [targetRevenue, setTargetRevenue] = useState<number>(0);
+  const [redistributeOnSla, setRedistributeOnSla] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -57,10 +59,14 @@ export function TodooEditCampaignDialog({
       setStatus(campaign.status || "active");
       setTargetCount(campaign.target_count || 0);
       setTargetRevenue(campaign.target_revenue || 0);
+      setRedistributeOnSla(Boolean(campaign.redistribute_on_sla_breach));
     }
   }, [campaign, open]);
 
   if (!campaign) return null;
+
+  // Indicações e Prospecção Ativa: o lead é de quem captou, não redistribui
+  const isCaptureCampaign = campaign.type === "mgm_referral" || campaign.type === "prospecting";
 
   const handleSave = async () => {
     if (!title.trim()) {
@@ -80,6 +86,7 @@ export function TodooEditCampaignDialog({
           status,
           target_count: Number(targetCount) || 0,
           target_revenue: Number(targetRevenue) || 0,
+          redistribute_on_sla_breach: isCaptureCampaign ? false : redistributeOnSla,
           updated_at: new Date().toISOString(),
         })
         .eq("id", campaign.id)
@@ -146,7 +153,7 @@ export function TodooEditCampaignDialog({
             <Input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Explique resumidamente qual o objetivo desta campanha..."
+              placeholder="Explique resumidamente qual o objetivo desta ação..."
               className="h-8 text-xs"
             />
           </div>
@@ -227,6 +234,23 @@ export function TodooEditCampaignDialog({
               />
             </div>
           </div>
+
+          {!isCaptureCampaign && (
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="edit-redistribute"
+                checked={redistributeOnSla}
+                onCheckedChange={(c) => setRedistributeOnSla(c === true)}
+                className="mt-0.5"
+              />
+              <Label htmlFor="edit-redistribute" className="text-xs font-normal leading-snug cursor-pointer">
+                Redistribuir o lead para outra consultora da ação se o prazo do 1º contato expirar
+                <span className="block text-[11px] text-muted-foreground">
+                  Uma vez por lead. Vale para prazos que vencerem depois de ligar.
+                </span>
+              </Label>
+            </div>
+          )}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0 pt-2 border-t border-border">

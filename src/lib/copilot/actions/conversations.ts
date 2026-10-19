@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { notifyTransferReceiver } from "@/lib/server/transfer-notifications";
+import { loadSlaLastMessages } from "@/lib/server/sla-last-message";
 import { assertConversationAccess } from "@/lib/server/access-control";
 import { sendPlatformMessage } from "@/lib/server/message-sender";
 import { sendEvogoText } from "@/lib/evogo";
@@ -156,10 +158,12 @@ export const conversationsActions: CopilotAction[] = [
       let query = supabaseAdmin
         .from("conversations")
         .select(
-          "id, status, channel, last_message_at, last_message_preview, unit_id, created_at, contacts!inner(id, name, phone, company_id), units(name)",
+          "id, status, channel, last_message_at, last_message_preview, unit_id, started_at, contacts!inner(id, name, phone, company_id), units(name)",
         )
         .eq("contacts.company_id", context.companyId)
-        .order("last_message_at", { ascending: false, nullsFirst: false });
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        // Com filtro de SLA busca mais: os SLAs mais atrasados têm a última mensagem mais antiga
+        .limit(params.filtro_sla && params.filtro_sla !== "all" ? 200 : limit * 2);
 
       // Restringir às unidades do usuário quando não for admin com acesso matriz
       // Acesso à Matriz/Rede libera só as conversas sem unidade (Rede), não todas as unidades
@@ -207,9 +211,12 @@ export const conversationsActions: CopilotAction[] = [
         .eq("id", context.companyId)
         .single();
       const customVars = (comp?.custom_variables as Record<string, any>) || {};
-      const slaSettings: SlaSettings = customVars.sla || DEFAULT_SLA_SETTINGS;
+      const slaSettings: SlaSettings = { ...DEFAULT_SLA_SETTINGS, ...(customVars.sla || {}) };
+
+      const slaLastByConv = await loadSlaLastMessages((convs || []).map((c: any) => c.id));
 
       let processed = (convs || []).map((c: any) => {
+        const slaLast = slaLastByConv.get(c.id);
         const contactPhone = (c.contacts as any)?.phone || "";
         const isGroup =
           contactPhone.startsWith("120363") ||
@@ -219,10 +226,10 @@ export const conversationsActions: CopilotAction[] = [
           id: c.id,
           channel: c.channel,
           status: c.status,
-          last_message: c.last_message_preview,
+          last_message: slaLast ? [slaLast] : [],
           last_message_at: c.last_message_at,
           last_message_preview: c.last_message_preview,
-          started_at: c.created_at || c.last_message_at,
+          started_at: c.started_at,
           contact: {
             phone: contactPhone,
             name: (c.contacts as any)?.name,
@@ -268,6 +275,11 @@ export const conversationsActions: CopilotAction[] = [
         processed = processed.filter((c) => c.sla.status === "ok");
       } else if (params.filtro_sla === "waiting") {
         processed = processed.filter((c) => c.sla.aguardando_resposta);
+      }
+
+      // Com filtro de SLA, quem espera há mais tempo vem primeiro (como na tela de conversas)
+      if (params.filtro_sla && params.filtro_sla !== "all") {
+        processed = [...processed].sort((a, b) => b.sla.minutos_espera - a.sla.minutos_espera);
       }
 
       const finalResults = processed.slice(0, limit);
@@ -1158,6 +1170,14 @@ export const conversationsActions: CopilotAction[] = [
         .eq("id", params.conversa_id);
 
       if (error) return { success: false, message: `Erro: ${error.message}` };
+
+      if (params.tipo_destino === "atendente") {
+        await notifyTransferReceiver({
+          conversationId: params.conversa_id,
+          receiverId: params.destino_id,
+          actorId: context.userId,
+        });
+      }
 
       return {
         success: true,

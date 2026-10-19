@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -7,28 +7,28 @@ import {
   CalendarCheck,
   Check,
   CheckCircle2,
+  ChevronDown,
   ClipboardList,
   Clock,
   Flame,
   Loader2,
   Repeat,
+  MessageCircle,
   MessageSquare,
+  Send,
   RefreshCw,
   Target,
   UserPlus,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { canAccessTodooTab } from "@/lib/permissions";
@@ -38,10 +38,10 @@ import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { TodooLead, TodooOutcomeType } from "@/types/todoo";
 import { TodooOutcomeDialog } from "./todoo-outcome-dialog";
 import { TodooGoalsDialog } from "./todoo-goals-dialog";
-import { TodooSectionHeader } from "./todoo-section-header";
 import { currentTodooMonth, formatTodooPhone, todooDayBounds } from "./todoo-period";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 import { TodooReferrerLink } from "./todoo-referrer-link";
 import { TodooSendMessageDialog } from "./todoo-send-message-dialog";
 import {
@@ -63,8 +63,6 @@ interface Props {
 
 // Lead em conversa (cadência pausada) sem nenhuma interação há este tempo vira follow-up
 const FOLLOWUP_AFTER_HOURS = 48;
-// Itens exibidos por grupo antes do "Ver todos"
-const GROUP_PREVIEW = 8;
 
 interface CrmTask {
   id: string;
@@ -97,7 +95,8 @@ export interface DayPlan {
   total: number;
 }
 
-export const pct = (done: number, total: number) => (total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0);
+export const pct = (done: number, total: number) =>
+  total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
 
 /**
  * Dados do dia (leads, tarefas do CRM, metas e cadastros) e o cálculo do plano
@@ -113,41 +112,73 @@ export function useTodooDayData() {
     profile?.role === "super_admin" ||
     profile?.role === "manager" ||
     canAccessTodooTab("team", profile);
-  const bounds = useMemo(() => todooDayBounds(), []);
+  // Redesenha a cada minuto: o que passou do horário vai para Atrasados e, depois da
+  // meia-noite, o dia muda junto (bounds é recalculado a cada render)
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const bounds = todooDayBounds();
   const month = currentTodooMonth();
   const { stages, statuses } = useTodooPipeline();
 
   const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ["todoo-my-day", activeCompanyId, profile?.id, isManagerOrAdmin, selectedUnitId, bounds.dayStart],
+    queryKey: [
+      "todoo-my-day",
+      activeCompanyId,
+      profile?.id,
+      isManagerOrAdmin,
+      selectedUnitId,
+      bounds.dayStart,
+    ],
     enabled: !!activeCompanyId && !!profile?.id,
     queryFn: async () => {
       // Quarentena vencida volta para A contatar antes de montar o dia
       await refreshTodooCadence(activeCompanyId!);
       const onlyMine = !isManagerOrAdmin;
-      const unitFilter = isManagerOrAdmin && selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null;
+      const unitFilter =
+        isManagerOrAdmin && selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null;
 
-      let leadsQuery = (supabase.from("todoo_leads") as any)
-        .select(`
+      // Gestoras carregam a empresa toda: as listas passam de 1.000 linhas, então vêm em páginas
+      const buildLeads = () => {
+        let leadsQuery = (supabase.from("todoo_leads") as any)
+          .select(
+            `
           *,
-          campaign:todoo_campaigns(id, title, type, message_template, offer_details, sla_hours),
+          campaign:todoo_campaigns!inner(id, title, type, status, message_template, offer_details, sla_hours),
           unit:units(id, name, color)
-        `)
-        .eq("company_id", activeCompanyId)
-        .or(`status.in.(pending,contacted,quoted,callback),last_interaction_at.gte.${bounds.dayStart}`)
-        .order("sla_deadline", { ascending: true, nullsFirst: false });
-      if (onlyMine) leadsQuery = leadsQuery.eq("assigned_user_id", profile!.id);
-      if (unitFilter) leadsQuery = leadsQuery.eq("unit_id", unitFilter);
+        `,
+          )
+          .eq("company_id", activeCompanyId)
+          // Ação pausada ou concluída sai da fila até ser retomada
+          .eq("campaign.status", "active")
+          .or(
+            `status.in.(pending,contacted,quoted,callback),last_interaction_at.gte.${bounds.dayStart}`,
+          )
+          .order("sla_deadline", { ascending: true, nullsFirst: false })
+          .order("id", { ascending: true });
+        if (onlyMine) leadsQuery = leadsQuery.eq("assigned_user_id", profile!.id);
+        if (unitFilter) leadsQuery = leadsQuery.eq("unit_id", unitFilter);
+        return leadsQuery;
+      };
 
       // Tarefas do CRM vencidas ou para hoje (as de retorno do Todoo já aparecem como lead)
-      let tasksQuery = (supabase.from("tasks") as any)
-        .select("id, title, description, due_date, contact_id, assigned_to, unit_id, contacts(name, phone)")
-        .eq("company_id", activeCompanyId)
-        .eq("status", "pending")
-        .lt("due_date", bounds.dayEnd)
-        .not("title", "ilike", "[Todoo]%")
-        .order("due_date", { ascending: true });
-      if (onlyMine) tasksQuery = tasksQuery.eq("assigned_to", profile!.id);
-      if (unitFilter) tasksQuery = tasksQuery.eq("unit_id", unitFilter);
+      const buildTasks = () => {
+        let tasksQuery = (supabase.from("tasks") as any)
+          .select(
+            "id, title, description, due_date, contact_id, assigned_to, unit_id, contacts(name, phone)",
+          )
+          .eq("company_id", activeCompanyId)
+          .eq("status", "pending")
+          .lt("due_date", bounds.dayEnd)
+          .not("title", "ilike", "[Todoo]%")
+          .order("due_date", { ascending: true })
+          .order("id", { ascending: true });
+        if (onlyMine) tasksQuery = tasksQuery.eq("assigned_to", profile!.id);
+        if (unitFilter) tasksQuery = tasksQuery.eq("unit_id", unitFilter);
+        return tasksQuery;
+      };
 
       let goalsQuery = (supabase.from("todoo_goals") as any)
         .select("user_id, target_contacts, contacts_period")
@@ -156,17 +187,22 @@ export function useTodooDayData() {
         .gt("target_contacts", 0);
       if (onlyMine) goalsQuery = goalsQuery.eq("user_id", profile!.id);
 
-      let capturesQuery = (supabase.from("todoo_referrals") as any)
-        .select("captured_by_user_id, created_at")
-        .eq("company_id", activeCompanyId)
-        .gte("created_at", bounds.monthStart);
-      if (onlyMine) capturesQuery = capturesQuery.eq("captured_by_user_id", profile!.id);
+      const buildCaptures = () => {
+        let capturesQuery = (supabase.from("todoo_referrals") as any)
+          .select("captured_by_user_id, created_at")
+          .eq("company_id", activeCompanyId)
+          .gte("created_at", bounds.monthStart)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true });
+        if (onlyMine) capturesQuery = capturesQuery.eq("captured_by_user_id", profile!.id);
+        return capturesQuery;
+      };
 
       const [leadsRes, tasksRes, goalsRes, capturesRes] = await Promise.all([
-        leadsQuery,
-        tasksQuery,
+        fetchAllPages(buildLeads),
+        fetchAllPages(buildTasks),
         goalsQuery,
-        capturesQuery,
+        fetchAllPages(buildCaptures),
       ]);
       if (leadsRes.error) throw leadsRes.error;
       if (tasksRes.error) throw tasksRes.error;
@@ -176,8 +212,15 @@ export function useTodooDayData() {
       return {
         leads: (leadsRes.data || []) as TodooLead[],
         tasks: (tasksRes.data || []) as CrmTask[],
-        goals: (goalsRes.data || []) as { user_id: string; target_contacts: number; contacts_period: string }[],
-        captures: (capturesRes.data || []) as { captured_by_user_id: string | null; created_at: string }[],
+        goals: (goalsRes.data || []) as {
+          user_id: string;
+          target_contacts: number;
+          contacts_period: string;
+        }[],
+        captures: (capturesRes.data || []) as {
+          captured_by_user_id: string | null;
+          created_at: string;
+        }[],
       };
     },
   });
@@ -189,16 +232,26 @@ export function useTodooDayData() {
     const leads = (data?.leads || []).filter((l) => l.assigned_user_id === userId);
 
     const callbacks = leads
-      .filter((l) => l.status === "callback" && (!l.callback_scheduled_at || l.callback_scheduled_at < bounds.dayEnd))
+      .filter(
+        (l) =>
+          l.status === "callback" &&
+          (!l.callback_scheduled_at || l.callback_scheduled_at < bounds.dayEnd),
+      )
       .sort((a, b) => (a.callback_scheduled_at || "").localeCompare(b.callback_scheduled_at || ""));
     // Cadência: etapa e status do card de cada lead
     const cadence = leads.map((l) => ({
       lead: l,
       stage: resolveTodooLeadStage(l, stages),
-      behavior: resolveTodooCardStatus(l, statuses)?.behavior ?? (l.status === "pending" ? "active" : "paused"),
+      behavior:
+        resolveTodooCardStatus(l, statuses)?.behavior ??
+        (l.status === "pending" ? "active" : "paused"),
     }));
     const toContact = cadence
-      .filter((c) => c.behavior === "active" && (c.stage ? c.stage.kind === "start" : c.lead.status === "pending"))
+      .filter(
+        (c) =>
+          c.behavior === "active" &&
+          (c.stage ? c.stage.kind === "start" : c.lead.status === "pending"),
+      )
       .map((c) => c.lead);
     const attempts = cadence
       .filter(
@@ -215,11 +268,14 @@ export function useTodooDayData() {
         (c) =>
           c.behavior === "paused" &&
           c.lead.status !== "callback" &&
-          (!c.lead.last_interaction_at || new Date(c.lead.last_interaction_at).getTime() < followupLimit),
+          (!c.lead.last_interaction_at ||
+            new Date(c.lead.last_interaction_at).getTime() < followupLimit),
       )
       .map((c) => c.lead)
       .sort((a, b) => (a.last_interaction_at || "").localeCompare(b.last_interaction_at || ""));
-    const workedToday = leads.filter((l) => l.last_interaction_at && l.last_interaction_at >= bounds.dayStart).length;
+    const workedToday = leads.filter(
+      (l) => l.last_interaction_at && l.last_interaction_at >= bounds.dayStart,
+    ).length;
     const crmTasks = (data?.tasks || []).filter((t) => t.assigned_to === userId);
 
     const goal = (data?.goals || []).find((g) => g.user_id === userId);
@@ -237,13 +293,21 @@ export function useTodooDayData() {
 
     const overdue =
       toContact.filter((l) => l.sla_deadline && new Date(l.sla_deadline).getTime() < now).length +
-      attempts.filter((l) => l.next_action_at && new Date(l.next_action_at).getTime() < now).length +
-      callbacks.filter((l) => l.callback_scheduled_at && new Date(l.callback_scheduled_at).getTime() < now).length +
-      crmTasks.filter((t) => t.due_date && t.due_date < bounds.dayStart).length;
+      attempts.filter((l) => l.next_action_at && new Date(l.next_action_at).getTime() < now)
+        .length +
+      callbacks.filter(
+        (l) => l.callback_scheduled_at && new Date(l.callback_scheduled_at).getTime() < now,
+      ).length +
+      crmTasks.filter((t) => t.due_date && new Date(t.due_date).getTime() < now).length;
 
     const captureRemaining = Math.max(0, captureTarget - captureDone);
     const pending =
-      callbacks.length + toContact.length + attempts.length + followups.length + crmTasks.length + captureRemaining;
+      callbacks.length +
+      toContact.length +
+      attempts.length +
+      followups.length +
+      crmTasks.length +
+      captureRemaining;
     const done = workedToday + Math.min(captureDone, captureTarget);
 
     return {
@@ -264,7 +328,6 @@ export function useTodooDayData() {
     };
   };
 
-
   return { data, isLoading, isFetching, refetch, buildPlan, bounds, stages, statuses };
 }
 
@@ -273,14 +336,25 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   const queryClient = useQueryClient();
 
   const isManagerOrAdmin =
-    profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager";
+    profile?.role === "admin_company" ||
+    profile?.role === "super_admin" ||
+    profile?.role === "manager";
 
   const [leadForOutcome, setLeadForOutcome] = useState<TodooLead | null>(null);
   const [outcomeType, setOutcomeType] = useState<TodooOutcomeType>("won");
-  const [savingId, setSavingId] = useState<string | null>(null);
+  // Itens salvando agora (evita clique duplo e não libera o botão de outro item)
+  const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+  const setSaving = (id: string, on: boolean) =>
+    setSavingIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   const [goalsOpen, setGoalsOpen] = useState(false);
 
-  const { data, isLoading, isFetching, refetch, buildPlan, bounds, stages, statuses } = useTodooDayData();
+  const { data, isLoading, isFetching, refetch, buildPlan, bounds, stages, statuses } =
+    useTodooDayData();
   const [messageLead, setMessageLead] = useState<TodooLead | null>(null);
   // Com cadência ativa, a mensagem pode registrar a próxima tentativa
   const messageNextStage = useMemo(() => {
@@ -295,6 +369,8 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   const plan = viewedUserId && data ? buildPlan(viewedUserId) : null;
   const viewingOther = viewedUserId !== profile?.id;
 
+  const queue = useMemo(() => (plan ? buildQueue(plan, stages) : []), [plan, stages]);
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
     queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
@@ -303,7 +379,8 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   // Marca o lead como trabalhado agora (contato feito)
   const markContacted = async (lead: TodooLead) => {
     if (!profile) return;
-    setSavingId(lead.id);
+    if (savingIds.has(lead.id)) return;
+    setSaving(lead.id, true);
     try {
       const now = new Date().toISOString();
       const { error } = await (supabase.from("todoo_leads") as any)
@@ -322,7 +399,8 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
         company_id: lead.company_id,
         user_id: profile.id,
         event_type: "status_changed",
-        notes: lead.status === "callback" ? "Retorno feito pelo Meu Dia" : "Contato feito pelo Meu Dia",
+        notes:
+          lead.status === "callback" ? "Retorno feito pelo Meu Dia" : "Contato feito pelo Meu Dia",
         metadata: { from: lead.status, to: "contacted" },
       });
       toast.success(`${lead.contact_name}: contato registrado`);
@@ -330,7 +408,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
     } catch (err: any) {
       toast.error("Erro ao registrar contato: " + err.message);
     } finally {
-      setSavingId(null);
+      setSaving(lead.id, false);
     }
   };
 
@@ -342,7 +420,8 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
       await markContacted(lead);
       return;
     }
-    setSavingId(lead.id);
+    if (savingIds.has(lead.id)) return;
+    setSaving(lead.id, true);
     try {
       const { error } = await (supabase.from("todoo_leads") as any)
         .update({ stage_id: next.id, updated_at: new Date().toISOString() })
@@ -362,14 +441,16 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
     } catch (err: any) {
       toast.error("Erro ao registrar tentativa: " + err.message);
     } finally {
-      setSavingId(null);
+      setSaving(lead.id, false);
     }
   };
 
-  const attemptLabel = (lead: TodooLead) => todooStageActionLabel(resolveTodooLeadStage(lead, stages), stages);
+  const attemptLabel = (lead: TodooLead) =>
+    todooStageActionLabel(resolveTodooLeadStage(lead, stages), stages);
 
   const completeTask = async (task: CrmTask) => {
-    setSavingId(task.id);
+    if (savingIds.has(task.id)) return;
+    setSaving(task.id, true);
     try {
       const { error } = await supabase.from("tasks").update({ status: "done" }).eq("id", task.id);
       if (error) throw error;
@@ -379,7 +460,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
     } catch (err: any) {
       toast.error("Erro ao concluir tarefa: " + err.message);
     } finally {
-      setSavingId(null);
+      setSaving(task.id, false);
     }
   };
 
@@ -391,171 +472,71 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
   const todayLabel = format(new Date(), "EEEE, d 'de' MMMM", { locale: ptBR });
 
   return (
-    <div className="space-y-5">
-      {!embedded && (
-        <TodooSectionHeader
-          title="Meu Dia"
-          description={`${todayLabel.charAt(0).toUpperCase()}${todayLabel.slice(1)} · tarefas comerciais de hoje`}
-          actions={
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs gap-1.5"
-              onClick={() => refetch()}
-              disabled={isFetching}
-            >
-              <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
-              Atualizar
-            </Button>
-          }
-        />
-      )}
-
+    <div className={cn("flex flex-col gap-5", !embedded && "xl:h-full xl:min-h-0")}>
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       ) : plan ? (
         <>
-          <DaySummary plan={plan} />
-
-          <div className={cn("grid grid-cols-1 gap-4", !embedded && "xl:grid-cols-2")}>
-            <CaptureCard
-              plan={plan}
-              canCreate={!viewingOther}
-              onCreate={onCreateContactsClick}
-              onConfigure={isManagerOrAdmin ? () => setGoalsOpen(true) : undefined}
-            />
-
-            <TaskGroup
-              icon={<Clock className="h-4 w-4 text-amber-500" />}
-              title="Retornos de hoje"
-              hint="Clientes que pediram para você retornar"
-              count={plan.callbacks.length}
-              emptyText="Nenhum retorno agendado para hoje."
-            >
-              {plan.callbacks.map((lead) => (
-                <LeadRow
-                  key={lead.id}
-                  lead={lead}
-                  onMessage={() => setMessageLead(lead)}
-                  detail={
-                    lead.callback_scheduled_at ? (
-                      <DueBadge date={lead.callback_scheduled_at} prefix="Retorno" />
-                    ) : null
-                  }
-                  saving={savingId === lead.id}
-                  doneLabel="Retornei"
-                  onDone={() => markContacted(lead)}
-                  onOutcome={(t) => openOutcome(lead, t)}
-                />
-              ))}
-            </TaskGroup>
-
-            <TaskGroup
-              icon={<Flame className="h-4 w-4 text-blue-500" />}
-              title="Contatos para chamar"
-              hint="A contatar: faça a 1ª tentativa"
-              count={plan.toContact.length}
-              emptyText="Fila zerada. Nenhum contato aguardando."
-            >
-              {plan.toContact.map((lead) => (
-                <LeadRow
-                  key={lead.id}
-                  lead={lead}
-                  onMessage={() => setMessageLead(lead)}
-                  detail={lead.sla_deadline ? <DueBadge date={lead.sla_deadline} prefix="Prazo" /> : null}
-                  saving={savingId === lead.id}
-                  doneLabel={attemptLabel(lead)}
-                  onDone={() => advanceLead(lead)}
-                  onOutcome={(t) => openOutcome(lead, t)}
-                />
-              ))}
-            </TaskGroup>
-
-            <TaskGroup
-              icon={<Repeat className="h-4 w-4 text-orange-500" />}
-              title="Próximas tentativas"
-              hint="Cadência: contatos que ainda não responderam"
-              count={plan.attempts.length}
-              emptyText="Nenhuma tentativa vencendo hoje."
-            >
-              {plan.attempts.map((lead) => {
-                const stage = resolveTodooLeadStage(lead, stages);
+          <div
+            className={cn(
+              "grid grid-cols-1 gap-4",
+              !embedded && "xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_320px]",
+            )}
+          >
+            <DayQueue
+              fill={!embedded}
+              title={embedded ? "Fila de hoje" : "Meu Dia"}
+              dateLabel={
+                embedded ? undefined : `${todayLabel.charAt(0).toUpperCase()}${todayLabel.slice(1)}`
+              }
+              refreshing={isFetching}
+              onRefresh={() => refetch()}
+              items={queue}
+              renderRow={(item) => {
+                if (item.kind === "task") {
+                  return (
+                    <QueueRow
+                      key={`task-${item.task.id}`}
+                      item={item}
+                      saving={savingIds.has(item.task.id)}
+                      doneLabel="Concluir"
+                      onDone={() => completeTask(item.task)}
+                    />
+                  );
+                }
+                const lead = item.lead;
+                const isCadence = item.kind === "first" || item.kind === "attempt";
                 return (
-                  <LeadRow
-                    key={lead.id}
-                    lead={lead}
-                    onMessage={() => setMessageLead(lead)}
-                    detail={
-                      <>
-                        {stage && (
-                          <span
-                            className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                            style={{ color: stage.color, backgroundColor: `${stage.color}15` }}
-                          >
-                            Feita: {stage.name}
-                          </span>
-                        )}
-                        {lead.next_action_at && <DueBadge date={lead.next_action_at} prefix="Vence" />}
-                      </>
+                  <QueueRow
+                    key={`lead-${lead.id}`}
+                    item={item}
+                    saving={savingIds.has(lead.id)}
+                    doneLabel={
+                      isCadence
+                        ? attemptLabel(lead)
+                        : item.kind === "callback"
+                          ? "Retornei"
+                          : "Chamei"
                     }
-                    saving={savingId === lead.id}
-                    doneLabel={attemptLabel(lead)}
-                    onDone={() => advanceLead(lead)}
+                    onDone={() => (isCadence ? advanceLead(lead) : markContacted(lead))}
+                    onMessage={() => setMessageLead(lead)}
                     onOutcome={(t) => openOutcome(lead, t)}
                   />
                 );
-              })}
-            </TaskGroup>
+              }}
+            />
 
-            <TaskGroup
-              icon={<MessageSquare className="h-4 w-4 text-violet-500" />}
-              title="Follow-up de conversas"
-              hint={`Em conversa sem interação há mais de ${FOLLOWUP_AFTER_HOURS / 24} dias`}
-              count={plan.followups.length}
-              emptyText="Nenhuma negociação parada."
-            >
-              {plan.followups.map((lead) => (
-                <LeadRow
-                  key={lead.id}
-                  lead={lead}
-                  onMessage={() => setMessageLead(lead)}
-                  detail={
-                    <span className="text-[10px] text-muted-foreground">
-                      {lead.last_interaction_at
-                        ? `Último contato ${formatDistanceToNow(new Date(lead.last_interaction_at), {
-                            addSuffix: true,
-                            locale: ptBR,
-                          })}`
-                        : "Sem contato registrado"}
-                    </span>
-                  }
-                  saving={savingId === lead.id}
-                  doneLabel="Chamei"
-                  onDone={() => markContacted(lead)}
-                  onOutcome={(t) => openOutcome(lead, t)}
-                />
-              ))}
-            </TaskGroup>
-
-            <TaskGroup
-              icon={<ClipboardList className="h-4 w-4 text-emerald-500" />}
-              title="Tarefas do CRM"
-              hint="Vencidas ou com vencimento hoje"
-              count={plan.crmTasks.length}
-              emptyText="Nenhuma tarefa do CRM para hoje."
-            >
-              {plan.crmTasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  dayStart={bounds.dayStart}
-                  saving={savingId === task.id}
-                  onDone={() => completeTask(task)}
-                />
-              ))}
-            </TaskGroup>
+            <div className="flex flex-col gap-4 xl:min-h-0 xl:overflow-y-auto">
+              <DaySummary plan={plan} />
+              <CaptureCard
+                plan={plan}
+                canCreate={!viewingOther}
+                onCreate={onCreateContactsClick}
+                onConfigure={isManagerOrAdmin ? () => setGoalsOpen(true) : undefined}
+              />
+            </div>
           </div>
         </>
       ) : null}
@@ -565,7 +546,6 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
         onOpenChange={setGoalsOpen}
         onSuccess={() => {
           queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
-          queryClient.invalidateQueries({ queryKey: ["todoo-goals-overview"] });
         }}
       />
 
@@ -592,33 +572,34 @@ function DaySummary({ plan }: { plan: DayPlan }) {
   const progress = pct(plan.done, plan.total);
   const remaining = plan.total - plan.done;
   return (
-    <Card className="p-4 bg-primary/5 border-primary/20">
-      <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
-            <CalendarCheck className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-sm font-semibold">
-                {plan.total === 0
-                  ? "Nenhuma tarefa para hoje"
-                  : remaining === 0
-                    ? "Dia concluído!"
-                    : `${remaining} ${remaining === 1 ? "tarefa pendente" : "tarefas pendentes"}`}
-              </span>
-              <span className="text-xs text-muted-foreground shrink-0">
-                {plan.done} de {plan.total} · {progress}%
-              </span>
-            </div>
-            <Progress value={progress} className="h-2" />
-          </div>
+    <Card className="p-4 space-y-3 bg-primary/5 border-primary/20">
+      <div className="flex items-center gap-3">
+        <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary shrink-0">
+          <CalendarCheck className="h-5 w-5" />
         </div>
-        <div className="grid grid-cols-3 gap-2 sm:w-auto shrink-0">
-          <SummaryStat label="Trabalhados hoje" value={plan.workedToday} />
-          <SummaryStat label="Cadastros hoje" value={plan.captureDone} />
-          <SummaryStat label="Atrasados" value={plan.overdue} danger={plan.overdue > 0} />
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">Meta do dia</h3>
+          <p className="text-[11px] text-muted-foreground">
+            {plan.total === 0
+              ? "Nenhuma tarefa para hoje"
+              : remaining === 0
+                ? "Dia concluído!"
+                : `${remaining} ${remaining === 1 ? "tarefa pendente" : "tarefas pendentes"}`}
+          </p>
         </div>
+      </div>
+      <div className="space-y-1">
+        <Progress value={progress} className="h-2" />
+        <div className="flex justify-between text-[11px] text-muted-foreground">
+          <span>
+            {plan.done} de {plan.total}
+          </span>
+          <span className="font-medium text-foreground">{progress}%</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <SummaryStat label="Trabalhados hoje" value={plan.workedToday} />
+        <SummaryStat label="Atrasados" value={plan.overdue} danger={plan.overdue > 0} />
       </div>
     </Card>
   );
@@ -626,8 +607,10 @@ function DaySummary({ plan }: { plan: DayPlan }) {
 
 function SummaryStat({ label, value, danger }: { label: string; value: number; danger?: boolean }) {
   return (
-    <div className="rounded-lg border bg-card px-3 py-1.5 text-center min-w-[92px]">
-      <div className={cn("text-lg font-bold leading-tight", danger && "text-destructive")}>{value}</div>
+    <div className="rounded-lg border bg-card px-2 py-1.5 text-center">
+      <div className={cn("text-lg font-bold leading-tight", danger && "text-destructive")}>
+        {value}
+      </div>
       <div className="text-[10px] text-muted-foreground whitespace-nowrap">{label}</div>
     </div>
   );
@@ -648,43 +631,48 @@ function CaptureCard({
   const monthly = plan.capturePeriod === "monthly";
   const reached =
     hasGoal &&
-    (monthly ? plan.captureMonthDone >= plan.captureMonthTarget : plan.captureDone >= plan.captureTarget);
+    (monthly
+      ? plan.captureMonthDone >= plan.captureMonthTarget
+      : plan.captureDone >= plan.captureTarget);
   const remaining = Math.max(0, plan.captureTarget - plan.captureDone);
   return (
     <Card className="p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <UserPlus className="h-4 w-4 text-pink-500 shrink-0" />
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-pink-500/10 text-pink-500">
+            <UserPlus className="h-5 w-5" />
+          </div>
           <div className="min-w-0">
             <h3 className="text-sm font-semibold">Cadastrar contatos</h3>
             <p className="text-[11px] text-muted-foreground">
-              {hasGoal ? `Meta ${monthly ? "mensal" : "diária"} · prospecção e indicações` : "Prospecção ativa e indicações"}
+              {hasGoal
+                ? `Meta ${monthly ? "mensal" : "diária"} · prospecção e indicações`
+                : "Prospecção e indicações"}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {onConfigure && (
-            <Button size="sm" variant="ghost" className="h-7 text-xs gap-1.5" onClick={onConfigure}>
-              <Target className="h-3.5 w-3.5" />
-              {hasGoal ? "Ajustar meta" : "Definir meta"}
-            </Button>
-          )}
-          {canCreate && onCreate && (
-            <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={onCreate}>
-              <UserPlus className="h-3.5 w-3.5" />
-              Cadastrar
-            </Button>
-          )}
-        </div>
+        {onConfigure && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 shrink-0"
+            title={hasGoal ? "Ajustar meta" : "Definir meta"}
+            onClick={onConfigure}
+          >
+            <Target className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-lg border bg-muted/30 px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Meta {monthly ? "de hoje" : "do dia"}</div>
-          <div className="text-xl font-bold leading-tight">{hasGoal ? plan.captureTarget : "—"}</div>
+          <div className="text-[11px] text-muted-foreground">Meta de hoje</div>
+          <div className="text-xl font-bold leading-tight">
+            {hasGoal ? plan.captureTarget : "—"}
+          </div>
         </div>
         <div className="rounded-lg border bg-muted/30 px-3 py-2">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Cadastrados hoje</div>
+          <div className="text-[11px] text-muted-foreground">Cadastrados hoje</div>
           <div className={cn("text-xl font-bold leading-tight", reached && "text-emerald-600")}>
             {plan.captureDone}
           </div>
@@ -697,7 +685,8 @@ function CaptureCard({
           <div className="flex items-baseline justify-between text-[11px]">
             {reached ? (
               <span className="flex items-center gap-1 text-emerald-600 font-medium">
-                <CheckCircle2 className="h-3.5 w-3.5" /> {monthly ? "Meta do mês batida" : "Meta do dia batida"}
+                <CheckCircle2 className="h-3.5 w-3.5" />{" "}
+                {monthly ? "Meta do mês batida" : "Meta do dia batida"}
               </span>
             ) : (
               <span className="text-muted-foreground">
@@ -706,7 +695,8 @@ function CaptureCard({
             )}
             {monthly && (
               <span className="text-muted-foreground">
-                Mês: <strong className="text-foreground">{plan.captureMonthDone}</strong> / {plan.captureMonthTarget}
+                Mês: <strong className="text-foreground">{plan.captureMonthDone}</strong> /{" "}
+                {plan.captureMonthTarget}
               </span>
             )}
           </div>
@@ -716,57 +706,229 @@ function CaptureCard({
           Sem meta de cadastros definida para este mês · {plan.captureMonthDone} no mês.
         </p>
       )}
+
+      {canCreate && onCreate && (
+        <Button size="sm" className="h-8 w-full gap-1.5 text-xs" onClick={onCreate}>
+          <UserPlus className="h-3.5 w-3.5" />
+          Cadastrar contato
+        </Button>
+      )}
     </Card>
   );
 }
 
-function TaskGroup({
-  icon,
+type QueueKind = "callback" | "first" | "attempt" | "followup" | "task";
+
+type QueueItem =
+  | {
+      kind: Exclude<QueueKind, "task">;
+      lead: TodooLead;
+      due: string | null;
+      tag: string;
+      stage?: string;
+    }
+  | { kind: "task"; task: CrmTask; due: string | null; tag: string };
+
+const QUEUE_KINDS: Record<QueueKind, { label: string; icon: typeof Clock; className: string }> = {
+  callback: {
+    label: "Retornos",
+    icon: Clock,
+    className: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  first: {
+    label: "A contatar",
+    icon: Flame,
+    className: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  },
+  attempt: {
+    label: "Tentativas",
+    icon: Repeat,
+    className: "bg-orange-500/10 text-orange-700 dark:text-orange-400",
+  },
+  followup: {
+    label: "Follow-up",
+    icon: MessageSquare,
+    className: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  },
+  task: {
+    label: "Tarefas",
+    icon: ClipboardList,
+    className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
+};
+const QUEUE_ORDER: QueueKind[] = ["callback", "first", "attempt", "followup", "task"];
+
+/**
+ * Tudo o que a pessoa tem para fazer hoje numa fila só, pela ordem do prazo
+ * (atrasados primeiro). Na cadência a tag é a etapa em que o lead está; retorno e
+ * follow-up mostram a etapa ao lado do prazo.
+ */
+function buildQueue(
+  plan: DayPlan,
+  stages: ReturnType<typeof useTodooPipeline>["stages"],
+): QueueItem[] {
+  const followupDue = (lead: TodooLead) =>
+    lead.last_interaction_at
+      ? new Date(
+          new Date(lead.last_interaction_at).getTime() + FOLLOWUP_AFTER_HOURS * 3600 * 1000,
+        ).toISOString()
+      : null;
+  const stageName = (lead: TodooLead) => resolveTodooLeadStage(lead, stages)?.name;
+
+  const items: QueueItem[] = [
+    ...plan.callbacks.map((lead) => ({
+      kind: "callback" as const,
+      lead,
+      due: lead.callback_scheduled_at,
+      tag: "Retorno",
+      stage: stageName(lead),
+    })),
+    ...plan.toContact.map((lead) => ({
+      kind: "first" as const,
+      lead,
+      due: lead.sla_deadline,
+      tag: stageName(lead) || "A contatar",
+    })),
+    ...plan.attempts.map((lead) => ({
+      kind: "attempt" as const,
+      lead,
+      due: lead.next_action_at,
+      tag: stageName(lead) || "Tentativa",
+    })),
+    ...plan.followups.map((lead) => ({
+      kind: "followup" as const,
+      lead,
+      due: followupDue(lead),
+      tag: "Follow-up",
+      stage: stageName(lead),
+    })),
+    ...plan.crmTasks.map((task) => ({
+      kind: "task" as const,
+      task,
+      due: task.due_date,
+      tag: "Tarefa",
+    })),
+  ];
+
+  // Sem prazo conta como "agora"; empate segue a ordem dos tipos
+  const time = (item: QueueItem) => (item.due ? new Date(item.due).getTime() : Date.now());
+  return items.sort(
+    (a, b) => time(a) - time(b) || QUEUE_ORDER.indexOf(a.kind) - QUEUE_ORDER.indexOf(b.kind),
+  );
+}
+
+function DayQueue({
+  items,
+  renderRow,
+  fill,
   title,
-  hint,
-  count,
-  emptyText,
-  children,
+  dateLabel,
+  refreshing,
+  onRefresh,
 }: {
-  icon: ReactNode;
+  items: QueueItem[];
+  renderRow: (item: QueueItem) => ReactNode;
+  /** Ocupa a altura disponível e rola por dentro (tela do Meu Dia) */
+  fill?: boolean;
   title: string;
-  hint: string;
-  count: number;
-  emptyText: string;
-  children: ReactNode[];
+  /** Data por extenso; no Painel da Equipe fica de fora */
+  dateLabel?: string;
+  refreshing: boolean;
+  onRefresh: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const items = expanded ? children : children.slice(0, GROUP_PREVIEW);
+  const [filter, setFilter] = useState<QueueKind | "all">("all");
+  const counts = useMemo(() => {
+    const c: Record<QueueKind, number> = {
+      callback: 0,
+      first: 0,
+      attempt: 0,
+      followup: 0,
+      task: 0,
+    };
+    for (const item of items) c[item.kind] += 1;
+    return c;
+  }, [items]);
+  // Tipo filtrado que acabou (último item concluído) volta para Todos
+  const activeFilter = filter !== "all" && counts[filter] === 0 ? "all" : filter;
+  const filtered =
+    activeFilter === "all" ? items : items.filter((item) => item.kind === activeFilter);
+  const overdue = items.filter(isLate).length;
+  // Atrasados primeiro, depois o que vence hoje (a fila já vem pela ordem do prazo)
+  const sections = [
+    { key: "late", label: "Atrasados", items: filtered.filter(isLate) },
+    { key: "today", label: "Para hoje", items: filtered.filter((item) => !isLate(item)) },
+  ];
+
+  const chip = (value: QueueKind | "all", label: string, count: number) => (
+    <button
+      key={value}
+      type="button"
+      onClick={() => setFilter(value)}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors",
+        activeFilter === value
+          ? "border-primary bg-primary text-primary-foreground"
+          : "bg-card text-muted-foreground hover:bg-muted",
+      )}
+    >
+      {label}
+      <span className={cn("tabular-nums font-semibold", filter !== value && "text-foreground")}>
+        {count}
+      </span>
+    </button>
+  );
+
   return (
-    <Card className="p-4 space-y-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="shrink-0">{icon}</span>
+    <Card className={cn("flex flex-col overflow-hidden", fill && "xl:min-h-0 xl:h-full")}>
+      <div className="flex shrink-0 flex-col gap-3 border-b px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold">{title}</h3>
-            <p className="text-[11px] text-muted-foreground">{hint}</p>
+            <h2 className="text-base font-semibold leading-tight">{title}</h2>
+            <p className="text-[11px] text-muted-foreground">
+              {dateLabel ? `${dateLabel} · ` : ""}tarefas comerciais de hoje pela ordem do prazo
+              {overdue > 0 ? ` · ${overdue} atrasado${overdue > 1 ? "s" : ""}` : ""}
+            </p>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            title="Atualizar"
+            onClick={onRefresh}
+            disabled={refreshing}
+          >
+            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+          </Button>
         </div>
-        <Badge variant={count > 0 ? "secondary" : "outline"} className="text-xs shrink-0">
-          {count}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {chip("all", "Todos", items.length)}
+          {QUEUE_ORDER.filter((kind) => counts[kind] > 0).map((kind) =>
+            chip(kind, QUEUE_KINDS[kind].label, counts[kind]),
+          )}
+        </div>
       </div>
-      {count === 0 ? (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground py-2">
-          <Check className="h-3.5 w-3.5 text-emerald-500" />
-          {emptyText}
+
+      {filtered.length === 0 ? (
+        <p className="flex items-center justify-center gap-1.5 px-4 py-10 text-sm text-muted-foreground">
+          <Check className="h-4 w-4 text-emerald-500" />
+          {items.length === 0 ? "Nada pendente para hoje." : "Nada pendente neste filtro."}
         </p>
       ) : (
-        <div className="divide-y divide-border/60 -mx-1">
-          {items}
-          {children.length > GROUP_PREVIEW && (
-            <button
-              type="button"
-              className="w-full pt-2 text-xs text-primary font-medium hover:underline"
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? "Mostrar menos" : `Ver todos (${children.length})`}
-            </button>
+        <div className={cn(fill && "xl:min-h-0 xl:flex-1 xl:overflow-y-auto")}>
+          {sections.map((section) =>
+            section.items.length === 0 ? null : (
+              <section key={section.key}>
+                <h4
+                  className={cn(
+                    "sticky top-0 z-10 border-b bg-muted/60 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide backdrop-blur",
+                    section.key === "late" ? "text-destructive" : "text-muted-foreground",
+                  )}
+                >
+                  {section.label} · {section.items.length}
+                </h4>
+                <div className="divide-y divide-border/60">{section.items.map(renderRow)}</div>
+              </section>
+            ),
           )}
         </div>
       )}
@@ -774,123 +936,208 @@ function TaskGroup({
   );
 }
 
-function DueBadge({ date, prefix }: { date: string; prefix: string }) {
-  const late = new Date(date).getTime() < Date.now();
+/** Atrasado: passou do prazo (follow-up não tem prazo, só o tempo sem resposta). */
+function isLate(item: QueueItem) {
+  return item.kind !== "followup" && !!item.due && new Date(item.due).getTime() < Date.now();
+}
+
+/** Prazo do item no canto da linha: atrasado em vermelho, senão o horário. */
+function DueBadge({ item }: { item: QueueItem }) {
+  if (item.kind === "followup") {
+    const last = item.lead.last_interaction_at;
+    return (
+      <span className="shrink-0 text-[11px] text-muted-foreground">
+        {last
+          ? `Sem resposta ${formatDistanceToNow(new Date(last), { addSuffix: true, locale: ptBR })}`
+          : "Sem contato"}
+      </span>
+    );
+  }
+  if (!item.due)
+    return <span className="shrink-0 text-[11px] text-muted-foreground">Sem prazo</span>;
+  const date = new Date(item.due);
+  if (isLate(item)) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-destructive"
+        title={`Prazo: ${format(date, "dd/MM 'às' HH:mm")}`}
+      >
+        <AlertTriangle className="h-3 w-3" />
+        Atrasado {formatDistanceToNow(date, { locale: ptBR })}
+      </span>
+    );
+  }
+  const today = format(date, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd");
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 text-[10px] font-medium",
-        late ? "text-destructive" : "text-muted-foreground",
-      )}
-    >
-      {late && <AlertTriangle className="h-3 w-3" />}
-      {prefix} {late ? "vencido" : ""} {format(new Date(date), "dd/MM 'às' HH:mm")}
+    <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+      <Clock className="h-3 w-3" />
+      {today ? `Hoje, ${format(date, "HH:mm")}` : format(date, "dd/MM 'às' HH:mm")}
     </span>
   );
 }
 
-function LeadRow({
-  lead,
-  detail,
+function QueueRow({
+  item,
   saving,
   doneLabel,
   onDone,
-  onOutcome,
   onMessage,
+  onOutcome,
 }: {
-  lead: TodooLead;
-  detail: ReactNode;
+  item: QueueItem;
   saving: boolean;
   doneLabel: string;
   onDone: () => void;
-  onOutcome: (type: TodooOutcomeType) => void;
-  onMessage: () => void;
+  onMessage?: () => void;
+  onOutcome?: (type: TodooOutcomeType) => void;
 }) {
-  const referrer = lead.custom_fields?.indicadora;
-  const interest = lead.custom_fields?.servico;
+  const kind = QUEUE_KINDS[item.kind];
+  const Icon = kind.icon;
+  const lead = item.kind === "task" ? null : item.lead;
+  const task = item.kind === "task" ? item.task : null;
+
+  const name = lead ? lead.contact_name : task?.contacts?.name || task?.title || "Tarefa";
+  const phone = lead ? lead.contact_phone : task?.contacts?.phone;
+  const contactId = lead ? lead.contact_id : task?.contact_id;
+  const referrer = lead?.custom_fields?.indicadora;
+  const interest = lead?.custom_fields?.servico;
+
+  // Uma linha de contexto, separada por "·": telefone, ação, etapa, indicação, interesse
+  const details: ReactNode[] = [];
+  if (phone) details.push(formatTodooPhone(phone));
+  if (task?.contacts?.name) details.push(task.title);
+  if (task?.description) details.push(task.description);
+  if (lead?.campaign?.title) details.push(lead.campaign.title);
+  if (item.kind !== "task" && item.stage) details.push(`Etapa: ${item.stage}`);
+  if (referrer) {
+    details.push(
+      <>
+        Indicada por{" "}
+        <TodooReferrerLink name={referrer} contactId={lead?.custom_fields?.indicadora_id} />
+      </>,
+    );
+  }
+  if (interest) details.push(`Interesse: ${interest}`);
+
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center gap-2 px-1 py-2">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-sm font-medium truncate">{lead.contact_name}</span>
-          <span className="text-[11px] text-muted-foreground shrink-0">{formatTodooPhone(lead.contact_phone)}</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
-          {lead.campaign?.title && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-              {lead.campaign.title}
-            </span>
-          )}
-          {referrer && (
-            <span className="text-[10px] text-muted-foreground">
-              Indicada por <TodooReferrerLink name={referrer} contactId={lead.custom_fields?.indicadora_id} />
-            </span>
-          )}
-          {interest && <span className="text-[10px] text-muted-foreground">Interesse: {interest}</span>}
-          {detail}
-        </div>
+    <div className="flex gap-3 px-4 py-3 transition-colors hover:bg-muted/30">
+      <div
+        className={cn(
+          "mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full",
+          kind.className,
+        )}
+      >
+        <Icon className="h-4 w-4" />
       </div>
-      <div className="flex items-center gap-1 shrink-0">
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" title="Enviar mensagem" onClick={onMessage}>
-          <MessageSquare className="h-3.5 w-3.5 text-emerald-500" />
-          Mensagem
-        </Button>
-        <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={onDone} disabled={saving}>
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-          {doneLabel}
-        </Button>
-        <Select value="" onValueChange={(v) => onOutcome(v as TodooOutcomeType)}>
-          <SelectTrigger className="h-7 w-[104px] text-xs">
-            <SelectValue placeholder="Desfecho" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="scheduled" className="text-xs">Agendou</SelectItem>
-            <SelectItem value="won" className="text-xs">Fechou venda</SelectItem>
-            <SelectItem value="quoted" className="text-xs">Enviou orçamento</SelectItem>
-            <SelectItem value="callback" className="text-xs">Retornar depois</SelectItem>
-            <SelectItem value="lost" className="text-xs">Sem sucesso</SelectItem>
-          </SelectContent>
-        </Select>
+
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm font-medium">{name}</span>
+              <span
+                className={cn(
+                  "shrink-0 rounded px-1.5 py-px text-[10px] font-medium",
+                  kind.className,
+                )}
+                title={item.tag}
+              >
+                {item.tag}
+              </span>
+            </div>
+            {details.length > 0 && (
+              <p className="truncate text-[11px] text-muted-foreground">
+                {details.map((d, i) => (
+                  <span key={i}>
+                    {i > 0 && " · "}
+                    {d}
+                  </span>
+                ))}
+              </p>
+            )}
+          </div>
+          <DueBadge item={item} />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(contactId || phone) && (
+            <ContactChatButton
+              contactId={contactId}
+              contactName={name}
+              phone={phone}
+              unitId={lead?.unit_id ?? task?.unit_id}
+              trigger={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 px-2 text-xs"
+                  title="Abrir a conversa"
+                >
+                  <MessageCircle className="h-3.5 w-3.5 text-primary" />
+                  Conversa
+                </Button>
+              }
+            />
+          )}
+          {onMessage && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 px-2 text-xs"
+              title="Enviar a mensagem da ação"
+              onClick={onMessage}
+            >
+              <Send className="h-3.5 w-3.5 text-emerald-500" />
+              Mensagem
+            </Button>
+          )}
+
+          <div className="ml-auto flex items-center gap-1.5">
+            {onOutcome && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs">
+                    Desfecho
+                    <ChevronDown className="h-3 w-3 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-40">
+                  {OUTCOME_OPTIONS.map((o) => (
+                    <DropdownMenuItem
+                      key={o.value}
+                      className="text-xs"
+                      onClick={() => onOutcome(o.value)}
+                    >
+                      {o.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <Button
+              size="sm"
+              className="h-7 gap-1 px-2.5 text-xs"
+              onClick={onDone}
+              disabled={saving}
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Check className="h-3.5 w-3.5" />
+              )}
+              {doneLabel}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function TaskRow({
-  task,
-  dayStart,
-  saving,
-  onDone,
-}: {
-  task: CrmTask;
-  dayStart: string;
-  saving: boolean;
-  onDone: () => void;
-}) {
-  const late = !!task.due_date && task.due_date < dayStart;
-  return (
-    <div className="flex items-center gap-2.5 px-1 py-2">
-      {saving ? (
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
-      ) : (
-        <Checkbox checked={false} onCheckedChange={onDone} aria-label="Concluir tarefa" className="shrink-0" />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{task.title}</div>
-        <div className="flex flex-wrap items-center gap-x-2 text-[10px] text-muted-foreground">
-          {task.contacts?.name && <span>{task.contacts.name}</span>}
-          {task.due_date && (
-            <span className={cn(late && "text-destructive font-medium")}>
-              {late ? "Venceu " : "Vence "}
-              {format(new Date(task.due_date), "dd/MM 'às' HH:mm")}
-            </span>
-          )}
-          {task.description && <span className="truncate max-w-[220px]">{task.description}</span>}
-        </div>
-      </div>
-      {task.contact_id && (
-        <ContactChatButton contactId={task.contact_id} contactName={task.contacts?.name} phone={task.contacts?.phone} />
-      )}
-    </div>
-  );
-}
+const OUTCOME_OPTIONS: { value: TodooOutcomeType; label: string }[] = [
+  { value: "scheduled", label: "Agendou" },
+  { value: "won", label: "Fechou" },
+  { value: "quoted", label: "Orçamento" },
+  { value: "callback", label: "Retornar" },
+  { value: "lost", label: "Sem interesse" },
+];
