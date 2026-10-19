@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -70,6 +70,7 @@ import {
   TODOO_CARD_BEHAVIORS,
   TODOO_STAGE_KINDS,
   nextTodooStage,
+  fetchAllPages,
   refreshTodooCadence,
   resolveTodooCardStatus,
   resolveTodooLeadStage,
@@ -89,6 +90,8 @@ interface Props {
 
 // Leads fechados (venda / sem sucesso) aparecem no quadro por este período
 const CLOSED_LEADS_DAYS = 30;
+// Cards por página em cada coluna ("Carregar mais" busca a próxima)
+const BOARD_PAGE_SIZE = 20;
 
 export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsClick }: Props) {
   const { profile } = useAuth();
@@ -170,55 +173,194 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     },
   });
 
-  // 4. Busca todos os leads do Todoo
-  const { data: leads = [], isLoading, refetch } = useQuery({
-    queryKey: ["todoo-leads", activeCompanyId, profile?.id, selectedUnitId],
-    enabled: !!activeCompanyId,
-    queryFn: async () => {
-      // Quarentena vencida volta para o início antes de montar o quadro
-      await refreshTodooCadence(activeCompanyId!);
-      let query = (supabase.from("todoo_leads") as any)
-        .select(`
-          *,
-          campaign:todoo_campaigns!inner(id, title, type, status, message_template, offer_details, sla_hours),
-          assigned_user:profiles(id, name, avatar_url),
-          unit:units(id, name, color)
-        `)
-        .eq("company_id", activeCompanyId)
-        // Ação pausada ou concluída sai da fila até ser retomada
-        .eq("campaign.status", "active")
-        .or(
-          `status.not.in.(won,lost),updated_at.gte.${new Date(
-            Date.now() - CLOSED_LEADS_DAYS * 24 * 60 * 60 * 1000,
-          ).toISOString()}`,
-        )
-        .order("created_at", { ascending: false });
-
-      // Se for consultor normal, apenas os seus leads
-      const isManagerOrAdmin =
-        profile?.role === "admin_company" || profile?.role === "super_admin" || profile?.role === "manager";
-      if (!isManagerOrAdmin) {
-        query = query.eq("assigned_user_id", profile?.id);
-      }
-
-      // Unidade do contexto (seletor da barra lateral), para todos: o quadro mostra só a unidade atual.
-      // A consultora também vê os leads dela que estão sem unidade.
-      if (selectedUnitId && selectedUnitId !== "all") {
-        query = isManagerOrAdmin
-          ? query.eq("unit_id", selectedUnitId)
-          : query.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return (data || []) as TodooLead[];
-    },
-  });
-
   const isManagerOrAdmin =
     profile?.role === "admin_company" ||
     profile?.role === "super_admin" ||
     profile?.role === "manager";
+
+  // Busca no banco só depois que a pessoa para de digitar
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Cards carregados em cada coluna; filtro novo volta todas para a primeira página
+  const [stageLimits, setStageLimits] = useState<Record<string, number>>({});
+  useEffect(() => {
+    setStageLimits({});
+  }, [selectedCampaignId, selectedConsultantId, debouncedSearch, selectedUnitId]);
+
+  // Card arrastado para outra etapa, até a coluna de destino recarregar do banco
+  const [movedLeads, setMovedLeads] = useState<Record<string, string>>({});
+
+  // Filtros do quadro aplicados no banco (todas as consultas das colunas usam os mesmos)
+  const applyBoardFilters = (query: any) => {
+    query = query
+      .eq("company_id", activeCompanyId)
+      // Ação pausada ou concluída sai da fila até ser retomada
+      .eq("campaign.status", "active")
+      .or(
+        `status.not.in.(won,lost),updated_at.gte.${new Date(
+          Date.now() - CLOSED_LEADS_DAYS * 24 * 60 * 60 * 1000,
+        ).toISOString()}`,
+      );
+
+    // Se for consultor normal, apenas os seus leads
+    if (!isManagerOrAdmin) query = query.eq("assigned_user_id", profile?.id);
+
+    // Unidade do contexto (seletor da barra lateral), para todos: o quadro mostra só a unidade atual.
+    // A consultora também vê os leads dela que estão sem unidade.
+    if (selectedUnitId && selectedUnitId !== "all") {
+      query = isManagerOrAdmin
+        ? query.eq("unit_id", selectedUnitId)
+        : query.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
+    }
+
+    if (selectedCampaignId !== "all") query = query.eq("campaign_id", selectedCampaignId);
+    if (selectedConsultantId !== "all") query = query.eq("assigned_user_id", selectedConsultantId);
+
+    // Busca por nome ou telefone (vírgula e parênteses quebram o filtro "or" do PostgREST)
+    const term = debouncedSearch.replace(/[,()*%\\]/g, " ").trim();
+    if (term) {
+      const digits = term.replace(/\D/g, "");
+      query = query.or(
+        `contact_name.ilike.*${term}*` + (digits.length >= 3 ? `,contact_phone.ilike.*${digits}*` : ""),
+      );
+    }
+    return query;
+  };
+
+  // Leads sem etapa (ou com etapa apagada) aparecem na primeira coluna
+  const applyStage = (query: any, stage: TodooStage) =>
+    stage.id === stages[0]?.id
+      ? query.or(`stage_id.eq.${stage.id},stage_id.is.null`)
+      : query.eq("stage_id", stage.id);
+
+  const boardKey = [
+    "todoo-leads",
+    activeCompanyId,
+    profile?.id,
+    selectedUnitId,
+    selectedCampaignId,
+    selectedConsultantId,
+    debouncedSearch,
+  ];
+
+  // Atrasados da coluna, contados no banco com a mesma regra de todooCadenceInfo:
+  // card ativo, fora da quarentena e com o prazo da tentativa (ou o SLA do início) vencido
+  const countOverdue = async (stage: TodooStage) => {
+    if (stage.kind === "failed") return 0;
+    let query = applyStage(
+      applyBoardFilters(
+        (supabase.from("todoo_leads") as any).select("id, campaign:todoo_campaigns!inner(status)", {
+          count: "exact",
+          head: true,
+        }),
+      ),
+      stage,
+    );
+    if (statuses.length > 0) {
+      const activeIds = statuses.filter((st) => st.behavior === "active").map((st) => st.id);
+      const fallback = statuses.find((st) => st.is_default) ?? statuses[0];
+      const parts = activeIds.length ? [`card_status_id.in.(${activeIds.join(",")})`] : [];
+      if (fallback.behavior === "active") parts.push("card_status_id.is.null");
+      if (parts.length === 0) return 0;
+      query = query.or(parts.join(","));
+    }
+    const now = new Date().toISOString();
+    query =
+      stage.kind === "start"
+        ? query.or(`next_action_at.lt.${now},and(next_action_at.is.null,sla_deadline.lt.${now})`)
+        : query.lt("next_action_at", now);
+    const { count, error } = await query;
+    if (error) throw error;
+    return count ?? 0;
+  };
+
+  // 4. Uma página de leads por coluna, como no Kanban do CRM; o total e os atrasados vêm do banco
+  const columnQueries = useQueries({
+    queries: stages.map((stage) => {
+      const limit = stageLimits[stage.id] ?? BOARD_PAGE_SIZE;
+      return {
+        queryKey: [...boardKey, stage.id, limit, statuses.map((st) => st.id).join(",")],
+        enabled: !!activeCompanyId && !!profile?.id,
+        placeholderData: keepPreviousData,
+        queryFn: async () => {
+          // Quarentena vencida volta para o início antes de montar o quadro
+          await refreshTodooCadence(activeCompanyId!);
+
+          const pageQuery = applyStage(
+            applyBoardFilters(
+              (supabase.from("todoo_leads") as any).select(
+                `
+                *,
+                campaign:todoo_campaigns!inner(id, title, type, status, message_template, offer_details, sla_hours),
+                assigned_user:profiles(id, name, avatar_url),
+                unit:units(id, name, color)
+              `,
+                { count: "exact" },
+              ),
+            ),
+            stage,
+          )
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+            .range(0, limit - 1);
+
+          const [page, overdue] = await Promise.all([pageQuery, countOverdue(stage)]);
+          if (page.error) throw page.error;
+          return {
+            leads: (page.data || []) as TodooLead[],
+            total: (page.count as number | null) ?? 0,
+            overdue,
+          };
+        },
+      };
+    }),
+  });
+
+  // Faturado de cada coluna (vendas dos últimos 30 dias que estão no quadro)
+  const { data: revenueByStage = {} } = useQuery({
+    queryKey: [...boardKey, "revenue"],
+    enabled: !!activeCompanyId && !!profile?.id && stages.length > 0,
+    queryFn: async () => {
+      const { data, error } = await fetchAllPages(() =>
+        applyBoardFilters(
+          (supabase.from("todoo_leads") as any)
+            .select("id, stage_id, outcome_value, campaign:todoo_campaigns!inner(status)")
+            .eq("status", "won")
+            .order("created_at", { ascending: true })
+            .order("id", { ascending: true }),
+        ),
+      );
+      if (error) throw error;
+      const sums: Record<string, number> = {};
+      for (const lead of data) {
+        const stage = resolveTodooLeadStage(lead, stages);
+        if (stage) sums[stage.id] = (sums[stage.id] || 0) + (Number(lead.outcome_value) || 0);
+      }
+      return sums;
+    },
+  });
+
+  const isLoading = stages.length > 0 && columnQueries.some((q) => q.isLoading);
+  const refetch = () => queryClient.invalidateQueries({ queryKey: ["todoo-leads"] });
+
+  // Cards carregados de todas as colunas (um card movido aparece na etapa de destino)
+  const leads = useMemo(() => {
+    const byId = new Map<string, TodooLead>();
+    for (const q of columnQueries) for (const lead of q.data?.leads || []) byId.set(lead.id, lead);
+    return [...byId.values()].map((lead) =>
+      movedLeads[lead.id] ? ({ ...lead, stage_id: movedLeads[lead.id] } as TodooLead) : lead,
+    );
+  }, [columnQueries, movedLeads]);
+
+  // Coluna recarregada do banco: o card movido já está no lugar certo
+  const columnsUpdatedAt = columnQueries.map((q) => q.dataUpdatedAt).join(",");
+  useEffect(() => {
+    setMovedLeads((prev) => (Object.keys(prev).length ? {} : prev));
+  }, [columnsUpdatedAt]);
 
   // A unidade vem do contexto da barra lateral e não é filtro do quadro
   const hasActiveFilters = selectedCampaignId !== "all" || selectedConsultantId !== "all";
@@ -228,44 +370,28 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     setSelectedConsultantId("all");
   };
 
-  // Leads filtrados pelos controles da barra do Kanban
-  const filteredLeads = useMemo(() => {
-    return leads.filter((lead) => {
-      // Filtro de campanha
-      if (selectedCampaignId !== "all" && lead.campaign_id !== selectedCampaignId) {
-        return false;
-      }
-
-      // Filtro de consultora
-      if (selectedConsultantId !== "all" && lead.assigned_user_id !== selectedConsultantId) {
-        return false;
-      }
-
-      // Busca por texto (nome, telefone, título)
-      if (searchTerm.trim()) {
-        const term = searchTerm.toLowerCase();
-        const matchName = (lead.contact_name || "").toLowerCase().includes(term);
-        const matchPhone = (lead.contact_phone || "").includes(term);
-        const matchCamp = (lead.campaign?.title || "").toLowerCase().includes(term);
-        if (!matchName && !matchPhone && !matchCamp) return false;
-      }
-
-      return true;
-    });
-  }, [leads, selectedCampaignId, selectedConsultantId, searchTerm]);
-
   // Agrupamento dos leads por etapa do Kanban
   const columnsData = useMemo(() => {
     const map: Record<string, TodooLead[]> = {};
     stages.forEach((stage) => {
       map[stage.id] = [];
     });
-    filteredLeads.forEach((lead) => {
+    leads.forEach((lead) => {
       const stage = resolveTodooLeadStage(lead, stages);
       if (stage) map[stage.id].push(lead);
     });
     return map;
-  }, [filteredLeads, stages]);
+  }, [leads, stages]);
+
+  // Total e atrasados de cada coluna, vindos do banco
+  const columnStats = useMemo(() => {
+    const map: Record<string, { total: number; overdue: number; loaded: number }> = {};
+    stages.forEach((stage, i) => {
+      const data = columnQueries[i]?.data;
+      map[stage.id] = { total: data?.total ?? 0, overdue: data?.overdue ?? 0, loaded: data?.leads.length ?? 0 };
+    });
+    return map;
+  }, [columnQueries, stages]);
 
   // Drag and Drop Handler
   const handleDragEnd = async (result: DropResult) => {
@@ -285,11 +411,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
 
   // Move o card na cadência (a etapa, o prazo e o status são ajustados no banco)
   const moveLeadToStage = async (lead: TodooLead, target: TodooStage) => {
-    queryClient.setQueryData(
-      ["todoo-leads", activeCompanyId, profile?.id, selectedUnitId],
-      (old: TodooLead[] | undefined) =>
-        old?.map((item) => (item.id === lead.id ? ({ ...item, stage_id: target.id } as TodooLead) : item)),
-    );
+    setMovedLeads((prev) => ({ ...prev, [lead.id]: target.id }));
 
     try {
       const { error } = await (supabase.from("todoo_leads") as any)
@@ -610,13 +732,10 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                   icon: TODOO_STAGE_KINDS[stage.kind].icon,
                 };
                 const columnLeads = columnsData[columnKey] || [];
-                const columnRevenue = columnLeads
-                  .filter((l) => l.status === "won")
-                  .reduce((acc, curr) => acc + (Number(curr.outcome_value) || 0), 0);
-                const columnOverdue = columnLeads.filter(
-                  (l) =>
-                    todooCadenceInfo(l, stage, resolveTodooCardStatus(l, statuses)).state === "overdue",
-                ).length;
+                const stats = columnStats[columnKey];
+                const columnRevenue = revenueByStage[columnKey] || 0;
+                const columnOverdue = stats?.overdue ?? 0;
+                const remaining = Math.max(0, (stats?.total ?? 0) - (stats?.loaded ?? 0));
                 const IconComponent = column.icon;
 
                 return (
@@ -635,7 +754,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                           {column.title}
                         </h3>
                         <Badge variant="secondary" className="text-[10px] px-1.5 h-4 font-bold shrink-0">
-                          {columnLeads.length}
+                          {stats?.total ?? columnLeads.length}
                         </Badge>
                       </div>
 
@@ -858,6 +977,28 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                             })
                           )}
                           {provided.placeholder}
+
+                          {/* Próxima página da coluna, como no Kanban do CRM */}
+                          {remaining > 0 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 w-full border-dashed text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                              disabled={columnQueries[stages.indexOf(stage)]?.isFetching}
+                              onClick={() =>
+                                setStageLimits((prev) => ({
+                                  ...prev,
+                                  [stage.id]: (prev[stage.id] ?? BOARD_PAGE_SIZE) + BOARD_PAGE_SIZE,
+                                }))
+                              }
+                            >
+                              {columnQueries[stages.indexOf(stage)]?.isFetching ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                `Carregar mais (+${Math.min(BOARD_PAGE_SIZE, remaining)} de ${remaining})`
+                              )}
+                            </Button>
+                          )}
                         </div>
                       )}
                     </Droppable>
