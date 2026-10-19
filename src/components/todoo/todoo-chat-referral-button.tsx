@@ -9,6 +9,9 @@ import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import { formatTodooPhone } from "./todoo-period";
 
+const formatShortDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+
 /** Cliente da conversa, que vira a indicadora do contato enviado. */
 export interface TodooChatReferrer {
   contactId: string;
@@ -47,34 +50,60 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
   const variants = phoneVariants(digits);
   const isSelf = phoneVariants(referrer.phone).some((v) => variants.includes(v));
 
-  // Contato já cadastrado no Todoo (por esta ou outra indicação) e o nome dele na base:
-  // o nome do cartão é o da agenda de quem enviou ("E&L - Patrícia"), o da base é o limpo
-  const { data: status } = useQuery({
+  // O que já existe com esse número: indicação (de qualquer cliente), card aberto no Todoo
+  // e contato na base. O nome do cartão é o da agenda de quem enviou ("E&L - Patrícia"),
+  // o da base é o limpo.
+  const { data: status, isLoading } = useQuery({
     queryKey: ["todoo-chat-referral", activeCompanyId, digits],
     enabled: !!activeCompanyId && variants.length > 0 && !isSelf,
     queryFn: async () => {
-      const [referrals, contacts] = await Promise.all([
+      const [referrals, leads, contacts] = await Promise.all([
         (supabase.from("todoo_referrals") as any)
-          .select("id")
+          .select("referrer_name, referrer_contact_id, created_at")
           .eq("company_id", activeCompanyId)
           .in("referred_phone", variants)
+          .order("created_at", { ascending: true })
+          .limit(1),
+        (supabase.from("todoo_leads") as any)
+          .select("created_at, campaign:todoo_campaigns(title), assigned_user:profiles(name)")
+          .eq("company_id", activeCompanyId)
+          .in("contact_phone", variants)
+          .not("status", "in", "(won,lost)")
+          .order("created_at", { ascending: false })
           .limit(1),
         (supabase.from("contacts") as any)
-          .select("name")
+          .select("name, created_at, source, unit:units(name)")
           .eq("company_id", activeCompanyId)
           .is("merged_into_id", null)
           .in("phone", variants)
+          .order("created_at", { ascending: true })
           .limit(1),
       ]);
       if (referrals.error) throw referrals.error;
+      if (leads.error) throw leads.error;
       return {
-        saved: (referrals.data || []).length > 0,
-        baseName: (contacts.data?.[0]?.name as string | null)?.trim() || null,
+        referral: (referrals.data?.[0] ?? null) as {
+          referrer_name: string | null;
+          referrer_contact_id: string | null;
+          created_at: string;
+        } | null,
+        lead: (leads.data?.[0] ?? null) as {
+          created_at: string;
+          campaign: { title: string | null } | null;
+          assigned_user: { name: string | null } | null;
+        } | null,
+        // Contato de outra unidade pode não aparecer (permissão); aí só não mostra o aviso
+        baseContact: (contacts.data?.[0] ?? null) as {
+          name: string | null;
+          created_at: string;
+          source: string | null;
+          unit: { name: string | null } | null;
+        } | null,
       };
     },
   });
-  const alreadySaved = status?.saved ?? false;
-  const name = status?.baseName || contact.name?.trim() || formatTodooPhone(digits);
+  const name =
+    status?.baseContact?.name?.trim() || contact.name?.trim() || formatTodooPhone(digits);
 
   if (digits.length < 10) return null;
 
@@ -102,7 +131,7 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
       if ((data?.created ?? 0) > 0) {
         toast.success(`${name} salvo no Todoo como indicação!`);
       } else {
-        toast.info(`${name} já estava cadastrado no Todoo.`);
+        toast.info(`${name} já estava no Todoo: a indicação conta uma vez só.`);
       }
       queryClient.invalidateQueries({
         predicate: (q) => String(q.queryKey[0]).startsWith("todoo-"),
@@ -126,34 +155,68 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
     );
   }
 
-  if (alreadySaved) {
-    return (
-      <span
-        className={cn(
-          "inline-flex h-6 items-center gap-1 rounded-md px-2 text-[10px] font-medium",
-          mine ? "bg-white/20 text-white" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-        )}
-      >
-        <Check className="h-3 w-3" />
-        No Todoo
-      </span>
+  const chip = (text: string, title?: string) => (
+    <span
+      title={title}
+      className={cn(
+        "inline-flex min-h-6 max-w-full items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium",
+        mine ? "bg-white/20 text-white" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+      )}
+    >
+      <Check className="h-3 w-3 shrink-0" />
+      <span className="truncate">{text}</span>
+    </span>
+  );
+
+  if (isLoading) {
+    return <Loader2 className="h-3 w-3 animate-spin opacity-60" />;
+  }
+
+  // Já indicada: o primeiro que salvou fica com a indicação; os próximos só veem o aviso
+  if (status?.referral) {
+    const { referral } = status;
+    const bySameClient = referral.referrer_contact_id === referrer.contactId;
+    return chip(
+      bySameClient
+        ? `No Todoo desde ${formatShortDate(referral.created_at)}`
+        : `Já indicada por ${referral.referrer_name || "outra cliente"} em ${formatShortDate(referral.created_at)}`,
+      "A indicação conta uma vez só, para quem cadastrou primeiro",
     );
   }
 
+  // Já tem card aberto no Todoo por outra ação (campanha, prospecção)
+  if (status?.lead) {
+    const { lead } = status;
+    return chip(
+      `Já no Todoo: ${lead.campaign?.title || "ação"}${lead.assigned_user?.name ? ` · ${lead.assigned_user.name}` : ""}`,
+      `Card aberto desde ${formatShortDate(lead.created_at)}`,
+    );
+  }
+
+  const base = status?.baseContact;
   return (
-    <Button
-      size="sm"
-      variant="secondary"
-      disabled={saving}
-      onClick={save}
-      className={cn("h-6 text-[10px] px-2 w-fit", tone)}
-    >
-      {saving ? (
-        <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
-      ) : (
-        <Gift className="h-3 w-3 mr-1.5" />
+    <div className="flex flex-col items-start gap-1">
+      <Button
+        size="sm"
+        variant="secondary"
+        disabled={saving}
+        onClick={save}
+        className={cn("h-6 text-[10px] px-2 w-fit", tone)}
+      >
+        {saving ? (
+          <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+        ) : (
+          <Gift className="h-3 w-3 mr-1.5" />
+        )}
+        + Indicação
+      </Button>
+      {base && (
+        <span className="text-[10px] leading-tight opacity-70">
+          Já é contato desde {formatShortDate(base.created_at)}
+          {base.unit?.name ? ` · ${base.unit.name}` : ""}
+          {base.source ? ` · ${base.source}` : ""}
+        </span>
       )}
-      + Indicação
-    </Button>
+    </div>
   );
 }
