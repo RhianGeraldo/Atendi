@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { toast } from "sonner";
 import {
@@ -85,6 +85,7 @@ import { ContactChatButton } from "@/components/chat/contact-chat-button";
 import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { useNavigate } from "@tanstack/react-router";
 import { initials } from "@/lib/format";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 
 export const Route = createFileRoute("/_authenticated/pipeline")({
@@ -101,6 +102,32 @@ export const Route = createFileRoute("/_authenticated/pipeline")({
     </ProtectedMenuRoute>
   ),
 });
+
+// Cards por página: em cada coluna do Kanban e na tabela
+const KANBAN_PAGE_SIZE = 20;
+const TABLE_PAGE_SIZE = 30;
+
+// Oportunidade como vem do banco (os campos de cima vêm sempre; os de baixo só no card completo)
+type OpportunityRow = {
+  id: string;
+  title: string;
+  value: number | null;
+  stage_id: string;
+  expected_close_date: string | null;
+  contact_id: string | null;
+  created_at: string;
+  notes: string | null;
+  owner_id: string | null;
+  unit_id: string | null;
+  status: string | null;
+  conversation_id: string | null;
+  stage_entered_at: string | null;
+  contacts: { name: string | null; phone: string | null } | null;
+  profiles?: { id: string; name: string | null; email: string | null } | null;
+  tasks?: { id: string; status: string }[];
+  opportunity_notes?: { id: string }[];
+  units?: { name: string | null } | null;
+};
 
 function PipelinePage() {
   const navigate = useNavigate();
@@ -136,7 +163,7 @@ function PipelinePage() {
   // Paginação sob demanda por coluna no Kanban (carrega inicialmente 20 por coluna)
   const [stageLimits, setStageLimits] = useState<Record<string, number>>({});
   // Paginação sob demanda no modo Tabela / Lista (carrega inicialmente 30 linhas)
-  const [tableLimit, setTableLimit] = useState<number>(30);
+  const [tableLimit, setTableLimit] = useState<number>(TABLE_PAGE_SIZE);
   const boardContainerRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef<string | null>(null);
 
@@ -245,7 +272,9 @@ function PipelinePage() {
     },
   });
 
-  // Fetch Opportunities for this pipeline
+  // Oportunidades do funil numa versão leve (sem tarefas, notas, responsável e unidade):
+  // contagens, valores, SLA, métricas e ordenação usam todas; os cards completos são
+  // buscados só para a página visível de cada coluna (ver opportunityDetails).
   const { data: opportunities, isLoading: isLoadingOpps } = useQuery({
     queryKey: [
       "opportunities",
@@ -263,19 +292,18 @@ function PipelinePage() {
       !!selectedPipelineId && !!stages && stages.length > 0 && !!profile?.id && !!activeCompanyId,
     queryFn: async () => {
       const stageIds = stages!.map((s) => s.id);
+      const build = () => {
       let query = supabase
         .from("opportunities")
         .select(
           `
           id, title, value, stage_id, expected_close_date, contact_id, created_at, notes, owner_id, unit_id, status, conversation_id, stage_entered_at,
-          contacts ( name, phone ),
-          profiles:owner_id ( id, name, email ),
-          tasks ( id, status ),
-          opportunity_notes ( id ),
-          units ( name )
+          contacts ( name, phone )
         `,
         )
-        .in("stage_id", stageIds);
+        .in("stage_id", stageIds)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false });
 
       if (statusFilter !== "all") {
         query = query.eq("status", statusFilter);
@@ -303,10 +331,13 @@ function PipelinePage() {
         toDate.setHours(23, 59, 59, 999);
         query = query.lte("created_at", toDate.toISOString());
       }
+      return query;
+      };
 
-      const { data, error } = await query;
+      // O PostgREST devolve no máximo 1.000 linhas por consulta
+      const { data, error } = await fetchAllPages(build);
       if (error) throw error;
-      return data;
+      return data as OpportunityRow[];
     },
   });
 
@@ -487,6 +518,75 @@ function PipelinePage() {
     });
     return cols;
   }, [stages, filteredOpportunities]);
+
+  // Cards completos só da página visível: no Kanban, blocos de 20 de cada coluna; na
+  // tabela, blocos de 30 linhas. "Carregar mais" busca só o bloco novo.
+  const detailChunks = useMemo(() => {
+    const chunks: string[][] = [];
+    const split = (ids: string[], size: number) => {
+      for (let i = 0; i < ids.length; i += size) chunks.push(ids.slice(i, i + size));
+    };
+    if (viewMode === "kanban") {
+      for (const stage of stages || []) {
+        const limit = stageLimits[stage.id] ?? KANBAN_PAGE_SIZE;
+        split((columns[stage.id] || []).slice(0, limit).map((o) => o.id), KANBAN_PAGE_SIZE);
+      }
+    } else {
+      split(sortedTableOpportunities.slice(0, tableLimit).map((o) => o.id), TABLE_PAGE_SIZE);
+    }
+    return chunks;
+  }, [viewMode, stages, stageLimits, columns, sortedTableOpportunities, tableLimit]);
+
+  const detailQueries = useQueries({
+    queries: detailChunks.map((ids) => ({
+      queryKey: ["opportunities", "details", ids.join(",")],
+      queryFn: async () => {
+        const { data, error } = await supabase
+          .from("opportunities")
+          .select(
+            `
+            id, title, value, stage_id, expected_close_date, contact_id, created_at, notes, owner_id, unit_id, status, conversation_id, stage_entered_at,
+            contacts ( name, phone ),
+            profiles:owner_id ( id, name, email ),
+            tasks ( id, status ),
+            opportunity_notes ( id ),
+            units ( name )
+          `,
+          )
+          .in("id", ids);
+        if (error) throw error;
+        return data as OpportunityRow[];
+      },
+    })),
+  });
+
+  const detailsById = useMemo(() => {
+    const map = new Map<string, OpportunityRow>();
+    for (const q of detailQueries) for (const opp of q.data || []) map.set(opp.id, opp);
+    return map;
+  }, [detailQueries]);
+
+  // Card completo quando já chegou; a versão leve (sem tarefas e responsável) enquanto carrega.
+  // Etapa e status vêm da versão leve, que é a que o arrastar atualiza na hora.
+  const withDetails = (opp: OpportunityRow): OpportunityRow => {
+    const full = detailsById.get(opp.id);
+    return full ? { ...full, stage_id: opp.stage_id, status: opp.status } : opp;
+  };
+
+  // Oportunidade aberta pelo link fora da primeira página da coluna: abre a coluna até ela
+  useEffect(() => {
+    if (!highlightedOppId || !stages) return;
+    for (const stage of stages) {
+      const index = (columns[stage.id] || []).findIndex((o) => o.id === highlightedOppId);
+      if (index < 0) continue;
+      const limit = stageLimits[stage.id] ?? KANBAN_PAGE_SIZE;
+      if (index >= limit) {
+        const needed = Math.ceil((index + 1) / KANBAN_PAGE_SIZE) * KANBAN_PAGE_SIZE;
+        setStageLimits((prev) => ({ ...prev, [stage.id]: needed }));
+      }
+      return;
+    }
+  }, [highlightedOppId, columns, stages, stageLimits]);
 
   // Auto-scroll suave para o card da oportunidade destacada
   useEffect(() => {
@@ -1163,8 +1263,8 @@ function PipelinePage() {
               <div className="flex h-full items-start gap-4 pb-4">
                 {stages.map((stage) => {
                   const stageOpps = columns[stage.id] || [];
-                  const currentLimit = stageLimits[stage.id] ?? 20;
-                  const visibleOpps = stageOpps.slice(0, currentLimit);
+                  const currentLimit = stageLimits[stage.id] ?? KANBAN_PAGE_SIZE;
+                  const visibleOpps = stageOpps.slice(0, currentLimit).map(withDetails);
                   const hasMoreInStage = stageOpps.length > currentLimit;
                   const remainingInStage = stageOpps.length - currentLimit;
 
@@ -1546,11 +1646,11 @@ function PipelinePage() {
                                   onClick={() =>
                                     setStageLimits((prev) => ({
                                       ...prev,
-                                      [stage.id]: currentLimit + 20,
+                                      [stage.id]: currentLimit + KANBAN_PAGE_SIZE,
                                     }))
                                   }
                                 >
-                                  Carregar mais (+{Math.min(20, remainingInStage)} de{" "}
+                                  Carregar mais (+{Math.min(KANBAN_PAGE_SIZE, remainingInStage)} de{" "}
                                   {remainingInStage})
                                 </Button>
                               </div>
@@ -1659,7 +1759,7 @@ function PipelinePage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sortedTableOpportunities.slice(0, tableLimit).map((opp: any) => {
+                    sortedTableOpportunities.slice(0, tableLimit).map(withDetails).map((opp: any) => {
                       const stage = stages?.find((s) => s.id === opp.stage_id);
                       const pendingTasksCount =
                         opp.tasks?.filter((t: any) => t.status === "pending" || t.status === "todo")
@@ -1928,9 +2028,9 @@ function PipelinePage() {
                   variant="outline"
                   size="sm"
                   className="h-8 text-xs cursor-pointer"
-                  onClick={() => setTableLimit((prev) => prev + 30)}
+                  onClick={() => setTableLimit((prev) => prev + TABLE_PAGE_SIZE)}
                 >
-                  Carregar mais (+{Math.min(30, sortedTableOpportunities.length - tableLimit)})
+                  Carregar mais (+{Math.min(TABLE_PAGE_SIZE, sortedTableOpportunities.length - tableLimit)})
                 </Button>
               </div>
             )}
