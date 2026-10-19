@@ -640,8 +640,9 @@ function ConversationsPage() {
       let query = supabase
         .from("conversations")
         .select(selectString)
-        .order("last_message_at", { ascending: false })
-        .order("id", { ascending: false });
+        // Ordem fixa entre as páginas: por last_message_at, uma conversa que recebe mensagem
+        // no meio da leitura muda de página e podia ficar fora da contagem
+        .order("id", { ascending: true });
 
       if (activeCompanyId) {
         query = query.eq("contact.company_id", activeCompanyId);
