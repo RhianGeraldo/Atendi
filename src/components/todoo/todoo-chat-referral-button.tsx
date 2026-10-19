@@ -26,6 +26,8 @@ export interface TodooChatReferrer {
 interface Props {
   contact: { name?: string | null; phone?: string | null; waid?: string | null };
   referrer: TodooChatReferrer;
+  /** Mensagem do cartão: o banco confere nela a cliente, a unidade e a hora */
+  messageId: string;
   /** Quando o cartão chegou: só quem já era contato antes dele fica sem o botão */
   receivedAt?: string | null;
   mine?: boolean;
@@ -46,7 +48,13 @@ function phoneVariants(raw: string | null | undefined): string[] {
  * "+ Indicação" no cartão de contato recebido no chat: salva o contato no Todoo como
  * indicação da cliente da conversa, sem abrir formulário.
  */
-export function TodooChatReferralButton({ contact, referrer, receivedAt, mine }: Props) {
+export function TodooChatReferralButton({
+  contact,
+  referrer,
+  messageId,
+  receivedAt,
+  mine,
+}: Props) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const queryClient = useQueryClient();
@@ -111,17 +119,14 @@ export function TodooChatReferralButton({ contact, referrer, receivedAt, mine }:
     if (!profile || !activeCompanyId) return;
     setSaving(true);
     try {
-      // O banco confere de novo se já é contato (de qualquer unidade) antes de salvar
-      const { data, error } = await (supabase.rpc as any)("todoo_register_chat_referral", {
-        p_company_id: activeCompanyId,
-        p_referrer_contact_id: referrer.contactId,
-        p_unit_id: referrer.unitId,
+      // O banco lê o cartão (cliente, unidade, hora) e confere de novo se já é contato
+      const { data, error } = await (supabase.rpc as any)("todoo_register_referral_from_message", {
+        p_message_id: messageId,
         p_name: name,
         p_phone: digits,
-        p_before: before,
       });
       if (error) throw error;
-      if (data?.already_contact) {
+      if ((data?.existing?.length ?? 0) > 0) {
         toast.info(`${name} já é contato: não entra como indicação.`);
       } else if ((data?.created ?? 0) > 0) {
         toast.success(`${name} salvo no Todoo como indicação!`);

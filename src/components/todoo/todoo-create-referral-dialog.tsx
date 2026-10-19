@@ -156,6 +156,8 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
 
       const created: number = data?.created ?? 0;
       const duplicates: { name: string }[] = data?.duplicates ?? [];
+      // Indicação é só de quem ainda não é contato
+      const existing: { name: string }[] = data?.existing ?? [];
 
       if (created > 0) {
         toast.success(
@@ -167,6 +169,14 @@ export function TodooCreateReferralDialog({ open, onOpenChange, onSuccess }: Pro
       if (duplicates.length > 0) {
         toast.warning(
           `Já cadastrado${duplicates.length > 1 ? "s" : ""} antes, não contou de novo: ${duplicates
+            .map((d) => d.name)
+            .join(", ")}`,
+        );
+      }
+
+      if (existing.length > 0) {
+        toast.warning(
+          `Já ${existing.length > 1 ? "são contatos" : "é contato"}, não entra como indicação: ${existing
             .map((d) => d.name)
             .join(", ")}`,
         );

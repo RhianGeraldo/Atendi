@@ -828,6 +828,7 @@ export function MessageBubble({
                         <TodooChatReferralButton
                           contact={contact}
                           referrer={todooReferrer}
+                          messageId={m.id}
                           receivedAt={m.created_at}
                         />
                       )}
