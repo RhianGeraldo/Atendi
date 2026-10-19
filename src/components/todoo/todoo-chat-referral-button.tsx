@@ -47,20 +47,34 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
   const variants = phoneVariants(digits);
   const isSelf = phoneVariants(referrer.phone).some((v) => variants.includes(v));
 
-  // Contato já cadastrado no Todoo (por esta ou outra indicação)
-  const { data: alreadySaved = false } = useQuery({
+  // Contato já cadastrado no Todoo (por esta ou outra indicação) e o nome dele na base:
+  // o nome do cartão é o da agenda de quem enviou ("E&L - Patrícia"), o da base é o limpo
+  const { data: status } = useQuery({
     queryKey: ["todoo-chat-referral", activeCompanyId, digits],
     enabled: !!activeCompanyId && variants.length > 0 && !isSelf,
     queryFn: async () => {
-      const { data, error } = await (supabase.from("todoo_referrals") as any)
-        .select("id")
-        .eq("company_id", activeCompanyId)
-        .in("referred_phone", variants)
-        .limit(1);
-      if (error) throw error;
-      return (data || []).length > 0;
+      const [referrals, contacts] = await Promise.all([
+        (supabase.from("todoo_referrals") as any)
+          .select("id")
+          .eq("company_id", activeCompanyId)
+          .in("referred_phone", variants)
+          .limit(1),
+        (supabase.from("contacts") as any)
+          .select("name")
+          .eq("company_id", activeCompanyId)
+          .is("merged_into_id", null)
+          .in("phone", variants)
+          .limit(1),
+      ]);
+      if (referrals.error) throw referrals.error;
+      return {
+        saved: (referrals.data || []).length > 0,
+        baseName: (contacts.data?.[0]?.name as string | null)?.trim() || null,
+      };
     },
   });
+  const alreadySaved = status?.saved ?? false;
+  const name = status?.baseName || contact.name?.trim() || formatTodooPhone(digits);
 
   if (digits.length < 10) return null;
 
@@ -78,7 +92,7 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
         p_unit_id: referrer.unitId,
         p_contacts: [
           {
-            name: contact.name?.trim() || formatTodooPhone(digits),
+            name,
             phone: digits,
             service: "",
           },
@@ -86,9 +100,9 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
       });
       if (error) throw error;
       if ((data?.created ?? 0) > 0) {
-        toast.success(`${contact.name || "Contato"} salvo no Todoo como indicação!`);
+        toast.success(`${name} salvo no Todoo como indicação!`);
       } else {
-        toast.info(`${contact.name || "Este contato"} já estava cadastrado no Todoo.`);
+        toast.info(`${name} já estava cadastrado no Todoo.`);
       }
       queryClient.invalidateQueries({
         predicate: (q) => String(q.queryKey[0]).startsWith("todoo-"),
