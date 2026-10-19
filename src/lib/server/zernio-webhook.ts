@@ -381,7 +381,7 @@ async function processarMensagem(
   if (evento.threadId) {
     const { data: convByThread } = await supabaseAdmin
       .from("conversations")
-      .select("id, status, assigned_agent_id, contact_id, ai_active, provider_thread_id")
+      .select("id, status, assigned_agent_id, contact_id, ai_active, ai_agent_id, unread_count, provider_thread_id")
       .eq("whatsapp_instance_id", instance.id)
       .eq("provider_thread_id", evento.threadId)
       .maybeSingle();
@@ -394,7 +394,7 @@ async function processarMensagem(
   if (!activeConv) {
     const { data: convByContact } = await supabaseAdmin
       .from("conversations")
-      .select("id, status, assigned_agent_id, contact_id, ai_active, provider_thread_id")
+      .select("id, status, assigned_agent_id, contact_id, ai_active, ai_agent_id, unread_count, provider_thread_id")
       .eq("whatsapp_instance_id", instance.id)
       .eq("contact_id", contact.id)
       .in("status", ["waiting", "active"])
@@ -438,23 +438,68 @@ async function processarMensagem(
   const messageContent = evento.texto || messageDefaultLabel;
   const previewText = (evento.texto || messageDefaultLabel || "Mensagem").substring(0, 50);
 
+  // Mensagem repetida (reentrega da Zernio, eco do envio) sai antes de mexer na conversa:
+  // senão um eco reabriria a conversa resolvida
+  const { data: existingMsg } = await supabaseAdmin
+    .from("messages")
+    .select("id")
+    .eq("remote_msg_id", evento.platformMessageId)
+    .maybeSingle();
+
+  if (existingMsg) {
+    // Mensagem duplicada
+    return;
+  }
+
   if (activeConv) {
     conversationId = activeConv.id;
     aiActive = activeConv.ai_active ?? false;
 
     // Atualização obrigatória da thread e da janela de 24h (§4.3, §4.4)
-    await supabaseAdmin
-      .from("conversations")
-      .update({
-        last_message_at: nowIso,
-        last_message_preview: previewText,
-        provider_thread_id: evento.threadId || activeConv.provider_thread_id,
-        remote_id: contactIdOrPhone,
-        channel: redeFinal,
-        has_window: true,
-        window_expires_at: windowExpiry,
-      })
-      .eq("id", conversationId);
+    const updatePayload: Record<string, any> = {
+      last_message_at: nowIso,
+      last_message_preview: previewText,
+      provider_thread_id: evento.threadId || activeConv.provider_thread_id,
+      remote_id: contactIdOrPhone,
+      channel: redeFinal,
+      has_window: true,
+      window_expires_at: windowExpiry,
+    };
+
+    if (!isFromMe) {
+      updatePayload.ai_followup_count = 0;
+      updatePayload.unread_count = (activeConv.unread_count || 0) + 1;
+    }
+
+    // A conversa é achada pela thread do Instagram mesmo resolvida: mensagem da cliente reabre
+    // como "aguardando" (ou "em atendimento" se a IA estava atendendo), igual ao WhatsApp
+    if (activeConv.status === "resolved" && !isFromMe) {
+      let agentId = activeConv.ai_agent_id ?? null;
+      if (!agentId) {
+        const { data: defaultAgents } = await supabaseAdmin
+          .from("ai_agents")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("is_active", true)
+          .or("is_main_agent.eq.true,active_by_default.eq.true")
+          .order("is_main_agent", { ascending: false })
+          .limit(1);
+        agentId = defaultAgents?.[0]?.id ?? null;
+      }
+      aiActive = activeConv.ai_active ?? false;
+      Object.assign(updatePayload, {
+        status: aiActive ? "active" : "waiting",
+        ai_active: aiActive,
+        ai_agent_id: agentId,
+        assigned_agent_id: null,
+        resolved_at: null,
+        unread_count: 1,
+      });
+      const sessionId = await abrirSessao(conversationId, contact.id, instance.id, aiActive, agentId);
+      if (sessionId) updatePayload.current_session_id = sessionId;
+    }
+
+    await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
   } else {
     // Verificar agente de IA padrão da empresa
     const { data: defaultAgents } = await supabaseAdmin
@@ -495,18 +540,22 @@ async function processarMensagem(
       return;
     }
     conversationId = newConv.id;
-  }
 
-  // 4. Inserir Mensagem com Deduplicação por remote_msg_id
-  const { data: existingMsg } = await supabaseAdmin
-    .from("messages")
-    .select("id")
-    .eq("remote_msg_id", evento.platformMessageId)
-    .maybeSingle();
-
-  if (existingMsg) {
-    // Mensagem duplicada
-    return;
+    if (!isFromMe) {
+      const sessionId = await abrirSessao(
+        conversationId,
+        contact.id,
+        instance.id,
+        aiActive,
+        aiActive ? defaultAgent?.id ?? null : null,
+      );
+      if (sessionId) {
+        await supabaseAdmin
+          .from("conversations")
+          .update({ current_session_id: sessionId })
+          .eq("id", conversationId);
+      }
+    }
   }
 
   const { data: insertedMsg, error: msgErr } = await supabaseAdmin
@@ -636,4 +685,66 @@ async function baixarEArmazenarMidiaZernio(params: {
       .update({ media_url: publicUrlData.publicUrl })
       .eq("id", messageId);
   }
+}
+
+/**
+ * Abre o atendimento (sessão) da conversa, como no webhook do WhatsApp: reaproveita a sessão
+ * aberta ou cria uma nova com os eventos "started" e, se a IA atende, "assigned".
+ */
+async function abrirSessao(
+  conversationId: string,
+  contactId: string,
+  instanceId: string,
+  aiActive: boolean,
+  agentId: string | null,
+): Promise<string | null> {
+  const { data: existing } = await supabaseAdmin
+    .from("conversation_sessions")
+    .select("id")
+    .eq("conversation_id", conversationId)
+    .is("resolved_at", null)
+    .maybeSingle();
+  if (existing) return existing.id;
+
+  const { data: created, error } = await supabaseAdmin
+    .from("conversation_sessions")
+    .insert({
+      conversation_id: conversationId,
+      contact_id: contactId,
+      whatsapp_instance_id: instanceId,
+      started_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    // Duas mensagens juntas: a outra entrega já abriu a sessão
+    if (error.code === "23505") {
+      const { data: concurrent } = await supabaseAdmin
+        .from("conversation_sessions")
+        .select("id")
+        .eq("conversation_id", conversationId)
+        .is("resolved_at", null)
+        .maybeSingle();
+      return concurrent?.id ?? null;
+    }
+    console.error("[zernio:webhook] Erro ao abrir sessão:", error);
+    return null;
+  }
+
+  const events: any[] = [{ session_id: created.id, event_type: "started" }];
+  if (aiActive && agentId) {
+    const { data: agent } = await supabaseAdmin
+      .from("ai_agents")
+      .select("name")
+      .eq("id", agentId)
+      .maybeSingle();
+    events.push({
+      session_id: created.id,
+      event_type: "assigned",
+      metadata: { by_ai: true, ai_agent_id: agentId, ai_agent_name: agent?.name || "IA" },
+    });
+  }
+  await supabaseAdmin.from("session_events").insert(events);
+  return created.id;
 }
