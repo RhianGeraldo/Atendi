@@ -7,6 +7,7 @@ import {
   CalendarCheck,
   Check,
   CheckCircle2,
+  ChevronDown,
   ClipboardList,
   Clock,
   Flame,
@@ -23,12 +24,11 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { canAccessTodooTab } from "@/lib/permissions";
@@ -828,9 +828,12 @@ function DayQueue({
     return c;
   }, [items]);
   const filtered = filter === "all" ? items : items.filter((item) => item.kind === filter);
-  const overdue = items.filter(
-    (item) => item.due && new Date(item.due).getTime() < Date.now(),
-  ).length;
+  const overdue = items.filter(isLate).length;
+  // Atrasados primeiro, depois o que vence hoje (a fila já vem pela ordem do prazo)
+  const sections = [
+    { key: "late", label: "Atrasados", items: filtered.filter(isLate) },
+    { key: "today", label: "Para hoje", items: filtered.filter((item) => !isLate(item)) },
+  ];
 
   const chip = (value: QueueKind | "all", label: string, count: number) => (
     <button
@@ -859,7 +862,7 @@ function DayQueue({
             <h2 className="text-base font-semibold leading-tight">{title}</h2>
             <p className="text-[11px] text-muted-foreground">
               {dateLabel ? `${dateLabel} · ` : ""}tarefas comerciais de hoje pela ordem do prazo
-              {overdue > 0 ? ` · ${overdue} atrasado${overdue > 1 ? "s" : ""} no topo` : ""}
+              {overdue > 0 ? ` · ${overdue} atrasado${overdue > 1 ? "s" : ""}` : ""}
             </p>
           </div>
           <Button
@@ -887,45 +890,64 @@ function DayQueue({
           {items.length === 0 ? "Nada pendente para hoje." : "Nada pendente neste filtro."}
         </p>
       ) : (
-        <div
-          className={cn(
-            "divide-y divide-border/60",
-            fill && "xl:min-h-0 xl:flex-1 xl:overflow-y-auto",
+        <div className={cn(fill && "xl:min-h-0 xl:flex-1 xl:overflow-y-auto")}>
+          {sections.map((section) =>
+            section.items.length === 0 ? null : (
+              <section key={section.key}>
+                <h4
+                  className={cn(
+                    "sticky top-0 z-10 border-b bg-muted/60 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide backdrop-blur",
+                    section.key === "late" ? "text-destructive" : "text-muted-foreground",
+                  )}
+                >
+                  {section.label} · {section.items.length}
+                </h4>
+                <div className="divide-y divide-border/60">{section.items.map(renderRow)}</div>
+              </section>
+            ),
           )}
-        >
-          {filtered.map(renderRow)}
         </div>
       )}
     </Card>
   );
 }
 
-function DueText({ item }: { item: QueueItem }) {
+/** Atrasado: passou do prazo (follow-up não tem prazo, só o tempo sem resposta). */
+function isLate(item: QueueItem) {
+  return item.kind !== "followup" && !!item.due && new Date(item.due).getTime() < Date.now();
+}
+
+/** Prazo do item no canto da linha: atrasado em vermelho, senão o horário. */
+function DueBadge({ item }: { item: QueueItem }) {
   if (item.kind === "followup") {
     const last = item.lead.last_interaction_at;
     return (
-      <span className="text-[11px] text-muted-foreground">
+      <span className="shrink-0 text-[11px] text-muted-foreground">
         {last
-          ? `Último contato ${formatDistanceToNow(new Date(last), { addSuffix: true, locale: ptBR })}`
-          : "Sem contato registrado"}
+          ? `Sem resposta ${formatDistanceToNow(new Date(last), { addSuffix: true, locale: ptBR })}`
+          : "Sem contato"}
       </span>
     );
   }
-  if (!item.due) return null;
+  if (!item.due)
+    return <span className="shrink-0 text-[11px] text-muted-foreground">Sem prazo</span>;
   const date = new Date(item.due);
-  const late = date.getTime() < Date.now();
-  const prefix = item.kind === "callback" ? "Retornar" : item.kind === "task" ? "Vence" : "Prazo";
+  if (isLate(item)) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-destructive"
+        title={`Prazo: ${format(date, "dd/MM 'às' HH:mm")}`}
+      >
+        <AlertTriangle className="h-3 w-3" />
+        Atrasado {formatDistanceToNow(date, { locale: ptBR })}
+      </span>
+    );
+  }
+  const today = format(date, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd");
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 text-[11px]",
-        late ? "font-medium text-destructive" : "text-muted-foreground",
-      )}
-    >
-      {late && <AlertTriangle className="h-3 w-3" />}
-      {late
-        ? `Atrasado desde ${format(date, "dd/MM 'às' HH:mm")}`
-        : `${prefix} ${format(date, "dd/MM 'às' HH:mm")}`}
+    <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+      <Clock className="h-3 w-3" />
+      {today ? `Hoje, ${format(date, "HH:mm")}` : format(date, "dd/MM 'às' HH:mm")}
     </span>
   );
 }
@@ -956,119 +978,142 @@ function QueueRow({
   const referrer = lead?.custom_fields?.indicadora;
   const interest = lead?.custom_fields?.servico;
 
+  // Uma linha de contexto, separada por "·": telefone, ação, etapa, indicação, interesse
+  const details: ReactNode[] = [];
+  if (phone) details.push(formatTodooPhone(phone));
+  if (task?.contacts?.name) details.push(task.title);
+  if (task?.description) details.push(task.description);
+  if (lead?.campaign?.title) details.push(lead.campaign.title);
+  if (item.kind !== "task" && item.stage) details.push(`Etapa: ${item.stage}`);
+  if (referrer) {
+    details.push(
+      <>
+        Indicada por{" "}
+        <TodooReferrerLink name={referrer} contactId={lead?.custom_fields?.indicadora_id} />
+      </>,
+    );
+  }
+  if (interest) details.push(`Interesse: ${interest}`);
+
   return (
-    <div className="flex flex-col gap-2 px-4 py-2.5 2xl:flex-row 2xl:items-center 2xl:gap-4">
-      <div className="flex min-w-0 flex-1 items-start gap-3">
-        <span
-          className={cn(
-            "mt-0.5 inline-flex w-[104px] shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium",
-            kind.className,
-          )}
-        >
-          <Icon className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate" title={item.tag}>
-            {item.tag}
-          </span>
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-sm font-medium">{name}</span>
-            {phone && (
-              <span className="shrink-0 text-[11px] text-muted-foreground">
-                {formatTodooPhone(phone)}
-              </span>
-            )}
-          </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-            <DueText item={item} />
-            {item.kind !== "task" && item.stage && <span>· Etapa: {item.stage}</span>}
-            {task && task.contacts?.name && <span className="truncate">{task.title}</span>}
-            {task?.description && (
-              <span className="max-w-[260px] truncate">{task.description}</span>
-            )}
-            {lead?.campaign?.title && <span>· {lead.campaign.title}</span>}
-            {referrer && (
-              <span>
-                · Indicada por{" "}
-                <TodooReferrerLink name={referrer} contactId={lead?.custom_fields?.indicadora_id} />
-              </span>
-            )}
-            {interest && <span>· Interesse: {interest}</span>}
-          </div>
-        </div>
+    <div className="flex gap-3 px-4 py-3 transition-colors hover:bg-muted/30">
+      <div
+        className={cn(
+          "mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full",
+          kind.className,
+        )}
+      >
+        <Icon className="h-4 w-4" />
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-1 sm:pl-[116px] 2xl:pl-0">
-        {(contactId || phone) && (
-          <ContactChatButton
-            contactId={contactId}
-            contactName={name}
-            phone={phone}
-            unitId={lead?.unit_id ?? task?.unit_id}
-            trigger={
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1 px-2 text-xs"
-                title="Abrir a conversa"
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm font-medium">{name}</span>
+              <span
+                className={cn(
+                  "shrink-0 rounded px-1.5 py-px text-[10px] font-medium",
+                  kind.className,
+                )}
+                title={item.tag}
               >
-                <MessageCircle className="h-3.5 w-3.5 text-primary" />
-                Conversa
-              </Button>
-            }
-          />
-        )}
-        {onMessage && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1 px-2 text-xs"
-            title="Enviar mensagem"
-            onClick={onMessage}
-          >
-            <Send className="h-3.5 w-3.5 text-emerald-500" />
-            Mensagem
-          </Button>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 gap-1 px-2 text-xs"
-          onClick={onDone}
-          disabled={saving}
-        >
-          {saving ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Check className="h-3.5 w-3.5" />
+                {item.tag}
+              </span>
+            </div>
+            {details.length > 0 && (
+              <p className="truncate text-[11px] text-muted-foreground">
+                {details.map((d, i) => (
+                  <span key={i}>
+                    {i > 0 && " · "}
+                    {d}
+                  </span>
+                ))}
+              </p>
+            )}
+          </div>
+          <DueBadge item={item} />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(contactId || phone) && (
+            <ContactChatButton
+              contactId={contactId}
+              contactName={name}
+              phone={phone}
+              unitId={lead?.unit_id ?? task?.unit_id}
+              trigger={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 px-2 text-xs"
+                  title="Abrir a conversa"
+                >
+                  <MessageCircle className="h-3.5 w-3.5 text-primary" />
+                  Conversa
+                </Button>
+              }
+            />
           )}
-          {doneLabel}
-        </Button>
-        {onOutcome && (
-          <Select value="" onValueChange={(v) => onOutcome(v as TodooOutcomeType)}>
-            <SelectTrigger className="h-7 w-[104px] text-xs">
-              <SelectValue placeholder="Desfecho" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="scheduled" className="text-xs">
-                Agendou
-              </SelectItem>
-              <SelectItem value="won" className="text-xs">
-                Fechou
-              </SelectItem>
-              <SelectItem value="quoted" className="text-xs">
-                Orçamento
-              </SelectItem>
-              <SelectItem value="callback" className="text-xs">
-                Retornar
-              </SelectItem>
-              <SelectItem value="lost" className="text-xs">
-                Sem interesse
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        )}
+          {onMessage && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 px-2 text-xs"
+              title="Enviar a mensagem da ação"
+              onClick={onMessage}
+            >
+              <Send className="h-3.5 w-3.5 text-emerald-500" />
+              Mensagem
+            </Button>
+          )}
+
+          <div className="ml-auto flex items-center gap-1.5">
+            {onOutcome && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs">
+                    Desfecho
+                    <ChevronDown className="h-3 w-3 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-40">
+                  {OUTCOME_OPTIONS.map((o) => (
+                    <DropdownMenuItem
+                      key={o.value}
+                      className="text-xs"
+                      onClick={() => onOutcome(o.value)}
+                    >
+                      {o.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <Button
+              size="sm"
+              className="h-7 gap-1 px-2.5 text-xs"
+              onClick={onDone}
+              disabled={saving}
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Check className="h-3.5 w-3.5" />
+              )}
+              {doneLabel}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+const OUTCOME_OPTIONS: { value: TodooOutcomeType; label: string }[] = [
+  { value: "scheduled", label: "Agendou" },
+  { value: "won", label: "Fechou" },
+  { value: "quoted", label: "Orçamento" },
+  { value: "callback", label: "Retornar" },
+  { value: "lost", label: "Sem interesse" },
+];
