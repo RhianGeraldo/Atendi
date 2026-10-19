@@ -22,6 +22,8 @@ export interface TodooChatReferrer {
 interface Props {
   contact: { name?: string | null; phone?: string | null; waid?: string | null };
   referrer: TodooChatReferrer;
+  /** Quando o cartão chegou: só quem já era contato antes dele fica sem o botão */
+  receivedAt?: string | null;
   mine?: boolean;
 }
 
@@ -40,7 +42,7 @@ function phoneVariants(raw: string | null | undefined): string[] {
  * "+ Indicação" no cartão de contato recebido no chat: salva o contato no Todoo como
  * indicação da cliente da conversa, sem abrir formulário.
  */
-export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
+export function TodooChatReferralButton({ contact, referrer, receivedAt, mine }: Props) {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const queryClient = useQueryClient();
@@ -53,7 +55,7 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
   // O que já existe com esse número: indicação (de qualquer cliente), card aberto no Todoo
   // e contato na base (o banco responde por todas as unidades, sem revelar qual)
   const { data: status, isLoading, isError, refetch } = useQuery({
-    queryKey: ["todoo-chat-referral", activeCompanyId, digits],
+    queryKey: ["todoo-chat-referral", activeCompanyId, digits, receivedAt],
     enabled: !!activeCompanyId && variants.length > 0 && !isSelf,
     queryFn: async () => {
       const [referrals, leads, isContact] = await Promise.all([
@@ -73,6 +75,8 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
         (supabase.rpc as any)("todoo_phone_is_contact", {
           p_company_id: activeCompanyId,
           p_phone: digits,
+          // Contato criado depois do cartão (conversa iniciada, mensagem dela) não conta
+          p_before: receivedAt ?? null,
         }),
       ]);
       if (referrals.error) throw referrals.error;
@@ -108,6 +112,7 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
         p_unit_id: referrer.unitId,
         p_name: name,
         p_phone: digits,
+        p_before: receivedAt ?? null,
       });
       if (error) throw error;
       if (data?.already_contact) {

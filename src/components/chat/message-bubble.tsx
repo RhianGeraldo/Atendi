@@ -825,7 +825,11 @@ export function MessageBubble({
                         }
                       />
                       {todooReferrer && !mine && (
-                        <TodooChatReferralButton contact={contact} referrer={todooReferrer} />
+                        <TodooChatReferralButton
+                          contact={contact}
+                          referrer={todooReferrer}
+                          receivedAt={m.created_at}
+                        />
                       )}
                     </div>
                   )}
