@@ -95,7 +95,7 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
   });
   const name = contact.name?.trim() || formatTodooPhone(digits);
 
-  if (digits.length < 10) return null;
+  if (digits.length < 10 || !activeCompanyId) return null;
 
   const save = async () => {
     if (!profile || !activeCompanyId) return;
@@ -117,7 +117,8 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
       } else {
         toast.info(`${name} já estava no Todoo: a indicação conta uma vez só.`);
       }
-      queryClient.invalidateQueries({
+      // Segura o "salvando" até o cartão recarregar: sem isso o botão volta por um instante
+      await queryClient.invalidateQueries({
         predicate: (q) => String(q.queryKey[0]).startsWith("todoo-"),
       });
     } catch (err: any) {
