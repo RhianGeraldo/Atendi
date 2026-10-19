@@ -51,13 +51,12 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
   const isSelf = phoneVariants(referrer.phone).some((v) => variants.includes(v));
 
   // O que já existe com esse número: indicação (de qualquer cliente), card aberto no Todoo
-  // e contato na base. O nome do cartão é o da agenda de quem enviou ("E&L - Patrícia"),
-  // o da base é o limpo.
+  // e contato na base (o banco responde por todas as unidades, sem revelar qual)
   const { data: status, isLoading, isError, refetch } = useQuery({
     queryKey: ["todoo-chat-referral", activeCompanyId, digits],
     enabled: !!activeCompanyId && variants.length > 0 && !isSelf,
     queryFn: async () => {
-      const [referrals, leads, contacts] = await Promise.all([
+      const [referrals, leads, isContact] = await Promise.all([
         (supabase.from("todoo_referrals") as any)
           .select("referrer_name, referrer_contact_id, created_at")
           .eq("company_id", activeCompanyId)
@@ -71,18 +70,14 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
           .not("status", "in", "(won,lost)")
           .order("created_at", { ascending: false })
           .limit(1),
-        (supabase.from("contacts") as any)
-          .select("name, merged_into_id")
-          .eq("company_id", activeCompanyId)
-          .in("phone", variants)
-          // Contato mesclado também conta como "já é contato"; o principal vem primeiro
-          .order("merged_into_id", { ascending: true, nullsFirst: true })
-          .order("created_at", { ascending: true })
-          .limit(1),
+        (supabase.rpc as any)("todoo_phone_is_contact", {
+          p_company_id: activeCompanyId,
+          p_phone: digits,
+        }),
       ]);
       if (referrals.error) throw referrals.error;
       if (leads.error) throw leads.error;
-      if (contacts.error) throw contacts.error;
+      if (isContact.error) throw isContact.error;
       return {
         referral: (referrals.data?.[0] ?? null) as {
           referrer_name: string | null;
@@ -94,13 +89,11 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
           campaign: { title: string | null } | null;
           assigned_user: { name: string | null } | null;
         } | null,
-        // Contato de outra unidade pode não aparecer (permissão); aí só não mostra o aviso
-        baseContact: (contacts.data?.[0] ?? null) as { name: string | null } | null,
+        isContact: isContact.data === true,
       };
     },
   });
-  const name =
-    status?.baseContact?.name?.trim() || contact.name?.trim() || formatTodooPhone(digits);
+  const name = contact.name?.trim() || formatTodooPhone(digits);
 
   if (digits.length < 10) return null;
 
@@ -108,24 +101,18 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
     if (!profile || !activeCompanyId) return;
     setSaving(true);
     try {
-      const { data, error } = await (supabase.rpc as any)("todoo_register_contacts", {
+      // O banco confere de novo se já é contato (de qualquer unidade) antes de salvar
+      const { data, error } = await (supabase.rpc as any)("todoo_register_chat_referral", {
         p_company_id: activeCompanyId,
-        p_origin: "indicacao",
-        p_referrer_name: null,
         p_referrer_contact_id: referrer.contactId,
-        p_referrer_phone: null,
-        p_captured_by: profile.id,
         p_unit_id: referrer.unitId,
-        p_contacts: [
-          {
-            name,
-            phone: digits,
-            service: "",
-          },
-        ],
+        p_name: name,
+        p_phone: digits,
       });
       if (error) throw error;
-      if ((data?.created ?? 0) > 0) {
+      if (data?.already_contact) {
+        toast.info(`${name} já é contato: não entra como indicação.`);
+      } else if ((data?.created ?? 0) > 0) {
         toast.success(`${name} salvo no Todoo como indicação!`);
       } else {
         toast.info(`${name} já estava no Todoo: a indicação conta uma vez só.`);
@@ -204,8 +191,7 @@ export function TodooChatReferralButton({ contact, referrer, mine }: Props) {
   }
 
   // Já é contato da base: não é indicação nova, só avisa
-  const base = status?.baseContact;
-  if (base) {
+  if (status?.isContact) {
     return chip("Já é contato");
   }
 
