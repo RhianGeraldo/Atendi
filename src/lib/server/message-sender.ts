@@ -15,6 +15,8 @@ export async function sendPlatformMessage({
   senderType = 'agent',
   senderId = null,
   aiAgentId = null,
+  keepStatus = false,
+  metadata = null,
 }: {
   conversationId: string;
   text?: string;
@@ -23,6 +25,10 @@ export async function sendPlatformMessage({
   senderType?: 'agent' | 'contact';
   senderId?: string | null;
   aiAgentId?: string | null;
+  /** Não mexe no status da conversa (envio automático do Todoo: resolvida continua resolvida) */
+  keepStatus?: boolean;
+  /** Metadados extras da mensagem */
+  metadata?: Record<string, unknown> | null;
 }) {
   const { data: conv, error: convErr } = await supabaseAdmin
     .from("conversations")
@@ -407,7 +413,10 @@ export async function sendPlatformMessage({
       media_url: mediaUrlToSend || null,
       remote_msg_id: remoteMsgId,
       participant_jid: participantJid,
-      metadata: aiAgentId ? { ai_generated: true, ai_agent_id: aiAgentId } : undefined
+      metadata:
+        aiAgentId || metadata
+          ? { ...(metadata || {}), ...(aiAgentId ? { ai_generated: true, ai_agent_id: aiAgentId } : {}) }
+          : undefined
     })
     .select()
     .single();
@@ -418,10 +427,10 @@ export async function sendPlatformMessage({
 
   // Update conversation status
   const convUpdate: any = { last_message_at: new Date().toISOString() };
-  if (conv.status === 'resolved') {
+  if (!keepStatus && conv.status === 'resolved') {
     convUpdate.status = 'active';
     convUpdate.resolved_at = null;
-  } else if (conv.status === 'waiting') {
+  } else if (!keepStatus && conv.status === 'waiting') {
     convUpdate.status = 'active';
   }
   

@@ -107,6 +107,23 @@ export default {
         return await handleCronFollowUps(request);
       }
 
+      // Envio automático do Todoo (pg_cron do Supabase chama a cada minuto com Authorization: Bearer $CRON_SECRET)
+      if (url.pathname === '/api/cron/todoo-auto') {
+        const cronSecret = process.env.CRON_SECRET;
+        if (!cronSecret || request.headers.get('Authorization') !== `Bearer ${cronSecret}`) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const { runTodooAutoSend } = await import('./lib/server/todoo-auto');
+        const result = await runTodooAutoSend();
+        return new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       // Reprocessa a caixa de entrada de webhooks (Vercel Cron envia Authorization: Bearer $CRON_SECRET)
       if (url.pathname === '/api/cron/webhook-inbox') {
         const cronSecret = process.env.CRON_SECRET;

@@ -57,6 +57,14 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
       console.error("[cron] Exception during Todoo cadence:", todooEx);
     }
 
+    // Todoo: envio automático da cadência (a fila e o intervalo de cada unidade ficam no banco)
+    try {
+      const { runTodooAutoSend } = await import("./todoo-auto");
+      await runTodooAutoSend();
+    } catch (autoEx) {
+      console.error("[cron] Exception during Todoo auto send:", autoEx);
+    }
+
     console.log("[cron] Starting follow-up scan...");
 
     // Find active conversations that are handled by AI
