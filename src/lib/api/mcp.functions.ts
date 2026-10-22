@@ -151,7 +151,7 @@ export const revokeMcpKeyAction = createServerFn({ method: "POST" })
   });
 
 // 4. Criar Assistente IA do chat interno: um usuário próprio da empresa + chave MCP que age
-// como ele (só ferramentas do chat interno). A equipe conversa com ele como com um colega.
+// como ele no chat interno, com acesso a todo o MCP. A equipe conversa com ele como com um colega.
 export const createTeamChatBotAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator(
@@ -192,15 +192,32 @@ export const createTeamChatBotAction = createServerFn({ method: "POST" })
         active: true,
         online: false,
         use_signature: false,
+        // Enxerga os grupos de todas as unidades (a chave já limita às ferramentas do chat)
+        has_matriz_access: true,
       });
       if (profErr) throw new Error(`Falha ao criar perfil do assistente: ${profErr.message}`);
+
+      // Entra nos grupos da empresa e das unidades; grupos personalizados ficam de fora
+      const { data: groups } = await supabaseAdmin
+        .from("internal_channels")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("type", "group")
+        .in("scope", ["company", "unit"]);
+      if (groups && groups.length > 0) {
+        const { error: memErr } = await supabaseAdmin.from("internal_channel_members").upsert(
+          groups.map((g) => ({ channel_id: g.id, user_id: botId, role: "member" })),
+          { onConflict: "channel_id,user_id", ignoreDuplicates: true },
+        );
+        if (memErr) throw new Error(`Falha ao incluir o assistente nos grupos: ${memErr.message}`);
+      }
 
       const result = await createMcpApiKey({
         companyId,
         unitId: null,
         name: `${botName} (chat interno)`,
         userId,
-        permissions: ["team_chat"],
+        permissions: ["all"],
         actsAsUserId: botId,
       });
 

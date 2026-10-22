@@ -12,6 +12,7 @@ import { intelligenceTools } from "./tools/intelligence";
 import { callsTools } from "./tools/calls";
 import { settingsTools } from "./tools/settings";
 import { teamChatTools } from "./tools/team-chat";
+import { todooTools } from "./tools/todoo";
 
 export const allToolsList: McpToolDefinition[] = [
   ...unitsTools,
@@ -26,6 +27,7 @@ export const allToolsList: McpToolDefinition[] = [
   ...callsTools,
   ...settingsTools,
   ...teamChatTools,
+  ...todooTools,
 ];
 
 const toolsByName = new Map<string, McpToolDefinition>();
@@ -44,15 +46,15 @@ const ROLE_WEIGHT: Record<McpRole, number> = {
  * Valida se o contexto do usuário possui autorização para executar a ferramenta
  */
 export function isToolAuthorizedForContext(tool: McpToolDefinition, context: McpContext): boolean {
-  // Chave com identidade e permissões restritas (ex: Assistente IA com ["team_chat"]):
+  // Chave com identidade e permissões restritas (ex: chave com ["team_chat"]):
   // só as ferramentas daquela categoria/menu, além das regras do perfil abaixo
   if (context.userRole && context.permissions?.length && !context.permissions.includes("all")) {
     const grants = [tool.security?.category, tool.security?.requiredMenu].filter(Boolean);
     if (!grants.some((g) => context.permissions.includes(g as string))) return false;
   }
 
-  // Super Admin tem acesso total irrestrito
-  if (context.userRole === "super_admin") return true;
+  // Super Admin e chave do Assistente IA com acesso total
+  if (context.userRole === "super_admin" || context.keyGrantsAll) return true;
 
   // Contextos externos de token (ex: Claude Desktop com permissions: ["all"])
   if (!context.userRole) {
