@@ -35,6 +35,7 @@ import {
   Filter,
   FilterX,
   UserPlus,
+  Zap,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +66,8 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { TodooReferrerLink } from "./todoo-referrer-link";
 import { TodooStagesDialog } from "./todoo-stages-dialog";
+import { TodooAutoDialog } from "./todoo-auto-dialog";
+import { useTodooAutoPending } from "./todoo-auto";
 import { TodooSendMessageDialog } from "./todoo-send-message-dialog";
 import {
   TODOO_CARD_BEHAVIORS,
@@ -116,6 +119,8 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   // Funil de prospecção (etapas da cadência e status dos cards)
   const { stages, statuses } = useTodooPipeline();
   const [stagesDialogOpen, setStagesDialogOpen] = useState(false);
+  const [autoDialogOpen, setAutoDialogOpen] = useState(false);
+  const autoPending = useTodooAutoPending();
   // Enviar mensagem sem sair do Quadro (com a próxima etapa, para registrar a tentativa)
   const [messageTarget, setMessageTarget] = useState<{ lead: TodooLead; nextStage: TodooStage | null } | null>(null);
   const canConfigureStages = profile?.role === "admin_company" || profile?.role === "super_admin";
@@ -681,6 +686,20 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
               </Button>
             )}
 
+            {/* Envio automático (admins) */}
+            {canConfigureStages && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-2.5 text-xs gap-1.5 bg-background shrink-0"
+                onClick={() => setAutoDialogOpen(true)}
+                title="Mensagens automáticas da cadência"
+              >
+                <Zap className="h-3.5 w-3.5 text-amber-500" />
+                <span className="hidden md:inline">Automático</span>
+              </Button>
+            )}
+
             {/* Botão Atualizar */}
             <Button
               variant="outline"
@@ -915,7 +934,17 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                           statuses={statuses}
                                           onChange={(st) => changeCardStatus(lead, st)}
                                         />
-                                        <CadenceBadge info={cadence} stage={stage} />
+                                        {autoPending.has(lead.id) ? (
+                                          <span
+                                            className="flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                                            title="A próxima mensagem sai sozinha pelo envio automático"
+                                          >
+                                            <Zap className="h-3 w-3" />
+                                            Envio automático na fila
+                                          </span>
+                                        ) : (
+                                          <CadenceBadge info={cadence} stage={stage} />
+                                        )}
                                       </div>
                                       {lead.status === "callback" && lead.callback_scheduled_at ? (
                                         <div className="mt-1.5 text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded">
@@ -1023,6 +1052,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
 
       {/* Configuração do funil e diálogo de desfecho (Venda, Agendou, Retorno, Perdido) */}
       <TodooStagesDialog open={stagesDialogOpen} onOpenChange={setStagesDialogOpen} />
+      <TodooAutoDialog open={autoDialogOpen} onOpenChange={setAutoDialogOpen} />
 
       <TodooSendMessageDialog
         lead={messageTarget?.lead ?? null}

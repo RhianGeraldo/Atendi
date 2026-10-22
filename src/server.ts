@@ -9,17 +9,24 @@ type ServerEntry = {
 
 import { handleEvogoWebhook } from "./lib/server/evogo-webhook";
 import { handleWavoipWebhook } from "./lib/server/wavoip-webhook";
-import { handleCronFollowUps } from "./lib/server/cron";
+import { handleCronFollowUps, runCronFollowUps } from "./lib/server/cron";
 
-// Auto-trigger cron jobs every 1 minute while server is running
+// Auto-trigger cron jobs every 1 minute while server is running.
+// Só em produção: o `npm run dev` usa o banco de produção e mandaria follow-ups reais para
+// clientes. Para testar o cron localmente, rode com RUN_CRON_LOCALLY=1.
+const isDevServer = import.meta.env?.DEV || process.env.NODE_ENV === 'development';
+const cronEnabled = !isDevServer || process.env.RUN_CRON_LOCALLY === '1';
 let cronIntervalStarted = false;
-if (typeof global !== 'undefined') {
+if (typeof global !== 'undefined' && !cronEnabled) {
+  console.log('[cron] Intervalo desligado no servidor de desenvolvimento (RUN_CRON_LOCALLY=1 liga).');
+}
+if (typeof global !== 'undefined' && cronEnabled) {
   if (!(global as any).__cronStarted) {
     (global as any).__cronStarted = true;
     console.log('[cron] Auto-trigger interval started (every 1 minute)');
     setInterval(() => {
-      const mockReq = new Request('http://localhost/api/cron/follow-ups?secret=atendi-cron-secret-123');
-      handleCronFollowUps(mockReq).catch(err => console.error('[cron] Auto-trigger error:', err));
+      // Chamada interna: roda o trabalho direto, sem passar pela autenticação da rota
+      runCronFollowUps().catch(err => console.error('[cron] Auto-trigger error:', err));
     }, 60 * 1000);
   }
 }
@@ -105,6 +112,23 @@ export default {
       }
       if (url.pathname === '/api/cron/follow-ups') {
         return await handleCronFollowUps(request);
+      }
+
+      // Envio automático do Todoo (pg_cron do Supabase chama a cada minuto com Authorization: Bearer $CRON_SECRET)
+      if (url.pathname === '/api/cron/todoo-auto') {
+        const cronSecret = process.env.CRON_SECRET;
+        if (!cronSecret || request.headers.get('Authorization') !== `Bearer ${cronSecret}`) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const { runTodooAutoSend } = await import('./lib/server/todoo-auto');
+        const result = await runTodooAutoSend();
+        return new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
 
       // Reprocessa a caixa de entrada de webhooks (Vercel Cron envia Authorization: Bearer $CRON_SECRET)

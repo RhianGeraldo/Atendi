@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils";
 import { fetchAllPages } from "@/lib/fetch-all-pages";
 import { TodooReferrerLink } from "./todoo-referrer-link";
 import { TodooSendMessageDialog } from "./todoo-send-message-dialog";
+import { useTodooAutoPending } from "./todoo-auto";
 import {
   nextTodooStage,
   refreshTodooCadence,
@@ -106,6 +107,7 @@ export function useTodooDayData() {
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
+  const autoPending = useTodooAutoPending();
   // Carrega a equipe para gestoras e para quem tem a aba Painel da Equipe; senão, só o que é da pessoa
   const isManagerOrAdmin =
     profile?.role === "admin_company" ||
@@ -250,6 +252,7 @@ export function useTodooDayData() {
       .filter(
         (c) =>
           c.behavior === "active" &&
+          !autoPending.has(c.lead.id) &&
           (c.stage ? c.stage.kind === "start" : c.lead.status === "pending"),
       )
       .map((c) => c.lead);
@@ -257,6 +260,8 @@ export function useTodooDayData() {
       .filter(
         (c) =>
           c.behavior === "active" &&
+          // A mensagem automática sai sozinha: não é tarefa nem atraso da consultora
+          !autoPending.has(c.lead.id) &&
           c.stage?.kind === "attempt" &&
           !!c.lead.next_action_at &&
           c.lead.next_action_at < bounds.dayEnd,

@@ -39,7 +39,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
-import { listMcpKeysAction, createMcpKeyAction, revokeMcpKeyAction } from "@/lib/api/mcp.functions";
+import {
+  listMcpKeysAction,
+  createMcpKeyAction,
+  revokeMcpKeyAction,
+  createTeamChatBotAction,
+} from "@/lib/api/mcp.functions";
 
 interface McpSettingsTabProps {
   companyId: string;
@@ -51,6 +56,8 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyUnitId, setNewKeyUnitId] = useState<string>("matriz");
+  const [isBotOpen, setIsBotOpen] = useState(false);
+  const [botName, setBotName] = useState("Assistente IA");
 
   // Estado para modal da chave gerada (mostra o token completo uma única vez)
   const [generatedKey, setGeneratedKey] = useState<{ name: string; token: string } | null>(null);
@@ -116,6 +123,24 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
     },
     onError: (err: Error) => {
       toast.error(err.message || "Erro ao criar chave MCP.");
+    },
+  });
+
+  // 3b. Mutation: Criar Assistente IA do chat interno (usuário próprio + chave)
+  const createBotMutation = useMutation({
+    mutationFn: async () => {
+      if (!botName.trim()) throw new Error("Informe o nome do assistente.");
+      return createTeamChatBotAction({ data: { companyId, botName: botName.trim() } });
+    },
+    onSuccess: (res) => {
+      setIsBotOpen(false);
+      setGeneratedKey({ name: res.key.name, token: res.rawToken });
+      qc.invalidateQueries({ queryKey: ["mcp-api-keys", companyId] });
+      qc.invalidateQueries({ queryKey: ["team-members", companyId] });
+      toast.success("Assistente criado! Ele já aparece na equipe do chat interno.");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Erro ao criar o assistente.");
     },
   });
 
@@ -187,13 +212,19 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
           </p>
         </div>
 
-        <Button
-          onClick={() => setIsCreateOpen(true)}
-          className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs shrink-0 self-start md:self-center"
-        >
-          <Plus className="h-4 w-4" />
-          Criar Nova Chave MCP
-        </Button>
+        <div className="flex flex-wrap gap-2 shrink-0 self-start md:self-center">
+          <Button variant="outline" onClick={() => setIsBotOpen(true)} className="gap-2">
+            <Bot className="h-4 w-4" />
+            Assistente do Chat Interno
+          </Button>
+          <Button
+            onClick={() => setIsCreateOpen(true)}
+            className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+          >
+            <Plus className="h-4 w-4" />
+            Criar Nova Chave MCP
+          </Button>
+        </div>
       </div>
 
       {/* Card da URL de Conexão */}
@@ -562,6 +593,15 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-sm text-foreground">{k.name}</span>
+                        {k.acts_as_user_id && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20 gap-1"
+                          >
+                            <Bot className="h-3 w-3" />
+                            Chat interno como {k.acts_as?.name || "Assistente"}
+                          </Badge>
+                        )}
                         {isGlobal ? (
                           <Badge
                             variant="outline"
@@ -714,6 +754,64 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Modal: Criar Assistente IA do Chat Interno */}
+      <Dialog open={isBotOpen} onOpenChange={setIsBotOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base flex items-center gap-2">
+              <Bot className="h-5 w-5 text-violet-600" />
+              Assistente do Chat Interno
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Cria um colega virtual na equipe e uma chave MCP que fala como ele. Conecte essa chave
+              à sua LLM: a equipe conversa com o assistente pelo chat interno e ele lê o histórico
+              de cada conversa.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold">Nome do assistente na equipe</label>
+              <Input
+                placeholder="Ex: Assistente IA, Lia, Copiloto..."
+                value={botName}
+                onChange={(e) => setBotName(e.target.value)}
+                className="text-xs"
+                maxLength={60}
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground leading-tight">
+              A chave só libera as ferramentas do chat interno. O assistente não entra na
+              distribuição de atendimentos. Revogar a chave desativa o assistente.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsBotOpen(false)}
+              className="text-xs"
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => createBotMutation.mutate()}
+              disabled={createBotMutation.isPending || botName.trim().length < 2}
+              className="bg-violet-600 hover:bg-violet-700 text-white text-xs gap-1.5"
+            >
+              {createBotMutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Bot className="h-3.5 w-3.5" />
+              )}
+              Criar Assistente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal: Criar Nova Chave */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>

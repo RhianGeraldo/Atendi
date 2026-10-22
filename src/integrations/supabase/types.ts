@@ -1741,6 +1741,7 @@ export type Database = {
       }
       mcp_api_keys: {
         Row: {
+          acts_as_user_id: string | null
           company_id: string
           created_at: string
           created_by: string | null
@@ -1756,6 +1757,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          acts_as_user_id?: string | null
           company_id: string
           created_at?: string
           created_by?: string | null
@@ -1771,6 +1773,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          acts_as_user_id?: string | null
           company_id?: string
           created_at?: string
           created_by?: string | null
@@ -1786,6 +1789,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "mcp_api_keys_acts_as_user_id_fkey"
+            columns: ["acts_as_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "mcp_api_keys_company_id_fkey"
             columns: ["company_id"]

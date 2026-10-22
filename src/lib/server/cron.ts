@@ -1,25 +1,46 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { timingSafeEqual } from "node:crypto";
 import { enqueueAiMessage } from "./ai-queue";
 
-export async function handleCronFollowUps(request: Request): Promise<Response> {
-  // Simple auth check to prevent abuse, e.g., Bearer token or simple secret
-  const authHeader = request.headers.get("Authorization");
-  const cronSecret = process.env.CRON_SECRET || "atendi-cron-secret-123";
+function cronJson(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
-  // Accept if it's localhost (dev) or has the correct secret
-  const url = new URL(request.url);
-  if (
-    url.hostname !== "localhost" &&
-    authHeader !== `Bearer ${cronSecret}` &&
-    url.searchParams.get("secret") !== cronSecret
-  ) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+/** Compara o segredo sem vazar, pelo tempo de resposta, quantos caracteres bateram. */
+function secretMatches(received: string | null, expected: string): boolean {
+  if (!received) return false;
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * Rota /api/cron/follow-ups: só com o CRON_SECRET do ambiente, sem valor padrão.
+ * Aceita "Authorization: Bearer <segredo>" (Vercel Cron, pg_cron) ou ?secret=<segredo>.
+ */
+export async function handleCronFollowUps(request: Request): Promise<Response> {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    console.error("[cron] CRON_SECRET não configurado: rota de cron recusada.");
+    return cronJson({ error: "Cron não configurado" }, 503);
   }
 
+  const authHeader = request.headers.get("Authorization");
+  const bearer = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const querySecret = new URL(request.url).searchParams.get("secret");
+  if (!secretMatches(bearer, cronSecret) && !secretMatches(querySecret, cronSecret)) {
+    return cronJson({ error: "Unauthorized" }, 401);
+  }
+
+  return runCronFollowUps();
+}
+
+/** O trabalho do cron, sem autenticação: chamado pela rota acima e pelo intervalo do server.ts. */
+export async function runCronFollowUps(): Promise<Response> {
   try {
     // Auto-expire calls stuck in ACTIVE or RINGING for more than 5 minutes
     try {
@@ -55,6 +76,14 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
       await handleCronTodooCadence();
     } catch (todooEx) {
       console.error("[cron] Exception during Todoo cadence:", todooEx);
+    }
+
+    // Todoo: envio automático da cadência (a fila e o intervalo de cada unidade ficam no banco)
+    try {
+      const { runTodooAutoSend } = await import("./todoo-auto");
+      await runTodooAutoSend();
+    } catch (autoEx) {
+      console.error("[cron] Exception during Todoo auto send:", autoEx);
     }
 
     console.log("[cron] Starting follow-up scan...");

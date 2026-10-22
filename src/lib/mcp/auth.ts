@@ -1,7 +1,91 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import crypto from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import type { McpContext } from "./types";
+import { getUserEffectiveMenus } from "@/lib/permissions";
+import type { McpContext, McpRole } from "./types";
+
+type McpUserIdentity = { profileCompanyId: string | null } & Pick<
+  McpContext,
+  | "userId"
+  | "userName"
+  | "userEmail"
+  | "userRole"
+  | "allowedMenus"
+  | "hasMatrizAccess"
+  | "userUnitIds"
+>;
+
+/**
+ * Carrega quem está por trás do token (mesmo cálculo de permissões do Copilot).
+ * Sem perfil ou com perfil inativo, retorna null e o token é recusado.
+ */
+async function loadMcpUserIdentity(userId: string): Promise<McpUserIdentity | null> {
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select(
+      "id, company_id, name, email, role, active, has_matriz_access, allowed_menus, custom_role:company_roles(id, name, allowed_menus, base_role), user_units(unit_id)",
+    )
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!profile || (profile as any).active === false) return null;
+
+  const userRole = ((profile as any).role || "agent") as McpRole;
+  return {
+    profileCompanyId: (profile as any).company_id || null,
+    userId,
+    userName: (profile as any).name || null,
+    userEmail: (profile as any).email || null,
+    userRole,
+    allowedMenus: getUserEffectiveMenus(profile as any),
+    hasMatrizAccess: Boolean(
+      (profile as any).has_matriz_access ||
+      userRole === "admin_company" ||
+      userRole === "super_admin",
+    ),
+    userUnitIds: (((profile as any).user_units as any[]) || []).map((u) => u.unit_id),
+  };
+}
+
+/**
+ * Empresa e unidade que o token pode usar, conforme quem está por trás dele.
+ * Sem acesso à Matriz, a pessoa fica na unidade escolhida (se for dela) ou na primeira
+ * unidade dela, como no Copilot. Retorna null se o perfil não é dessa empresa.
+ */
+async function resolveIdentityScope(
+  identity: McpUserIdentity,
+  companyId: string,
+  requestedUnitId: string | null,
+): Promise<{
+  identity: Omit<McpUserIdentity, "profileCompanyId">;
+  unitId: string | null;
+  unitName: string | null;
+} | null> {
+  const { profileCompanyId, ...rest } = identity;
+  if (rest.userRole !== "super_admin" && profileCompanyId !== companyId) return null;
+
+  let unitId: string | null = requestedUnitId;
+  if (!rest.hasMatrizAccess) {
+    const ownUnits = rest.userUnitIds || [];
+    if (!unitId || !ownUnits.includes(unitId)) unitId = ownUnits[0] || null;
+  }
+
+  let unitName: string | null = null;
+  if (unitId) {
+    const { data: unit } = await supabaseAdmin
+      .from("units")
+      .select("name, company_id")
+      .eq("id", unitId)
+      .maybeSingle();
+    if (!unit || unit.company_id !== companyId) {
+      unitId = null;
+    } else {
+      unitName = unit.name;
+    }
+  }
+
+  return { identity: rest, unitId, unitName };
+}
 
 export function hashMcpToken(token: string): string {
   return crypto.createHash("sha256").update(token.trim()).digest("hex");
@@ -13,12 +97,15 @@ export async function createMcpApiKey({
   name,
   userId,
   permissions = ["all"],
+  actsAsUserId = null,
 }: {
   companyId: string;
   unitId?: string | null;
   name: string;
   userId?: string;
   permissions?: string[];
+  /** Perfil que a chave representa (ex: usuário "Assistente IA" do chat interno) */
+  actsAsUserId?: string | null;
 }): Promise<{ rawToken: string; key: any }> {
   // Gerar token de alta entropia
   const randomBytes = crypto.randomBytes(32).toString("hex");
@@ -36,6 +123,8 @@ export async function createMcpApiKey({
       key_hash: keyHash,
       permissions,
       created_by: userId || null,
+      // Só envia a coluna quando usada: chaves comuns funcionam mesmo sem a migration
+      ...(actsAsUserId ? { acts_as_user_id: actsAsUserId } : {}),
       is_active: true,
     })
     .select()
@@ -72,8 +161,12 @@ export async function validateMcpToken(rawToken: string): Promise<McpContext | n
         .single();
 
       if (!tokenErr && tokenRow) {
+        const loaded = await loadMcpUserIdentity(tokenRow.user_id);
+        if (!loaded) return null;
+        const scope = await resolveIdentityScope(loaded, tokenRow.company_id, tokenRow.unit_id);
+        if (!scope) return null;
+
         let companyName = "Empresa";
-        let unitName: string | null = null;
 
         if (tokenRow.company_id) {
           const { data: c } = await supabaseAdmin
@@ -84,23 +177,15 @@ export async function validateMcpToken(rawToken: string): Promise<McpContext | n
           if (c?.name) companyName = c.name;
         }
 
-        if (tokenRow.unit_id) {
-          const { data: u } = await supabaseAdmin
-            .from("units")
-            .select("name")
-            .eq("id", tokenRow.unit_id)
-            .single();
-          if (u?.name) unitName = u.name;
-        }
-
         return {
           keyId: `oauth_${tokenRow.user_id}`,
           companyId: tokenRow.company_id,
-          unitId: tokenRow.unit_id,
+          unitId: scope.unitId,
           companyName,
-          unitName,
+          unitName: scope.unitName,
           keyName: "Claude.ai OAuth Connector",
           permissions: ["all"],
+          ...scope.identity,
         };
       }
     } catch (e) {
@@ -120,18 +205,23 @@ export async function validateMcpToken(rawToken: string): Promise<McpContext | n
           .eq("id", userId)
           .single();
 
-        if (profile?.company_id) {
+        const loaded = profile?.company_id ? await loadMcpUserIdentity(userId) : null;
+        const scope = loaded
+          ? await resolveIdentityScope(loaded, profile!.company_id!, null)
+          : null;
+        if (profile?.company_id && scope) {
           const companyId = profile.company_id;
           const companyName = (profile.companies as any)?.name || "Empresa";
 
           return {
             keyId: `supabase_${userId}`,
             companyId,
-            unitId: null,
+            unitId: scope.unitId,
             companyName,
-            unitName: null,
+            unitName: scope.unitName,
             keyName: `OAuth User (${authUser.user.email || "Supabase"})`,
             permissions: ["all"],
+            ...scope.identity,
           };
         }
       }
@@ -146,9 +236,8 @@ export async function validateMcpToken(rawToken: string): Promise<McpContext | n
 
     const { data: key, error } = await supabaseAdmin
       .from("mcp_api_keys")
-      .select(
-        "id, company_id, unit_id, name, permissions, is_active, expires_at, companies(name), units(name)",
-      )
+      // "*" em vez de listar acts_as_user_id: funciona antes e depois da migration que cria a coluna
+      .select("*, companies(name), units(name)")
       .eq("key_hash", hash)
       .single();
 
@@ -159,6 +248,15 @@ export async function validateMcpToken(rawToken: string): Promise<McpContext | n
     // Verificar expiração se configurada
     if (key.expires_at && new Date(key.expires_at) < new Date()) {
       return null;
+    }
+
+    // Chave com identidade própria (ex: Assistente IA do chat interno)
+    let scope: Awaited<ReturnType<typeof resolveIdentityScope>> = null;
+    const actsAsUserId = (key as any).acts_as_user_id as string | null | undefined;
+    if (actsAsUserId) {
+      const loaded = await loadMcpUserIdentity(actsAsUserId);
+      scope = loaded ? await resolveIdentityScope(loaded, key.company_id, key.unit_id) : null;
+      if (!scope) return null;
     }
 
     // Atualizar last_used_at em background
@@ -175,11 +273,12 @@ export async function validateMcpToken(rawToken: string): Promise<McpContext | n
     return {
       keyId: key.id,
       companyId: key.company_id,
-      unitId: key.unit_id,
+      unitId: scope ? scope.unitId : key.unit_id,
       companyName,
-      unitName,
+      unitName: scope ? scope.unitName : unitName,
       keyName: key.name,
       permissions: key.permissions || ["all"],
+      ...scope?.identity,
     };
   }
 
