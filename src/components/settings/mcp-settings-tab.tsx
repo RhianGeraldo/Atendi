@@ -32,6 +32,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -58,6 +68,11 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
   const [newKeyUnitId, setNewKeyUnitId] = useState<string>("matriz");
   const [isBotOpen, setIsBotOpen] = useState(false);
   const [botName, setBotName] = useState("Assistente IA");
+  const [revokingKey, setRevokingKey] = useState<{
+    id: string;
+    name: string;
+    botName: string | null;
+  } | null>(null);
 
   // Estado para modal da chave gerada (mostra o token completo uma única vez)
   const [generatedKey, setGeneratedKey] = useState<{ name: string; token: string } | null>(null);
@@ -644,15 +659,13 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        if (
-                          confirm(
-                            `Tem certeza que deseja revogar a chave "${k.name}"? Qualquer IA usando este token perderá o acesso imediatamente.`,
-                          )
-                        ) {
-                          revokeMutation.mutate(k.id);
-                        }
-                      }}
+                      onClick={() =>
+                        setRevokingKey({
+                          id: k.id,
+                          name: k.name,
+                          botName: k.acts_as_user_id ? k.acts_as?.name || "Assistente" : null,
+                        })
+                      }
                       disabled={revokeMutation.isPending}
                       className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-500/10 self-end sm:self-center gap-1.5 h-8 px-2.5"
                     >
@@ -699,9 +712,9 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               <span className="font-semibold text-foreground">💬 Atendimento, WhatsApp & SLA</span>
               <p className="text-muted-foreground text-[11px]">
                 listar_conversas (com SLA em tempo real), consultar_conversa,
-                consultar_sla_atendimento, enviar_mensagem_whatsapp, enviar_midia_whatsapp, assumir_conversa,
-                transferir_conversa, adicionar_nota_interna, listar_motivos_encerramento,
-                encerrar_atendimento
+                consultar_sla_atendimento, enviar_mensagem_whatsapp, enviar_midia_whatsapp,
+                assumir_conversa, transferir_conversa, adicionar_nota_interna,
+                listar_motivos_encerramento, encerrar_atendimento
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
@@ -725,6 +738,12 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               <span className="font-semibold text-foreground">📋 Tarefas & Follow-ups</span>
               <p className="text-muted-foreground text-[11px]">
                 listar_tarefas, criar_tarefa, concluir_tarefa
+              </p>
+            </div>
+            <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
+              <span className="font-semibold text-foreground">🏁 Meu Todoo: Metas & Gincana</span>
+              <p className="text-muted-foreground text-[11px]">
+                consultar_metas_todoo, consultar_desempenho_todoo, consultar_pendencias_todoo
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
@@ -782,8 +801,9 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               />
             </div>
             <p className="text-[11px] text-muted-foreground leading-tight">
-              A chave só libera as ferramentas do chat interno. O assistente não entra na
-              distribuição de atendimentos. Revogar a chave desativa o assistente.
+              A chave libera todas as ferramentas do MCP, como a chave da Matriz, e no chat interno
+              fala como o assistente. O assistente não entra na distribuição de atendimentos.
+              Revogar a chave desativa o assistente.
             </p>
           </div>
 
@@ -957,6 +977,35 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmação: Revogar Chave */}
+      <AlertDialog open={!!revokingKey} onOpenChange={(open) => !open && setRevokingKey(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revogar chave?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja revogar a chave <strong>{revokingKey?.name}</strong>? Qualquer
+              IA usando este token perderá o acesso imediatamente.
+              {revokingKey?.botName && (
+                <>
+                  {" "}
+                  O assistente <strong>{revokingKey.botName}</strong> também será desativado e sai
+                  da equipe do chat interno.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => revokingKey && revokeMutation.mutate(revokingKey.id)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 text-xs"
+            >
+              Revogar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

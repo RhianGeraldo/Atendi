@@ -12,7 +12,7 @@ export interface McpToolSecurity {
   isWriteAction?: boolean;
   /** Se exige acesso irrestrito à Matriz/Visão Global */
   requiresMatriz?: boolean;
-  /** Grupo liberável por chave com permissões restritas (ex: chave do Assistente IA só tem "team_chat") */
+  /** Grupo liberável por chave com permissões restritas (ex: chave com ["team_chat"] só acessa o chat interno) */
   category?: string;
 }
 
@@ -31,6 +31,8 @@ export interface McpContext {
   allowedMenus?: string[] | null;
   hasMatrizAccess?: boolean;
   userUnitIds?: string[];
+  /** Chave do Assistente IA com ["all"]: libera tudo; a identidade serve para falar no chat interno */
+  keyGrantsAll?: boolean;
 }
 
 export interface McpToolInputSchema {

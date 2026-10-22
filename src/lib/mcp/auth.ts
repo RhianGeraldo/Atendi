@@ -279,6 +279,7 @@ export async function validateMcpToken(rawToken: string): Promise<McpContext | n
       keyName: key.name,
       permissions: key.permissions || ["all"],
       ...scope?.identity,
+      keyGrantsAll: Boolean(scope && (key.permissions || ["all"]).includes("all")),
     };
   }
 
