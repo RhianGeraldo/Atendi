@@ -431,11 +431,12 @@ export function useTeamChat(
            reactions:internal_message_reactions(id, message_id, user_id, emoji, created_at, profile:profiles(name))`
         )
         .eq("channel_id", activeChannelId!)
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
         .limit(100);
 
       if (error) throw error;
-      return (data || []).map((m: any) => {
+      // As 100 mais recentes, exibidas da mais antiga para a mais nova
+      return (data || []).reverse().map((m: any) => {
         const pinUser = m.pinned_by ? teamMembers?.find((tm) => tm.id === m.pinned_by) : null;
         return {
           ...m,
