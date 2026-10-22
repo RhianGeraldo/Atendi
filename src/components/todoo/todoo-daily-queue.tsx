@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, type ReactNode } from "react";
-import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -36,7 +36,18 @@ import {
   FilterX,
   UserPlus,
   Zap,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -124,6 +135,10 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   // Enviar mensagem sem sair do Quadro (com a próxima etapa, para registrar a tentativa)
   const [messageTarget, setMessageTarget] = useState<{ lead: TodooLead; nextStage: TodooStage | null } | null>(null);
   const canConfigureStages = profile?.role === "admin_company" || profile?.role === "super_admin";
+  // Excluir card do quadro: só administrador (o contato do CRM continua)
+  const canDeleteLeads = canConfigureStages;
+  const [leadToDelete, setLeadToDelete] = useState<TodooLead | null>(null);
+  const [isDeletingLead, setIsDeletingLead] = useState(false);
 
   // Feedback de cópia
   const [copiedPhoneId, setCopiedPhoneId] = useState<string | null>(null);
@@ -252,81 +267,118 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     debouncedSearch,
   ];
 
-  // Atrasados da coluna, contados no banco com a mesma regra de todooCadenceInfo:
-  // card ativo, fora da quarentena e com o prazo da tentativa (ou o SLA do início) vencido
-  const countOverdue = async (stage: TodooStage) => {
-    if (stage.kind === "failed") return 0;
-    let query = applyStage(
-      applyBoardFilters(
-        (supabase.from("todoo_leads") as any).select("id, campaign:todoo_campaigns!inner(status)", {
-          count: "exact",
-          head: true,
-        }),
-      ),
-      stage,
-    );
+  // Atrasados da coluna, no banco com a mesma regra de todooCadenceInfo: card ativo, fora da
+  // quarentena e com o prazo da tentativa (ou o SLA do início) vencido. Devolve os filtros dos
+  // atrasados e o filtro do resto (o contrário), ou null quando a coluna não tem atraso.
+  const overdueFilters = (stage: TodooStage, now: string) => {
+    if (stage.kind === "failed") return null;
+    // Status: ativo / parado (sem status cadastrado, todo card conta como ativo)
+    let active: string | null = null;
+    let stopped: string[] = [];
     if (statuses.length > 0) {
       const activeIds = statuses.filter((st) => st.behavior === "active").map((st) => st.id);
       const fallback = statuses.find((st) => st.is_default) ?? statuses[0];
       const parts = activeIds.length ? [`card_status_id.in.(${activeIds.join(",")})`] : [];
       if (fallback.behavior === "active") parts.push("card_status_id.is.null");
-      if (parts.length === 0) return 0;
-      query = query.or(parts.join(","));
+      else stopped.push("card_status_id.is.null");
+      if (parts.length === 0) return null;
+      active = parts.join(",");
+      stopped = [`card_status_id.not.in.(${activeIds.join(",")})`, ...stopped];
     }
-    const now = new Date().toISOString();
-    query =
+    // Prazo: vencido / no prazo ou sem prazo
+    const late =
       stage.kind === "start"
-        ? query.or(`next_action_at.lt.${now},and(next_action_at.is.null,sla_deadline.lt.${now})`)
-        : query.lt("next_action_at", now);
-    const { count, error } = await query;
-    if (error) throw error;
-    return count ?? 0;
+        ? `next_action_at.lt.${now},and(next_action_at.is.null,sla_deadline.lt.${now})`
+        : `next_action_at.lt.${now}`;
+    const onTime =
+      stage.kind === "start"
+        ? `next_action_at.gte.${now},and(next_action_at.is.null,or(sla_deadline.is.null,sla_deadline.gte.${now}))`
+        : `next_action_at.is.null,next_action_at.gte.${now}`;
+    return {
+      overdue: active ? [active, late] : [late],
+      rest: [...stopped, onTime].join(","),
+    };
   };
 
-  // 4. Uma página de leads por coluna, como no Kanban do CRM; o total e os atrasados vêm do banco
+  // 4. Uma página de leads por coluna, como no Kanban do CRM; o total e os atrasados vêm do banco.
+  // Os atrasados vêm no topo (o mais atrasado primeiro), depois o resto do mais novo ao mais antigo.
+  // Etapa e status entram na chave: mudar o tipo da etapa ou o comportamento de um
+  // status muda a contagem de atrasados
+  const columnQueryKey = (stage: TodooStage, limit: number) => [
+    ...boardKey,
+    stage.id,
+    stage.kind,
+    stage.id === stages[0]?.id,
+    limit,
+    statuses.map((st) => `${st.id}:${st.behavior}:${st.is_default ? 1 : 0}`).join(","),
+  ];
+
   const columnQueries = useQueries({
     queries: stages.map((stage) => {
       const limit = stageLimits[stage.id] ?? BOARD_PAGE_SIZE;
       return {
-        // Etapa e status entram na chave: mudar o tipo da etapa ou o comportamento de um
-        // status muda a contagem de atrasados
-        queryKey: [
-          ...boardKey,
-          stage.id,
-          stage.kind,
-          stage.id === stages[0]?.id,
-          limit,
-          statuses.map((st) => `${st.id}:${st.behavior}:${st.is_default ? 1 : 0}`).join(","),
-        ],
+        queryKey: columnQueryKey(stage, limit),
         enabled: !!activeCompanyId && !!profile?.id,
-        placeholderData: keepPreviousData,
+        // No useQueries a chave nova ganha outro observador, sem dado anterior: na próxima
+        // página a coluna fica com a página que já tinha (do cache), sem recarregar o quadro
+        placeholderData: (previous: any) =>
+          previous ??
+          (limit > BOARD_PAGE_SIZE
+            ? queryClient.getQueryData(columnQueryKey(stage, limit - BOARD_PAGE_SIZE))
+            : undefined),
         queryFn: async () => {
           // Quarentena vencida volta para o início antes de montar o quadro
           await refreshTodooCadence(activeCompanyId!);
 
-          const pageQuery = applyStage(
-            applyBoardFilters(
-              (supabase.from("todoo_leads") as any).select(
-                `
-                *,
-                campaign:todoo_campaigns!inner(id, title, type, status, message_template, offer_details, sla_hours),
-                assigned_user:profiles(id, name, avatar_url),
-                unit:units(id, name, color)
-              `,
-                { count: "exact" },
+          const baseQuery = (head = false) =>
+            applyStage(
+              applyBoardFilters(
+                (supabase.from("todoo_leads") as any).select(
+                  `
+                  *,
+                  campaign:todoo_campaigns!inner(id, title, type, status, message_template, offer_details, sla_hours),
+                  assigned_user:profiles(id, name, avatar_url),
+                  unit:units(id, name, color)
+                `,
+                  { count: "exact", head },
+                ),
               ),
-            ),
-            stage,
-          )
-            .order("created_at", { ascending: false })
-            .order("id", { ascending: false })
-            .range(0, limit - 1);
+              stage,
+            );
 
-          const [page, overdue] = await Promise.all([pageQuery, countOverdue(stage)]);
-          if (page.error) throw page.error;
+          const filters = overdueFilters(stage, new Date().toISOString());
+
+          let overdueLeads: TodooLead[] = [];
+          let overdue = 0;
+          if (filters) {
+            let query = baseQuery();
+            for (const part of filters.overdue) query = query.or(part);
+            const { data, count, error } = await query
+              .order("next_action_at", { ascending: true, nullsFirst: true })
+              .order("sla_deadline", { ascending: true })
+              .order("id", { ascending: true })
+              .range(0, limit - 1);
+            if (error) throw error;
+            overdueLeads = (data || []) as TodooLead[];
+            overdue = (count as number | null) ?? 0;
+          }
+
+          // O resto completa a página; com a página cheia de atrasados, só a contagem
+          const restLimit = limit - overdueLeads.length;
+          let restQuery = baseQuery(restLimit <= 0);
+          if (filters) restQuery = restQuery.or(filters.rest);
+          if (restLimit > 0) {
+            restQuery = restQuery
+              .order("created_at", { ascending: false })
+              .order("id", { ascending: false })
+              .range(0, restLimit - 1);
+          }
+          const rest = await restQuery;
+          if (rest.error) throw rest.error;
+
           return {
-            leads: (page.data || []) as TodooLead[],
-            total: (page.count as number | null) ?? 0,
+            leads: [...overdueLeads, ...((rest.data || []) as TodooLead[])],
+            total: overdue + ((rest.count as number | null) ?? 0),
             overdue,
           };
         },
@@ -401,8 +453,10 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     return map;
   }, [columnQueries, stages]);
 
-  // Drag and Drop Handler
+  // Drag and Drop Handler (enquanto arrasta, as colunas não carregam a próxima página sozinhas)
+  const [isDragging, setIsDragging] = useState(false);
   const handleDragEnd = async (result: DropResult) => {
+    setIsDragging(false);
     const { destination, source, draggableId } = result;
 
     if (!destination) return;
@@ -513,6 +567,29 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     }
 
     window.open(`tel:${lead.contact_phone}`, "_self");
+  };
+
+  // Exclui o card do Todoo (histórico e fila do envio automático saem junto, em cascata)
+  const handleDeleteLead = async () => {
+    if (!leadToDelete || !canDeleteLeads) return;
+    setIsDeletingLead(true);
+    try {
+      const { data, error } = await (supabase.from("todoo_leads") as any)
+        .delete()
+        .eq("id", leadToDelete.id)
+        .select("id");
+      if (error) throw error;
+      if (!data || data.length === 0) throw new Error("Você não tem permissão para excluir este contato.");
+      toast.success(`${leadToDelete.contact_name} excluído do Todoo`);
+      setLeadToDelete(null);
+    } catch (err: any) {
+      toast.error("Erro ao excluir contato: " + err.message);
+    } finally {
+      setIsDeletingLead(false);
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ["todoo-my-day"] });
+      queryClient.invalidateQueries({ queryKey: ["todoo-campaigns-list"] });
+    }
   };
 
   const handleCopyPhone = (phone: string, id: string, e?: React.MouseEvent) => {
@@ -751,7 +828,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
             <p className="text-xs text-muted-foreground">Carregando quadro comercial...</p>
           </div>
         ) : (
-          <DragDropContext onDragEnd={handleDragEnd}>
+          <DragDropContext onDragStart={() => setIsDragging(true)} onDragEnd={handleDragEnd}>
             <div className="flex h-full items-start gap-4 pb-4">
               {stages.map((stage) => {
                 const columnKey = stage.id;
@@ -989,6 +1066,21 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                                           <MessageSquare className="h-3.5 w-3.5 text-emerald-500" />
                                         </Button>
 
+                                        {canDeleteLeads && (
+                                          <Button
+                                            size="icon"
+                                            variant="ghost"
+                                            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                            title="Excluir do Todoo"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setLeadToDelete(lead);
+                                            }}
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </Button>
+                                        )}
+
                                         {nextStage && stage.kind !== "failed" ? (
                                           <Button
                                             size="sm"
@@ -1018,26 +1110,19 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                           )}
                           {provided.placeholder}
 
-                          {/* Próxima página da coluna, como no Kanban do CRM */}
+                          {/* Próxima página da coluna: carrega sozinha ao rolar até o fim */}
                           {remaining > 0 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 w-full border-dashed text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                              disabled={columnQueries[stages.indexOf(stage)]?.isFetching}
-                              onClick={() =>
+                            <ColumnLoadMore
+                              remaining={remaining}
+                              fetching={!!columnQueries[stages.indexOf(stage)]?.isFetching}
+                              paused={isDragging || !!columnQueries[stages.indexOf(stage)]?.isError}
+                              onLoad={() =>
                                 setStageLimits((prev) => ({
                                   ...prev,
                                   [stage.id]: (prev[stage.id] ?? BOARD_PAGE_SIZE) + BOARD_PAGE_SIZE,
                                 }))
                               }
-                            >
-                              {columnQueries[stages.indexOf(stage)]?.isFetching ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                `Carregar mais (+${Math.min(BOARD_PAGE_SIZE, remaining)} de ${remaining})`
-                              )}
-                            </Button>
+                            />
                           )}
                         </div>
                       )}
@@ -1053,6 +1138,34 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
       {/* Configuração do funil e diálogo de desfecho (Venda, Agendou, Retorno, Perdido) */}
       <TodooStagesDialog open={stagesDialogOpen} onOpenChange={setStagesDialogOpen} />
       <TodooAutoDialog open={autoDialogOpen} onOpenChange={setAutoDialogOpen} />
+
+      <AlertDialog open={!!leadToDelete} onOpenChange={(open) => !open && !isDeletingLead && setLeadToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base font-semibold">Excluir contato do Todoo?</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              <strong className="text-foreground">{leadToDelete?.contact_name}</strong> sai do Quadro Comercial
+              com o histórico de tentativas. O contato continua no CRM. Não dá para desfazer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel disabled={isDeletingLead} className="text-xs">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteLead();
+              }}
+              disabled={isDeletingLead}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground text-xs gap-1.5"
+            >
+              {isDeletingLead ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <TodooSendMessageDialog
         lead={messageTarget?.lead ?? null}
@@ -1089,6 +1202,61 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
         }}
       />
     </div>
+  );
+}
+
+/**
+ * Fim da coluna: busca a próxima página quando aparece na rolagem da coluna. O botão fica
+ * como reserva. O observador é refeito ao terminar cada busca, para continuar carregando
+ * se o fim da coluna ainda estiver visível (tela alta). Pausado (erro na busca ou card sendo
+ * arrastado), só carrega pelo botão.
+ */
+function ColumnLoadMore({
+  remaining,
+  fetching,
+  paused,
+  onLoad,
+}: {
+  remaining: number;
+  fetching: boolean;
+  paused: boolean;
+  onLoad: () => void;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const onLoadRef = useRef(onLoad);
+  onLoadRef.current = onLoad;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || fetching || paused) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          onLoadRef.current();
+        }
+      },
+      { root: el.parentElement, rootMargin: "0px 0px 300px 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [fetching, paused]);
+
+  return (
+    <Button
+      ref={ref}
+      variant="outline"
+      size="sm"
+      className="h-7 w-full border-dashed text-[11px] font-medium text-muted-foreground hover:text-foreground"
+      disabled={fetching}
+      onClick={onLoad}
+    >
+      {fetching ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : (
+        `Carregar mais (+${Math.min(BOARD_PAGE_SIZE, remaining)} de ${remaining})`
+      )}
+    </Button>
   );
 }
 
