@@ -12,6 +12,8 @@ export interface McpToolSecurity {
   isWriteAction?: boolean;
   /** Se exige acesso irrestrito à Matriz/Visão Global */
   requiresMatriz?: boolean;
+  /** Grupo liberável por chave com permissões restritas (ex: chave do Assistente IA só tem "team_chat") */
+  category?: string;
 }
 
 export interface McpContext {

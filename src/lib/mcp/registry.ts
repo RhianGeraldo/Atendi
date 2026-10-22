@@ -11,6 +11,7 @@ import { quickMessagesTools } from "./tools/quick-messages";
 import { intelligenceTools } from "./tools/intelligence";
 import { callsTools } from "./tools/calls";
 import { settingsTools } from "./tools/settings";
+import { teamChatTools } from "./tools/team-chat";
 
 export const allToolsList: McpToolDefinition[] = [
   ...unitsTools,
@@ -24,6 +25,7 @@ export const allToolsList: McpToolDefinition[] = [
   ...intelligenceTools,
   ...callsTools,
   ...settingsTools,
+  ...teamChatTools,
 ];
 
 const toolsByName = new Map<string, McpToolDefinition>();
@@ -42,6 +44,13 @@ const ROLE_WEIGHT: Record<McpRole, number> = {
  * Valida se o contexto do usuário possui autorização para executar a ferramenta
  */
 export function isToolAuthorizedForContext(tool: McpToolDefinition, context: McpContext): boolean {
+  // Chave com identidade e permissões restritas (ex: Assistente IA com ["team_chat"]):
+  // só as ferramentas daquela categoria/menu, além das regras do perfil abaixo
+  if (context.userRole && context.permissions?.length && !context.permissions.includes("all")) {
+    const grants = [tool.security?.category, tool.security?.requiredMenu].filter(Boolean);
+    if (!grants.some((g) => context.permissions.includes(g as string))) return false;
+  }
+
   // Super Admin tem acesso total irrestrito
   if (context.userRole === "super_admin") return true;
 
