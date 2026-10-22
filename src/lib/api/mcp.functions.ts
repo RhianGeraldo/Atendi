@@ -145,6 +145,22 @@ export const revokeMcpKeyAction = createServerFn({ method: "POST" })
         .from("profiles")
         .update({ active: false, online: false })
         .eq("id", revoked.acts_as_user_id);
+      // Sai dos grupos (as conversas privadas ficam como histórico)
+      const { data: groups } = await supabaseAdmin
+        .from("internal_channels")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("type", "group");
+      if (groups && groups.length > 0) {
+        await supabaseAdmin
+          .from("internal_channel_members")
+          .delete()
+          .eq("user_id", revoked.acts_as_user_id)
+          .in(
+            "channel_id",
+            groups.map((g) => g.id),
+          );
+      }
     }
 
     return { success: true };
@@ -231,4 +247,51 @@ export const createTeamChatBotAction = createServerFn({ method: "POST" })
       await supabaseAdmin.auth.admin.deleteUser(botId).catch(() => {});
       throw err;
     }
+  });
+
+// 5. Renomear o Assistente IA: troca o nome do usuário dele (o que a equipe vê no chat) e da chave
+export const renameTeamChatBotAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    z.object({
+      companyId: z.string().uuid(),
+      keyId: z.string().uuid(),
+      botName: z.string().trim().min(2, "Informe o nome do assistente.").max(60),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const { userId } = context as { userId: string };
+    const { companyId, keyId, botName } = data;
+    await assertCompanyAccess(userId, companyId, true);
+
+    const { data: key } = await supabaseAdmin
+      .from("mcp_api_keys")
+      .select("*")
+      .eq("id", keyId)
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .maybeSingle();
+    const botId = (key as { acts_as_user_id?: string | null } | null)?.acts_as_user_id;
+    if (!key || !botId) throw new Error("Chave do assistente não encontrada.");
+
+    const { error: profErr } = await supabaseAdmin
+      .from("profiles")
+      .update({ name: botName })
+      .eq("id", botId)
+      .eq("company_id", companyId);
+    if (profErr) throw new Error(`Falha ao renomear o assistente: ${profErr.message}`);
+
+    const { error: keyErr } = await supabaseAdmin
+      .from("mcp_api_keys")
+      .update({ name: `${botName} (chat interno)`, updated_at: new Date().toISOString() })
+      .eq("id", keyId);
+    if (keyErr) throw new Error(`Falha ao renomear a chave: ${keyErr.message}`);
+
+    await supabaseAdmin.auth.admin
+      .updateUserById(botId, {
+        user_metadata: { name: botName, company_id: companyId, is_bot: true },
+      })
+      .catch(() => {});
+
+    return { success: true };
   });

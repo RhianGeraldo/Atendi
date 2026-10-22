@@ -331,98 +331,126 @@ function ConversationsPage() {
       const selectString =
         "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
 
-      let query = supabase
-        .from("conversations")
-        .select(selectString)
-        .order("last_message_at", { ascending: false })
-        .range(from, to);
+      // Mesmos filtros para a página e para as conversas esperando resposta
+      const buildQuery = () => {
+        let query = supabase.from("conversations").select(selectString);
 
-      if (activeCompanyId) {
-        query = query.eq("contact.company_id", activeCompanyId);
-      }
-      query = query.not("contact.is_blocked", "is", true);
+        if (activeCompanyId) {
+          query = query.eq("contact.company_id", activeCompanyId);
+        }
+        query = query.not("contact.is_blocked", "is", true);
 
-      if (selectedUnitId) {
-        query = query.eq("unit_id", selectedUnitId);
-      } else {
-        query = applyUnitScope(query);
-      }
-
-      if (instanceFilter && instanceFilter !== "all") {
-        query = query.eq("whatsapp_instance_id", instanceFilter);
-      } else if (!isAdmin && instances && instances.length > 0) {
-        const allowedIds = instances.map((inst: any) => inst.id);
-        query = query.in("whatsapp_instance_id", allowedIds);
-      } else if (!isAdmin && instances && instances.length === 0) {
-        query = query.eq("whatsapp_instance_id", "00000000-0000-0000-0000-000000000000");
-      }
-
-      if (departmentFilter && departmentFilter !== "all") {
-        query = query.eq("department_id", departmentFilter);
-      }
-
-      if (agentFilter && agentFilter !== "all") {
-        if (agentFilter === "unassigned") {
-          query = query.is("assigned_agent_id", null);
+        if (selectedUnitId) {
+          query = query.eq("unit_id", selectedUnitId);
         } else {
-          query = query.eq("assigned_agent_id", agentFilter);
+          query = applyUnitScope(query);
         }
-      }
 
-      if (debouncedSearch) {
-        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%,whatsapp_lid.ilike.%${debouncedSearch}%`, {
-          foreignTable: "contact",
-        });
-      }
+        if (instanceFilter && instanceFilter !== "all") {
+          query = query.eq("whatsapp_instance_id", instanceFilter);
+        } else if (!isAdmin && instances && instances.length > 0) {
+          const allowedIds = instances.map((inst: any) => inst.id);
+          query = query.in("whatsapp_instance_id", allowedIds);
+        } else if (!isAdmin && instances && instances.length === 0) {
+          query = query.eq("whatsapp_instance_id", "00000000-0000-0000-0000-000000000000");
+        }
 
-      if (tab === "groups") {
-        query = query.or("phone.like.120363%,phone.like.%-%", { foreignTable: "contact" });
-      }
+        if (departmentFilter && departmentFilter !== "all") {
+          query = query.eq("department_id", departmentFilter);
+        }
 
-      // Server-side status filter for non-group tabs
-      if (tab === "waiting") {
-        query = query.eq("status", "waiting");
-        if (profile?.role !== "admin_company" && profile?.role !== "super_admin") {
-          if (profile?.department_id) {
-            query = query.or(
-              `assigned_agent_id.eq.${profile.id},and(assigned_agent_id.is.null,or(department_id.eq.${profile.department_id},department_id.is.null))`,
-            );
+        if (agentFilter && agentFilter !== "all") {
+          if (agentFilter === "unassigned") {
+            query = query.is("assigned_agent_id", null);
           } else {
-            query = query.or(
-              `assigned_agent_id.eq.${profile?.id},and(assigned_agent_id.is.null,department_id.is.null)`,
-            );
+            query = query.eq("assigned_agent_id", agentFilter);
           }
         }
-      } else if (tab === "active" || tab === "resolved") {
-        query = query.eq("status", tab);
-        if (profile?.role === "manager") {
-          if (profile?.department_id) {
-            query = query.or(
-              `department_id.eq.${profile.department_id},assigned_agent_id.eq.${profile.id}`,
-            );
-          } else {
-            query = query.or(`assigned_agent_id.eq.${profile.id},department_id.is.null`);
-          }
-        } else if (profile?.role !== "admin_company" && profile?.role !== "super_admin") {
-          if (tab === "active") {
-            // Em andamento: atendente vê conversas atribuídas a ele OU sem atendente (ex: disparos/outbound)
+
+        if (debouncedSearch) {
+          query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%,whatsapp_lid.ilike.%${debouncedSearch}%`, {
+            foreignTable: "contact",
+          });
+        }
+
+        if (tab === "groups") {
+          query = query.or("phone.like.120363%,phone.like.%-%", { foreignTable: "contact" });
+        }
+
+        // Server-side status filter for non-group tabs
+        if (tab === "waiting") {
+          query = query.eq("status", "waiting");
+          if (profile?.role !== "admin_company" && profile?.role !== "super_admin") {
             if (profile?.department_id) {
               query = query.or(
                 `assigned_agent_id.eq.${profile.id},and(assigned_agent_id.is.null,or(department_id.eq.${profile.department_id},department_id.is.null))`,
               );
             } else {
-              query = query.or(`assigned_agent_id.eq.${profile?.id},assigned_agent_id.is.null`);
+              query = query.or(
+                `assigned_agent_id.eq.${profile?.id},and(assigned_agent_id.is.null,department_id.is.null)`,
+              );
             }
-          } else {
-            query = query.eq("assigned_agent_id", profile?.id ?? "");
+          }
+        } else if (tab === "active" || tab === "resolved") {
+          query = query.eq("status", tab);
+          if (profile?.role === "manager") {
+            if (profile?.department_id) {
+              query = query.or(
+                `department_id.eq.${profile.department_id},assigned_agent_id.eq.${profile.id}`,
+              );
+            } else {
+              query = query.or(`assigned_agent_id.eq.${profile.id},department_id.is.null`);
+            }
+          } else if (profile?.role !== "admin_company" && profile?.role !== "super_admin") {
+            if (tab === "active") {
+              // Em andamento: atendente vê conversas atribuídas a ele OU sem atendente (ex: disparos/outbound)
+              if (profile?.department_id) {
+                query = query.or(
+                  `assigned_agent_id.eq.${profile.id},and(assigned_agent_id.is.null,or(department_id.eq.${profile.department_id},department_id.is.null))`,
+                );
+              } else {
+                query = query.or(`assigned_agent_id.eq.${profile?.id},assigned_agent_id.is.null`);
+              }
+            } else {
+              query = query.eq("assigned_agent_id", profile?.id ?? "");
+            }
           }
         }
-      }
 
-      const { data, error } = await query;
+        return query;
+      };
+
+      const { data, error } = await buildQuery()
+        .order("last_message_at", { ascending: false })
+        .range(from, to);
       if (error) throw error;
 
       let rows = (data ?? []) as unknown as ConvRow[];
+
+      // Quem espera resposta fica parado e desce na lista: na primeira página vêm todas as
+      // conversas abertas esperando resposta, para o SLA e a ordem "quem espera mais" valerem
+      if (from === 0 && activeCompanyId && tab !== "groups" && tab !== "resolved") {
+        const { data: awaiting, error: awaitingErr } = await (supabase as any).rpc(
+          "conversations_awaiting_reply",
+          { p_company_id: activeCompanyId, p_unit_id: selectedUnitId || null },
+        );
+        if (awaitingErr) {
+          console.warn("[conversations] Erro ao buscar conversas esperando resposta:", awaitingErr);
+        } else {
+          const pageIds = new Set(rows.map((c) => c.id));
+          const missing = ((awaiting ?? []) as { conversation_id: string }[])
+            .map((a) => a.conversation_id)
+            .filter((id) => !pageIds.has(id));
+          for (let i = 0; i < missing.length; i += 100) {
+            const { data: extra, error: extraErr } = await buildQuery().in(
+              "id",
+              missing.slice(i, i + 100),
+            );
+            if (extraErr) throw extraErr;
+            rows = rows.concat((extra ?? []) as unknown as ConvRow[]);
+          }
+        }
+      }
 
       // Client-side: separate groups from regular convs
       if (tab === "groups") {
@@ -522,14 +550,20 @@ function ConversationsPage() {
     enabled: !!profile && (isAdmin || instances !== undefined),
   });
 
-  const conversations = useMemo(
-    () =>
+  const conversations = useMemo(() => {
+    // A primeira página já traz quem espera resposta: a mesma conversa pode vir de novo depois
+    const seen = new Set<string>();
+    return (
       conversationsData?.pages.flatMap((p) => {
         const rows = Array.isArray(p) ? p : p?.rows;
-        return (rows ?? []).filter(Boolean);
-      }) ?? [],
-    [conversationsData],
-  );
+        return (rows ?? []).filter((c) => {
+          if (!c || seen.has(c.id)) return false;
+          seen.add(c.id);
+          return true;
+        });
+      }) ?? []
+    );
+  }, [conversationsData]);
 
   const handleTabChange = useCallback(
     (newTab: TabType) => {

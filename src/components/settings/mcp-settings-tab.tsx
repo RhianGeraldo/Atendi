@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   Bot,
   Workflow,
+  Pencil,
 } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,6 +55,7 @@ import {
   createMcpKeyAction,
   revokeMcpKeyAction,
   createTeamChatBotAction,
+  renameTeamChatBotAction,
 } from "@/lib/api/mcp.functions";
 
 interface McpSettingsTabProps {
@@ -68,6 +70,7 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
   const [newKeyUnitId, setNewKeyUnitId] = useState<string>("matriz");
   const [isBotOpen, setIsBotOpen] = useState(false);
   const [botName, setBotName] = useState("Assistente IA");
+  const [renamingBot, setRenamingBot] = useState<{ keyId: string; name: string } | null>(null);
   const [revokingKey, setRevokingKey] = useState<{
     id: string;
     name: string;
@@ -156,6 +159,25 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
     },
     onError: (err: Error) => {
       toast.error(err.message || "Erro ao criar o assistente.");
+    },
+  });
+
+  // 3c. Mutation: Renomear Assistente IA (nome que a equipe vê no chat interno)
+  const renameBotMutation = useMutation({
+    mutationFn: async () => {
+      if (!renamingBot) return;
+      await renameTeamChatBotAction({
+        data: { companyId, keyId: renamingBot.keyId, botName: renamingBot.name.trim() },
+      });
+    },
+    onSuccess: () => {
+      setRenamingBot(null);
+      qc.invalidateQueries({ queryKey: ["mcp-api-keys", companyId] });
+      qc.invalidateQueries({ queryKey: ["team-members", companyId] });
+      toast.success("Nome do assistente atualizado.");
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Erro ao renomear o assistente.");
     },
   });
 
@@ -656,22 +678,37 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
                       </div>
                     </div>
 
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        setRevokingKey({
-                          id: k.id,
-                          name: k.name,
-                          botName: k.acts_as_user_id ? k.acts_as?.name || "Assistente" : null,
-                        })
-                      }
-                      disabled={revokeMutation.isPending}
-                      className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-500/10 self-end sm:self-center gap-1.5 h-8 px-2.5"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Revogar
-                    </Button>
+                    <div className="flex items-center gap-1 self-end sm:self-center">
+                      {k.acts_as_user_id && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setRenamingBot({ keyId: k.id, name: k.acts_as?.name || "" })
+                          }
+                          className="text-xs gap-1.5 h-8 px-2.5"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Renomear
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setRevokingKey({
+                            id: k.id,
+                            name: k.name,
+                            botName: k.acts_as_user_id ? k.acts_as?.name || "Assistente" : null,
+                          })
+                        }
+                        disabled={revokeMutation.isPending}
+                        className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-500/10 gap-1.5 h-8 px-2.5"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Revogar
+                      </Button>
+                    </div>
                   </div>
                 );
               })}
@@ -711,10 +748,10 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
               <span className="font-semibold text-foreground">💬 Atendimento, WhatsApp & SLA</span>
               <p className="text-muted-foreground text-[11px]">
-                listar_conversas (com SLA em tempo real), consultar_conversa,
-                consultar_sla_atendimento, enviar_mensagem_whatsapp, enviar_midia_whatsapp,
-                assumir_conversa, transferir_conversa, adicionar_nota_interna,
-                listar_motivos_encerramento, encerrar_atendimento
+                listar_conversas (com SLA em tempo real), listar_clientes_aguardando_resposta,
+                consultar_conversa, consultar_sla_atendimento, enviar_mensagem_whatsapp,
+                enviar_midia_whatsapp, assumir_conversa, transferir_conversa,
+                adicionar_nota_interna, listar_motivos_encerramento, encerrar_atendimento
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
@@ -973,6 +1010,52 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               className="text-xs w-full sm:w-auto"
             >
               Concluir e Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Renomear Assistente IA */}
+      <Dialog open={!!renamingBot} onOpenChange={(open) => !open && setRenamingBot(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base flex items-center gap-2">
+              <Bot className="h-4 w-4 text-primary" />
+              Renomear assistente
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              É o nome que a equipe vê no chat interno e usa para mencioná-lo (@nome). O token
+              continua o mesmo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold">Nome do assistente na equipe</label>
+            <Input
+              value={renamingBot?.name || ""}
+              onChange={(e) =>
+                setRenamingBot((prev) => (prev ? { ...prev, name: e.target.value } : prev))
+              }
+              className="text-xs"
+              maxLength={60}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRenamingBot(null)}
+              className="text-xs"
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => renameBotMutation.mutate()}
+              disabled={renameBotMutation.isPending || (renamingBot?.name.trim().length || 0) < 2}
+              className="text-xs gap-1.5"
+            >
+              {renameBotMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Salvar nome
             </Button>
           </DialogFooter>
         </DialogContent>
