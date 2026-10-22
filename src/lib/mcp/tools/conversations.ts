@@ -3,7 +3,12 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { notifyTransferReceiver } from "@/lib/server/transfer-notifications";
 import { loadSlaLastMessages } from "@/lib/server/sla-last-message";
 import { sendPlatformMessage } from "@/lib/server/message-sender";
-import { calculateConversationSla, DEFAULT_SLA_SETTINGS, type SlaSettings } from "@/lib/sla";
+import {
+  calculateConversationSla,
+  DEFAULT_SLA_SETTINGS,
+  formatMinutesFriendly,
+  type SlaSettings,
+} from "@/lib/sla";
 import type { McpContext, McpToolDefinition } from "../types";
 
 function detectMediaType(url: string): "image" | "video" | "audio" | "document" {
@@ -53,6 +58,39 @@ function formatMediaPayload(
   }
   return "";
 }
+
+/** Última mensagem do SLA em blocos de 200 conversas, para não abrir centenas de consultas juntas. */
+async function loadSlaLastMessagesInBatches(convIds: string[]) {
+  const merged: Awaited<ReturnType<typeof loadSlaLastMessages>> = new Map();
+  for (let i = 0; i < convIds.length; i += 200) {
+    const part = await loadSlaLastMessages(convIds.slice(i, i + 200));
+    for (const [id, msg] of part) merged.set(id, msg);
+  }
+  return merged;
+}
+
+/** Conversas abertas com a última mensagem do cliente (mesma função da tela de atendimento). */
+async function loadAwaitingReplyIds(companyId: string, unitId?: string | null): Promise<string[]> {
+  const { data, error } = await (supabaseAdmin as any).rpc("conversations_awaiting_reply", {
+    p_company_id: companyId,
+    p_unit_id: unitId || null,
+  });
+  if (error) throw new Error(`Erro ao buscar conversas esperando resposta: ${error.message}`);
+  return ((data || []) as { conversation_id: string }[]).map((a) => a.conversation_id);
+}
+
+async function loadSlaSettings(companyId: string): Promise<SlaSettings> {
+  const { data: company } = await supabaseAdmin
+    .from("companies")
+    .select("custom_variables")
+    .eq("id", companyId)
+    .single();
+  const customVars = (company?.custom_variables as Record<string, any>) || {};
+  return { ...DEFAULT_SLA_SETTINGS, ...(customVars.sla || {}) };
+}
+
+const isGroupPhone = (phone: string) =>
+  phone.startsWith("120363") || (phone.includes("-") && phone.length > 18);
 
 export const conversationsTools: McpToolDefinition[] = [
   {
@@ -123,10 +161,11 @@ export const conversationsTools: McpToolDefinition[] = [
         ...(customVars.sla || {}),
       };
 
-      let query = supabaseAdmin
-        .from("conversations")
-        .select(
-          `
+      const buildQuery = () => {
+        let query = supabaseAdmin
+          .from("conversations")
+          .select(
+            `
           id,
           status,
           channel,
@@ -140,35 +179,47 @@ export const conversationsTools: McpToolDefinition[] = [
           units(name, slug),
           profiles!conversations_assigned_agent_id_fkey(name)
         `,
-        )
-        .eq("contacts.company_id", context.companyId)
-        .order("last_message_at", { ascending: false, nullsFirst: false })
-        // Com filtro de SLA busca mais: os SLAs mais atrasados têm a última mensagem mais antiga
-        .limit(slaFilter !== "all" ? 200 : limit * 2);
+          )
+          .eq("contacts.company_id", context.companyId)
+          .order("last_message_at", { ascending: false, nullsFirst: false })
+          .order("id", { ascending: true });
 
-      if (targetStatus !== "all") {
-        query = query.eq("status", targetStatus);
+        if (targetStatus !== "all") {
+          query = query.eq("status", targetStatus);
+        }
+
+        if (targetUnitId) {
+          query = query.eq("unit_id", targetUnitId);
+        }
+
+        if (args?.canal && args.canal !== "all") {
+          query = query.eq("channel", args.canal);
+        }
+
+        if (args?.busca && typeof args.busca === "string" && args.busca.trim()) {
+          const term = args.busca.trim();
+          query = query.or(`contacts.name.ilike.%${term}%,contacts.phone.ilike.%${term}%`);
+        }
+        return query;
+      };
+
+      // Todo filtro de SLA exige cliente esperando resposta: busca só essas conversas (todas,
+      // não só as mais recentes, porque as mais atrasadas têm a última mensagem mais antiga)
+      let convs: any[] = [];
+      if (slaFilter !== "all") {
+        const awaitingIds = await loadAwaitingReplyIds(context.companyId, targetUnitId);
+        for (let i = 0; i < awaitingIds.length; i += 100) {
+          const { data, error } = await buildQuery().in("id", awaitingIds.slice(i, i + 100));
+          if (error) throw new Error(`Erro ao listar conversas: ${error.message}`);
+          convs.push(...(data || []));
+        }
+      } else {
+        const { data, error } = await buildQuery().limit(limit * 2);
+        if (error) throw new Error(`Erro ao listar conversas: ${error.message}`);
+        convs = data || [];
       }
 
-      if (targetUnitId) {
-        query = query.eq("unit_id", targetUnitId);
-      }
-
-      if (args?.canal && args.canal !== "all") {
-        query = query.eq("channel", args.canal);
-      }
-
-      if (args?.busca && typeof args.busca === "string" && args.busca.trim()) {
-        const term = args.busca.trim();
-        query = query.or(`contacts.name.ilike.%${term}%,contacts.phone.ilike.%${term}%`);
-      }
-
-      const { data: convs, error } = await query;
-      if (error) {
-        throw new Error(`Erro ao listar conversas: ${error.message}`);
-      }
-
-      const slaLastByConv = await loadSlaLastMessages((convs || []).map((c: any) => c.id));
+      const slaLastByConv = await loadSlaLastMessagesInBatches((convs || []).map((c: any) => c.id));
 
       let processed = (convs || []).map((c: any) => {
         const slaLast = slaLastByConv.get(c.id);
@@ -209,7 +260,11 @@ export const conversationsTools: McpToolDefinition[] = [
           unidade: c.units?.name || "Geral",
           atendente: c.profiles?.name || (c.ai_active ? "IA Atendi" : "Não atribuído"),
           ultima_mensagem: c.last_message_preview || null,
-          ultima_mensagem_de: slaLast ? (slaLast.sender_type === "contact" ? "contato" : "atendente") : null,
+          ultima_mensagem_de: slaLast
+            ? slaLast.sender_type === "contact"
+              ? "contato"
+              : "atendente"
+            : null,
           data_ultima_mensagem: c.last_message_at,
           nao_lidas: c.unread_count || 0,
           sla: {
@@ -248,6 +303,196 @@ export const conversationsTools: McpToolDefinition[] = [
       return {
         total: finalResults.length,
         conversas: finalResults,
+      };
+    },
+  },
+  {
+    name: "listar_clientes_aguardando_resposta",
+    description:
+      "Clientes esperando resposta: olha TODAS as conversas abertas (aguardando e em andamento) e traz as que têm a última mensagem do cliente sem resposta, com tempo de espera, SLA (estourado/alerta/no prazo), atendente, departamento e unidade. Traz também o resumo por atendente e por unidade. Use para cobrar a equipe ou priorizar quem responder.",
+    security: {
+      requiredMenu: "conversations",
+      minRole: "manager",
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          description:
+            "'abertas' (padrão: aguardando + em andamento), 'waiting' (aguardando, ainda sem atendente) ou 'active' (em andamento).",
+          enum: ["abertas", "waiting", "active"],
+          default: "abertas",
+        },
+        situacao_sla: {
+          type: "string",
+          description:
+            "'atrasadas' (padrão: SLA estourado), 'alerta' (perto de estourar), 'atrasadas_e_alerta' ou 'todas' (todos que aguardam resposta).",
+          enum: ["atrasadas", "alerta", "atrasadas_e_alerta", "todas"],
+          default: "atrasadas",
+        },
+        atendente_id: {
+          type: "string",
+          description:
+            "ID (UUID) do atendente responsável. Use 'sem_atendente' para as sem responsável.",
+        },
+        unidade_id: {
+          type: "string",
+          description: "ID (UUID) da unidade. Se omitido em chave Matriz, toda a rede.",
+        },
+        canal: {
+          type: "string",
+          description: "Canal: 'all' (padrão), 'whatsapp', 'instagram', 'messenger'.",
+          enum: ["all", "whatsapp", "instagram", "messenger"],
+        },
+        espera_minima_minutos: {
+          type: "number",
+          description: "Só clientes esperando há pelo menos esse tempo (em minutos).",
+        },
+        limite: {
+          type: "number",
+          description: "Máximo de conversas na lista (padrão 30, máx. 100). O resumo conta todas.",
+          default: 30,
+        },
+      },
+    },
+    handler: async (args: any, context: McpContext) => {
+      const limit = Math.min(Math.max(Number(args?.limite) || 30, 1), 100);
+      const statuses =
+        args?.status === "waiting"
+          ? ["waiting"]
+          : args?.status === "active"
+            ? ["active"]
+            : ["waiting", "active"];
+      const situacao = args?.situacao_sla || "atrasadas";
+      const targetUnitId = context.unitId || args?.unidade_id;
+      const minWait = Math.max(Number(args?.espera_minima_minutos) || 0, 0);
+      const slaSettings = await loadSlaSettings(context.companyId);
+
+      // Mesma lista da tela de atendimento: conversas abertas com a última mensagem do cliente
+      const awaitingIds = await loadAwaitingReplyIds(context.companyId, targetUnitId);
+
+      const convs: any[] = [];
+      for (let i = 0; i < awaitingIds.length; i += 100) {
+        let query = supabaseAdmin
+          .from("conversations")
+          .select(
+            `id, status, channel, last_message_at, last_message_preview, started_at, unread_count, ai_active, unit_id, assigned_agent_id,
+            contacts!inner(id, name, phone, company_id),
+            units(name),
+            departments(name),
+            profiles!conversations_assigned_agent_id_fkey(id, name)`,
+          )
+          .in("id", awaitingIds.slice(i, i + 100))
+          .in("status", statuses as any);
+        if (args?.canal && args.canal !== "all") query = query.eq("channel", args.canal);
+        if (args?.atendente_id === "sem_atendente") query = query.is("assigned_agent_id", null);
+        else if (args?.atendente_id) query = query.eq("assigned_agent_id", args.atendente_id);
+        const { data, error } = await query;
+        if (error) throw new Error(`Erro ao listar conversas: ${error.message}`);
+        convs.push(...(data || []));
+      }
+
+      const open = (convs || []).filter((c: any) => !isGroupPhone(c.contacts?.phone || ""));
+      const slaLastByConv = await loadSlaLastMessagesInBatches(open.map((c: any) => c.id));
+
+      const waiting = open
+        .map((c: any) => {
+          const slaLast = slaLastByConv.get(c.id);
+          const sla = calculateConversationSla(
+            {
+              id: c.id,
+              channel: c.channel,
+              status: c.status,
+              last_message: slaLast ? [slaLast] : [],
+              last_message_at: c.last_message_at,
+              last_message_preview: c.last_message_preview,
+              started_at: c.started_at,
+              contact: { ...c.contacts, phone: c.contacts?.phone || "" },
+            } as any,
+            slaSettings,
+          );
+          return { c, sla };
+        })
+        .filter(({ sla }) => sla.isWaiting && sla.elapsedMinutes >= minWait);
+
+      const matches = waiting.filter(({ sla }) =>
+        situacao === "todas"
+          ? true
+          : situacao === "alerta"
+            ? sla.status === "warning"
+            : situacao === "atrasadas_e_alerta"
+              ? sla.status === "breached" || sla.status === "warning"
+              : sla.status === "breached",
+      );
+      matches.sort((a, b) => b.sla.elapsedMinutes - a.sla.elapsedMinutes);
+
+      // Resumo por atendente e por unidade (de tudo que bateu no filtro)
+      const group = (keyOf: (c: any) => string) => {
+        const map = new Map<
+          string,
+          {
+            nome: string;
+            total: number;
+            atrasadas: number;
+            alerta: number;
+            maior_espera_minutos: number;
+          }
+        >();
+        for (const { c, sla } of matches) {
+          const nome = keyOf(c);
+          const row = map.get(nome) || {
+            nome,
+            total: 0,
+            atrasadas: 0,
+            alerta: 0,
+            maior_espera_minutos: 0,
+          };
+          row.total += 1;
+          if (sla.status === "breached") row.atrasadas += 1;
+          if (sla.status === "warning") row.alerta += 1;
+          row.maior_espera_minutos = Math.max(row.maior_espera_minutos, sla.elapsedMinutes);
+          map.set(nome, row);
+        }
+        return [...map.values()].sort((a, b) => b.total - a.total);
+      };
+      const agentName = (c: any) =>
+        c.profiles?.name ||
+        (c.status === "waiting"
+          ? "Aguardando atendente"
+          : c.ai_active
+            ? "IA Atendi"
+            : "Não atribuído");
+
+      return {
+        sla_limite_resposta_minutos: slaSettings.response_limit_minutes || 5,
+        resumo: {
+          aguardando_resposta: waiting.length,
+          atrasadas: waiting.filter(({ sla }) => sla.status === "breached").length,
+          alerta: waiting.filter(({ sla }) => sla.status === "warning").length,
+          no_filtro: matches.length,
+          por_atendente: group(agentName),
+          por_unidade: group((c) => c.units?.name || "Geral"),
+        },
+        total_listado: Math.min(limit, matches.length),
+        conversas: matches.slice(0, limit).map(({ c, sla }) => ({
+          conversa_id: c.id,
+          status: c.status,
+          canal: c.channel,
+          contato: { id: c.contacts?.id, nome: c.contacts?.name, telefone: c.contacts?.phone },
+          atendente: agentName(c),
+          atendente_id: c.profiles?.id || null,
+          departamento: c.departments?.name || null,
+          unidade: c.units?.name || "Geral",
+          aguardando_desde: sla.waitingSince ? new Date(sla.waitingSince).toISOString() : null,
+          espera: formatMinutesFriendly(sla.elapsedMinutes),
+          minutos_espera: sla.elapsedMinutes,
+          minutos_atraso: sla.overdueMinutes,
+          sla: sla.status,
+          primeira_resposta: sla.isFirstResponse,
+          ultima_mensagem: c.last_message_preview || null,
+          nao_lidas: c.unread_count || 0,
+        })),
       };
     },
   },
