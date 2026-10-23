@@ -91,22 +91,17 @@ export const validateMetaChannelAction = createServerFn({ method: "POST" })
         );
       }
 
-      const page = await graph(
-        comToken(`${GRAPH_FB}/${pageId}`, token, {
-          fields: "id,name,instagram_business_account{id,username}",
-        }),
-      );
-
+      // Ler o nó da Página exige pages_read_engagement, que o app não pede. Para
+      // o Instagram basta a conta IG responder com o token (instagram_basic); a
+      // inscrição abaixo usa pages_manage_metadata.
       if (inst.provider === "instagram") {
-        const ig = page.instagram_business_account;
-        if (!ig?.id || ig.id !== inst.oficial_phone_number_id) {
-          throw new Error(
-            `A Página "${page.name}" não está ligada à conta do Instagram deste canal (${inst.oficial_phone_number_id}).`,
-          );
-        }
+        if (!inst.oficial_phone_number_id) throw new Error("O canal não tem o ID da conta do Instagram.");
+        const ig = await graph(
+          comToken(`${GRAPH_FB}/${inst.oficial_phone_number_id}`, token, { fields: "id,username" }),
+        );
         conta = ig.username ? `@${ig.username}` : ig.id;
       } else {
-        conta = page.name;
+        conta = `Página ${pageId}`;
       }
 
       // A lista pode trazer outros apps instalados na Página: olha só o nosso.
