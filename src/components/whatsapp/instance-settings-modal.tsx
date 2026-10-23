@@ -13,29 +13,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { WhatsappTemplatesTab } from "./whatsapp-templates-tab";
+import { enderecoLocal, origemPublica } from "@/lib/endereco-publico";
 
 interface InstanceSettingsModalProps {
   instance: any; // { id, name, instance_name, evogo_api_key, evogo_instance_id, webhook_url, department_id }
   company: any; // { evogo_host, evogo_global_token }
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-/** localhost, 127.x, rede privada ou .local: endereço que um servidor externo não alcança. */
-function enderecoLocal(url: string): boolean {
-  try {
-    const host = new URL(url).hostname;
-    return (
-      host === "localhost" ||
-      host.endsWith(".local") ||
-      /^127\./.test(host) ||
-      /^10\./.test(host) ||
-      /^192\.168\./.test(host) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-    );
-  } catch {
-    return false;
-  }
 }
 
 export function InstanceSettingsModal({ instance, company, open, onOpenChange }: InstanceSettingsModalProps) {
@@ -45,6 +29,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   
   const [channelName, setChannelName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSugerido, setWebhookSugerido] = useState("");
   const [customHost, setCustomHost] = useState("");
   const [customApiKey, setCustomApiKey] = useState("");
   const [wavoipToken, setWavoipToken] = useState("");
@@ -96,18 +81,17 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     else if (isZernio) providerWebhookPath = `zernio/${instance.company_id || ''}?k=${company?.zernio_webhook_secret || ''}`;
 
     let defaultWebhook = instance.webhook_url;
-    const currentDomainWebhook = `${window.location.origin}/api/webhooks/${providerWebhookPath}`;
+    const currentDomainWebhook = `${origemPublica()}/api/webhooks/${providerWebhookPath}`;
     
     // Corrige se estiver vazio, for do supabase antigo, for de outro provedor ou
-    // apontar para endereço local. Uma URL pública que já funciona nunca é trocada
-    // pelo endereço do navegador: aberto no localhost ou num preview, isso desviaria
-    // as mensagens de produção. Para mudar de domínio, edite o campo à mão.
+    // apontar para endereço local. Uma URL pública que já funciona não é trocada
+    // sozinha: mudar de domínio fica no botão "Usar endereço atual".
     const webhookKeyword = isZernio ? 'zernio' : providerWebhookPath;
     if (
       !defaultWebhook ||
       defaultWebhook.includes('supabase.co') ||
       !defaultWebhook.includes(webhookKeyword) ||
-      (enderecoLocal(defaultWebhook) && !enderecoLocal(currentDomainWebhook))
+      enderecoLocal(defaultWebhook)
     ) {
       defaultWebhook = currentDomainWebhook;
     }
@@ -115,6 +99,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     setChannelName(instance.name || "");
     setAdvSettingsOriginal(null);
     setWebhookUrl(defaultWebhook);
+    setWebhookSugerido(currentDomainWebhook);
     setCustomHost(instance.custom_host || "");
     setCustomApiKey(instance.provider === "stevo" ? (instance.stevo_api_key || "") : (instance.evogo_api_key || ""));
     setWavoipToken(instance.wavoip_token || "");
@@ -179,8 +164,16 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     const advSettingsMudaram =
       !!advSettingsOriginal && JSON.stringify(advSettings) !== JSON.stringify(advSettingsOriginal);
 
+    const webhookFinal = webhookUrl.trim();
+    if (isProvedorQr && !/^https?:\/\/[^\s/]+/i.test(webhookFinal)) {
+      toast.error("URL do webhook inválida", {
+        description: "Informe o endereço completo, começando com https://.",
+      });
+      return;
+    }
+
     // O EvoGo/Stevo roda fora daqui: não tem como entregar num endereço local.
-    if (isProvedorQr && enderecoLocal(webhookUrl)) {
+    if (isProvedorQr && enderecoLocal(webhookFinal)) {
       toast.error("URL do webhook inválida", {
         description: "O EvoGo/Stevo não consegue entregar mensagens em localhost ou rede local. Use o endereço público do Atendi.",
       });
@@ -201,7 +194,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
         const { error: dbErr } = await supabase
           .from("whatsapp_instances")
           .update({ 
-            webhook_url: webhookUrl,
+            webhook_url: webhookFinal,
             wavoip_token: wavoipToken || null,
             department_id: selectedDepartmentId || null,
             name,
@@ -212,7 +205,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
         const { error: dbErr } = await supabase
           .from("whatsapp_instances")
           .update({ 
-             webhook_url: webhookUrl, 
+             webhook_url: webhookFinal, 
              oficial_phone_number_id: oficialPhoneId,
              oficial_waba_id: oficialWabaId,
              oficial_access_token: oficialAccessToken,
@@ -228,11 +221,11 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           const client = new StevoClient({ host: customHost || company.stevo_host, token: company.stevo_global_token });
           // Só reenvia ao Stevo quando algo dele mudou: renomear ou trocar o
           // departamento não depende do servidor do Stevo estar no ar.
-          if (webhookUrl !== instance.webhook_url || (customHost || null) !== (instance.custom_host || null) || (customApiKey || instance.stevo_api_key) !== instance.stevo_api_key) {
-            await client.connectInstance(webhookUrl, customApiKey || instance.stevo_api_key);
+          if (webhookFinal !== instance.webhook_url || (customHost || null) !== (instance.custom_host || null) || (customApiKey || instance.stevo_api_key) !== instance.stevo_api_key) {
+            await client.connectInstance(webhookFinal, customApiKey || instance.stevo_api_key);
           }
           const { error: dbErr } = await supabase.from("whatsapp_instances").update({ 
-            webhook_url: webhookUrl, 
+            webhook_url: webhookFinal, 
             wavoip_token: wavoipToken || null, 
             custom_host: customHost || null, 
             stevo_api_key: customApiKey || instance.stevo_api_key,
@@ -247,11 +240,11 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           const client = new EvoGoClient({ host: customHost || company.evogo_host, token: company.evogo_global_token });
           // Só reenvia ao EvoGo quando algo dele mudou: renomear ou trocar o
           // departamento não depende do servidor do EvoGo estar no ar.
-          if (webhookUrl !== instance.webhook_url || (customHost || null) !== (instance.custom_host || null) || (customApiKey || instance.evogo_api_key) !== instance.evogo_api_key) {
-            await client.connectInstance(webhookUrl, customApiKey || instance.evogo_api_key);
+          if (webhookFinal !== instance.webhook_url || (customHost || null) !== (instance.custom_host || null) || (customApiKey || instance.evogo_api_key) !== instance.evogo_api_key) {
+            await client.connectInstance(webhookFinal, customApiKey || instance.evogo_api_key);
           }
           const { error: dbErr } = await supabase.from("whatsapp_instances").update({ 
-            webhook_url: webhookUrl, 
+            webhook_url: webhookFinal, 
             wavoip_token: wavoipToken || null, 
             custom_host: customHost || null, 
             evogo_api_key: customApiKey || instance.evogo_api_key,
@@ -313,7 +306,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                 <TabsContent value="settings" className="space-y-4 pt-4">
                   <SettingsFormContent 
                     channelName={channelName} setChannelName={setChannelName}
-                  webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl}
+                  webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl} webhookSugerido={webhookSugerido}
                     wavoipToken={wavoipToken} setWavoipToken={setWavoipToken}
                     oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
                     oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
@@ -347,7 +340,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
               <div className="space-y-4 py-4">
                 <SettingsFormContent 
                   channelName={channelName} setChannelName={setChannelName}
-                  webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl}
+                  webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl} webhookSugerido={webhookSugerido}
                   wavoipToken={wavoipToken} setWavoipToken={setWavoipToken}
                   oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
                   oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
@@ -383,7 +376,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
 // Subcomponente criado para reaproveitar os campos de input, não poluindo o retorno principal
 function SettingsFormContent({ 
   channelName, setChannelName,
-  webhookUrl, setWebhookUrl, 
+  webhookUrl, setWebhookUrl, webhookSugerido,
   wavoipToken, setWavoipToken, 
   oficialPhoneId, setOficialPhoneId, 
   oficialWabaId, setOficialWabaId, 
@@ -472,6 +465,23 @@ function SettingsFormContent({
               </Button>
             )}
           </div>
+          {!isZernio && webhookSugerido && webhookUrl.trim() !== webhookSugerido && (
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <p className="text-[11px] text-muted-foreground">
+                Diferente do endereço atual do Atendi.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs shrink-0"
+                onClick={() => setWebhookUrl(webhookSugerido)}
+                title={webhookSugerido}
+              >
+                Usar endereço atual
+              </Button>
+            </div>
+          )}
           {isCloudAPI && (
             <p className="text-[10px] text-muted-foreground mt-1">
               {isZernio 

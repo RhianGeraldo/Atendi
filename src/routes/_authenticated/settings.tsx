@@ -110,6 +110,7 @@ import { MetaCapiSettingsTab } from "@/components/settings/meta-capi-settings";
 import { SlaSettingsTab } from "@/components/settings/sla-settings";
 import { ContactSourcesTab } from "@/components/settings/contact-sources-tab";
 import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
+import { origemPublica } from "@/lib/endereco-publico";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   validateSearch: (search: Record<string, unknown>) => {
@@ -1048,7 +1049,7 @@ function SettingsPage() {
                             <div className="flex items-center gap-2">
                               <code className="text-[10px] font-mono break-all flex-1 bg-background p-1.5 rounded border">
                                 {typeof window !== "undefined"
-                                  ? `${window.location.origin}/api/webhooks/zernio/${activeCompanyId}${company?.zernio_webhook_secret ? `?k=${encodeURIComponent(company.zernio_webhook_secret)}` : ""}`
+                                  ? `${origemPublica()}/api/webhooks/zernio/${activeCompanyId}${company?.zernio_webhook_secret ? `?k=${encodeURIComponent(company.zernio_webhook_secret)}` : ""}`
                                   : ""}
                               </code>
                               <Button
@@ -1057,7 +1058,7 @@ function SettingsPage() {
                                 size="icon"
                                 className="h-7 w-7 shrink-0"
                                 onClick={() => {
-                                  const url = `${window.location.origin}/api/webhooks/zernio/${activeCompanyId}${company?.zernio_webhook_secret ? `?k=${encodeURIComponent(company.zernio_webhook_secret)}` : ""}`;
+                                  const url = `${origemPublica()}/api/webhooks/zernio/${activeCompanyId}${company?.zernio_webhook_secret ? `?k=${encodeURIComponent(company.zernio_webhook_secret)}` : ""}`;
                                   copyToClipboard(url, "URL do Webhook Zernio");
                                 }}
                                 title="Copiar URL"
@@ -1117,7 +1118,7 @@ function SettingsPage() {
                                 await syncZernioWebhookAction({
                                   data: {
                                     companyId: activeCompanyId,
-                                    appOrigin: window.location.origin,
+                                    appOrigin: origemPublica(),
                                   },
                                 });
                                 toast.success("Webhook configurado na Zernio com sucesso!");
@@ -1295,7 +1296,7 @@ function SettingsPage() {
                               <span className="truncate">
                                 WhatsApp:{" "}
                                 {typeof window !== "undefined"
-                                  ? `${window.location.origin}/api/webhooks/whatsapp`
+                                  ? `${origemPublica()}/api/webhooks/whatsapp`
                                   : ""}
                               </span>
                               <Button
@@ -1305,7 +1306,7 @@ function SettingsPage() {
                                 className="h-5 w-5 shrink-0 ml-1"
                                 onClick={() =>
                                   copyToClipboard(
-                                    `${window.location.origin}/api/webhooks/whatsapp`,
+                                    `${origemPublica()}/api/webhooks/whatsapp`,
                                     "Webhook WhatsApp",
                                   )
                                 }
@@ -1317,7 +1318,7 @@ function SettingsPage() {
                               <span className="truncate">
                                 Instagram:{" "}
                                 {typeof window !== "undefined"
-                                  ? `${window.location.origin}/api/webhooks/instagram`
+                                  ? `${origemPublica()}/api/webhooks/instagram`
                                   : ""}
                               </span>
                               <Button
@@ -1327,7 +1328,7 @@ function SettingsPage() {
                                 className="h-5 w-5 shrink-0 ml-1"
                                 onClick={() =>
                                   copyToClipboard(
-                                    `${window.location.origin}/api/webhooks/instagram`,
+                                    `${origemPublica()}/api/webhooks/instagram`,
                                     "Webhook Instagram",
                                   )
                                 }
@@ -1437,7 +1438,7 @@ function SettingsPage() {
                           <div className="flex items-center gap-2">
                             <code className="text-[10px] font-mono break-all flex-1 bg-background p-1.5 rounded border">
                               {typeof window !== "undefined"
-                                ? `${window.location.origin}/api/webhooks/evogo`
+                                ? `${origemPublica()}/api/webhooks/evogo`
                                 : ""}
                             </code>
                             <Button
@@ -1447,7 +1448,7 @@ function SettingsPage() {
                               className="h-7 w-7 shrink-0"
                               onClick={() =>
                                 copyToClipboard(
-                                  `${window.location.origin}/api/webhooks/evogo`,
+                                  `${origemPublica()}/api/webhooks/evogo`,
                                   "Webhook EvoGo",
                                 )
                               }
@@ -1557,7 +1558,7 @@ function SettingsPage() {
                           <div className="flex items-center gap-2">
                             <code className="text-[10px] font-mono break-all flex-1 bg-background p-1.5 rounded border">
                               {typeof window !== "undefined"
-                                ? `${window.location.origin}/api/webhooks/stevo`
+                                ? `${origemPublica()}/api/webhooks/stevo`
                                 : ""}
                             </code>
                             <Button
@@ -1567,7 +1568,7 @@ function SettingsPage() {
                               className="h-7 w-7 shrink-0"
                               onClick={() =>
                                 copyToClipboard(
-                                  `${window.location.origin}/api/webhooks/stevo`,
+                                  `${origemPublica()}/api/webhooks/stevo`,
                                   "Webhook StevoChat",
                                 )
                               }

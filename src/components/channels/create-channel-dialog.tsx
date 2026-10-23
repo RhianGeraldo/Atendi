@@ -37,6 +37,7 @@ import { EvoGoClient } from "@/integrations/evogo/client";
 import { StevoClient } from "@/integrations/stevo/client";
 import { listZernioAccountsAction, syncZernioWebhookAction } from "@/lib/api/zernio.functions";
 import { validateMetaChannelAction } from "@/lib/api/meta-channels.functions";
+import { origemPublica } from "@/lib/endereco-publico";
 
 export type ChannelType = "whatsapp" | "instagram" | "messenger";
 
@@ -290,13 +291,13 @@ export function CreateChannelDialog({
 
       let defaultWebhookUrl = null;
       if (provider === "oficial") {
-        defaultWebhookUrl = `${window.location.origin}/api/webhooks/whatsapp`;
+        defaultWebhookUrl = `${origemPublica()}/api/webhooks/whatsapp`;
       } else if (provider === "instagram") {
-        defaultWebhookUrl = `${window.location.origin}/api/webhooks/instagram`;
+        defaultWebhookUrl = `${origemPublica()}/api/webhooks/instagram`;
       } else if (provider === "messenger") {
-        defaultWebhookUrl = `${window.location.origin}/api/webhooks/messenger`;
+        defaultWebhookUrl = `${origemPublica()}/api/webhooks/messenger`;
       } else if (provider === "zernio") {
-        defaultWebhookUrl = `${window.location.origin}/api/webhooks/zernio/${companyId}?k=${encodeURIComponent(company?.zernio_webhook_secret || "")}`;
+        defaultWebhookUrl = `${origemPublica()}/api/webhooks/zernio/${companyId}?k=${encodeURIComponent(company?.zernio_webhook_secret || "")}`;
       }
 
       const network =
@@ -345,7 +346,7 @@ export function CreateChannelDialog({
         }
       } else if (provider === "zernio") {
         syncZernioWebhookAction({
-          data: { companyId, appOrigin: window.location.origin },
+          data: { companyId, appOrigin: origemPublica() },
         }).catch((err) => console.warn("[zernio] Erro ao sincronizar webhook na criação:", err));
       } else if (provider === "evogo") {
         const hostToUse = customHost || company.evogo_host;
@@ -363,7 +364,7 @@ export function CreateChannelDialog({
           }
 
           if (evogoId) {
-            const webhookUrl = `${window.location.origin}/api/webhooks/evogo`;
+            const webhookUrl = `${origemPublica()}/api/webhooks/evogo`;
             await supabase
               .from("whatsapp_instances")
               .update({ evogo_instance_id: evogoId, webhook_url: webhookUrl })
@@ -397,7 +398,7 @@ export function CreateChannelDialog({
           }
 
           if (stevoId) {
-            const webhookUrl = `${window.location.origin}/api/webhooks/stevo`;
+            const webhookUrl = `${origemPublica()}/api/webhooks/stevo`;
             await supabase
               .from("whatsapp_instances")
               .update({ stevo_instance_id: stevoId, webhook_url: webhookUrl })
