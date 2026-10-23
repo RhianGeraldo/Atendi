@@ -164,6 +164,8 @@ function PipelinePage() {
   const [stageLimits, setStageLimits] = useState<Record<string, number>>({});
   // Paginação sob demanda no modo Tabela / Lista (carrega inicialmente 30 linhas)
   const [tableLimit, setTableLimit] = useState<number>(TABLE_PAGE_SIZE);
+  // Durante o arraste a coluna não carrega mais cards sozinha
+  const [isDragging, setIsDragging] = useState(false);
   const boardContainerRef = useRef<HTMLDivElement>(null);
   const hasScrolledRef = useRef<string | null>(null);
 
@@ -521,9 +523,24 @@ function PipelinePage() {
     if (!stages) return {};
     const cols: Record<string, any[]> = {};
     stages.forEach((s) => {
-      cols[s.id] = (filteredOpportunities || [])
-        .filter((o) => o.stage_id === s.id)
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      // Como no Todoo: atrasadas no SLA da etapa no topo (a mais atrasada primeiro),
+      // depois o resto da mais nova para a mais antiga
+      const overdueOf = new Map<string, number>();
+      const stageOpps = (filteredOpportunities || []).filter((o) => o.stage_id === s.id);
+      for (const o of stageOpps) {
+        const sla = calculateOpportunitySla(o, s);
+        if (sla.status === "breached") overdueOf.set(o.id, sla.elapsedMinutes - sla.limitMinutes);
+      }
+      cols[s.id] = stageOpps.sort((a, b) => {
+        const oa = overdueOf.get(a.id);
+        const ob = overdueOf.get(b.id);
+        if (oa !== undefined || ob !== undefined) {
+          if (oa === undefined) return 1;
+          if (ob === undefined) return -1;
+          if (oa !== ob) return ob - oa;
+        }
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
     });
     return cols;
   }, [stages, filteredOpportunities]);
@@ -1275,7 +1292,13 @@ function PipelinePage() {
               Este funil ainda não tem etapas. Adicione etapas nas configurações.
             </div>
           ) : (
-            <DragDropContext onDragEnd={onDragEnd}>
+            <DragDropContext
+              onDragStart={() => setIsDragging(true)}
+              onDragEnd={(result) => {
+                setIsDragging(false);
+                onDragEnd(result);
+              }}
+            >
               <div className="flex h-full items-start gap-4 pb-4">
                 {stages.map((stage) => {
                   const stageOpps = columns[stage.id] || [];
@@ -1358,6 +1381,7 @@ function PipelinePage() {
                           <div
                             ref={provided.innerRef}
                             {...provided.droppableProps}
+                            data-load-more-root
                             className={`flex-1 overflow-y-auto p-3 space-y-3 min-h-[160px] transition-colors rounded-b-xl scroll-smooth ${snapshot.isDraggingOver ? "bg-primary/5 ring-1 ring-primary/20" : ""}`}
                           >
                             {stageOpps.length === 0 && !snapshot.isDraggingOver ? (
@@ -1652,24 +1676,19 @@ function PipelinePage() {
                             )}
                             {provided.placeholder}
 
-                            {/* Botão de carregar mais itens progressivamente na coluna */}
+                            {/* Próximos 20 cards: carregam sozinhos ao rolar até o fim da coluna (como no Todoo) */}
                             {hasMoreInStage && (
-                              <div className="pt-1 pb-2 flex justify-center">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 px-3 text-[11px] font-medium text-muted-foreground hover:text-foreground bg-background/80 hover:bg-muted border-dashed border-border/80 w-full cursor-pointer"
-                                  onClick={() =>
-                                    setStageLimits((prev) => ({
-                                      ...prev,
-                                      [stage.id]: currentLimit + KANBAN_PAGE_SIZE,
-                                    }))
-                                  }
-                                >
-                                  Carregar mais (+{Math.min(KANBAN_PAGE_SIZE, remainingInStage)} de{" "}
-                                  {remainingInStage})
-                                </Button>
-                              </div>
+                              <ColumnLoadMore
+                                loaded={currentLimit}
+                                remaining={remainingInStage}
+                                paused={isDragging}
+                                onLoad={() =>
+                                  setStageLimits((prev) => ({
+                                    ...prev,
+                                    [stage.id]: currentLimit + KANBAN_PAGE_SIZE,
+                                  }))
+                                }
+                              />
                             )}
                           </div>
                         )}
@@ -1683,7 +1702,7 @@ function PipelinePage() {
         </div>
       ) : (
         /* Visualização em Lista / Tabela */
-        <div className="flex-1 overflow-auto p-6">
+        <div data-load-more-root className="flex-1 overflow-auto p-6">
           <Card className="border border-border/70 shadow-sm overflow-hidden bg-card">
             <div className="overflow-x-auto">
               <Table>
@@ -2035,24 +2054,97 @@ function PipelinePage() {
               </Table>
             </div>
             {sortedTableOpportunities.length > tableLimit && (
-              <div className="p-3 border-t bg-muted/20 flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
-                  Exibindo <strong>{tableLimit}</strong> de{" "}
-                  <strong>{sortedTableOpportunities.length}</strong> oportunidades
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs cursor-pointer"
-                  onClick={() => setTableLimit((prev) => prev + TABLE_PAGE_SIZE)}
-                >
-                  Carregar mais (+{Math.min(TABLE_PAGE_SIZE, sortedTableOpportunities.length - tableLimit)})
-                </Button>
-              </div>
+              <TableLoadMore
+                loaded={tableLimit}
+                total={sortedTableOpportunities.length}
+                onLoad={() => setTableLimit((prev) => prev + TABLE_PAGE_SIZE)}
+              />
             )}
           </Card>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Chama onLoad quando o elemento chega perto do fim da rolagem ([data-load-more-root] mais
+ * próximo). Rearma a cada página (loaded): o botão continua montado enquanto houver mais.
+ */
+function useAutoLoadMore<T extends HTMLElement>(
+  loaded: number,
+  paused: boolean,
+  onLoad: () => void,
+) {
+  const ref = useRef<T>(null);
+  const onLoadRef = useRef(onLoad);
+  onLoadRef.current = onLoad;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || paused) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          onLoadRef.current();
+        }
+      },
+      { root: el.closest("[data-load-more-root]"), rootMargin: "0px 0px 300px 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loaded, paused]);
+
+  return ref;
+}
+
+/** "Carregar mais" da coluna do Kanban: carrega sozinho ao rolar até o fim (como no Todoo). */
+function ColumnLoadMore({
+  loaded,
+  remaining,
+  paused,
+  onLoad,
+}: {
+  loaded: number;
+  remaining: number;
+  paused: boolean;
+  onLoad: () => void;
+}) {
+  const ref = useAutoLoadMore<HTMLDivElement>(loaded, paused, onLoad);
+  return (
+    <div ref={ref} className="pt-1 pb-2 flex justify-center">
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-7 px-3 text-[11px] font-medium text-muted-foreground hover:text-foreground bg-background/80 hover:bg-muted border-dashed border-border/80 w-full cursor-pointer"
+        onClick={onLoad}
+      >
+        Carregar mais (+{Math.min(KANBAN_PAGE_SIZE, remaining)} de {remaining})
+      </Button>
+    </div>
+  );
+}
+
+/** Rodapé da tabela: as próximas 30 linhas carregam sozinhas ao rolar até o fim. */
+function TableLoadMore({
+  loaded,
+  total,
+  onLoad,
+}: {
+  loaded: number;
+  total: number;
+  onLoad: () => void;
+}) {
+  const ref = useAutoLoadMore<HTMLDivElement>(loaded, false, onLoad);
+  return (
+    <div ref={ref} className="p-3 border-t bg-muted/20 flex items-center justify-between">
+      <span className="text-xs text-muted-foreground">
+        Exibindo <strong>{loaded}</strong> de <strong>{total}</strong> oportunidades
+      </span>
+      <Button variant="outline" size="sm" className="h-8 text-xs cursor-pointer" onClick={onLoad}>
+        Carregar mais (+{Math.min(TABLE_PAGE_SIZE, total - loaded)})
+      </Button>
     </div>
   );
 }

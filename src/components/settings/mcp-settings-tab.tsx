@@ -738,6 +738,13 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
               </p>
             </div>
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
+              <span className="font-semibold text-foreground">🧑‍💼 Equipe & Usuários</span>
+              <p className="text-muted-foreground text-[11px]">
+                listar_usuarios_empresa, criar_usuario_equipe (senha temporária),
+                atualizar_usuario_equipe
+              </p>
+            </div>
+            <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
               <span className="font-semibold text-foreground">👥 Contatos, Origens & Tags</span>
               <p className="text-muted-foreground text-[11px]">
                 listar_contatos, consultar_contato, criar_contato, atualizar_contato,
@@ -766,7 +773,8 @@ export function McpSettingsTab({ companyId }: McpSettingsTabProps) {
             <div className="p-2.5 rounded-lg border border-border/70 bg-muted/20 space-y-1">
               <span className="font-semibold text-foreground">🎯 Funis, Qualificação & CRM</span>
               <p className="text-muted-foreground text-[11px]">
-                listar_funis, listar_etapas, listar_oportunidades, criar_oportunidade,
+                listar_funis, listar_etapas, listar_oportunidades,
+                listar_oportunidades_atrasadas_etapa (SLA de etapa), criar_oportunidade,
                 mover_oportunidade, atualizar_oportunidade, listar_passos_etapa,
                 consultar_qualificacao_oportunidade, preencher_qualificacao_oportunidade
               </p>
