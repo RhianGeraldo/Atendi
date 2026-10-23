@@ -21,6 +21,23 @@ interface InstanceSettingsModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/** localhost, 127.x, rede privada ou .local: endereço que um servidor externo não alcança. */
+function enderecoLocal(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return (
+      host === "localhost" ||
+      host.endsWith(".local") ||
+      /^127\./.test(host) ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function InstanceSettingsModal({ instance, company, open, onOpenChange }: InstanceSettingsModalProps) {
   const qc = useQueryClient();
   const [loading, setLoading] = useState(true);
@@ -40,6 +57,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     readMessages: false,
     alwaysOnline: false
   });
+  // O que veio do provedor. null = não carregou: aí não se manda nada por cima.
+  const [advSettingsOriginal, setAdvSettingsOriginal] = useState<typeof advSettings | null>(null);
 
   const { data: departments } = useQuery({
     queryKey: ["departments_for_instance", instance?.company_id],
@@ -79,13 +98,22 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     let defaultWebhook = instance.webhook_url;
     const currentDomainWebhook = `${window.location.origin}/api/webhooks/${providerWebhookPath}`;
     
-    // Se estiver vazio, for do supabase antigo, for de um domínio antigo, ou for de outro provedor, corrige
+    // Corrige se estiver vazio, for do supabase antigo, for de outro provedor ou
+    // apontar para endereço local. Uma URL pública que já funciona nunca é trocada
+    // pelo endereço do navegador: aberto no localhost ou num preview, isso desviaria
+    // as mensagens de produção. Para mudar de domínio, edite o campo à mão.
     const webhookKeyword = isZernio ? 'zernio' : providerWebhookPath;
-    if (!defaultWebhook || defaultWebhook.includes('supabase.co') || !defaultWebhook.startsWith(window.location.origin) || !defaultWebhook.includes(webhookKeyword)) {
+    if (
+      !defaultWebhook ||
+      defaultWebhook.includes('supabase.co') ||
+      !defaultWebhook.includes(webhookKeyword) ||
+      (enderecoLocal(defaultWebhook) && !enderecoLocal(currentDomainWebhook))
+    ) {
       defaultWebhook = currentDomainWebhook;
     }
 
     setChannelName(instance.name || "");
+    setAdvSettingsOriginal(null);
     setWebhookUrl(defaultWebhook);
     setCustomHost(instance.custom_host || "");
     setCustomApiKey(instance.provider === "stevo" ? (instance.stevo_api_key || "") : (instance.evogo_api_key || ""));
@@ -120,11 +148,13 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
         }
         
         if (res) {
-          setAdvSettings({
+          const carregadas = {
             rejectCall: res.rejectCall ?? false,
             readMessages: res.readMessages ?? false,
             alwaysOnline: res.alwaysOnline ?? false
-          });
+          };
+          setAdvSettings(carregadas);
+          setAdvSettingsOriginal(carregadas);
         }
       } catch (err: any) {
         console.error("Erro ao buscar configs avançadas:", err);
@@ -144,6 +174,18 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     const isMessenger = instance.provider === 'messenger';
     const isZernio = instance.provider === 'zernio';
     const isCloudAPI = isOficial || isInstagram || isMessenger;
+    const isProvedorQr = instance.provider === "evogo" || instance.provider === "stevo" || !instance.provider;
+
+    const advSettingsMudaram =
+      !!advSettingsOriginal && JSON.stringify(advSettings) !== JSON.stringify(advSettingsOriginal);
+
+    // O EvoGo/Stevo roda fora daqui: não tem como entregar num endereço local.
+    if (isProvedorQr && enderecoLocal(webhookUrl)) {
+      toast.error("URL do webhook inválida", {
+        description: "O EvoGo/Stevo não consegue entregar mensagens em localhost ou rede local. Use o endereço público do Atendi.",
+      });
+      return;
+    }
 
     // Só o nome de exibição; instance_name é o identificador técnico no EvoGo/Stevo.
     const name = channelName.trim();
@@ -184,7 +226,11 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
         if (instance.provider === 'evogo' && !company?.evogo_host) throw new Error("Host da EvoGo não configurado na empresa.");
         if (instance.provider === 'stevo') {
           const client = new StevoClient({ host: customHost || company.stevo_host, token: company.stevo_global_token });
-          await client.connectInstance(webhookUrl, customApiKey || instance.stevo_api_key);
+          // Só reenvia ao Stevo quando algo dele mudou: renomear ou trocar o
+          // departamento não depende do servidor do Stevo estar no ar.
+          if (webhookUrl !== instance.webhook_url || (customHost || null) !== (instance.custom_host || null) || (customApiKey || instance.stevo_api_key) !== instance.stevo_api_key) {
+            await client.connectInstance(webhookUrl, customApiKey || instance.stevo_api_key);
+          }
           const { error: dbErr } = await supabase.from("whatsapp_instances").update({ 
             webhook_url: webhookUrl, 
             wavoip_token: wavoipToken || null, 
@@ -194,12 +240,16 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
             name,
           }).eq("id", instance.id);
           if (dbErr) throw dbErr;
-          if (instance.stevo_instance_id) {
+          if (instance.stevo_instance_id && advSettingsMudaram) {
             await client.updateAdvancedSettings(instance.stevo_instance_id, advSettings, customApiKey || instance.stevo_api_key);
           }
         } else {
           const client = new EvoGoClient({ host: customHost || company.evogo_host, token: company.evogo_global_token });
-          await client.connectInstance(webhookUrl, customApiKey || instance.evogo_api_key);
+          // Só reenvia ao EvoGo quando algo dele mudou: renomear ou trocar o
+          // departamento não depende do servidor do EvoGo estar no ar.
+          if (webhookUrl !== instance.webhook_url || (customHost || null) !== (instance.custom_host || null) || (customApiKey || instance.evogo_api_key) !== instance.evogo_api_key) {
+            await client.connectInstance(webhookUrl, customApiKey || instance.evogo_api_key);
+          }
           const { error: dbErr } = await supabase.from("whatsapp_instances").update({ 
             webhook_url: webhookUrl, 
             wavoip_token: wavoipToken || null, 
@@ -209,7 +259,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
             name,
           }).eq("id", instance.id);
           if (dbErr) throw dbErr;
-          if (instance.evogo_instance_id) {
+          if (instance.evogo_instance_id && advSettingsMudaram) {
             await client.updateAdvancedSettings(instance.evogo_instance_id, advSettings, customApiKey || instance.evogo_api_key);
           }
         }

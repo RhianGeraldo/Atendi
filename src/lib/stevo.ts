@@ -49,6 +49,8 @@ export async function sendStevoText({
       ...(delay > 0 ? { delay } : {}),
       ...(quoted && { quoted }),
     }),
+    // Aparelho desconectado faz o provedor segurar a requisição sem responder.
+    signal: AbortSignal.timeout(35000),
   });
 
   if (!response.ok) {
@@ -85,6 +87,8 @@ export async function sendStevoLink({
       ...(delay > 0 ? { delay } : {}),
       ...(quoted && { quoted }),
     }),
+    // Aparelho desconectado faz o provedor segurar a requisição sem responder.
+    signal: AbortSignal.timeout(35000),
   });
 
   if (!response.ok) {
@@ -163,6 +167,8 @@ export async function sendStevoMedia({
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
+    // Aparelho desconectado faz o provedor segurar a requisição sem responder.
+    signal: AbortSignal.timeout(50000),
   });
 
   if (!response.ok) {
