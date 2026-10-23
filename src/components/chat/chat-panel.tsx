@@ -1486,13 +1486,17 @@ export function ChatPanel({
               <span className="font-semibold">{canalDaConversa?.name || "O canal"} está desconectado.</span>{" "}
               As mensagens não serão enviadas até reconectar o WhatsApp pelo QR Code.
             </p>
-            <Link
-              to="/settings"
-              search={{ tab: "channels" }}
-              className="shrink-0 rounded-md bg-background/15 hover:bg-background/25 px-2.5 py-1 text-xs font-semibold transition-colors"
-            >
-              Reconectar
-            </Link>
+            {canAccessMenu("settings", profile) ? (
+              <Link
+                to="/settings"
+                search={{ tab: "channels" }}
+                className="shrink-0 rounded-md bg-background/15 hover:bg-background/25 px-2.5 py-1 text-xs font-semibold transition-colors"
+              >
+                Reconectar
+              </Link>
+            ) : (
+              <span className="shrink-0 text-xs opacity-90">Avise um administrador.</span>
+            )}
           </div>
         )}
 

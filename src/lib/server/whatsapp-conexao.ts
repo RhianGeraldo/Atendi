@@ -50,7 +50,12 @@ export async function consultarConexao(canal: Pick<CanalAberto, "host" | "token"
     } catch {
       return "sem_resposta";
     }
-    return respostaConectada(json) ? "conectado" : "desconectado";
+    if (respostaConectada(json)) return "conectado";
+    // Logado mas sem conexão: o websocket caiu e o EvoGo está reconectando
+    // sozinho. Não é caso de QR Code, então não marca o canal.
+    const d = json?.data ?? json;
+    if (d?.LoggedIn === true && d?.Connected === false) return "sem_resposta";
+    return "desconectado";
   } catch {
     return "sem_resposta";
   }
