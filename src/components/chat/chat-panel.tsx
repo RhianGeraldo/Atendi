@@ -26,6 +26,7 @@ import {
   Loader2,
   AlertCircle,
   AlertTriangle,
+  WifiOff,
   Clock,
   Check,
   ChevronRight,
@@ -40,6 +41,7 @@ import EmojiPicker from "emoji-picker-react";
 import { markMessageAsSentByMe } from "@/lib/hooks/use-global-notifications";
 
 import { supabase } from "@/integrations/supabase/client";
+import { Link } from "@tanstack/react-router";
 import { 
   sendMessageAction, 
   reactToMessageAction, 
@@ -606,6 +608,28 @@ export function ChatPanel({
     }
   }, [conv.id, conv.unread_count, conv.contact?.phone, conv.status, qc]);
 
+  // Status do canal da conversa, para a faixa de desconectado. A chave começa por
+  // "whatsapp-instances" para atualizar junto quando a tela de canais muda o status.
+  const { data: canalDaConversa } = useQuery({
+    queryKey: ["whatsapp-instances", "status-da-conversa", conv.whatsapp_instance_id],
+    enabled: !!conv.whatsapp_instance_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("whatsapp_instances")
+        .select("id, name, provider, status")
+        .eq("id", conv.whatsapp_instance_id!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    staleTime: 1000 * 30,
+    refetchInterval: 1000 * 60,
+  });
+  // Só WhatsApp por QR Code: num canal Zernio, "disconnected" é canal desativado de propósito.
+  const canalDesconectado =
+    canalDaConversa?.status === "disconnected" &&
+    (canalDaConversa.provider === "evogo" || canalDaConversa.provider === "stevo");
+
   const send = useMutation({
     mutationFn: async (payload: { content: string; isInternal?: boolean; mediaType?: "text"|"image"|"video"|"audio"|"document"|"template"; mediaBase64?: string; quotedMessageId?: string; quotedParticipant?: string; quotedInternalId?: string; quotedContent?: string }) => {
       return await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: (payload.mediaType === "template" ? "text" : payload.mediaType) as any, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent, isInternal: payload.isInternal } });
@@ -689,6 +713,7 @@ export function ChatPanel({
         qc.setQueryData(["messages", conv.id], context.previousMessages);
       }
       setText(context?.content || "");
+      qc.invalidateQueries({ queryKey: ["whatsapp-instances", "status-da-conversa", conv.whatsapp_instance_id] });
       if (e.message.includes("WINDOW_24H_EXPIRED")) {
         setTemplateDialogOpen(true);
       } else {
@@ -1450,6 +1475,26 @@ export function ChatPanel({
             )}
           </div>
         </header>
+
+        {canalDesconectado && (
+          <div
+            role="alert"
+            className="flex items-center gap-2.5 px-4 py-2 bg-destructive text-destructive-foreground text-sm border-b border-destructive"
+          >
+            <WifiOff className="h-4 w-4 shrink-0" />
+            <p className="flex-1 min-w-0">
+              <span className="font-semibold">{canalDaConversa?.name || "O canal"} está desconectado.</span>{" "}
+              As mensagens não serão enviadas até reconectar o WhatsApp pelo QR Code.
+            </p>
+            <Link
+              to="/settings"
+              search={{ tab: "channels" }}
+              className="shrink-0 rounded-md bg-background/15 hover:bg-background/25 px-2.5 py-1 text-xs font-semibold transition-colors"
+            >
+              Reconectar
+            </Link>
+          </div>
+        )}
 
         {/* Banner Inteligente do Todoo (se o cliente estiver em campanha ativa) */}
         {canAccessMenu("todoo", profile) && <TodooConversationBanner conv={conv} />}

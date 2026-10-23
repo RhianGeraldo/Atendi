@@ -126,6 +126,8 @@ export const Route = createFileRoute("/_authenticated/settings")({
 });
 
 function SettingsPage() {
+  // ?tab=channels abre direto na aba de canais (link da faixa de canal desconectado).
+  const { tab: abaInicial } = Route.useSearch();
   const { profile, user, refreshProfile } = useAuth();
   const { selectedUnitId } = useUnit();
   const { activeCompanyId } = useActiveCompany();
@@ -514,7 +516,7 @@ function SettingsPage() {
 
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 max-w-7xl mx-auto w-full">
-      <Tabs defaultValue="general" className="space-y-6">
+      <Tabs defaultValue={abaInicial || "general"} className="space-y-6">
         <TabsList className="w-full justify-start overflow-x-auto h-auto p-1 bg-muted/60 rounded-xl gap-1 border">
           <TabsTrigger
             value="general"
