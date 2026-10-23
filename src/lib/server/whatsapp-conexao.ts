@@ -28,7 +28,48 @@ function respostaConectada(res: any): boolean {
   );
 }
 
-export async function consultarConexao(canal: Pick<CanalAberto, "host" | "token">): Promise<EstadoDaConexao> {
+/**
+ * Sem cliente na memória, o EvoGo responde `Connected: false, LoggedIn: false`
+ * tanto para sessão encerrada quanto logo depois de reiniciar, enquanto ainda
+ * religa as instâncias. O que separa os dois é o `connected` que ele guarda no
+ * banco: só vira false no LoggedOut. Essa leitura pede o token global.
+ * Sem conseguir ler, fica o que o /status disse.
+ */
+async function sessaoGuardadaNoProvedor(
+  canalId: string,
+  provedor: string,
+  host: string,
+): Promise<EstadoDaConexao> {
+  const colunaId = provedor === "stevo" ? "stevo_instance_id" : "evogo_instance_id";
+  const colunaToken = provedor === "stevo" ? "stevo_global_token" : "evogo_global_token";
+  try {
+    const { data } = await supabaseAdmin
+      .from("whatsapp_instances")
+      .select(`${colunaId}, companies(${colunaToken})`)
+      .eq("id", canalId)
+      .maybeSingle();
+    const linha = data as any;
+    const empresa = Array.isArray(linha?.companies) ? linha.companies[0] : linha?.companies;
+    const instanciaId = linha?.[colunaId];
+    const tokenGlobal = empresa?.[colunaToken];
+    if (!instanciaId || !tokenGlobal) return "desconectado";
+
+    const res = await fetch(`${host}/instance/info/${encodeURIComponent(instanciaId)}`, {
+      headers: { apikey: tokenGlobal },
+      signal: AbortSignal.timeout(TIMEOUT_STATUS_MS),
+    });
+    if (!res.ok) return "desconectado";
+    const json: any = await res.json().catch(() => null);
+    // Ainda marcada como conectada: o provedor está religando, não é QR Code.
+    return json?.data?.connected === true ? "sem_resposta" : "desconectado";
+  } catch {
+    return "desconectado";
+  }
+}
+
+export async function consultarConexao(
+  canal: Pick<CanalAberto, "host" | "token"> & { id?: string; provedor?: string },
+): Promise<EstadoDaConexao> {
   if (!canal.host || !canal.token) return "sem_resposta";
   const baseUrl = canal.host.replace(/\/$/, "");
   try {
@@ -55,6 +96,9 @@ export async function consultarConexao(canal: Pick<CanalAberto, "host" | "token"
     // sozinho. Não é caso de QR Code, então não marca o canal.
     const d = json?.data ?? json;
     if (d?.LoggedIn === true && d?.Connected === false) return "sem_resposta";
+    if (canal.id && d?.LoggedIn === false && d?.Connected === false) {
+      return sessaoGuardadaNoProvedor(canal.id, canal.provedor || "evogo", baseUrl);
+    }
     return "desconectado";
   } catch {
     return "sem_resposta";
@@ -229,6 +273,8 @@ export async function atualizarStatusPeloWebhook(provedor: "evogo" | "stevo", bo
   const agora = await consultarConexao({
     host: canal.custom_host || (provedor === "stevo" ? empresa?.stevo_host : empresa?.evogo_host) || null,
     token: provedor === "stevo" ? canal.stevo_api_key : canal.evogo_api_key,
+    id: canal.id,
+    provedor,
   });
   if ((novo === "connected" && agora === "desconectado") || (novo === "disconnected" && agora === "conectado")) {
     console.log(`[${provedor}-webhook] ${evento} ignorado: o provedor diz que a sessão está ${agora} agora (evento atrasado).`);
