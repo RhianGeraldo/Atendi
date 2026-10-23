@@ -26,6 +26,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
+  const [channelName, setChannelName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [customHost, setCustomHost] = useState("");
   const [customApiKey, setCustomApiKey] = useState("");
@@ -84,6 +85,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
       defaultWebhook = currentDomainWebhook;
     }
 
+    setChannelName(instance.name || "");
     setWebhookUrl(defaultWebhook);
     setCustomHost(instance.custom_host || "");
     setCustomApiKey(instance.provider === "stevo" ? (instance.stevo_api_key || "") : (instance.evogo_api_key || ""));
@@ -143,20 +145,29 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     const isZernio = instance.provider === 'zernio';
     const isCloudAPI = isOficial || isInstagram || isMessenger;
 
+    // Só o nome de exibição; instance_name é o identificador técnico no EvoGo/Stevo.
+    const name = channelName.trim();
+    if (!name) {
+      toast.error("Informe um nome para o canal.");
+      return;
+    }
+
     setSaving(true);
 
     try {
       if (isZernio) {
-        await supabase
+        const { error: dbErr } = await supabase
           .from("whatsapp_instances")
           .update({ 
             webhook_url: webhookUrl,
             wavoip_token: wavoipToken || null,
             department_id: selectedDepartmentId || null,
+            name,
           })
           .eq("id", instance.id);
+        if (dbErr) throw dbErr;
       } else if (isCloudAPI) {
-        await supabase
+        const { error: dbErr } = await supabase
           .from("whatsapp_instances")
           .update({ 
              webhook_url: webhookUrl, 
@@ -164,34 +175,40 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
              oficial_waba_id: oficialWabaId,
              oficial_access_token: oficialAccessToken,
              department_id: selectedDepartmentId || null,
+             name,
           })
           .eq("id", instance.id);
+        if (dbErr) throw dbErr;
       } else {
         if (instance.provider === 'stevo' && !company?.stevo_host) throw new Error("Host da Stevo não configurado na empresa.");
         if (instance.provider === 'evogo' && !company?.evogo_host) throw new Error("Host da EvoGo não configurado na empresa.");
         if (instance.provider === 'stevo') {
           const client = new StevoClient({ host: customHost || company.stevo_host, token: company.stevo_global_token });
           await client.connectInstance(webhookUrl, customApiKey || instance.stevo_api_key);
-          await supabase.from("whatsapp_instances").update({ 
+          const { error: dbErr } = await supabase.from("whatsapp_instances").update({ 
             webhook_url: webhookUrl, 
             wavoip_token: wavoipToken || null, 
             custom_host: customHost || null, 
             stevo_api_key: customApiKey || instance.stevo_api_key,
             department_id: selectedDepartmentId || null,
+            name,
           }).eq("id", instance.id);
+          if (dbErr) throw dbErr;
           if (instance.stevo_instance_id) {
             await client.updateAdvancedSettings(instance.stevo_instance_id, advSettings, customApiKey || instance.stevo_api_key);
           }
         } else {
           const client = new EvoGoClient({ host: customHost || company.evogo_host, token: company.evogo_global_token });
           await client.connectInstance(webhookUrl, customApiKey || instance.evogo_api_key);
-          await supabase.from("whatsapp_instances").update({ 
+          const { error: dbErr } = await supabase.from("whatsapp_instances").update({ 
             webhook_url: webhookUrl, 
             wavoip_token: wavoipToken || null, 
             custom_host: customHost || null, 
             evogo_api_key: customApiKey || instance.evogo_api_key,
             department_id: selectedDepartmentId || null,
+            name,
           }).eq("id", instance.id);
+          if (dbErr) throw dbErr;
           if (instance.evogo_instance_id) {
             await client.updateAdvancedSettings(instance.evogo_instance_id, advSettings, customApiKey || instance.evogo_api_key);
           }
@@ -245,7 +262,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                 
                 <TabsContent value="settings" className="space-y-4 pt-4">
                   <SettingsFormContent 
-                    webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl}
+                    channelName={channelName} setChannelName={setChannelName}
+                  webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl}
                     wavoipToken={wavoipToken} setWavoipToken={setWavoipToken}
                     oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
                     oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
@@ -278,6 +296,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
             ) : (
               <div className="space-y-4 py-4">
                 <SettingsFormContent 
+                  channelName={channelName} setChannelName={setChannelName}
                   webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl}
                   wavoipToken={wavoipToken} setWavoipToken={setWavoipToken}
                   oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
@@ -313,6 +332,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
 
 // Subcomponente criado para reaproveitar os campos de input, não poluindo o retorno principal
 function SettingsFormContent({ 
+  channelName, setChannelName,
   webhookUrl, setWebhookUrl, 
   wavoipToken, setWavoipToken, 
   oficialPhoneId, setOficialPhoneId, 
@@ -330,6 +350,20 @@ function SettingsFormContent({
   
   return (
     <>
+      {/* Nome de exibição do canal */}
+      <div className="space-y-2">
+        <label className="text-sm font-semibold text-foreground">Nome do canal</label>
+        <Input
+          value={channelName}
+          onChange={(e) => setChannelName(e.target.value)}
+          placeholder="Ex: Instagram São Mateus"
+          maxLength={80}
+        />
+        <p className="text-xs text-muted-foreground">
+          É o nome que aparece na lista de canais e nas conversas.
+        </p>
+      </div>
+
       {/* Departamento Responsável */}
       <div className="space-y-2 p-3.5 rounded-xl border bg-muted/30">
         <div className="flex items-center gap-2">
