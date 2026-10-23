@@ -189,28 +189,43 @@ async function processIncomingMessage(params: any) {
     .limit(1)
     .maybeSingle();
 
+  // O mesmo IGSID já conversou neste canal: o contato é o da conversa. Cobre o
+  // contato reaproveitado da Zernio, cujo instagram_id é o ID de lá.
+  if (!contact) {
+    const { data: convAnterior } = await supabaseAdmin
+      .from('conversations')
+      .select('contact_id, contacts(id, name, merged_into_id)')
+      .eq('whatsapp_instance_id', instanceId)
+      .eq('remote_id', contactIgsid)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const c = (convAnterior as any)?.contacts;
+    if (c?.id) contact = { id: c.id, name: c.name, merged_into_id: c.merged_into_id };
+  }
+
   if (!contact) {
     const perfil = await buscarPerfilInstagram(instanceId, contactIgsid);
 
     // O IGSID muda de um app para outro: quem já falou pela Zernio tem outro
-    // instagram_id, mas o mesmo @. Reaproveita o contato em vez de duplicar.
+    // instagram_id, mas o mesmo @. Reaproveita o contato em vez de duplicar, sem
+    // trocar o instagram_id dele: o canal Zernio continua usando o ID de lá.
     if (perfil.username) {
       const { data: porUsername } = await supabaseAdmin
         .from('contacts')
-        .select('id, name, merged_into_id, profile_picture_url')
+        .select('id, name, merged_into_id, profile_picture_url, instagram_id')
         .eq('company_id', companyId)
         .in('instagram_username', [perfil.username, `@${perfil.username}`])
         .limit(1)
         .maybeSingle();
 
       if (porUsername) {
-        await supabaseAdmin
-          .from('contacts')
-          .update({
-            instagram_id: contactIgsid,
-            ...(perfil.pic && !porUsername.profile_picture_url ? { profile_picture_url: perfil.pic } : {}),
-          })
-          .eq('id', porUsername.id);
+        const updates: Record<string, string> = {};
+        if (!porUsername.instagram_id) updates.instagram_id = contactIgsid;
+        if (perfil.pic && !porUsername.profile_picture_url) updates.profile_picture_url = perfil.pic;
+        if (Object.keys(updates).length > 0) {
+          await supabaseAdmin.from('contacts').update(updates).eq('id', porUsername.id);
+        }
         contact = { id: porUsername.id, name: porUsername.name, merged_into_id: porUsername.merged_into_id };
       }
     }
