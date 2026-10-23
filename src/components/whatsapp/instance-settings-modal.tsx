@@ -320,7 +320,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                     oficialAccessToken={oficialAccessToken} setOficialAccessToken={setOficialAccessToken}
                     customHost={customHost} setCustomHost={setCustomHost}
                     customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
-                    advSettings={advSettings} setAdvSettings={setAdvSettings}
+                    advSettings={advSettings} setAdvSettings={setAdvSettings} advCarregadas={!!advSettingsOriginal}
                     selectedDepartmentId={selectedDepartmentId}
                     setSelectedDepartmentId={setSelectedDepartmentId}
                     departments={filteredDepartments}
@@ -354,7 +354,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                   oficialAccessToken={oficialAccessToken} setOficialAccessToken={setOficialAccessToken}
                   customHost={customHost} setCustomHost={setCustomHost}
                   customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
-                  advSettings={advSettings} setAdvSettings={setAdvSettings}
+                  advSettings={advSettings} setAdvSettings={setAdvSettings} advCarregadas={!!advSettingsOriginal}
                   selectedDepartmentId={selectedDepartmentId}
                   setSelectedDepartmentId={setSelectedDepartmentId}
                   departments={filteredDepartments}
@@ -390,7 +390,7 @@ function SettingsFormContent({
   oficialAccessToken, setOficialAccessToken, 
   customHost, setCustomHost,
   customApiKey, setCustomApiKey,
-  advSettings, setAdvSettings, 
+  advSettings, setAdvSettings, advCarregadas,
   selectedDepartmentId, setSelectedDepartmentId,
   departments,
   isOficial, isInstagram, isMessenger, instance
@@ -571,6 +571,11 @@ function SettingsFormContent({
       ) : (
         <div className="space-y-4 mt-4">
           <h4 className="text-sm font-medium border-b pb-1">Opções Avançadas</h4>
+          {!advCarregadas && (
+            <p className="text-xs text-muted-foreground">
+              Não foi possível ler estas opções do servidor do WhatsApp agora. Elas ficam como estão; tente de novo mais tarde para alterar.
+            </p>
+          )}
           
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
@@ -579,6 +584,7 @@ function SettingsFormContent({
             </div>
             <Switch 
               checked={advSettings.rejectCall}
+              disabled={!advCarregadas}
               onCheckedChange={(c) => setAdvSettings((s: any) => ({ ...s, rejectCall: c }))}
             />
           </div>
@@ -590,6 +596,7 @@ function SettingsFormContent({
             </div>
             <Switch 
               checked={advSettings.readMessages}
+              disabled={!advCarregadas}
               onCheckedChange={(c) => setAdvSettings((s: any) => ({ ...s, readMessages: c }))}
             />
           </div>
@@ -601,6 +608,7 @@ function SettingsFormContent({
             </div>
             <Switch 
               checked={advSettings.alwaysOnline}
+              disabled={!advCarregadas}
               onCheckedChange={(c) => setAdvSettings((s: any) => ({ ...s, alwaysOnline: c }))}
             />
           </div>
