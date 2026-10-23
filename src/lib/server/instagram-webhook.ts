@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
 import { conferirPorta } from './webhook-auth';
+import { responderVerificacaoMeta } from './meta-webhook-verify';
 
 import { enqueueAiMessage } from './ai-queue';
 
@@ -7,15 +8,7 @@ export async function handleInstagramWebhook(request: Request): Promise<Response
   const url = new URL(request.url);
 
   if (request.method === 'GET') {
-    const mode = url.searchParams.get('hub.mode');
-    const token = url.searchParams.get('hub.verify_token');
-    const challenge = url.searchParams.get('hub.challenge');
-
-    if (mode === 'subscribe' && token && challenge) {
-      console.log(`[Instagram Webhook] Verificado com token: ${token}`);
-      return new Response(challenge, { status: 200 });
-    }
-    return new Response('Invalid request', { status: 400 });
+    return responderVerificacaoMeta(url, 'Instagram');
   }
 
   if (request.method === 'POST') {
@@ -170,112 +163,78 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
 async function processIncomingMessage(params: any) {
   const { companyId, unitId, instanceId, contactIgsid, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe, isDeleted, quotedMessageId } = params;
 
-  // 1. Encontrar ou criar o contato usando o IGSID (Instagram Scoped ID) no campo whatsapp_lid
+  // 1. Encontrar ou criar o contato pelo IGSID (Instagram Scoped ID), gravado em
+  // instagram_id. Contatos antigos deste webhook guardavam o IGSID em whatsapp_lid.
   let { data: contact } = await supabaseAdmin
     .from('contacts')
     .select('id, name, merged_into_id')
     .eq('company_id', companyId)
-    .eq('whatsapp_lid', contactIgsid)
+    .or(`instagram_id.eq.${contactIgsid},whatsapp_lid.eq.${contactIgsid}`)
     .limit(1)
     .maybeSingle();
 
   if (!contact) {
-    let profileName = `Instagram User (${contactIgsid})`;
-    let profilePic = null;
-    let profileUsername = null;
+    const perfil = await buscarPerfilInstagram(instanceId, contactIgsid);
 
-    try {
-      const { data: instance } = await supabaseAdmin
-        .from('whatsapp_instances')
-        .select('oficial_access_token')
-        .eq('id', instanceId)
+    // O IGSID muda de um app para outro: quem já falou pela Zernio tem outro
+    // instagram_id, mas o mesmo @. Reaproveita o contato em vez de duplicar.
+    if (perfil.username) {
+      const { data: porUsername } = await supabaseAdmin
+        .from('contacts')
+        .select('id, name, merged_into_id, profile_picture_url')
+        .eq('company_id', companyId)
+        .eq('instagram_username', perfil.username)
+        .limit(1)
+        .maybeSingle();
+
+      if (porUsername) {
+        await supabaseAdmin
+          .from('contacts')
+          .update({
+            instagram_id: contactIgsid,
+            ...(perfil.pic && !porUsername.profile_picture_url ? { profile_picture_url: perfil.pic } : {}),
+          })
+          .eq('id', porUsername.id);
+        contact = { id: porUsername.id, name: porUsername.name, merged_into_id: porUsername.merged_into_id };
+      }
+    }
+
+    if (!contact) {
+      const profileName = perfil.name || perfil.username || `Instagram User (${contactIgsid})`;
+      const { data: newContact, error: contactError } = await supabaseAdmin
+        .from('contacts')
+        .insert({
+          company_id: companyId,
+          unit_id: unitId,
+          name: profileName,
+          profile_picture_url: perfil.pic,
+          instagram_username: perfil.username,
+          instagram_id: contactIgsid,
+          source: 'Instagram'
+        })
+        .select('id')
         .single();
 
-      if (instance?.oficial_access_token) {
-        const isDirectToken = instance.oficial_access_token.startsWith('IGA');
-        const endpoint = isDirectToken
-          ? `https://graph.instagram.com/v20.0/${contactIgsid}?fields=name,username,profile_pic&access_token=${instance.oficial_access_token}`
-          : `https://graph.facebook.com/v20.0/${contactIgsid}?fields=name,profile_pic&access_token=${instance.oficial_access_token}`;
-
-        const profileRes = await fetch(endpoint);
-        if (profileRes.ok) {
-          const profileData = await profileRes.json();
-          if (isDirectToken) {
-            if (profileData.name || profileData.username) profileName = profileData.name || profileData.username;
-            if (profileData.profile_pic) profilePic = profileData.profile_pic;
-            if (profileData.username) profileUsername = profileData.username;
-          } else {
-            if (profileData.name) profileName = profileData.name;
-            if (profileData.profile_pic) profilePic = profileData.profile_pic;
-          }
-        } else {
-          const errorText = await profileRes.text();
-          console.error('[Instagram Webhook] Erro na API do Graph ao buscar perfil:', errorText);
-        }
+      if (contactError) {
+        console.error('[Instagram Webhook] Erro ao criar contato:', contactError);
+        return;
       }
-    } catch (e) {
-      console.error('[Instagram Webhook] Erro ao buscar perfil:', e);
+      contact = { ...newContact, name: profileName, merged_into_id: null };
     }
-
-    const { data: newContact, error: contactError } = await supabaseAdmin
-      .from('contacts')
-      .insert({
-        company_id: companyId,
-        unit_id: unitId,
-        name: profileName,
-        profile_picture_url: profilePic,
-        instagram_username: profileUsername,
-        instagram_id: contactIgsid,
-        source: 'Instagram'
-      })
-      .select('id')
-      .single();
-
-    if (contactError) {
-      console.error('[Instagram Webhook] Erro ao criar contato:', contactError);
-      return;
-    }
-    contact = { ...newContact, name: profileName };
   } else if (contact.name && contact.name.startsWith('Instagram User (')) {
     // Tenta atualizar o nome genérico se ele mandar mensagem novamente
-    try {
-      const { data: instance } = await supabaseAdmin
-        .from('whatsapp_instances')
-        .select('oficial_access_token')
-        .eq('id', instanceId)
-        .single();
-
-      if (instance?.oficial_access_token) {
-        const isDirectToken = instance.oficial_access_token.startsWith('IGA');
-        const endpoint = isDirectToken
-          ? `https://graph.instagram.com/v20.0/${contactIgsid}?fields=name,username,profile_pic&access_token=${instance.oficial_access_token}`
-          : `https://graph.facebook.com/v20.0/${contactIgsid}?fields=name,profile_pic&access_token=${instance.oficial_access_token}`;
-
-        const profileRes = await fetch(endpoint);
-        if (profileRes.ok) {
-          const profileData = await profileRes.json();
-          let newName = contact.name;
-          let newPic = null;
-
-          if (isDirectToken) {
-            if (profileData.name || profileData.username) newName = profileData.name || profileData.username;
-            if (profileData.profile_pic) newPic = profileData.profile_pic;
-          } else {
-            if (profileData.name) newName = profileData.name;
-            if (profileData.profile_pic) newPic = profileData.profile_pic;
-          }
-
-          if (newName !== contact.name) {
-            await supabaseAdmin.from('contacts').update({ name: newName, profile_picture_url: newPic }).eq('id', contact.id);
-            contact.name = newName;
-          }
-        } else {
-          const errorText = await profileRes.text();
-          console.error('[Instagram Webhook] Erro na API do Graph ao atualizar perfil genérico:', errorText);
-        }
-      }
-    } catch (e) {
-      console.error('[Instagram Webhook] Erro ao atualizar perfil genérico:', e);
+    const perfil = await buscarPerfilInstagram(instanceId, contactIgsid);
+    const newName = perfil.name || perfil.username;
+    if (newName && newName !== contact.name) {
+      await supabaseAdmin
+        .from('contacts')
+        .update({
+          name: newName,
+          profile_picture_url: perfil.pic,
+          ...(perfil.username ? { instagram_username: perfil.username } : {}),
+        })
+        .eq('id', contact.id);
+      contact.name = newName;
     }
   }
 
@@ -489,6 +448,39 @@ async function processIncomingMessage(params: any) {
   // Se não for do dono da página, enqueue para IA se necessário
   if (!isFromMe && aiActive) {
     await enqueueAiMessage(conversationId, msgData.id, companyId);
+  }
+}
+
+async function buscarPerfilInstagram(
+  instanceId: string,
+  igsid: string,
+): Promise<{ name: string | null; username: string | null; pic: string | null }> {
+  const vazio = { name: null, username: null, pic: null };
+  try {
+    const { data: instance } = await supabaseAdmin
+      .from('whatsapp_instances')
+      .select('oficial_access_token')
+      .eq('id', instanceId)
+      .single();
+
+    const token = instance?.oficial_access_token;
+    if (!token) return vazio;
+
+    const base = token.startsWith('IGA') ? 'https://graph.instagram.com/v20.0' : 'https://graph.facebook.com/v20.0';
+    const profileRes = await fetch(`${base}/${igsid}?fields=name,username,profile_pic&access_token=${token}`);
+    if (!profileRes.ok) {
+      console.error('[Instagram Webhook] Erro na API do Graph ao buscar perfil:', await profileRes.text());
+      return vazio;
+    }
+    const profileData = await profileRes.json();
+    return {
+      name: profileData.name || null,
+      username: profileData.username || null,
+      pic: profileData.profile_pic || null,
+    };
+  } catch (e) {
+    console.error('[Instagram Webhook] Erro ao buscar perfil:', e);
+    return vazio;
   }
 }
 

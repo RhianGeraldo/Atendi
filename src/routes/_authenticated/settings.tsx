@@ -52,6 +52,7 @@ import {
   syncZernioAvatarsAction,
 } from "@/lib/api/zernio.functions";
 import { CreateChannelDialog } from "@/components/channels/create-channel-dialog";
+import { validateMetaChannelAction } from "@/lib/api/meta-channels.functions";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -2360,7 +2361,25 @@ function InstanceRow({
     instance.provider === "messenger" ||
     instance.provider === "facebook";
   const isOfficial = instance.provider === "zernio" || instance.provider === "oficial";
+  // Instagram/Messenger direto da Meta: sem QR, "conectado" = conta inscrita no app.
+  const isMetaDirect = instance.provider === "instagram" || instance.provider === "messenger";
   const isConnected = instance.status === "connected";
+  const [isValidating, setIsValidating] = useState(false);
+
+  const handleValidateMeta = async () => {
+    setIsValidating(true);
+    try {
+      const res = await validateMetaChannelAction({ data: { instanceId: instance.id } });
+      toast.success("Canal validado na Meta", {
+        description: `${res.conta} inscrito para receber mensagens.`,
+      });
+      qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+    } catch (e: any) {
+      toast.error("Falha ao validar na Meta", { description: e.message });
+    } finally {
+      setIsValidating(false);
+    }
+  };
 
   const handleDisconnect = async () => {
     try {
@@ -2475,6 +2494,13 @@ function InstanceRow({
               >
                 Meta Oficial
               </Badge>
+            ) : isMetaDirect ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-2 py-0 bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
+              >
+                Meta Direto
+              </Badge>
             ) : instance.provider === "evogo" ? (
               <Badge
                 variant="outline"
@@ -2513,10 +2539,32 @@ function InstanceRow({
               {instance.instance_name}
             </span>
             <span className="text-muted-foreground/40">•</span>
-            {isOfficial ? (
+            {isOfficial && instance.provider === "zernio" && !isConnected ? (
+              <span className="flex items-center gap-1.5 text-muted-foreground font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60" />
+                Desativado
+              </span>
+            ) : isOfficial ? (
               <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 API Oficial Ativa
+              </span>
+            ) : isMetaDirect ? (
+              <span
+                className={cn(
+                  "flex items-center gap-1.5 font-medium",
+                  isConnected
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-amber-600 dark:text-amber-400",
+                )}
+              >
+                <span
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full",
+                    isConnected ? "bg-emerald-500" : "bg-amber-500",
+                  )}
+                />
+                {isConnected ? "Recebendo mensagens" : "Não validado na Meta"}
               </span>
             ) : (
               <span
@@ -2541,7 +2589,26 @@ function InstanceRow({
       </div>
 
       <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+        {isMetaDirect && (
+          <Button
+            variant={isConnected ? "outline" : "default"}
+            size="sm"
+            onClick={handleValidateMeta}
+            disabled={isValidating}
+            className="text-xs h-8 gap-1.5"
+            title="Confere o token e inscreve a conta no app da Meta para receber mensagens"
+          >
+            {isValidating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            {isConnected ? "Revalidar" : "Validar na Meta"}
+          </Button>
+        )}
+
         {!isOfficial &&
+          !isMetaDirect &&
           (isConnected ? (
             <Button
               variant="outline"
