@@ -1,20 +1,13 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
 import { conferirPorta } from './webhook-auth';
+import { responderVerificacaoMeta } from './meta-webhook-verify';
 
 export async function handleFacebookWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
 
   // 1. Verificação do Webhook (GET request)
   if (request.method === 'GET') {
-    const mode = url.searchParams.get('hub.mode');
-    const token = url.searchParams.get('hub.verify_token');
-    const challenge = url.searchParams.get('hub.challenge');
-
-    if (mode === 'subscribe' && token && challenge) {
-      console.log(`[Facebook Webhook] Verificado com token: ${token}`);
-      return new Response(challenge, { status: 200 });
-    }
-    return new Response('Invalid request', { status: 400 });
+    return responderVerificacaoMeta(url, 'Facebook');
   }
 
   // 2. Recebimento de mensagens (POST request)
