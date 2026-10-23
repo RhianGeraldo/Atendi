@@ -128,6 +128,8 @@ export interface CanalAberto {
   provedor: ProvedorTipo;
   rede: Rede;
   nome: string | null;
+  /** `whatsapp_instances.status`: connected, disconnected... */
+  status?: string | null;
   companyId: string | null;
   unitId: string | null;
 
