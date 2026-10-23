@@ -41,12 +41,16 @@ export function novoSegredo(bytes = 32): string {
 const FORMA_DE_ASSINATURA = /signature|signed|hmac|hub\.|digest/i;
 
 export function acharAssinatura(headers: Headers): { nome: string; valor: string } | null {
+  const achadas: { nome: string; valor: string }[] = [];
   for (const [nome, valor] of headers.entries()) {
     if (FORMA_DE_ASSINATURA.test(nome) && valor.trim()) {
-      return { nome, valor: valor.trim() };
+      achadas.push({ nome, valor: valor.trim() });
     }
   }
-  return null;
+  // A Meta manda `x-hub-signature` (sha1=) e `x-hub-signature-256` (sha256=), e
+  // os cabeçalhos vêm em ordem alfabética: pegar o primeiro era pegar o SHA-1 e
+  // comparar com o HMAC SHA-256 — recusa em toda entrega, com o segredo certo.
+  return achadas.find((a) => !/^sha1=/i.test(a.valor)) ?? achadas[0] ?? null;
 }
 
 /**
