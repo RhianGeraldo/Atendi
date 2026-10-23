@@ -127,6 +127,11 @@ export async function explicarFalhaDeEnvio(canal: CanalAberto, erro: unknown): P
  * - `Disconnected` fica de fora de propósito: é o websocket caindo, e o EvoGo
  *   reconecta em segundos. Marcar o canal acenderia a faixa vermelha à toa.
  * - `connection.update` é o mesmo aviso no formato Baileys / Evolution API.
+ *
+ * Ordem: o EvoGo manda cada evento numa goroutine própria e tenta de novo até
+ * 5 vezes, de 30 em 30 segundos, sem data no corpo. Um `LoggedOut` antigo pode
+ * chegar depois do `Connected` da reconexão, e vice-versa. Por isso o evento
+ * não é gravado às cegas: antes se pergunta ao provedor como a sessão está agora.
  */
 const MOTIVO_DE_SESSAO_PERDIDA = /logged.?out|main device gone|unknown logout|ban|outdated|401|402|403|406/i;
 
@@ -191,22 +196,42 @@ export async function atualizarStatusPeloWebhook(provedor: "evogo" | "stevo", bo
     ["instance_name", nomeDaInstancia],
   ];
 
-  let canal: { id: string; status: string | null } | null = null;
+  type Linha = {
+    id: string;
+    status: string | null;
+    custom_host: string | null;
+    evogo_api_key: string | null;
+    stevo_api_key: string | null;
+    companies: { evogo_host?: string | null; stevo_host?: string | null } | null;
+  };
+  let canal: Linha | null = null;
   for (const [coluna, valor] of tentativas) {
     if (typeof valor !== "string" || !valor) continue;
     const { data } = await supabaseAdmin
       .from("whatsapp_instances")
-      .select("id, status")
+      .select("id, status, custom_host, evogo_api_key, stevo_api_key, companies(evogo_host, stevo_host)")
       .eq("provider", provedor)
       .eq(coluna, valor)
       .limit(2);
     if (data?.length === 1) {
-      canal = data[0];
+      canal = data[0] as unknown as Linha;
       break;
     }
   }
   if (!canal) {
     console.warn(`[${provedor}-webhook] Evento ${evento} de instância que não está cadastrada no Atendi.`);
+    return true;
+  }
+
+  // Confere com o provedor: se a sessão agora contradiz o evento, ele é velho.
+  // Sem resposta, vale o evento, que é a melhor informação que se tem.
+  const empresa = Array.isArray(canal.companies) ? canal.companies[0] : canal.companies;
+  const agora = await consultarConexao({
+    host: canal.custom_host || (provedor === "stevo" ? empresa?.stevo_host : empresa?.evogo_host) || null,
+    token: provedor === "stevo" ? canal.stevo_api_key : canal.evogo_api_key,
+  });
+  if ((novo === "connected" && agora === "desconectado") || (novo === "disconnected" && agora === "conectado")) {
+    console.log(`[${provedor}-webhook] ${evento} ignorado: o provedor diz que a sessão está ${agora} agora (evento atrasado).`);
     return true;
   }
 
