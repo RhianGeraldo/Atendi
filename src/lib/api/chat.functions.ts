@@ -10,6 +10,11 @@ import {
   assertMessageAccess,
 } from "@/lib/server/access-control";
 import { abrirCanal, destinatarioDe } from "@/lib/canais/motor";
+import {
+  erroDeDonoDaConversa,
+  pegarConversaDeVolta,
+  MENSAGEM_SEM_DONO_DA_CONVERSA,
+} from "@/lib/server/instagram-thread";
 import type { CanalAberto, Destinatario } from "@/lib/canais/tipos";
 import {
   sendEvogoText,
@@ -526,8 +531,29 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           result = await igRes.json();
         }
 
+        // Outro app (ou a Caixa de entrada do Business Suite) está com a conversa:
+        // pede de volta e reenvia uma vez.
+        if (!igRes.ok && !isDirectToken && erroDeDonoDaConversa(result)) {
+          const retomada = await pegarConversaDeVolta({
+            pageId,
+            token: instance.oficial_access_token,
+            igsid: phone,
+          });
+          if (!retomada.ok) {
+            console.error("[chat.functions] Instagram: falha ao retomar a conversa:", retomada.erro);
+            throw new Error(MENSAGEM_SEM_DONO_DA_CONVERSA);
+          }
+          igRes = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          result = await igRes.json();
+        }
+
         if (!igRes.ok) {
           console.error("[chat.functions] Instagram sending error:", result);
+          if (erroDeDonoDaConversa(result)) throw new Error(MENSAGEM_SEM_DONO_DA_CONVERSA);
           throw new Error(`Instagram Error: ${result.error?.message || "Unknown error"}`);
         }
 

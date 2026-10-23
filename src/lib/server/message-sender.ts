@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { erroDeDonoDaConversa, pegarConversaDeVolta, MENSAGEM_SEM_DONO_DA_CONVERSA } from "./instagram-thread";
 import { sendEvogoText, sendEvogoMedia, sendEvogoLink } from "../evogo";
 import { sendStevoText, sendStevoMedia, sendStevoLink } from "../stevo";
 import { abrirCanal, destinatarioDe } from "../canais/motor";
@@ -308,15 +309,37 @@ export async function sendPlatformMessage({
       ? `https://graph.instagram.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`
       : `https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`;
 
-    const response = await fetch(endpoint, {
+    let response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
-    const result = await response.json();
+    let result = await response.json();
+
+    // Outro app (ou a Caixa de entrada do Business Suite) está com a conversa:
+    // pede de volta e reenvia uma vez.
+    if (!response.ok && !isDirectToken && erroDeDonoDaConversa(result)) {
+      const retomada = await pegarConversaDeVolta({
+        pageId: canal.contaPaiId || 'me',
+        token: instance.oficial_access_token,
+        igsid,
+      });
+      if (!retomada.ok) {
+        console.error("[sendPlatformMessage] Instagram: falha ao retomar a conversa:", retomada.erro);
+        throw new Error(MENSAGEM_SEM_DONO_DA_CONVERSA);
+      }
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      result = await response.json();
+    }
+
     if (!response.ok) {
       console.error("[sendPlatformMessage] Instagram sending error:", result);
+      if (erroDeDonoDaConversa(result)) throw new Error(MENSAGEM_SEM_DONO_DA_CONVERSA);
       throw new Error(`Graph API Error: ${result.error?.message || 'Unknown error'}`);
     }
 
