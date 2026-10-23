@@ -108,3 +108,113 @@ export async function explicarFalhaDeEnvio(canal: CanalAberto, erro: unknown): P
   // Conectado: o problema é outro (número, mídia, conteúdo). Mantém o erro original.
   return original;
 }
+
+/**
+ * Eventos de conexão que o EvoGo / Stevo mandam no webhook (formato whatsmeow:
+ * `{ event, data, instanceToken, instanceId, instanceName }`).
+ *
+ * - `Connected` / `PairSuccess`: sessão ativa.
+ * - `LoggedOut`: o aparelho saiu (desconectou pelo celular, trocou de aparelho):
+ *   só volta lendo o QR Code de novo.
+ * - `ConnectFailure`: conta só quando o motivo é sessão perdida ou banimento;
+ *   erro de servidor do WhatsApp é passageiro e o EvoGo tenta de novo sozinho.
+ * - `TemporaryBan`: o número não envia até o banimento acabar.
+ * - `Disconnected` fica de fora de propósito: é o websocket caindo, e o EvoGo
+ *   reconecta em segundos. Marcar o canal acenderia a faixa vermelha à toa.
+ * - `connection.update` é o mesmo aviso no formato Baileys / Evolution API.
+ */
+const MOTIVO_DE_SESSAO_PERDIDA = /logged.?out|main device gone|unknown logout|ban|outdated|401|402|403|406/i;
+
+function estadoDoEvento(body: any): "connected" | "disconnected" | null {
+  const evento = String(body?.event ?? "");
+  const data = body?.data ?? {};
+  switch (evento) {
+    case "Connected":
+    case "PairSuccess":
+      return "connected";
+    case "LoggedOut":
+    case "TemporaryBan":
+      return "disconnected";
+    case "ConnectFailure":
+      return MOTIVO_DE_SESSAO_PERDIDA.test(String(data.reason ?? data.Reason ?? "")) ? "disconnected" : null;
+    case "connection.update":
+    case "CONNECTION_UPDATE": {
+      if (data.state === "open") return "connected";
+      if (data.state === "close" && MOTIVO_DE_SESSAO_PERDIDA.test(String(data.statusReason ?? ""))) return "disconnected";
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Atualiza o status do canal a partir de um evento de conexão. Retorna `true`
+ * quando o evento era de conexão (tratado ou ignorado), para o webhook parar ali.
+ */
+export async function atualizarStatusPeloWebhook(provedor: "evogo" | "stevo", body: any): Promise<boolean> {
+  const evento = String(body?.event ?? "");
+  const eventosDeConexao = [
+    "Connected",
+    "PairSuccess",
+    "LoggedOut",
+    "TemporaryBan",
+    "ConnectFailure",
+    "Disconnected",
+    "connection.update",
+    "CONNECTION_UPDATE",
+  ];
+  if (!eventosDeConexao.includes(evento)) return false;
+
+  const novo = estadoDoEvento(body);
+  const nomeDaInstancia = body?.instanceName || body?.instance || null;
+  console.log(
+    `[${provedor}-webhook] Conexão: ${evento} da instância ${nomeDaInstancia ?? body?.instanceId ?? "?"}` +
+      (body?.data?.reason ? ` (motivo: ${body.data.reason})` : "") +
+      (novo ? ` -> ${novo}` : " -> sem mudança"),
+  );
+  if (!novo) return true;
+
+  // O token e o id da instância no provedor identificam sem ambiguidade; o nome
+  // pode se repetir entre empresas com hosts diferentes. Consultas separadas,
+  // com .eq, porque o valor vem de fora e não pode entrar num filtro .or().
+  const colunaToken = provedor === "stevo" ? "stevo_api_key" : "evogo_api_key";
+  const colunaId = provedor === "stevo" ? "stevo_instance_id" : "evogo_instance_id";
+  const tentativas: [string, unknown][] = [
+    [colunaToken, body?.instanceToken],
+    [colunaId, body?.instanceId],
+    ["instance_name", nomeDaInstancia],
+  ];
+
+  let canal: { id: string; status: string | null } | null = null;
+  for (const [coluna, valor] of tentativas) {
+    if (typeof valor !== "string" || !valor) continue;
+    const { data } = await supabaseAdmin
+      .from("whatsapp_instances")
+      .select("id, status")
+      .eq("provider", provedor)
+      .eq(coluna, valor)
+      .limit(2);
+    if (data?.length === 1) {
+      canal = data[0];
+      break;
+    }
+  }
+  if (!canal) {
+    console.warn(`[${provedor}-webhook] Evento ${evento} de instância que não está cadastrada no Atendi.`);
+    return true;
+  }
+
+  const update: { status?: string; owner_jid?: string } = {};
+  if (canal.status !== novo) update.status = novo;
+  // Mesmo formato que a tela de Unidades grava: só o número.
+  const jid = novo === "connected" ? String(body?.data?.jid ?? body?.data?.ID ?? "") : "";
+  const numero = jid.split("@")[0].split(":")[0];
+  if (numero && /^\d+$/.test(numero)) update.owner_jid = numero;
+
+  if (Object.keys(update).length) {
+    const { error } = await supabaseAdmin.from("whatsapp_instances").update(update).eq("id", canal.id);
+    if (error) console.error(`[${provedor}-webhook] Falha ao gravar o status do canal ${canal.id}:`, error);
+  }
+  return true;
+}

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { conferirPorta } from "./webhook-auth";
+import { atualizarStatusPeloWebhook } from "./whatsapp-conexao";
 import { getPhoneVariants } from "@/lib/utils";
 import { enqueueAiMessage } from "./ai-queue";
 import { extractExternalAdReply, processAndCacheAdPreview } from "./ad-preview-cache";
@@ -57,6 +58,9 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
     } catch (e) {
       console.error("Failed to write webhook-debug.json", e);
     }
+    // --- Conexão (Connected / LoggedOut...): atualiza o status do canal ---
+    if (await atualizarStatusPeloWebhook("stevo", body)) return;
+
     // --- Handle PushName (CTWA LID Resolution) ---
     if (body.event === "PushName") {
       const instanceName = body.instance || body.instanceName;

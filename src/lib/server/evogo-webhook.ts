@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { conferirPorta } from "./webhook-auth";
+import { atualizarStatusPeloWebhook } from "./whatsapp-conexao";
 import { getPhoneVariants } from "@/lib/utils";
 import { enqueueAiMessage } from "./ai-queue";
 import { syncContactProfile } from "@/lib/api/chat.functions";
@@ -95,6 +96,9 @@ export async function processEvogoWebhookBody(
     } catch (e) {
       console.error("Failed to write webhook-debug.json", e);
     }
+    // --- Conexão (Connected / LoggedOut...): atualiza o status do canal ---
+    if (await atualizarStatusPeloWebhook("evogo", body)) return;
+
     // --- Handle PushName (CTWA LID Resolution) ---
     if (body.event === "PushName") {
       const instanceName = body.instance || body.instanceName;
