@@ -31,7 +31,7 @@ import {
  * inteira, não só o campo.
  */
 const COLUNAS =
-  "id, name, instance_name, provider, company_id, unit_id, custom_host, " +
+  "id, name, instance_name, status, provider, company_id, unit_id, custom_host, " +
   "evogo_api_key, stevo_api_key, oficial_phone_number_id, oficial_access_token, " +
   "oficial_waba_id, network, zernio_account_id, webhook_base, " +
   "companies(evogo_host, stevo_host, zernio_api_key, zernio_base_url, zernio_webhook_secret, zernio_signature_secret)";
@@ -96,6 +96,7 @@ type InstanciaBruta = {
   id: string;
   name: string | null;
   instance_name: string | null;
+  status?: string | null;
   provider: string | null;
   network?: string | null;
   zernio_account_id?: string | null;
@@ -131,6 +132,7 @@ function montar(bruta: InstanciaBruta, canalDaConversa: string): CanalAberto {
     provedor,
     rede: redeFinal,
     nome: bruta.name,
+    status: bruta.status ?? null,
     companyId: bruta.company_id,
     unitId: bruta.unit_id,
     host: bruta.custom_host || hostGlobal || null,

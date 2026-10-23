@@ -10,6 +10,7 @@ import {
   assertMessageAccess,
 } from "@/lib/server/access-control";
 import { abrirCanal, destinatarioDe } from "@/lib/canais/motor";
+import { garantirConexaoWhatsApp, explicarFalhaDeEnvio } from "@/lib/server/whatsapp-conexao";
 import {
   erroDeDonoDaConversa,
   pegarConversaDeVolta,
@@ -641,67 +642,75 @@ export const sendMessageAction = createServerFn({ method: "POST" })
           isMessenger: true,
           participant: instance.oficial_phone_number_id,
         };
-      } else if (provider === "stevo") {
-        if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
-          evogoResponse = await sendStevoMedia({
-            host: host!,
-            token: token!,
-            instanceName: instanceName!,
-            number: phoneToSend,
-            base64: mediaUrlToSend!,
-            mediatype: data.mediaType as any,
-            caption: textToSend,
-            quoted,
-          });
-        } else if (textToSend.match(/https?:\/\//)) {
-          evogoResponse = await sendStevoLink({
-            host: host!,
-            token: token!,
-            instanceName: instanceName!,
-            number: phoneToSend,
-            text: textToSend,
-            quoted,
-          });
-        } else {
-          evogoResponse = await sendStevoText({
-            host: host!,
-            token: token!,
-            instanceName: instanceName!,
-            number: phoneToSend,
-            text: textToSend,
-            quoted,
-          });
-        }
       } else {
-        if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
-          evogoResponse = await sendEvogoMedia({
-            host: host!,
-            token: token!,
-            instanceName: instanceName!,
-            number: phoneToSend,
-            base64: mediaUrlToSend!,
-            mediatype: data.mediaType as any,
-            caption: textToSend,
-            quoted,
-          });
-        } else if (textToSend.match(/https?:\/\//)) {
-          evogoResponse = await sendEvogoLink({
-            host: host!,
-            token: token!,
-            instanceName: instanceName!,
-            number: phoneToSend,
-            text: textToSend,
-            quoted,
-          });
-        } else {
-          evogoResponse = await sendEvogoText({
-            host: host!,
-            token: token!,
-            instanceName: instanceName!,
-            number: phoneToSend,
-            text: textToSend,
-            quoted,
-          });
+        // EvoGo / Stevo: aparelho desconectado vira aviso claro, não timeout.
+        await garantirConexaoWhatsApp(canal!);
+        try {
+          if (provider === "stevo") {
+            if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
+              evogoResponse = await sendStevoMedia({
+                host: host!,
+                token: token!,
+                instanceName: instanceName!,
+                number: phoneToSend,
+                base64: mediaUrlToSend!,
+                mediatype: data.mediaType as any,
+                caption: textToSend,
+                quoted,
+              });
+            } else if (textToSend.match(/https?:\/\//)) {
+              evogoResponse = await sendStevoLink({
+                host: host!,
+                token: token!,
+                instanceName: instanceName!,
+                number: phoneToSend,
+                text: textToSend,
+                quoted,
+              });
+            } else {
+              evogoResponse = await sendStevoText({
+                host: host!,
+                token: token!,
+                instanceName: instanceName!,
+                number: phoneToSend,
+                text: textToSend,
+                quoted,
+              });
+            }
+          } else {
+            if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
+              evogoResponse = await sendEvogoMedia({
+                host: host!,
+                token: token!,
+                instanceName: instanceName!,
+                number: phoneToSend,
+                base64: mediaUrlToSend!,
+                mediatype: data.mediaType as any,
+                caption: textToSend,
+                quoted,
+              });
+            } else if (textToSend.match(/https?:\/\//)) {
+              evogoResponse = await sendEvogoLink({
+                host: host!,
+                token: token!,
+                instanceName: instanceName!,
+                number: phoneToSend,
+                text: textToSend,
+                quoted,
+              });
+            } else {
+              evogoResponse = await sendEvogoText({
+                host: host!,
+                token: token!,
+                instanceName: instanceName!,
+                number: phoneToSend,
+                text: textToSend,
+                quoted,
+              });
+            }
+          }
+        } catch (envioErr) {
+          throw await explicarFalhaDeEnvio(canal!, envioErr);
         }
       }
     }

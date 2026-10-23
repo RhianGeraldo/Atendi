@@ -3,6 +3,7 @@ import { erroDeDonoDaConversa, pegarConversaDeVolta, MENSAGEM_SEM_DONO_DA_CONVER
 import { sendEvogoText, sendEvogoMedia, sendEvogoLink } from "../evogo";
 import { sendStevoText, sendStevoMedia, sendStevoLink } from "../stevo";
 import { abrirCanal, destinatarioDe } from "../canais/motor";
+import { garantirConexaoWhatsApp, explicarFalhaDeEnvio } from "./whatsapp-conexao";
 
 /**
  * Unified function to send messages across different channels (WhatsApp, Instagram, etc)
@@ -157,6 +158,10 @@ export async function sendPlatformMessage({
         throw new Error("EvoGo is not configured or missing phone number for WhatsApp channel.");
       }
 
+      // Aparelho desconectado vira aviso claro, não timeout.
+      await garantirConexaoWhatsApp(canal);
+      try {
+
       if (mediaBase64 && mediaType !== 'text') {
         // Upload to Supabase se for base64 e não tiver link de storage (Evogo não gosta de mt URL, mas a logica tava com base64 e storage misto)
         // A lógica de upload fica idêntica para o evogo e ja tava aqui, ela sobe pro supabase e pega publicUrl
@@ -236,6 +241,9 @@ export async function sendPlatformMessage({
         }
       }
     }
+      } catch (envioErr) {
+        throw await explicarFalhaDeEnvio(canal, envioErr);
+      }
     remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
     participantJid = evogoResponse?.data?.Info?.Sender || null;
   }

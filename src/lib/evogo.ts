@@ -66,6 +66,9 @@ export async function sendEvogoText({
       lastError = err;
       const errMsg = err?.cause?.message || err?.message || String(err);
       console.warn(`[sendEvogoText] Tentativa ${attempt} falhou (${errMsg})...`);
+      // Timeout é sintoma de aparelho desconectado: repetir só dobra a espera
+      // (e, se a primeira chegou a sair, duplica a mensagem).
+      if (err?.name === "TimeoutError" || err?.name === "AbortError") break;
       if (attempt === 1) {
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
