@@ -217,7 +217,9 @@ export async function sendPlatformMessage({
               host, token, instanceName, number: phone, text: messageText,
             });
           }
-        } catch (linkErr) {
+        } catch (linkErr: any) {
+          // Timeout é o aparelho desconectado, não a URL: tentar como texto só dobraria a espera.
+          if (linkErr?.name === 'TimeoutError' || linkErr?.name === 'AbortError') throw linkErr;
           console.warn('[message-sender] sendLink failed (possibly invalid URL format), falling back to text:', linkErr);
           if (provider === 'stevo') {
             evogoResponse = await sendStevoText({
