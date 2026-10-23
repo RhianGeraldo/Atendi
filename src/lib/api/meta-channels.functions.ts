@@ -109,9 +109,16 @@ export const validateMetaChannelAction = createServerFn({ method: "POST" })
         conta = page.name;
       }
 
+      // A lista pode trazer outros apps instalados na Página: olha só o nosso.
+      const appId = process.env.VITE_META_APP_ID;
+      const doNossoApp = (lista: any) => {
+        const apps: any[] = lista?.data ?? [];
+        return (appId ? apps.find((a) => String(a.id) === appId) : apps.length === 1 ? apps[0] : null) ?? null;
+      };
+
       // POST substitui a lista de campos: mantém os que já estavam inscritos.
       const atuais = await graph(comToken(`${GRAPH_FB}/${pageId}/subscribed_apps`, token));
-      const jaInscritos: string[] = atuais?.data?.[0]?.subscribed_fields ?? [];
+      const jaInscritos: string[] = doNossoApp(atuais)?.subscribed_fields ?? [];
       const desejados = Array.from(new Set([...jaInscritos, ...CAMPOS_PAGINA]));
 
       await graph(
@@ -122,7 +129,7 @@ export const validateMetaChannelAction = createServerFn({ method: "POST" })
       );
 
       const conferido = await graph(comToken(`${GRAPH_FB}/${pageId}/subscribed_apps`, token));
-      campos = conferido?.data?.[0]?.subscribed_fields ?? [];
+      campos = doNossoApp(conferido)?.subscribed_fields ?? [];
       if (!campos.includes("messages")) {
         throw new Error("A Meta aceitou a inscrição, mas o campo de mensagens não ficou ativo na Página.");
       }

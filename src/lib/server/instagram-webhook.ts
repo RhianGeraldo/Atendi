@@ -40,12 +40,14 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
       for (const entry of body.entry) {
         const accountId = entry.id; // Pode ser IG Account ID ou Facebook Page ID
 
-        // Buscar a instância correspondente (checando tanto o ID do Instagram quanto o da Página)
+        // Buscar a instância pelo ID da conta do Instagram. Não casa pelo ID da
+        // Página (oficial_waba_id): um evento de Messenger dessa Página que caísse
+        // aqui viraria conversa de Instagram.
         const { data: instance } = await supabaseAdmin
           .from('whatsapp_instances')
           .select('id, company_id, unit_id, provider, oficial_phone_number_id, oficial_waba_id')
           .eq('provider', 'instagram')
-          .or(`oficial_phone_number_id.eq.${accountId},oficial_waba_id.eq.${accountId}`)
+          .eq('oficial_phone_number_id', accountId)
           .limit(1)
           .maybeSingle();
 
@@ -163,6 +165,20 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
 async function processIncomingMessage(params: any) {
   const { companyId, unitId, instanceId, contactIgsid, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe, isDeleted, quotedMessageId } = params;
 
+  // Eco do que o próprio Atendi enviou: o envio só grava a mensagem depois que a
+  // Meta responde, e o eco pode chegar antes disso. Se o webhook gravasse primeiro,
+  // o insert do envio bateria no UNIQUE de remote_msg_id e perderia autor/IA.
+  // Dá tempo ao envio e, se ele já gravou, ignora o eco.
+  if (isFromMe) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const { data: jaGravada } = await supabaseAdmin
+      .from('messages')
+      .select('id')
+      .eq('remote_msg_id', messageId)
+      .maybeSingle();
+    if (jaGravada) return;
+  }
+
   // 1. Encontrar ou criar o contato pelo IGSID (Instagram Scoped ID), gravado em
   // instagram_id. Contatos antigos deste webhook guardavam o IGSID em whatsapp_lid.
   let { data: contact } = await supabaseAdmin
@@ -183,7 +199,7 @@ async function processIncomingMessage(params: any) {
         .from('contacts')
         .select('id, name, merged_into_id, profile_picture_url')
         .eq('company_id', companyId)
-        .eq('instagram_username', perfil.username)
+        .in('instagram_username', [perfil.username, `@${perfil.username}`])
         .limit(1)
         .maybeSingle();
 
