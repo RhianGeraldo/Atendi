@@ -195,7 +195,7 @@ async function processarMensagem(
   // 1. Encontrar instância pelo zernio_account_id
   const { data: instance, error: instErr } = await supabaseAdmin
     .from("whatsapp_instances")
-    .select("id, company_id, unit_id, provider, network, name")
+    .select("id, company_id, unit_id, provider, network, name, status")
     .eq("zernio_account_id", evento.accountId)
     .maybeSingle();
 
@@ -203,6 +203,13 @@ async function processarMensagem(
     console.warn(
       `[zernio:webhook] Instância não encontrada para accountId: ${evento.accountId} (empresa da URL: ${company?.id ?? "?"}, rede: ${evento.rede}, remetente: ${evento.remetente?.username || evento.remetente?.identificador || "?"})`,
     );
+    return;
+  }
+
+  // Canal desativado (ex.: a conta migrou para a Graph direta): não abre conversa
+  // em dobro com o canal novo.
+  if (instance.status === "disconnected") {
+    console.log(`[zernio:webhook] Canal ${instance.name} desativado; evento de ${evento.accountId} ignorado`);
     return;
   }
 

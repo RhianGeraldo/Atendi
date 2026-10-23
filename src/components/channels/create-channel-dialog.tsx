@@ -36,6 +36,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { EvoGoClient } from "@/integrations/evogo/client";
 import { StevoClient } from "@/integrations/stevo/client";
 import { listZernioAccountsAction, syncZernioWebhookAction } from "@/lib/api/zernio.functions";
+import { validateMetaChannelAction } from "@/lib/api/meta-channels.functions";
 
 export type ChannelType = "whatsapp" | "instagram" | "messenger";
 
@@ -333,7 +334,16 @@ export function CreateChannelDialog({
       if (insertErr) throw insertErr;
 
       // 2. Ações pós-criação específicas
-      if (provider === "zernio") {
+      if (provider === "instagram" || provider === "messenger") {
+        // Sem QR: inscreve a conta no app da Meta para as mensagens chegarem.
+        try {
+          await validateMetaChannelAction({ data: { instanceId: newInst.id } });
+        } catch (e: any) {
+          toast.warning("Canal criado, mas não foi validado na Meta", {
+            description: `${e?.message || "Erro desconhecido."} Use "Validar na Meta" no canal para tentar de novo.`,
+          });
+        }
+      } else if (provider === "zernio") {
         syncZernioWebhookAction({
           data: { companyId, appOrigin: window.location.origin },
         }).catch((err) => console.warn("[zernio] Erro ao sincronizar webhook na criação:", err));
@@ -1020,9 +1030,13 @@ export function CreateChannelDialog({
                     />
                   </div>
 
-                  {provider === "oficial" && (
+                  {(provider === "oficial" || provider === "instagram") && (
                     <div className="space-y-1">
-                      <label className="font-medium">WABA ID (WhatsApp Business Account)</label>
+                      <label className="font-medium">
+                        {provider === "instagram"
+                          ? "Facebook Page ID (Página ligada ao Instagram)"
+                          : "WABA ID (WhatsApp Business Account)"}
+                      </label>
                       <Input
                         placeholder="Ex: 109876543210"
                         className="bg-background text-xs h-8"
@@ -1043,15 +1057,17 @@ export function CreateChannelDialog({
                     />
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="font-medium">Verify Token do Webhook</label>
-                    <Input
-                      placeholder="Crie uma senha (ex: atendi2026)"
-                      className="bg-background text-xs h-8"
-                      value={oficialVerifyToken}
-                      onChange={(e) => setOficialVerifyToken(e.target.value)}
-                    />
-                  </div>
+                  {provider === "oficial" && (
+                    <div className="space-y-1">
+                      <label className="font-medium">Verify Token do Webhook</label>
+                      <Input
+                        placeholder="Crie uma senha (ex: atendi2026)"
+                        className="bg-background text-xs h-8"
+                        value={oficialVerifyToken}
+                        onChange={(e) => setOficialVerifyToken(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>

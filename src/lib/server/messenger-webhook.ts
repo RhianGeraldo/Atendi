@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/integrations/supabase/client.server';
 import { conferirPorta } from './webhook-auth';
+import { responderVerificacaoMeta } from './meta-webhook-verify';
 
 import { enqueueAiMessage } from './ai-queue';
 
@@ -7,15 +8,7 @@ export async function handleMessengerWebhook(request: Request): Promise<Response
   const url = new URL(request.url);
 
   if (request.method === 'GET') {
-    const mode = url.searchParams.get('hub.mode');
-    const token = url.searchParams.get('hub.verify_token');
-    const challenge = url.searchParams.get('hub.challenge');
-
-    if (mode === 'subscribe' && token && challenge) {
-      console.log(`[Messenger Webhook] Verificado com token: ${token}`);
-      return new Response(challenge, { status: 200 });
-    }
-    return new Response('Invalid request', { status: 400 });
+    return responderVerificacaoMeta(url, 'Messenger');
   }
 
   if (request.method === 'POST') {
