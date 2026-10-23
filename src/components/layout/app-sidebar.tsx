@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut, Phone,
+  KeyRound,
   Building2,
   Building,
   ChevronsUpDown,
@@ -34,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { initials } from "@/lib/format";
+import { ChangePasswordDialog } from "./change-password-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -62,6 +64,7 @@ interface Props {
 
 export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Props) {
   const { profile, signOut } = useAuth();
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isSuperAdmin = profile?.role === 'super_admin';
   const { activeCompanyId: selectedCompanyId, setActiveCompanyId } = useActiveCompany();
@@ -348,6 +351,15 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
               ) : null}
             </div>
           )}
+          {!collapsed && (
+            <button
+              onClick={() => setPasswordOpen(true)}
+              className="rounded p-1 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground cursor-pointer transition-colors"
+              title="Trocar senha"
+            >
+              <KeyRound className="h-4 w-4" />
+            </button>
+          )}
           {!collapsed ? (
             <button
               onClick={() => signOut()}
@@ -368,6 +380,7 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
         </div>
       </div>
       </aside>
+      <ChangePasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
     </>
   );
 }

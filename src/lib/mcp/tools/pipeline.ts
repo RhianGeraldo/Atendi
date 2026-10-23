@@ -2,9 +2,199 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendMetaCapiEvent } from "@/lib/server/meta-capi";
 import { getQuestionDisqualification, parseAnswerValue } from "@/types/crm-qualification";
+import { calculateOpportunitySla, formatSlaDuration } from "@/types/crm-sla";
+import { fetchAllPages } from "@/lib/fetch-all-pages";
 import type { McpContext, McpToolDefinition } from "../types";
 
 export const pipelineTools: McpToolDefinition[] = [
+  {
+    name: "listar_oportunidades_atrasadas_etapa",
+    description:
+      "SLA do CRM (etapas do funil): oportunidades em aberto paradas na etapa além do prazo configurado nela (atrasadas) ou perto de estourar (alerta), com funil, etapa, responsável, contato, tempo na etapa e atraso. Traz o resumo por responsável, por etapa e por unidade. Não é o SLA de atendimento (resposta nas conversas) nem o do Todoo.",
+    security: {
+      requiredMenu: "pipeline",
+      minRole: "manager",
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        situacao_sla: {
+          type: "string",
+          description:
+            "'atrasadas' (padrão: prazo da etapa estourado), 'alerta' (perto de estourar), 'atrasadas_e_alerta' ou 'todas' (todas as oportunidades em etapas com SLA).",
+          enum: ["atrasadas", "alerta", "atrasadas_e_alerta", "todas"],
+          default: "atrasadas",
+        },
+        funil_id: {
+          type: "string",
+          description: "ID (UUID) do funil. Se omitido, todos os funis da empresa.",
+        },
+        etapa_id: {
+          type: "string",
+          description: "ID (UUID) da etapa.",
+        },
+        responsavel_id: {
+          type: "string",
+          description: "ID (UUID) do responsável. Use 'sem_responsavel' para as sem responsável.",
+        },
+        unidade_id: {
+          type: "string",
+          description: "ID (UUID) da unidade. Se omitido em chave Matriz, toda a rede.",
+        },
+        entrou_na_etapa_nos_ultimos_dias: {
+          type: "number",
+          description:
+            "Só oportunidades que entraram na etapa atual nos últimos N dias (ex: 7). Útil para cobrar o que é recente; sem ele, todas.",
+        },
+        limite: {
+          type: "number",
+          description:
+            "Máximo de oportunidades na lista (padrão 30, máx. 100). O resumo conta todas.",
+          default: 30,
+        },
+      },
+    },
+    handler: async (args: any, context: McpContext) => {
+      const limit = Math.min(Math.max(Number(args?.limite) || 30, 1), 100);
+      const situacao = args?.situacao_sla || "atrasadas";
+      const targetUnitId = context.unitId || args?.unidade_id;
+      const days = Number(args?.entrou_na_etapa_nos_ultimos_dias) || 0;
+      const sinceIso = days > 0 ? new Date(Date.now() - days * 86_400_000).toISOString() : null;
+
+      let pipelinesQuery = supabaseAdmin
+        .from("pipelines")
+        .select("id, name")
+        .eq("company_id", context.companyId);
+      if (args?.funil_id) pipelinesQuery = pipelinesQuery.eq("id", args.funil_id);
+      const { data: pipelines, error: pErr } = await pipelinesQuery;
+      if (pErr) throw new Error(`Erro ao carregar funis: ${pErr.message}`);
+      const pipelineName = new Map((pipelines || []).map((p: any) => [p.id, p.name]));
+      if (pipelineName.size === 0) {
+        return { etapas_com_sla: [], resumo: { no_filtro: 0 }, oportunidades: [] };
+      }
+
+      let stagesQuery = (supabaseAdmin.from("pipeline_stages") as any)
+        .select("id, name, order, pipeline_id, sla_enabled, sla_minutes, sla_warning_pct")
+        .in("pipeline_id", [...pipelineName.keys()])
+        .eq("sla_enabled", true)
+        .gt("sla_minutes", 0);
+      if (args?.etapa_id) stagesQuery = stagesQuery.eq("id", args.etapa_id);
+      const { data: stages, error: sErr } = await stagesQuery;
+      if (sErr) throw new Error(`Erro ao carregar etapas: ${sErr.message}`);
+      const stageById = new Map<string, any>((stages || []).map((st: any) => [st.id, st]));
+      if (stageById.size === 0) {
+        return {
+          aviso: "Nenhuma etapa com SLA ligado neste filtro.",
+          etapas_com_sla: [],
+          resumo: { no_filtro: 0 },
+          oportunidades: [],
+        };
+      }
+
+      const { data: opps, error } = await fetchAllPages(() => {
+        let query = supabaseAdmin
+          .from("opportunities")
+          .select(
+            `id, title, value, status, created_at, stage_entered_at, stage_id, unit_id, owner_id, conversation_id,
+            contacts(id, name, phone),
+            units(name),
+            profiles!opportunities_owner_id_fkey(id, name)`,
+          )
+          .eq("status", "open")
+          .in("stage_id", [...stageById.keys()])
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true });
+        if (targetUnitId) query = query.eq("unit_id", targetUnitId);
+        if (sinceIso) query = query.gte("stage_entered_at", sinceIso);
+        if (args?.responsavel_id === "sem_responsavel") query = query.is("owner_id", null);
+        else if (args?.responsavel_id) query = query.eq("owner_id", args.responsavel_id);
+        return query;
+      });
+      if (error) throw new Error(`Erro ao listar oportunidades: ${error.message}`);
+
+      // Mesmo cálculo do quadro do funil (types/crm-sla.ts)
+      const rows = (opps || []).map((o: any) => {
+        const stage = stageById.get(o.stage_id);
+        return { o, stage, sla: calculateOpportunitySla(o, stage) };
+      });
+      const matches = rows.filter(({ sla }) =>
+        situacao === "todas"
+          ? true
+          : situacao === "alerta"
+            ? sla.status === "warning"
+            : situacao === "atrasadas_e_alerta"
+              ? sla.status === "breached" || sla.status === "warning"
+              : sla.status === "breached",
+      );
+      const overdue = (sla: { elapsedMinutes: number; limitMinutes: number }) =>
+        Math.max(0, sla.elapsedMinutes - sla.limitMinutes);
+      matches.sort(
+        (a, b) => overdue(b.sla) - overdue(a.sla) || b.sla.percentElapsed - a.sla.percentElapsed,
+      );
+
+      const group = (keyOf: (r: (typeof rows)[number]) => string) => {
+        const map = new Map<
+          string,
+          { nome: string; total: number; atrasadas: number; alerta: number; valor: number }
+        >();
+        for (const r of matches) {
+          const nome = keyOf(r);
+          const row = map.get(nome) || { nome, total: 0, atrasadas: 0, alerta: 0, valor: 0 };
+          row.total += 1;
+          if (r.sla.status === "breached") row.atrasadas += 1;
+          if (r.sla.status === "warning") row.alerta += 1;
+          row.valor += Number(r.o.value) || 0;
+          map.set(nome, row);
+        }
+        return [...map.values()]
+          .map((row) => ({ ...row, valor: Math.round(row.valor * 100) / 100 }))
+          .sort((a, b) => b.total - a.total);
+      };
+      const ownerName = (r: (typeof rows)[number]) => r.o.profiles?.name || "Sem responsável";
+
+      return {
+        etapas_com_sla: [...stageById.values()]
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+          .map((st) => ({
+            etapa_id: st.id,
+            etapa: st.name,
+            funil: pipelineName.get(st.pipeline_id) || null,
+            prazo: formatSlaDuration(st.sla_minutes),
+            alerta_a_partir_de_percentual: st.sla_warning_pct ?? 75,
+          })),
+        resumo: {
+          oportunidades_em_etapas_com_sla: rows.length,
+          atrasadas: rows.filter((r) => r.sla.status === "breached").length,
+          alerta: rows.filter((r) => r.sla.status === "warning").length,
+          no_filtro: matches.length,
+          por_responsavel: group(ownerName),
+          por_etapa: group((r) => r.stage?.name || "Sem etapa"),
+          por_unidade: group((r) => r.o.units?.name || "Geral"),
+        },
+        total_listado: Math.min(limit, matches.length),
+        oportunidades: matches.slice(0, limit).map(({ o, stage, sla }) => ({
+          oportunidade_id: o.id,
+          titulo: o.title,
+          valor: o.value,
+          funil: pipelineName.get(stage?.pipeline_id) || null,
+          etapa: stage?.name || null,
+          etapa_id: o.stage_id,
+          responsavel: ownerName({ o, stage, sla }),
+          responsavel_id: o.profiles?.id || null,
+          contato: { id: o.contacts?.id, nome: o.contacts?.name, telefone: o.contacts?.phone },
+          unidade: o.units?.name || "Geral",
+          conversa_id: o.conversation_id || null,
+          na_etapa_desde: o.stage_entered_at || o.created_at,
+          tempo_na_etapa: sla.formattedElapsed,
+          prazo_da_etapa: formatSlaDuration(sla.limitMinutes),
+          atraso: sla.status === "breached" ? formatSlaDuration(overdue(sla)) : null,
+          minutos_atraso: overdue(sla),
+          percentual_do_prazo: sla.percentElapsed,
+          sla: sla.status,
+        })),
+      };
+    },
+  },
   {
     name: "listar_funis",
     description: "Lista os funis de vendas (pipelines) configurados para a empresa.",
