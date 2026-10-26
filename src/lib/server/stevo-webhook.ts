@@ -6,6 +6,7 @@ import { enqueueAiMessage } from "./ai-queue";
 import { extractExternalAdReply, processAndCacheAdPreview } from "./ad-preview-cache";
 import { dispatchAutomationEvent } from "./automation-engine";
 import { sendMetaCapiEvent } from "./meta-capi";
+import { insertContactOrFindExisting } from "./whatsapp-lid";
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
 export async function handleStevoWebhook(request: Request): Promise<Response> {
@@ -973,19 +974,16 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
           newContactName = phoneNumber || "Desconhecido";
         }
 
-        const { data: newContact, error: contactErr } = await supabaseAdmin
-          .from("contacts")
-          .insert({
+        const newContact = await insertContactOrFindExisting(
+          {
             company_id: company_id,
             unit_id: unit_id,
             name: newContactName,
             phone: phoneNumber,
             whatsapp_lid: extractedLid || null,
-          })
-          .select()
-          .single();
-
-        if (contactErr) throw contactErr;
+          },
+          "id",
+        );
         contactId = newContact.id;
       }
 

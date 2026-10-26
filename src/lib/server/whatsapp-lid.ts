@@ -147,3 +147,29 @@ export async function learnLidFromOwnMessage(
     return false;
   }
 }
+
+/**
+ * Cria o contato; se outro webhook acabou de criar o mesmo telefone na mesma
+ * empresa (índice único uq_contacts_company_phone_novos), devolve o dele em vez
+ * de falhar ou duplicar. Lança nos demais erros.
+ */
+export async function insertContactOrFindExisting<T extends string>(
+  row: { company_id: string; phone: string | null } & Record<string, unknown>,
+  columns: T,
+) {
+  const { data, error } = await supabaseAdmin.from("contacts").insert(row as any).select(columns).single();
+  if (!error) return data as any;
+  if (error.code !== "23505" || !row.phone) throw error;
+
+  const { data: existing, error: fErr } = await supabaseAdmin
+    .from("contacts")
+    .select(columns)
+    .eq("company_id", row.company_id)
+    .eq("phone", row.phone)
+    .is("merged_into_id", null)
+    .limit(1)
+    .maybeSingle();
+  if (fErr || !existing) throw error;
+  console.warn(`[whatsapp-lid] Corrida na criação do contato ${row.phone}: reaproveitando o existente.`);
+  return existing as any;
+}

@@ -9,6 +9,7 @@ import { dispatchAutomationEvent } from "./automation-engine";
 import { sendMetaCapiEvent } from "./meta-capi";
 import { drainInbox, processWithInbox, type InboxProcessOptions } from "./webhook-inbox";
 import {
+  insertContactOrFindExisting,
   isProvisionalPhone,
   learnLidFromOwnMessage,
   promoteProvisionalContact,
@@ -1068,19 +1069,16 @@ export async function processEvogoWebhookBody(
           newContactName = phoneNumber || "Desconhecido";
         }
 
-        const { data: newContact, error: contactErr } = await supabaseAdmin
-          .from("contacts")
-          .insert({
+        const newContact = await insertContactOrFindExisting(
+          {
             company_id: company_id,
             unit_id: unit_id,
             name: newContactName,
             phone: phoneNumber,
             whatsapp_lid: extractedLid || null,
-          })
-          .select()
-          .single();
-
-        if (contactErr) throw contactErr;
+          },
+          "id",
+        );
         contactId = newContact.id;
 
         // Auto-sync profile picture (MUST await in Vercel so the serverless function doesn't die)
