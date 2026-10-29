@@ -432,12 +432,14 @@ export const todooTools: McpToolDefinition[] = [
             l.status === "callback" &&
             (!l.callback_scheduled_at || l.callback_scheduled_at < bounds.dayEnd),
         );
+        // Como no Meu Dia: contato com prazo depois de hoje não é pendência do dia
         const toContact = cadence
           .filter(
             (c: any) =>
               c.behavior === "active" &&
               !autoPending.has(c.lead.id) &&
-              (c.stage ? c.stage.kind === "start" : c.lead.status === "pending"),
+              (c.stage ? c.stage.kind === "start" : c.lead.status === "pending") &&
+              (!c.lead.sla_deadline || c.lead.sla_deadline < bounds.dayEnd),
           )
           .map((c: any) => c.lead);
         const attempts = cadence

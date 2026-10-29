@@ -63,3 +63,6 @@ test-*
 *.snippet.ts
 *.mp4
 *.zip
+
+# graphify
+graphify-out/

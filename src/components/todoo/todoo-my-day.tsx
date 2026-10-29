@@ -83,8 +83,10 @@ export interface DayPlan {
   captureMonthTarget: number;
   captureMonthDone: number;
   callbacks: TodooLead[];
-  /** A contatar: 1ª tentativa da cadência */
+  /** A contatar: 1ª tentativa da cadência com prazo até o fim de hoje */
   toContact: TodooLead[];
+  /** A contatar com prazo depois de hoje: aparece na fila, mas não conta no total do dia */
+  upcoming: TodooLead[];
   /** Próximas tentativas da cadência que vencem até o fim de hoje */
   attempts: TodooLead[];
   /** Em conversa (cadência pausada) e parados há 48h */
@@ -248,7 +250,7 @@ export function useTodooDayData() {
         resolveTodooCardStatus(l, statuses)?.behavior ??
         (l.status === "pending" ? "active" : "paused"),
     }));
-    const toContact = cadence
+    const startLeads = cadence
       .filter(
         (c) =>
           c.behavior === "active" &&
@@ -256,6 +258,10 @@ export function useTodooDayData() {
           (c.stage ? c.stage.kind === "start" : c.lead.status === "pending"),
       )
       .map((c) => c.lead);
+    // Contato cadastrado hoje vence amanhã (SLA da ação): é tarefa de amanhã, não pendência de hoje.
+    // Se a consultora chamar antes, conta como trabalhado hoje.
+    const toContact = startLeads.filter((l) => !l.sla_deadline || l.sla_deadline < bounds.dayEnd);
+    const upcoming = startLeads.filter((l) => !!l.sla_deadline && l.sla_deadline >= bounds.dayEnd);
     const attempts = cadence
       .filter(
         (c) =>
@@ -323,6 +329,7 @@ export function useTodooDayData() {
       captureMonthDone,
       callbacks,
       toContact,
+      upcoming,
       attempts,
       followups,
       crmTasks,
@@ -388,9 +395,11 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
     setSaving(lead.id, true);
     try {
       const now = new Date().toISOString();
+      // Orçamento enviado continua orçamento: o follow-up só registra o contato
+      const nextStatus = lead.status === "quoted" ? "quoted" : "contacted";
       const { error } = await (supabase.from("todoo_leads") as any)
         .update({
-          status: "contacted",
+          status: nextStatus,
           last_interaction_at: now,
           updated_at: now,
           ...(lead.first_contact_at ? {} : { first_contact_at: now }),
@@ -406,7 +415,7 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
         event_type: "status_changed",
         notes:
           lead.status === "callback" ? "Retorno feito pelo Meu Dia" : "Contato feito pelo Meu Dia",
-        metadata: { from: lead.status, to: "contacted" },
+        metadata: { from: lead.status, to: nextStatus },
       });
       toast.success(`${lead.contact_name}: contato registrado`);
       refresh();
@@ -731,6 +740,8 @@ type QueueItem =
       due: string | null;
       tag: string;
       stage?: string;
+      /** Vence depois de hoje: fica em Próximos dias, fora do total do dia */
+      upcoming?: boolean;
     }
   | { kind: "task"; task: CrmTask; due: string | null; tag: string };
 
@@ -793,6 +804,13 @@ function buildQueue(
       lead,
       due: lead.sla_deadline,
       tag: stageName(lead) || "A contatar",
+    })),
+    ...plan.upcoming.map((lead) => ({
+      kind: "first" as const,
+      lead,
+      due: lead.sla_deadline,
+      tag: stageName(lead) || "A contatar",
+      upcoming: true,
     })),
     ...plan.attempts.map((lead) => ({
       kind: "attempt" as const,
@@ -858,10 +876,16 @@ function DayQueue({
   const filtered =
     activeFilter === "all" ? items : items.filter((item) => item.kind === activeFilter);
   const overdue = items.filter(isLate).length;
-  // Atrasados primeiro, depois o que vence hoje (a fila já vem pela ordem do prazo)
+  // Atrasados, o que vence hoje e o que vence depois (a fila já vem pela ordem do prazo)
+  const isUpcoming = (item: QueueItem) => item.kind !== "task" && !!item.upcoming;
   const sections = [
     { key: "late", label: "Atrasados", items: filtered.filter(isLate) },
-    { key: "today", label: "Para hoje", items: filtered.filter((item) => !isLate(item)) },
+    {
+      key: "today",
+      label: "Para hoje",
+      items: filtered.filter((item) => !isLate(item) && !isUpcoming(item)),
+    },
+    { key: "upcoming", label: "Próximos dias", items: filtered.filter(isUpcoming) },
   ];
 
   const chip = (value: QueueKind | "all", label: string, count: number) => (

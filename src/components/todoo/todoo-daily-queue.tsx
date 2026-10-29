@@ -542,31 +542,32 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
       return;
     }
 
-    if (wavoipInstances && wavoipInstances.length > 0) {
-      try {
-        const cleanPhone = lead.contact_phone.replace(/\D/g, "");
-        const formattedPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
-        await startCall(formattedPhone, wavoipInstances[0].instance_name);
-        toast.success(`Iniciando chamada com ${lead.contact_name}...`);
-
-        if (profile) {
-          await (supabase.from("todoo_events") as any).insert({
-            lead_id: lead.id,
-            campaign_id: lead.campaign_id,
-            company_id: lead.company_id,
-            user_id: profile.id,
-            event_type: "call_attempted",
-            notes: "Chamada iniciada via WaVoIP",
-            metadata: { phone: lead.contact_phone },
-          });
-        }
-        return;
-      } catch (err: any) {
-        console.warn("Falha no WaVoIP, abrindo discador:", err);
-      }
+    // Liga pelo número da unidade do lead (senão o da sede); sem WaVoIP, abre o discador
+    const instance =
+      wavoipInstances?.find((i) => i.wavoip_token && i.unit_id === lead.unit_id) ??
+      wavoipInstances?.find((i) => i.wavoip_token && !i.unit_id) ??
+      wavoipInstances?.find((i) => i.wavoip_token);
+    if (!instance) {
+      window.open(`tel:${lead.contact_phone}`, "_self");
+      return;
     }
 
-    window.open(`tel:${lead.contact_phone}`, "_self");
+    const cleanPhone = lead.contact_phone.replace(/\D/g, "");
+    const formattedPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
+    // startCall já avisa o erro; só registra a tentativa quando a chamada saiu
+    const started = await startCall(formattedPhone, lead.contact_name, instance.wavoip_token);
+    if (started && profile) {
+      const { error } = await (supabase.from("todoo_events") as any).insert({
+        lead_id: lead.id,
+        campaign_id: lead.campaign_id,
+        company_id: lead.company_id,
+        user_id: profile.id,
+        event_type: "call_attempted",
+        notes: "Chamada iniciada via WaVoIP",
+        metadata: { phone: lead.contact_phone, instance_id: instance.id },
+      });
+      if (error) console.warn("[todoo] evento da chamada:", error.message);
+    }
   };
 
   // Exclui o card do Todoo (histórico e fila do envio automático saem junto, em cascata)
