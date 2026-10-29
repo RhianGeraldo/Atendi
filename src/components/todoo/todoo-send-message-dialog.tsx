@@ -363,7 +363,7 @@ export function TodooSendMessageDialog({ lead, open, onOpenChange, nextStage, on
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="z-[100]">
                   {instances.map((i) => (
                     <SelectItem key={i.id} value={i.instance_name} className="text-xs">
                       {i.name}
