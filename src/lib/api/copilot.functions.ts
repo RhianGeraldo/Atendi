@@ -10,7 +10,7 @@ import { runCopilotEngine } from "@/lib/copilot/engine";
 // 1. Ação para processar mensagem e executar ações nativas da plataforma
 export const copilotSendMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       messages: z.array(
@@ -112,7 +112,7 @@ export const copilotSendMessageAction = createServerFn({ method: "POST" })
 // 2. Ação para obter sugestões rápidas de prompt com base na tela e permissão
 export const copilotGetSuggestionsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       currentRoute: z.string().optional(),
     })
@@ -183,7 +183,7 @@ export const copilotGetSuggestionsAction = createServerFn({ method: "POST" })
 // 3. Ação para transcrever áudio gravado pelo usuário via motor Whisper
 export const copilotTranscribeAudioAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       audioBase64: z.string().min(1, "Áudio é obrigatório"),

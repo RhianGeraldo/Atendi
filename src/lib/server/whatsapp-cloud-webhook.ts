@@ -7,6 +7,7 @@ import { assignTrafficLeadRoundRobin } from './routing';
 import { conferirPorta } from './webhook-auth';
 import { dispatchAutomationEvent } from './automation-engine';
 import { sendMetaCapiEvent } from './meta-capi';
+import { insertContactOrFindExisting } from './whatsapp-lid';
 
 export async function handleWhatsappCloudWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -460,20 +461,20 @@ async function processIncomingMessage(params: any) {
       sourceDetails = messageReferral.headline || messageReferral.body || (messageReferral.source_id ? `Anúncio ID: ${messageReferral.source_id}` : null);
     }
 
-    const { data: newContact, error: contactError } = await supabaseAdmin
-      .from('contacts')
-      .insert({
-        company_id: companyId,
-        name: contactName,
-        phone: phoneWithoutPlus,
-        whatsapp_lid: phoneWithoutPlus,
-        source: source,
-        source_details: sourceDetails
-      })
-      .select('id, unit_id')
-      .single();
-
-    if (contactError) {
+    let newContact;
+    try {
+      newContact = await insertContactOrFindExisting(
+        {
+          company_id: companyId,
+          name: contactName,
+          phone: phoneWithoutPlus,
+          whatsapp_lid: phoneWithoutPlus,
+          source: source,
+          source_details: sourceDetails,
+        },
+        'id, unit_id',
+      );
+    } catch (contactError) {
       console.error('[Whatsapp Cloud] Erro ao criar contato:', contactError);
       return;
     }

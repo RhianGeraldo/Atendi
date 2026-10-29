@@ -16,7 +16,8 @@ interface WavoipContextType {
   connectingPhone: string | null;
   acceptCall: () => Promise<void>;
   rejectCall: () => Promise<void>;
-  startCall: (phone: string, contactName?: string, fromToken?: string) => Promise<void>;
+  /** true quando a chamada saiu (o WaVoIP devolveu a chamada) */
+  startCall: (phone: string, contactName?: string, fromToken?: string) => Promise<boolean>;
   endCall: () => Promise<void>;
   mute: () => Promise<void>;
   unmute: () => Promise<void>;
@@ -451,7 +452,7 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
   const startCall = useCallback(async (phone: string, contactName?: string, fromToken?: string) => {
     if (!wavoip) {
       toast.error("Wavoip não conectado", { description: "Nenhuma instância ativa possui token do Wavoip configurado." });
-      return;
+      return false;
     }
     const finalPhone = phone.replace(/\D/g, '');
     toast.info(`Iniciando chamada para ${contactName || finalPhone}...`);
@@ -481,7 +482,7 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         toast.error("Erro ao ligar", { description: errorMsg });
         console.error("Erro detalhado do Wavoip:", JSON.stringify(err, null, 2));
         setActiveContactName(null);
-        return;
+        return false;
       }
       if (call) {
         setActiveCall(call);
@@ -540,10 +541,12 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         call.on("unanswered", closeCallWithDelay);
         call.on("ended", closeCallWithDelay);
       }
+      return !!call;
     } catch (e) {
       console.error(e);
       setActiveContactName(null);
       setIsConnecting(false);
+      return false;
     }
   }, [wavoip]);
 

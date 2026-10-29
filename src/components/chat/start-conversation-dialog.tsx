@@ -331,7 +331,7 @@ export function StartConversationDialog({
                   ) : undefined}
                 </SelectValue>
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-[100]">
                 {isLoadingInstances ? (
                   <div className="flex items-center justify-center p-4 text-xs text-muted-foreground gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" /> Carregando instâncias...

@@ -52,7 +52,7 @@ function comToken(url: string, token: string, params: Record<string, string> = {
  */
 export const validateMetaChannelAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({ instanceId: z.string().uuid() }))
+  .validator(z.object({ instanceId: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     const { data: inst, error } = await supabaseAdmin
       .from("whatsapp_instances")

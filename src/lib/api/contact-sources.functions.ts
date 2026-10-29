@@ -26,7 +26,7 @@ export const DEFAULT_CONTACT_SOURCES = INITIAL_CONTACT_SOURCES;
  */
 export const getCompanyContactSourcesAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
     }),
@@ -78,7 +78,7 @@ export const getCompanyContactSourcesAction = createServerFn({ method: "POST" })
  */
 export const addCompanyContactSourceAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       source: z.string().min(1).max(100),
@@ -136,7 +136,7 @@ export const addCompanyContactSourceAction = createServerFn({ method: "POST" })
  */
 export const removeCompanyContactSourceAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       source: z.string(),
@@ -200,7 +200,7 @@ export const removeCompanyContactSourceAction = createServerFn({ method: "POST" 
  */
 export const updateContactSourceAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       contactId: z.string().uuid(),
       source: z.string().nullable().optional(),
@@ -228,7 +228,7 @@ export const updateContactSourceAction = createServerFn({ method: "POST" })
  */
 export const renameCompanyContactSourceAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       oldSource: z.string(),
@@ -296,7 +296,7 @@ export const renameCompanyContactSourceAction = createServerFn({ method: "POST" 
  */
 export const resetCompanyContactSourcesAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
     }),
@@ -334,7 +334,7 @@ export const resetCompanyContactSourcesAction = createServerFn({ method: "POST" 
  */
 export const getSourcesWithStatsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
     }),

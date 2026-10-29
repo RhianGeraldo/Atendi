@@ -20,6 +20,7 @@ import { downloadZernioMedia, ZernioClient } from "../canais/zernio/client";
 import { enqueueAiMessage } from "./ai-queue";
 import { getPhoneVariants } from "@/lib/utils";
 import { persistirAvatarContatoNoStorage } from "../avatar-storage";
+import { insertContactOrFindExisting } from "./whatsapp-lid";
 
 export async function handleZernioWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -306,26 +307,24 @@ async function processarMensagem(
     contact = foundContacts?.[0];
 
     if (!contact) {
-      const { data: newContact, error: createErr } = await supabaseAdmin
-        .from("contacts")
-        .insert({
-          company_id: companyId,
-          unit_id: unitId,
-          name: evento.remetente.nome || contactIdOrPhone,
-          phone: contactIdOrPhone,
-          whatsapp_lid: evento.remetente.bsuid || null,
-          source: "whatsapp",
-          source_details: "zernio",
-          profile_picture_url: evento.remetente.fotoPerfil || null,
-        })
-        .select()
-        .single();
-
-      if (createErr) {
+      try {
+        contact = await insertContactOrFindExisting(
+          {
+            company_id: companyId,
+            unit_id: unitId,
+            name: evento.remetente.nome || contactIdOrPhone,
+            phone: contactIdOrPhone,
+            whatsapp_lid: evento.remetente.bsuid || null,
+            source: "whatsapp",
+            source_details: "zernio",
+            profile_picture_url: evento.remetente.fotoPerfil || null,
+          },
+          "*",
+        );
+      } catch (createErr) {
         console.error("[zernio:webhook] Erro ao criar contato WhatsApp:", createErr);
         return;
       }
-      contact = newContact;
     } else {
       const updates: Record<string, any> = {};
       if (evento.remetente.bsuid && !contact.whatsapp_lid) {
@@ -543,10 +542,32 @@ async function processarMensagem(
       .single();
 
     if (newConvErr || !newConv) {
-      console.error("[zernio:webhook] Erro ao criar conversa:", newConvErr);
-      return;
+      if (newConvErr?.code === "23505") {
+        console.warn("[zernio:webhook] Race condition ao criar conversa, buscando conversa criada em paralelo.");
+        const { data: racedConv } = await supabaseAdmin
+          .from("conversations")
+          .select("id, status, assigned_agent_id, contact_id, ai_active, ai_agent_id, unread_count, provider_thread_id")
+          .eq("whatsapp_instance_id", instance.id)
+          .eq("contact_id", contact.id)
+          .in("status", ["waiting", "active"])
+          .order("started_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (racedConv) {
+          conversationId = racedConv.id;
+          aiActive = racedConv.ai_active ?? false;
+        } else {
+          console.error("[zernio:webhook] Erro ao recuperar conversa da race condition:", newConvErr);
+          return;
+        }
+      } else {
+        console.error("[zernio:webhook] Erro ao criar conversa:", newConvErr);
+        return;
+      }
+    } else {
+      conversationId = newConv.id;
     }
-    conversationId = newConv.id;
 
     if (!isFromMe) {
       const sessionId = await abrirSessao(

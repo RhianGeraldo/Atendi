@@ -15,7 +15,7 @@ import { persistirAvatarContatoNoStorage } from "../avatar-storage";
  */
 export const saveZernioConfigAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       apiKey: z.string().min(1, "A chave de API é obrigatória"),
@@ -72,7 +72,7 @@ export const saveZernioConfigAction = createServerFn({ method: "POST" })
  */
 export const listZernioAccountsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       platform: z.enum(["whatsapp", "instagram"]).optional(),
@@ -113,7 +113,7 @@ export const listZernioAccountsAction = createServerFn({ method: "POST" })
  */
 export const syncZernioWebhookAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       appOrigin: z.string().url(),
@@ -203,7 +203,7 @@ export const syncZernioWebhookAction = createServerFn({ method: "POST" })
  */
 export const syncZernioAvatarsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
     })

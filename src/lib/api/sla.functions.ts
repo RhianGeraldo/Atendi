@@ -10,7 +10,7 @@ import { DEFAULT_SLA_SETTINGS, type SlaSettings } from "@/lib/sla";
  */
 export const getSlaSettingsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
     }),
@@ -74,7 +74,7 @@ export const getSlaSettingsAction = createServerFn({ method: "POST" })
  */
 export const saveSlaSettingsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       settings: z.object({

@@ -6,7 +6,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 export const recordActivityHeartbeatAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       status: z.enum(["active", "idle", "background", "offline"]),
       intervalSeconds: z.number().int().min(1).max(300).default(30),
@@ -90,7 +90,7 @@ export const recordUserLogoutAction = createServerFn({ method: "POST" })
 
 export const getUserActivityReportAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       startDate: z.string().optional(), // YYYY-MM-DD
