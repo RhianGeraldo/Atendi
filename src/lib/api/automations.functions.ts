@@ -5,7 +5,7 @@ import { dispatchAutomationEvent } from "@/lib/server/automation-engine";
 
 export const dispatchAutomationAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       unitId: z.string().uuid().nullable().optional(),

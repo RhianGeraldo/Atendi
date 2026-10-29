@@ -3,7 +3,7 @@ import { z } from "zod";
 import { syncCloudTemplates } from "../server/whatsapp-cloud-api";
 
 export const syncCloudTemplatesAction = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ instanceId: z.string() }))
+  .validator(z.object({ instanceId: z.string() }))
   .handler(async ({ data }) => {
     try {
       const result = await syncCloudTemplates(data.instanceId);
@@ -15,7 +15,7 @@ export const syncCloudTemplatesAction = createServerFn({ method: "POST" })
   });
 
 export const exchangeMetaCodeAction = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ 
+  .validator(z.object({ 
     code: z.string(), 
     companyId: z.string(),
     redirectUri: z.string()

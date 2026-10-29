@@ -10,7 +10,7 @@ import { getMetaCapiConfig, sendMetaCapiEvent, validateMetaToken, type MetaCapiS
  */
 export const getMetaCapiConfigAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
     }),
@@ -60,7 +60,7 @@ export const getMetaCapiConfigAction = createServerFn({ method: "POST" })
  */
 export const validateMetaTokenAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       token: z.string(),
     }),
@@ -74,7 +74,7 @@ export const validateMetaTokenAction = createServerFn({ method: "POST" })
  */
 export const saveMetaCapiConfigAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       config: z.object({
@@ -151,7 +151,7 @@ export const saveMetaCapiConfigAction = createServerFn({ method: "POST" })
  */
 export const testMetaCapiEventAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       testEventCode: z.string().optional(),
@@ -183,7 +183,7 @@ export const testMetaCapiEventAction = createServerFn({ method: "POST" })
  */
 export const listMetaCapiLogsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       limit: z.number().min(1).max(100).default(30),
@@ -236,7 +236,7 @@ export const listMetaCapiLogsAction = createServerFn({ method: "POST" })
  */
 export const triggerOpportunityCapiAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       opportunityId: z.string().uuid(),

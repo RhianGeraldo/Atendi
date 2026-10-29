@@ -114,7 +114,7 @@ async function callCompanyLlm({
 // 1. Minerar Objeções Reais das conversas da empresa
 export const mineCompanyObjectionsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       period: z.enum(["week", "month"]).default("week"),
@@ -242,7 +242,7 @@ Regras:
 // 2. Buscar último insight de objeções da empresa
 export const fetchObjectionInsightsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
     })
@@ -267,7 +267,7 @@ export const fetchObjectionInsightsAction = createServerFn({ method: "POST" })
 // 3. Iniciar Simulação de Treinamento "Às Cegas" (Blind Roleplay)
 export const startBlindTrainingSessionAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       channel: z.enum(["whatsapp", "instagram"]).default("whatsapp"),
@@ -388,7 +388,7 @@ REGRAS:
 // 4. Enviar mensagem da consultora e receber réplica do Lead Simulado
 export const sendTrainingMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       sessionId: z.string().uuid(),
       content: z.string().min(1),
@@ -484,7 +484,7 @@ DIRETRIZES FUNDAMENTAIS DE COMPORTAMENTO:
 // 5. Encerrar Treinamento e Gerar Avaliação (Scorecard Dinâmico + Linha a Linha)
 export const finishTrainingSessionAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       sessionId: z.string().uuid(),
     })
@@ -627,7 +627,7 @@ RETORNE RIGOROSAMENTE UM JSON estruturado da seguinte forma:
 // 6. Listar sessões de treino com filtros
 export const fetchTrainingSessionsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       userId: z.string().uuid().optional(),
@@ -665,7 +665,7 @@ export const fetchTrainingSessionsAction = createServerFn({ method: "POST" })
 // 7. Obter detalhes e mensagens de uma sessão específica
 export const fetchTrainingSessionDetailsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       sessionId: z.string().uuid(),
     })
@@ -757,7 +757,7 @@ export async function getCompanyPlaybookSummary(companyId: string): Promise<stri
 // Listar procedimentos do playbook com filtros
 export const fetchSalesPlaybookProceduresAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       category: z.string().optional(),
@@ -794,7 +794,7 @@ export const fetchSalesPlaybookProceduresAction = createServerFn({ method: "POST
 // Criar ou atualizar procedimento no playbook
 export const upsertSalesPlaybookProcedureAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       id: z.string().uuid().optional(),
       companyId: z.string().uuid(),
@@ -859,7 +859,7 @@ export const upsertSalesPlaybookProcedureAction = createServerFn({ method: "POST
 // Excluir procedimento do playbook
 export const deleteSalesPlaybookProcedureAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       id: z.string().uuid(),
       companyId: z.string().uuid(),

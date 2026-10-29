@@ -26,7 +26,7 @@ async function assertCompanyAccess(userId: string, companyId: string, adminOnly 
 // 1. Listar chaves MCP ativas da empresa
 export const listMcpKeysAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
     }),
@@ -83,7 +83,7 @@ export const listMcpKeysAction = createServerFn({ method: "POST" })
 // 2. Criar nova chave MCP (retorna o token bruto UMA única vez)
 export const createMcpKeyAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       unitId: z.string().uuid().optional().nullable(),
@@ -112,7 +112,7 @@ export const createMcpKeyAction = createServerFn({ method: "POST" })
 // 3. Revogar chave MCP
 export const revokeMcpKeyAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       keyId: z.string().uuid(),
       companyId: z.string().uuid(),
@@ -170,7 +170,7 @@ export const revokeMcpKeyAction = createServerFn({ method: "POST" })
 // como ele no chat interno, com acesso a todo o MCP. A equipe conversa com ele como com um colega.
 export const createTeamChatBotAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       botName: z.string().trim().min(2, "Informe o nome do assistente.").max(60),
@@ -252,7 +252,7 @@ export const createTeamChatBotAction = createServerFn({ method: "POST" })
 // 5. Renomear o Assistente IA: troca o nome do usuário dele (o que a equipe vê no chat) e da chave
 export const renameTeamChatBotAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       companyId: z.string().uuid(),
       keyId: z.string().uuid(),

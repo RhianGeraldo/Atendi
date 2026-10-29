@@ -161,15 +161,32 @@ export async function insertContactOrFindExisting<T extends string>(
   if (!error) return data as any;
   if (error.code !== "23505" || !row.phone) throw error;
 
-  const { data: existing, error: fErr } = await supabaseAdmin
+  const variants = getPhoneVariants(row.phone);
+  const phones = variants.length > 0 ? variants : [row.phone];
+
+  let { data: existing, error: fErr } = await supabaseAdmin
     .from("contacts")
     .select(columns)
     .eq("company_id", row.company_id)
-    .eq("phone", row.phone)
+    .in("phone", phones)
     .is("merged_into_id", null)
+    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (fErr || !existing) throw error;
+
+  if (fErr || !existing) {
+    const { data: merged } = await supabaseAdmin
+      .from("contacts")
+      .select(columns)
+      .eq("company_id", row.company_id)
+      .in("phone", phones)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (merged) existing = merged;
+  }
+
+  if (!existing) throw error;
   console.warn(`[whatsapp-lid] Corrida na criação do contato ${row.phone}: reaproveitando o existente.`);
   return existing as any;
 }

@@ -169,7 +169,7 @@ async function resolveWhatsAppChatJid({
 
 export const sendMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       conversationId: z.string().uuid(),
       text: z.string().optional(),
@@ -787,7 +787,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
 export const sendProactiveMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       phone: z.string().min(10),
       text: z.string().optional(),
@@ -1090,7 +1090,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
 
 export const fetchContactInfoAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       contactId: z.string().uuid(),
       unitId: z.string().uuid().optional().nullable(),
@@ -1185,7 +1185,7 @@ export const fetchContactInfoAction = createServerFn({ method: "POST" })
 
 export const syncLabelsAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(z.object({ unitId: z.string().uuid() }))
+  .validator(z.object({ unitId: z.string().uuid() }))
   .handler(async ({ data, context }) => {
     // Legacy endpoint: now labels are local, we just return success
     return { success: true, count: 0 };
@@ -1193,7 +1193,7 @@ export const syncLabelsAction = createServerFn({ method: "POST" })
 
 export const createLabelAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       unitId: z.string().uuid().optional().nullable(),
       companyId: z.string().uuid().optional().nullable(),
@@ -1264,7 +1264,7 @@ export const createLabelAction = createServerFn({ method: "POST" })
 
 export const toggleContactLabelAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       unitId: z.string().uuid().optional().nullable(),
       contactId: z.string().uuid(),
@@ -1311,7 +1311,7 @@ export const toggleContactLabelAction = createServerFn({ method: "POST" })
 
 export const reactToMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       conversationId: z.string().uuid(),
       messageId: z.string().uuid(),
@@ -1509,7 +1509,7 @@ export const reactToMessageAction = createServerFn({ method: "POST" })
 
 export const assignConversationAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       conversationId: z.string().uuid(),
     }),
@@ -1616,7 +1616,7 @@ export const assignConversationAction = createServerFn({ method: "POST" })
 
 export const transferConversationAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       conversationId: z.string().uuid(),
       targetType: z.enum(["department", "agent"]),
@@ -2090,7 +2090,7 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
 
 export const updateContactFromWhatsappAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       contactId: z.string().uuid(),
       unitId: z.string().uuid().optional().nullable(),
@@ -2109,7 +2109,7 @@ export const updateContactFromWhatsappAction = createServerFn({ method: "POST" }
 
 export const editMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       conversationId: z.string().uuid(),
       messageId: z.string().uuid(),
@@ -2273,7 +2273,7 @@ export const editMessageAction = createServerFn({ method: "POST" })
 
 export const deleteMessageAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       messageId: z.string().uuid(),
     }),
@@ -2410,7 +2410,7 @@ export const deleteMessageAction = createServerFn({ method: "POST" })
 
 export const transcribeAudioAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       messageId: z.string().uuid(),
     }),
@@ -2555,7 +2555,7 @@ export const transcribeAudioAction = createServerFn({ method: "POST" })
 
 export const fixMessageTextAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       conversationId: z.string().uuid(),
       text: z.string().min(1),
@@ -2735,7 +2735,7 @@ export const fixMessageTextAction = createServerFn({ method: "POST" })
 
 export const transcribeCallAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       callId: z.string().uuid(),
     }),
@@ -2857,7 +2857,7 @@ export const transcribeCallAction = createServerFn({ method: "POST" })
 
 export const salesCoachAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       conversationId: z.string().uuid(),
     }),
@@ -3017,7 +3017,7 @@ Responda APENAS com o texto da tabela em markdown e nada mais.`;
 
 export const salesCoachSuggestAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       conversationId: z.string().uuid(),
     }),
@@ -3242,7 +3242,7 @@ export async function internalResolveConversation(
 
 export const resolveConversationAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       conversationId: z.string().uuid(),
       reasonId: z.string().optional().nullable(),
@@ -3268,7 +3268,7 @@ export const resolveConversationAction = createServerFn({ method: "POST" })
 
 export const blockContactAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       contactId: z.string().uuid(),
       reason: z.string().min(1, "O motivo é obrigatório"),
@@ -3307,7 +3307,7 @@ export const blockContactAction = createServerFn({ method: "POST" })
 
 export const unblockContactAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
+  .validator(
     z.object({
       contactId: z.string().uuid(),
     }),
