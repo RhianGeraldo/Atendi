@@ -1,4 +1,4 @@
-import dns from "node:dns";
+import * as dns from "node:dns";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 try {
@@ -178,7 +178,7 @@ export async function getAtendiCallsConnectStatus(config: AtendiCallsConfig): Pr
     status: isConnected
       ? ("connected" as const)
       : qrcodeBase64
-        ? ("qrcode_ready" as const)
+        ? ("scan_qr_code" as const)
         : ("disconnected" as const),
     isConnected,
     qrcode: qrcodeBase64,
@@ -196,7 +196,7 @@ export async function startAtendiCallsVoiceCall(params: {
   webhookUrl?: string;
   agent?: AtendiCallsAgentConfig;
   config: AtendiCallsConfig;
-}): Promise<{ callId: string; raw: any }> {
+}): Promise<{ callId: string; sessionId?: string; raw: any }> {
   const { to, webhookUrl, agent, config } = params;
   const cleanPhone = to.replace(/\D/g, "");
   const formattedPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
@@ -324,12 +324,16 @@ export async function startAtendiCallsHumanCall(params: {
     ? `${params.config.apiUrl}/api/sessions/${encodeURIComponent(sid)}/calls`
     : `${params.config.apiUrl}/api/v1/voice/calls`;
 
-  const payload = sid ? { phone: formattedPhone, record: true } : { to: formattedPhone };
+  const payload = sid
+    ? { phone: formattedPhone, duration_ms: 300000, record: true }
+    : { to: formattedPhone };
 
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
+      Authorization: `Bearer ${params.config.token}`,
       "X-API-Key": params.config.token,
+      "X-Client-Id": "atendi",
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
@@ -372,7 +376,9 @@ export async function sendAtendiCallsWebRTCOffer(params: {
   const res = await fetch(url, {
     method: "POST",
     headers: {
+      Authorization: `Bearer ${params.config.token}`,
       "X-API-Key": params.config.token,
+      "X-Client-Id": "atendi",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ sdp_offer: params.sdpOffer }),
@@ -400,22 +406,56 @@ export async function sendAtendiCallsWebRTCOffer(params: {
 export async function hangupAtendiCallsVoiceCall(
   callId: string,
   config: AtendiCallsConfig,
+  sessionId?: string,
 ): Promise<boolean> {
-  const url = `${config.apiUrl}/api/v1/voice/calls/${callId}/hangup`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "X-API-Key": config.token,
-    },
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    console.warn(`[AtendiCalls] Erro ao desligar chamada ${callId} (${res.status}):`, errText);
-    return false;
+  let sid = sessionId;
+  if (!sid) {
+    const conn = await getAtendiCallsConnectStatus(config).catch(() => null);
+    sid = conn?.instance?.id || conn?.instance?.sessionId;
   }
 
-  return true;
+  const headers = {
+    Authorization: `Bearer ${config.token}`,
+    "X-API-Key": config.token,
+    "X-Client-Id": "atendi",
+    "Content-Type": "application/json",
+  };
+
+  // 1. Tenta DELETE /api/sessions/:sid/calls/:id (padrão nativo do AtendiCalls)
+  if (sid) {
+    try {
+      const delRes = await fetch(
+        `${config.apiUrl}/api/sessions/${encodeURIComponent(sid)}/calls/${encodeURIComponent(callId)}`,
+        {
+          method: "DELETE",
+          headers,
+        },
+      );
+      if (delRes.ok) return true;
+    } catch {}
+
+    // 2. Tenta POST /api/sessions/:sid/calls/:id/reject
+    try {
+      const rejRes = await fetch(
+        `${config.apiUrl}/api/sessions/${encodeURIComponent(sid)}/calls/${encodeURIComponent(callId)}/reject`,
+        {
+          method: "POST",
+          headers,
+          body: "{}",
+        },
+      );
+      if (rejRes.ok) return true;
+    } catch {}
+  }
+
+  // 3. Fallback POST /api/v1/voice/calls/:id/hangup
+  const url = `${config.apiUrl}/api/v1/voice/calls/${encodeURIComponent(callId)}/hangup`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+  });
+
+  return res.ok;
 }
 
 /**

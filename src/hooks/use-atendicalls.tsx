@@ -41,18 +41,17 @@ export interface AtendiCallsContextType {
   incomingOffer: CallOffer | null;
   activeCall: CallActive | null;
   callStatus: CallStatus | "CONNECTING" | null;
-  callMode: "human" | "ai";
   instances: any[] | undefined;
   isConnecting: boolean;
   connectingPhone: string | null;
   acceptCall: () => Promise<void>;
   rejectCall: () => Promise<void>;
-  /** Dispara chamada pelo AtendiCalls no modo atendente humano (WebRTC) ou com IA */
+  /** Dispara chamada pelo AtendiCalls no navegador via WebRTC */
   startCall: (
     phone: string,
     contactName?: string,
     fromToken?: string,
-    mode?: "human" | "ai",
+    mode?: string,
     agentPrompt?: string,
   ) => Promise<boolean>;
   endCall: () => Promise<void>;
@@ -80,10 +79,10 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectingPhone, setConnectingPhone] = useState<string | null>(null);
-  const [callMode, setCallMode] = useState<"human" | "ai">("human");
 
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const currentCallIdRef = useRef<string | null>(null);
+  const currentSessionIdRef = useRef<string | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const webrtcRef = useRef<AtendiCallsWebRTCConnection | null>(null);
 
@@ -105,6 +104,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       setIsSpeakerOn(false);
       setActiveContactName(null);
       currentCallIdRef.current = null;
+      currentSessionIdRef.current = null;
     }, 2000);
   }, []);
 
@@ -207,6 +207,76 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
     staleTime: 60000,
   });
 
+  // Conexão Realtime SSE direta com o motor AtendiCalls para eventos instantâneos (ringing, connected, ended)
+  useEffect(() => {
+    if (!instances || instances.length === 0) return;
+    const inst = instances[0];
+    const token = inst.atendicalls_token || inst.wavoip_token;
+    if (!token) return;
+
+    const apiUrl = (inst.atendicalls_url || "https://calls.esteticaelaser.com.br").replace(
+      /\/+$/,
+      "",
+    );
+    let clientId = localStorage.getItem("atendicalls.clientId");
+    if (!clientId) {
+      clientId = "c-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem("atendicalls.clientId", clientId);
+    }
+
+    const sseUrl = `${apiUrl}/api/events?clientId=${encodeURIComponent(clientId)}&token=${encodeURIComponent(token)}`;
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource(sseUrl);
+
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          const currentId = currentCallIdRef.current;
+
+          if (payload.type === "call-status") {
+            const rawStatus = (payload.status || "").toLowerCase();
+            const matchesCall =
+              !currentId || payload.id === currentId || payload.callId === currentId;
+
+            if (matchesCall) {
+              if (rawStatus === "connected" || rawStatus === "active") {
+                setCallStatus("ACTIVE");
+              } else if (rawStatus === "ringing" || rawStatus === "calling") {
+                setCallStatus("RINGING");
+              } else if (
+                rawStatus === "ended" ||
+                rawStatus === "terminated" ||
+                rawStatus === "rejected" ||
+                rawStatus === "failed"
+              ) {
+                setCallStatus("ENDED");
+                closeCallWithDelay();
+              }
+            }
+          } else if (payload.type === "call-ended") {
+            if (!currentId || payload.id === currentId || payload.callId === currentId) {
+              setCallStatus("ENDED");
+              closeCallWithDelay();
+            }
+          }
+        } catch {}
+      };
+
+      eventSource.onerror = () => {
+        // O navegador reconecta o EventSource automaticamente
+      };
+    } catch (err) {
+      console.warn("[AtendiCalls SSE] Erro ao conectar EventSource:", err);
+    }
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [instances, closeCallWithDelay]);
+
   // Monitora mudanças no banco de dados via Supabase Realtime para a chamada ativa
   useEffect(() => {
     if (!profile?.company_id) return;
@@ -276,15 +346,15 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
 
   /**
    * Dispara ligação através do motor AtendiCalls na VPS
-   * Suporta modo atendente humano (WebRTC pelo navegador) ou agente com IA
+   * Sempre realiza chamada direta pelo navegador com atendente humano
    */
   const startCall = useCallback(
     async (
       phone: string,
       contactName?: string,
       fromToken?: string,
-      mode: "human" | "ai" = "human",
-      agentPrompt?: string,
+      _mode?: string,
+      _agentPrompt?: string,
     ) => {
       const cleanPhone = phone.replace(/\D/g, "");
       if (cleanPhone.length < 8) {
@@ -294,12 +364,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       const finalPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
       const displayName = contactName || finalPhone;
 
-      setCallMode(mode);
-      toast.info(
-        mode === "human"
-          ? `Iniciando ligação para ${displayName}...`
-          : `Iniciando ligação com IA para ${displayName}...`,
-      );
+      toast.info(`Iniciando ligação para ${displayName}...`);
       setActiveContactName(contactName || null);
       if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
       setIsConnecting(true);
@@ -312,8 +377,6 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
             contactName: displayName,
             fromToken,
             companyId: profile?.company_id,
-            mode,
-            systemPrompt: agentPrompt,
           },
         });
 
@@ -336,34 +399,33 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         };
 
         currentCallIdRef.current = res.callId;
+        currentSessionIdRef.current = res.sessionId || null;
         setActiveCall(callObj);
         setCallStatus("CALLING");
 
-        // Se for modo humano, inicia negociação de áudio WebRTC imediatamente pelo navegador
-        if (mode === "human") {
-          try {
-            const webrtc = await openAtendiCallsWebRTC({
-              sdpAnswerCallback: async (sdpOffer) => {
-                const ans = await sendAtendiCallsWebRTCOfferAction({
-                  data: {
-                    callId: res.callId,
-                    sessionId: res.sessionId,
-                    token: fromToken || res.token,
-                    apiUrl: res.apiUrl,
-                    sdpOffer,
-                  },
-                });
-                return ans.sdpAnswer;
-              },
-            });
-            webrtcRef.current = webrtc;
-          } catch (audioErr: any) {
-            console.warn(
-              "[AtendiCalls WebRTC] Microfone do navegador não pôde ser ativado:",
-              audioErr,
-            );
-            toast.warning("Ligação iniciada, mas o acesso ao microfone não foi concedido.");
-          }
+        // Inicia negociação de áudio WebRTC imediatamente pelo navegador
+        try {
+          const webrtc = await openAtendiCallsWebRTC({
+            sdpAnswerCallback: async (sdpOffer) => {
+              const ans = await sendAtendiCallsWebRTCOfferAction({
+                data: {
+                  callId: res.callId,
+                  sessionId: res.sessionId,
+                  token: fromToken || res.token,
+                  apiUrl: res.apiUrl,
+                  sdpOffer,
+                },
+              });
+              return ans.sdpAnswer;
+            },
+          });
+          webrtcRef.current = webrtc;
+        } catch (audioErr: any) {
+          console.warn(
+            "[AtendiCalls WebRTC] Microfone do navegador não pôde ser ativado:",
+            audioErr,
+          );
+          toast.warning("Ligação iniciada, mas o acesso ao microfone não foi concedido.");
         }
 
         setTimeout(() => {
@@ -398,6 +460,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         await hangupAtendiCallsVoiceCallAction({
           data: {
             callId,
+            sessionId: currentSessionIdRef.current,
             companyId: profile?.company_id,
           },
         });
@@ -431,7 +494,6 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         incomingOffer,
         activeCall,
         callStatus,
-        callMode,
         acceptCall,
         rejectCall,
         startCall,

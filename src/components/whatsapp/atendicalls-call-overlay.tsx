@@ -23,7 +23,6 @@ export function AtendiCallsCallOverlay() {
     incomingOffer,
     activeCall,
     callStatus,
-    callMode,
     acceptCall,
     rejectCall,
     endCall,
@@ -88,8 +87,7 @@ export function AtendiCallsCallOverlay() {
 
         <div className="flex flex-col items-center mt-2 mb-6 gap-2">
           <div className="flex items-center gap-2 text-slate-500 text-sm mb-4">
-            <MessageCircle className="w-4 h-4 text-emerald-600" /> AtendiCalls •{" "}
-            {callMode === "ai" ? "Agente IA de Voz" : "Voz WhatsApp"}
+            <MessageCircle className="w-4 h-4 text-emerald-600" /> AtendiCalls • Voz WhatsApp
           </div>
 
           <div className="text-slate-400 text-sm mb-2 flex items-center gap-2">
@@ -160,8 +158,7 @@ export function AtendiCallsCallOverlay() {
 
         <div className="flex flex-col items-center mt-2 mb-8 gap-2">
           <div className="flex items-center gap-2 text-slate-500 text-sm mb-4">
-            <MessageCircle className="w-4 h-4 text-emerald-600" /> AtendiCalls •{" "}
-            {callMode === "ai" ? "Agente IA de Voz" : "Voz WhatsApp"}
+            <MessageCircle className="w-4 h-4 text-emerald-600" /> AtendiCalls • Voz WhatsApp
           </div>
 
           <div className="flex items-center justify-center gap-4 w-full px-8">
@@ -278,8 +275,7 @@ export function AtendiCallsCallOverlay() {
 
         <div className="flex flex-col items-center mt-2 mb-8 gap-2">
           <div className="flex items-center gap-2 text-slate-500 text-sm mb-4">
-            <MessageCircle className="w-4 h-4 text-emerald-600" /> AtendiCalls •{" "}
-            {callMode === "ai" ? "Agente IA de Voz" : "Voz WhatsApp"}
+            <MessageCircle className="w-4 h-4 text-emerald-600" /> AtendiCalls • Voz WhatsApp
           </div>
 
           <div className="text-slate-400 text-sm mb-2 flex items-center gap-2">

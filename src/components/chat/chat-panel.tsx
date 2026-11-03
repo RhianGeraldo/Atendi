@@ -1534,72 +1534,27 @@ export function ChatPanel({
             )}
             {conv.status === "active" && !isGroup && (
               <>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-10 w-10 text-muted-foreground hover:bg-muted/50 rounded-full"
-                      title="Ligar para contato (AtendiCalls)"
-                    >
-                      <Phone className="h-5 w-5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56 z-[60]">
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (conv.contact?.phone) {
-                          const name =
-                            conv.contact.name !== "Desconhecido" ? conv.contact.name : undefined;
-                          const currentInstance = instances?.find(
-                            (i: any) => i.id === conv.whatsapp_instance_id,
-                          );
-                          const callToken =
-                            currentInstance?.atendicalls_token || currentInstance?.wavoip_token;
-                          startCall(conv.contact.phone, name, callToken, "human");
-                        }
-                      }}
-                      className="flex items-center gap-2 cursor-pointer py-2"
-                    >
-                      <Phone className="h-4 w-4 text-emerald-600 shrink-0" />
-                      <div className="flex flex-col">
-                        <span className="font-medium text-xs text-foreground">
-                          Ligar pelo Navegador
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          Falar no microfone (Operador)
-                        </span>
-                      </div>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (conv.contact?.phone) {
-                          const name =
-                            conv.contact.name !== "Desconhecido" ? conv.contact.name : undefined;
-                          const currentInstance = instances?.find(
-                            (i: any) => i.id === conv.whatsapp_instance_id,
-                          );
-                          const callToken =
-                            currentInstance?.atendicalls_token || currentInstance?.wavoip_token;
-                          startCall(conv.contact.phone, name, callToken, "ai");
-                        }
-                      }}
-                      className="flex items-center gap-2 cursor-pointer py-2"
-                    >
-                      <Bot className="h-4 w-4 text-purple-600 shrink-0" />
-                      <div className="flex flex-col">
-                        <span className="font-medium text-xs text-foreground">
-                          Ligar com Agente IA
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          Voz autônoma inteligente
-                        </span>
-                      </div>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 text-muted-foreground hover:bg-muted/50 rounded-full"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (conv.contact?.phone) {
+                      const name =
+                        conv.contact.name !== "Desconhecido" ? conv.contact.name : undefined;
+                      const currentInstance = instances?.find(
+                        (i: any) => i.id === conv.whatsapp_instance_id,
+                      );
+                      const callToken =
+                        currentInstance?.atendicalls_token || currentInstance?.wavoip_token;
+                      startCall(conv.contact.phone, name, callToken);
+                    }
+                  }}
+                  title="Ligar para contato"
+                >
+                  <Phone className="h-5 w-5" />
+                </Button>
                 <TransferDialog conv={conv} />
                 <Button
                   variant="ghost"

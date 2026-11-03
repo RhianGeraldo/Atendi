@@ -274,51 +274,13 @@ export const startAtendiCallsVoiceCallAction = createServerFn({ method: "POST" }
     const config = await resolveAtendiCallsConfig(effectiveInstanceId, effectiveCompanyId);
     const contactDisplayName = data.contactName || "Cliente";
 
-    let callId = "";
-    let sessionId: string | undefined = undefined;
-
-    if (data.mode === "human") {
-      // Inicia chamada para o operador humano atender pelo navegador via WebRTC
-      const result = await startAtendiCallsHumanCall({
-        phone: formattedPhone,
-        config,
-      });
-      callId = result.callId;
-      sessionId = result.sessionId;
-    } else {
-      // Sincroniza as chaves de IA da empresa no AtendiCalls para o motor de voz (TTS/STT/LLM)
-      await syncCompanyKeysToAtendiCalls(effectiveCompanyId, config);
-
-      const agentConfig: AtendiCallsAgentConfig = {
-        provider: data.provider || "openrouter",
-        model: data.model || "google/gemini-2.0-flash-001",
-        voice: data.voice || "alloy",
-        systemPrompt:
-          data.systemPrompt ||
-          `Você é a consultora de atendimento da clínica Estética e Laser. Seja gentil, acolhedora e objetiva. Confirme o interesse e as dúvidas do cliente {{nome}} e ofereça o melhor encaminhamento para agendamento.`,
-        firstMessage:
-          data.firstMessage ||
-          `Olá {{nome}}, tudo bem? Aqui é da Estética e Laser. Estou ligando para dar continuidade ao seu atendimento!`,
-        variables: {
-          nome: contactDisplayName,
-          telefone: formattedPhone,
-          ...(data.variables || {}),
-        },
-      };
-
-      const appOrigin =
-        process.env.APP_ORIGIN || process.env.NEXT_PUBLIC_APP_URL || "https://atendiai.vercel.app";
-      const webhookUrl = `${appOrigin.replace(/\/+$/, "")}/api/webhooks/calls`;
-
-      const result = await startAtendiCallsVoiceCall({
-        to: formattedPhone,
-        webhookUrl,
-        agent: agentConfig,
-        config,
-      });
-      callId = result.callId;
-      sessionId = result.sessionId;
-    }
+    // Inicia chamada para o operador humano atender pelo navegador via WebRTC
+    const result = await startAtendiCallsHumanCall({
+      phone: formattedPhone,
+      config,
+    });
+    const callId = result.callId;
+    const sessionId = result.sessionId;
 
     // 5. Registrar entrada inicial em call_logs com status CALLING
     if (callId) {
@@ -336,7 +298,6 @@ export const startAtendiCallsVoiceCallAction = createServerFn({ method: "POST" }
           started_at: new Date().toISOString(),
           provider: "atendicalls",
           metadata: {
-            mode: data.mode,
             initiated_by: context.userId,
             sessionId,
           },
@@ -349,7 +310,6 @@ export const startAtendiCallsVoiceCallAction = createServerFn({ method: "POST" }
       success: true,
       callId,
       sessionId,
-      mode: data.mode,
       phone: formattedPhone,
       contactName: contactDisplayName,
       token: config.token,
@@ -394,13 +354,18 @@ export const hangupAtendiCallsVoiceCallAction = createServerFn({ method: "POST" 
   .validator(
     z.object({
       callId: z.string().min(1),
+      sessionId: z.string().optional().nullable(),
       instanceId: z.string().uuid().optional().nullable(),
       companyId: z.string().uuid().optional().nullable(),
     }),
   )
   .handler(async ({ data }) => {
     const config = await resolveAtendiCallsConfig(data.instanceId, data.companyId);
-    const hungUp = await hangupAtendiCallsVoiceCall(data.callId, config);
+    const hungUp = await hangupAtendiCallsVoiceCall(
+      data.callId,
+      config,
+      data.sessionId || undefined,
+    );
 
     if (hungUp) {
       await supabaseAdmin

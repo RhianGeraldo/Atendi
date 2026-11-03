@@ -11,7 +11,9 @@ export interface AtendiCallsWebRTCConnection {
   pc: RTCPeerConnection;
   dc: RTCDataChannel;
   micStream: MediaStream;
+  remoteStream: MediaStream;
   audioCtx: AudioContext;
+  remoteAudio: HTMLAudioElement;
   close: () => void;
   mute: () => void;
   unmute: () => void;
@@ -38,42 +40,43 @@ export async function openAtendiCallsWebRTC(params: {
   const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
   const audioCtx = new AudioContextClass({ sampleRate: SAMPLE_RATE });
 
-  try {
-    await audioCtx.audioWorklet.addModule(CAPTURE_WORKLET_URL);
-    await audioCtx.audioWorklet.addModule(PLAYBACK_WORKLET_URL);
-  } catch (err) {
-    console.warn("[AtendiCalls WebRTC] Falha ao carregar audioWorklets:", err);
-  }
-
+  await audioCtx.audioWorklet.addModule(CAPTURE_WORKLET_URL);
+  await audioCtx.audioWorklet.addModule(PLAYBACK_WORKLET_URL);
   await audioCtx.resume();
 
   let isMuted = false;
 
   // 1. Captura do microfone -> Envia para o WhatsApp do cliente
-  try {
-    const micSource = audioCtx.createMediaStreamSource(micStream);
-    const captureNode = new AudioWorkletNode(audioCtx, CAPTURE_PROCESSOR_NAME);
-    captureNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
-      if (!isMuted && dc.readyState === "open") {
-        dc.send(float32ToInt16LE(e.data));
-      }
-    };
-    micSource.connect(captureNode);
-    // Não conecta captureNode na destination para o atendente não ouvir a própria voz (eco)
-  } catch (err) {
-    console.error("[AtendiCalls WebRTC] Erro no pipeline de captura:", err);
-  }
+  const micSource = audioCtx.createMediaStreamSource(micStream);
+  const captureNode = new AudioWorkletNode(audioCtx, CAPTURE_PROCESSOR_NAME);
+  captureNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
+    if (!isMuted && dc.readyState === "open") {
+      dc.send(float32ToInt16LE(e.data));
+    }
+  };
+  micSource.connect(captureNode);
+  // Conectar através de ganho zero para manter o nó ativo no scheduler sem causar retorno de eco no fone do operador
+  const zeroGain = audioCtx.createGain();
+  zeroGain.gain.value = 0;
+  captureNode.connect(zeroGain);
+  zeroGain.connect(audioCtx.destination);
 
   // 2. Recepção do WhatsApp do cliente -> Toca nos fones/caixa do atendente
-  try {
-    const playbackNode = new AudioWorkletNode(audioCtx, PLAYBACK_PROCESSOR_NAME);
-    playbackNode.connect(audioCtx.destination);
-    dc.onmessage = (e: MessageEvent<ArrayBuffer>) => {
-      playbackNode.port.postMessage(int16LEToFloat32(e.data));
-    };
-  } catch (err) {
-    console.error("[AtendiCalls WebRTC] Erro no pipeline de reprodução:", err);
-  }
+  const playbackNode = new AudioWorkletNode(audioCtx, PLAYBACK_PROCESSOR_NAME);
+  const streamDest = audioCtx.createMediaStreamDestination();
+  playbackNode.connect(streamDest);
+  playbackNode.connect(audioCtx.destination);
+  dc.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+    playbackNode.port.postMessage(int16LEToFloat32(e.data));
+  };
+
+  // Cria elemento de áudio no navegador e vincula ao stream recebido para reprodução
+  const remoteAudio = new Audio();
+  remoteAudio.srcObject = streamDest.stream;
+  remoteAudio.autoplay = true;
+  remoteAudio.play().catch((err) => {
+    console.warn("[AtendiCalls WebRTC] Autoplay aguardando interação:", err);
+  });
 
   // 3. Negociação SDP Offer / Answer
   const offer = await pc.createOffer();
@@ -90,7 +93,7 @@ export async function openAtendiCallsWebRTC(params: {
         }
       };
       pc.addEventListener("icegatheringstatechange", checkIce);
-      setTimeout(resolve, 2000); // Timeout de segurança para não travar
+      setTimeout(resolve, 2000);
     }
   });
 
@@ -104,7 +107,9 @@ export async function openAtendiCallsWebRTC(params: {
     pc,
     dc,
     micStream,
+    remoteStream: streamDest.stream,
     audioCtx,
+    remoteAudio,
     mute: () => {
       isMuted = true;
       micStream.getAudioTracks().forEach((t) => (t.enabled = false));
@@ -115,6 +120,10 @@ export async function openAtendiCallsWebRTC(params: {
     },
     isMuted: () => isMuted,
     close: () => {
+      try {
+        remoteAudio.pause();
+        remoteAudio.srcObject = null;
+      } catch {}
       try {
         micStream.getTracks().forEach((t) => t.stop());
       } catch {}
