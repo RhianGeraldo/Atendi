@@ -1,28 +1,28 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { 
-  Send, 
-  Paperclip, 
-  Smile, 
-  Phone, 
-  CheckCircle2, 
-  ChevronLeft, 
-  ChevronUp, 
-  ChevronDown, 
-  Users, 
-  Bot, 
-  BookOpen, 
-  Mic, 
-  X, 
-  Image as ImageIcon, 
-  MessageSquarePlus, 
-  LayoutTemplate, 
-  FileText, 
-  Sparkles, 
-  Folder, 
-  FolderOpen, 
-  Video, 
-  Headphones, 
+import {
+  Send,
+  Paperclip,
+  Smile,
+  Phone,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronUp,
+  ChevronDown,
+  Users,
+  Bot,
+  BookOpen,
+  Mic,
+  X,
+  Image as ImageIcon,
+  MessageSquarePlus,
+  LayoutTemplate,
+  FileText,
+  Sparkles,
+  Folder,
+  FolderOpen,
+  Video,
+  Headphones,
   Loader2,
   AlertCircle,
   AlertTriangle,
@@ -31,7 +31,7 @@ import {
   Check,
   ChevronRight,
   Zap,
-  Play
+  Play,
 } from "lucide-react";
 import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
@@ -42,17 +42,17 @@ import { markMessageAsSentByMe } from "@/lib/hooks/use-global-notifications";
 
 import { supabase } from "@/integrations/supabase/client";
 import { Link } from "@tanstack/react-router";
-import { 
-  sendMessageAction, 
-  reactToMessageAction, 
-  editMessageAction, 
-  deleteMessageAction, 
-  transcribeAudioAction, 
-  fixMessageTextAction, 
-  salesCoachAction, 
+import {
+  sendMessageAction,
+  reactToMessageAction,
+  editMessageAction,
+  deleteMessageAction,
+  transcribeAudioAction,
+  fixMessageTextAction,
+  salesCoachAction,
   salesCoachSuggestAction,
   resolveConversationAction,
-  assignConversationAction 
+  assignConversationAction,
 } from "@/lib/api/chat.functions";
 
 import { useAuth } from "@/lib/auth-context";
@@ -72,19 +72,42 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ChannelIcon } from "@/components/common/channel-icon";
 import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger, PopoverAnchor } from "@/components/ui/popover";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 import { TransferDialog } from "@/components/chat/transfer-dialog";
 import { PlaybookSheet } from "@/components/training/playbook-sheet";
 import { WhatsappTemplateSender } from "@/components/whatsapp/whatsapp-template-sender";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { ContactAvatar } from "@/components/chat/contact-avatar";
-import { ConvRow, MessageRow, fetchConversationMessages } from "@/components/chat/conversation-types";
+import {
+  ConvRow,
+  MessageRow,
+  fetchConversationMessages,
+} from "@/components/chat/conversation-types";
 
 let ffmpegInstance: FFmpeg | null = null;
 const getFFmpeg = async () => {
@@ -93,7 +116,7 @@ const getFFmpeg = async () => {
   try {
     await ffmpeg.load({
       coreURL: "https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js",
-      wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm"
+      wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm",
     });
     ffmpegInstance = ffmpeg;
     return ffmpeg;
@@ -102,13 +125,15 @@ const getFFmpeg = async () => {
     try {
       await ffmpeg.load({
         coreURL: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js",
-        wasmURL: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm"
+        wasmURL: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm",
       });
       ffmpegInstance = ffmpeg;
       return ffmpeg;
     } catch (fallbackErr) {
       console.error("Erro ao carregar FFmpeg de ambos CDNs:", fallbackErr);
-      throw new Error("Não foi possível carregar o módulo de áudio. Verifique a conexão com a internet.");
+      throw new Error(
+        "Não foi possível carregar o módulo de áudio. Verifique a conexão com a internet.",
+      );
     }
   }
 };
@@ -122,7 +147,7 @@ interface ChatPanelProps {
   onClose?: () => void;
 }
 
-export function ChatPanel({ 
+export function ChatPanel({
   conv,
   showSidebar,
   onToggleSidebar,
@@ -141,7 +166,11 @@ export function ChatPanel({
   const [isLocallyAssigned, setIsLocallyAssigned] = useState(false);
   const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
   const isManagerOrAdmin = isAdmin || profile?.role === "manager";
-  const [selectedFile, setSelectedFile] = useState<{ file: File | null; base64: string; type: string } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<{
+    file: File | null;
+    base64: string;
+    type: string;
+  } | null>(null);
   const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
   const [isCoaching, setIsCoaching] = useState(false);
   const [isPlaybookSheetOpen, setIsPlaybookSheetOpen] = useState(false);
@@ -188,20 +217,23 @@ export function ChatPanel({
   });
 
   const aiSettings = companyData?.ai_settings as any;
-  const hasAiConfigured = aiSettings && (
-    (aiSettings.engines?.chatbot && aiSettings.engines.chatbot !== "none") ||
-    (aiSettings.engines?.text && aiSettings.engines.text !== "none") ||
-    aiSettings.keys?.openai || aiSettings.keys?.openrouter || aiSettings.keys?.groq
-  );
+  const hasAiConfigured =
+    aiSettings &&
+    ((aiSettings.engines?.chatbot && aiSettings.engines.chatbot !== "none") ||
+      (aiSettings.engines?.text && aiSettings.engines.text !== "none") ||
+      aiSettings.keys?.openai ||
+      aiSettings.keys?.openrouter ||
+      aiSettings.keys?.groq);
 
-  const showCoach = hasAiConfigured && 
-    (aiSettings?.sales_coach_active_instances?.includes(conv.whatsapp_instance_id!) || 
-    !aiSettings?.sales_coach_active_instances?.length);
+  const showCoach =
+    hasAiConfigured &&
+    (aiSettings?.sales_coach_active_instances?.includes(conv.whatsapp_instance_id!) ||
+      !aiSettings?.sales_coach_active_instances?.length);
 
   useEffect(() => {
     const handleInsert = (e: any) => {
       if (e.detail) {
-        setText(prev => prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + e.detail);
+        setText((prev) => prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + e.detail);
         setTimeout(() => {
           document.getElementById("chat-input")?.focus();
         }, 100);
@@ -420,7 +452,9 @@ export function ChatPanel({
     try {
       const { data, error } = await supabase
         .from("messages")
-        .select("id, conversation_id, sender_type, sender_id, participant_jid, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
+        .select(
+          "id, conversation_id, sender_type, sender_id, participant_jid, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata",
+        )
         .eq("conversation_id", conv.id)
         .lt("created_at", oldestMessage.created_at)
         .order("created_at", { ascending: false })
@@ -441,8 +475,8 @@ export function ChatPanel({
 
       qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
         if (!old) return olderMessages;
-        const existingIds = new Set(old.map(m => m.id));
-        const filteredNew = olderMessages.filter(m => !existingIds.has(m.id));
+        const existingIds = new Set(old.map((m) => m.id));
+        const filteredNew = olderMessages.filter((m) => !existingIds.has(m.id));
         return [...filteredNew, ...old];
       });
 
@@ -585,21 +619,27 @@ export function ChatPanel({
               if (!page || !page.rows) return page;
               return {
                 ...page,
-                rows: page.rows.map((c: ConvRow) => c.id === conv.id ? { ...c, unread_count: 0 } : c)
+                rows: page.rows.map((c: ConvRow) =>
+                  c.id === conv.id ? { ...c, unread_count: 0 } : c,
+                ),
               };
-            })
+            }),
           };
         });
 
-        const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith("120363") || (conv.contact.phone.includes("-") && conv.contact.phone.length > 18)));
-        const tabKey = isGroup ? "groups" : (conv.status || "active");
+        const isGroup = !!(
+          conv.contact?.phone &&
+          (conv.contact.phone.startsWith("120363") ||
+            (conv.contact.phone.includes("-") && conv.contact.phone.length > 18))
+        );
+        const tabKey = isGroup ? "groups" : conv.status || "active";
         qc.setQueriesData({ queryKey: ["unread-counts"] }, (oldData: any) => {
           if (!oldData) return oldData;
           const newData = { ...oldData };
           if (newData[tabKey]) {
             newData[tabKey] = {
               total: newData[tabKey].total,
-              unread: Math.max(0, newData[tabKey].unread - conv.unread_count!)
+              unread: Math.max(0, newData[tabKey].unread - conv.unread_count!),
             };
           }
           return newData;
@@ -631,31 +671,57 @@ export function ChatPanel({
     (canalDaConversa.provider === "evogo" || canalDaConversa.provider === "stevo");
 
   const send = useMutation({
-    mutationFn: async (payload: { content: string; isInternal?: boolean; mediaType?: "text"|"image"|"video"|"audio"|"document"|"template"; mediaBase64?: string; quotedMessageId?: string; quotedParticipant?: string; quotedInternalId?: string; quotedContent?: string }) => {
-      return await sendMessageAction({ data: { conversationId: conv.id, text: payload.content, mediaType: (payload.mediaType === "template" ? "text" : payload.mediaType) as any, mediaBase64: payload.mediaBase64, quotedMessageId: payload.quotedMessageId, quotedParticipant: payload.quotedParticipant, quotedInternalId: payload.quotedInternalId, quotedContent: payload.quotedContent, isInternal: payload.isInternal } });
+    mutationFn: async (payload: {
+      content: string;
+      isInternal?: boolean;
+      mediaType?: "text" | "image" | "video" | "audio" | "document" | "template";
+      mediaBase64?: string;
+      quotedMessageId?: string;
+      quotedParticipant?: string;
+      quotedInternalId?: string;
+      quotedContent?: string;
+    }) => {
+      return await sendMessageAction({
+        data: {
+          conversationId: conv.id,
+          text: payload.content,
+          mediaType: (payload.mediaType === "template" ? "text" : payload.mediaType) as any,
+          mediaBase64: payload.mediaBase64,
+          quotedMessageId: payload.quotedMessageId,
+          quotedParticipant: payload.quotedParticipant,
+          quotedInternalId: payload.quotedInternalId,
+          quotedContent: payload.quotedContent,
+          isInternal: payload.isInternal,
+        },
+      });
     },
     onMutate: async (payload) => {
       await qc.cancelQueries({ queryKey: ["messages", conv.id] });
       const previousMessages = qc.getQueryData(["messages", conv.id]);
-      
+
       const optimisticMsg: MessageRow = {
         id: crypto.randomUUID(),
         conversation_id: conv.id,
         sender_type: "agent",
         is_internal: payload.isInternal,
         content: payload.content,
-        media_type: (payload.mediaType === "template" ? "text" : (payload.mediaType || "text")) as any,
+        media_type: (payload.mediaType === "template"
+          ? "text"
+          : payload.mediaType || "text") as any,
         media_url: payload.mediaBase64 || null,
         created_at: new Date().toISOString(),
         isOptimistic: true,
         quoted_message_id: payload.quotedInternalId || null,
         quoted_content: payload.quotedContent || null,
-        profiles: profile?.name ? { name: profile.name } : undefined
+        profiles: profile?.name ? { name: profile.name } : undefined,
       };
 
       markMessageAsSentByMe(optimisticMsg.id);
-      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => [...(old || []), optimisticMsg]);
-      
+      qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => [
+        ...(old || []),
+        optimisticMsg,
+      ]);
+
       if (!payload.isInternal) {
         qc.setQueriesData({ queryKey: ["conversations"] }, (oldData: any) => {
           if (!oldData || !oldData.pages) return oldData;
@@ -665,12 +731,22 @@ export function ChatPanel({
               if (!page || !page.rows) return page;
               return {
                 ...page,
-                rows: page.rows.map((c: ConvRow) => c.id === conv.id ? {
-                  ...c,
-                  last_message: [{ sender_type: "agent", created_at: optimisticMsg.created_at, is_internal: false }]
-                } : c)
+                rows: page.rows.map((c: ConvRow) =>
+                  c.id === conv.id
+                    ? {
+                        ...c,
+                        last_message: [
+                          {
+                            sender_type: "agent",
+                            created_at: optimisticMsg.created_at,
+                            is_internal: false,
+                          },
+                        ],
+                      }
+                    : c,
+                ),
               };
-            })
+            }),
           };
         });
       }
@@ -683,11 +759,11 @@ export function ChatPanel({
       } else {
         setIsInternalNote(false);
       }
-      
+
       isNearBottomRef.current = true;
       setShowScrollBottomBtn(false);
       setNewMessagesBelow(0);
-      
+
       setTimeout(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
       }, 50);
@@ -700,10 +776,12 @@ export function ChatPanel({
         if (result.message.remote_msg_id) markMessageAsSentByMe(result.message.remote_msg_id);
         qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
           if (!old) return old;
-          return old.map(m =>
-            m.isOptimistic && (m.content === result.message.content || m.quoted_message_id === result.message.quoted_message_id)
+          return old.map((m) =>
+            m.isOptimistic &&
+            (m.content === result.message.content ||
+              m.quoted_message_id === result.message.quoted_message_id)
               ? { ...result.message, isOptimistic: false }
-              : m
+              : m,
           );
         });
       }
@@ -713,7 +791,9 @@ export function ChatPanel({
         qc.setQueryData(["messages", conv.id], context.previousMessages);
       }
       setText(context?.content || "");
-      qc.invalidateQueries({ queryKey: ["whatsapp-instances", "status-da-conversa", conv.whatsapp_instance_id] });
+      qc.invalidateQueries({
+        queryKey: ["whatsapp-instances", "status-da-conversa", conv.whatsapp_instance_id],
+      });
       if (e.message.includes("WINDOW_24H_EXPIRED")) {
         setTemplateDialogOpen(true);
       } else {
@@ -732,45 +812,55 @@ export function ChatPanel({
     onMutate: async (messageId) => {
       await qc.cancelQueries({ queryKey: ["messages", conv.id] });
       const previousMessages = qc.getQueryData(["messages", conv.id]);
-      
+
       qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
-        return old.map(m => m.id === messageId ? { ...m, is_deleted: true } : m);
+        return old.map((m) => (m.id === messageId ? { ...m, is_deleted: true } : m));
       });
       return { previousMessages };
     },
     onError: (e, v, context) => {
-      if (context?.previousMessages) qc.setQueryData(["messages", conv.id], context.previousMessages);
+      if (context?.previousMessages)
+        qc.setQueryData(["messages", conv.id], context.previousMessages);
       toast.error("Erro ao apagar mensagem", { description: (e as Error).message });
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["messages", conv.id] });
-    }
+    },
   });
 
   const editMsg = useMutation({
     mutationFn: async (payload: { messageId: string; content: string }) => {
-      await editMessageAction({ data: { conversationId: conv.id, messageId: payload.messageId, newContent: payload.content } });
+      await editMessageAction({
+        data: {
+          conversationId: conv.id,
+          messageId: payload.messageId,
+          newContent: payload.content,
+        },
+      });
     },
     onMutate: async (payload) => {
       await qc.cancelQueries({ queryKey: ["messages", conv.id] });
       const previousMessages = qc.getQueryData(["messages", conv.id]);
-      
+
       qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
-        return old.map(m => m.id === payload.messageId ? { ...m, content: payload.content, is_edited: true } : m);
+        return old.map((m) =>
+          m.id === payload.messageId ? { ...m, content: payload.content, is_edited: true } : m,
+        );
       });
       setText("");
       setEditingMessage(null);
       return { previousMessages };
     },
     onError: (e, v, context) => {
-      if (context?.previousMessages) qc.setQueryData(["messages", conv.id], context.previousMessages);
+      if (context?.previousMessages)
+        qc.setQueryData(["messages", conv.id], context.previousMessages);
       toast.error("Erro ao editar", { description: (e as Error).message });
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["messages", conv.id] });
-    }
+    },
   });
 
   const transcribeAudio = useMutation({
@@ -781,11 +871,11 @@ export function ChatPanel({
       toast.success("Transcrição concluída com sucesso!");
       qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
-        return old.map(m => m.id === variables ? { ...m, transcription: data.text } : m);
+        return old.map((m) => (m.id === variables ? { ...m, transcription: data.text } : m));
       });
       qc.invalidateQueries({ queryKey: ["messages"] });
     },
-    onError: (e) => toast.error("Erro na transcrição", { description: (e as Error).message })
+    onError: (e) => toast.error("Erro na transcrição", { description: (e as Error).message }),
   });
 
   const fixTextMutation = useMutation({
@@ -798,7 +888,7 @@ export function ChatPanel({
     },
     onError: (e) => {
       toast.error("Erro ao corrigir texto", { description: (e as Error).message });
-    }
+    },
   });
 
   const react = useMutation({
@@ -808,20 +898,23 @@ export function ChatPanel({
     onMutate: async ({ messageId, emoji }) => {
       await qc.cancelQueries({ queryKey: ["messages", conv.id] });
       const previousMessages = qc.getQueryData(["messages", conv.id]);
-      
+
       qc.setQueryData(["messages", conv.id], (old: MessageRow[] | undefined) => {
         if (!old) return old;
-        return old.map(m => m.id === messageId ? { ...m, reactions: emoji ? { [emoji]: 1 } : {} } : m);
+        return old.map((m) =>
+          m.id === messageId ? { ...m, reactions: emoji ? { [emoji]: 1 } : {} } : m,
+        );
       });
       return { previousMessages };
     },
     onError: (e, v, context) => {
-      if (context?.previousMessages) qc.setQueryData(["messages", conv.id], context.previousMessages);
+      if (context?.previousMessages)
+        qc.setQueryData(["messages", conv.id], context.previousMessages);
       toast.error("Erro ao reagir", { description: (e as Error).message });
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["messages", conv.id] });
-    }
+    },
   });
 
   const processFile = (file: File) => {
@@ -829,7 +922,7 @@ export function ChatPanel({
     if (file.type.startsWith("image/")) type = "image";
     else if (file.type.startsWith("video/")) type = "video";
     else if (file.type.startsWith("audio/")) type = "audio";
-    
+
     if (type === "image") {
       const img = new Image();
       img.onload = () => {
@@ -837,7 +930,7 @@ export function ChatPanel({
         const MAX_DIM = 1200;
         let width = img.width;
         let height = img.height;
-        
+
         if (width > height && width > MAX_DIM) {
           height = Math.round(height * (MAX_DIM / width));
           width = MAX_DIM;
@@ -845,7 +938,7 @@ export function ChatPanel({
           width = Math.round(width * (MAX_DIM / height));
           height = MAX_DIM;
         }
-        
+
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext("2d");
@@ -933,10 +1026,10 @@ export function ChatPanel({
         const toastId = toast.loading("Processando áudio...");
         try {
           const webmBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-          
+
           const ffmpeg = await getFFmpeg();
           await ffmpeg.writeFile("input.webm", await fetchFile(webmBlob));
-          
+
           const isInstagram = conv.channel === "instagram";
           const outputName = isInstagram ? "output.mp4" : "output.ogg";
           const mimeType = isInstagram ? "audio/mp4" : "audio/ogg";
@@ -946,14 +1039,19 @@ export function ChatPanel({
           } else {
             await ffmpeg.exec(["-i", "input.webm", "-c:a", "libopus", outputName]);
           }
-          
+
           const data = await ffmpeg.readFile(outputName);
-          
+
           const audioBlob = new Blob([data], { type: mimeType });
           const reader = new FileReader();
           reader.onloadend = () => {
             const base64data = reader.result as string;
-            send.mutate({ content: "", isInternal: isInternalNote, mediaType: "audio", mediaBase64: base64data });
+            send.mutate({
+              content: "",
+              isInternal: isInternalNote,
+              mediaType: "audio",
+              mediaBase64: base64data,
+            });
             toast.dismiss(toastId);
           };
           reader.readAsDataURL(audioBlob);
@@ -962,7 +1060,7 @@ export function ChatPanel({
           toast.dismiss(toastId);
           toast.error("Erro ao processar áudio", { description: String(error) });
         } finally {
-          stream.getTracks().forEach(track => track.stop());
+          stream.getTracks().forEach((track) => track.stop());
         }
       };
 
@@ -970,7 +1068,7 @@ export function ChatPanel({
       setIsRecording(true);
       setRecordingTime(0);
       recordingTimerRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1);
+        setRecordingTime((prev) => prev + 1);
       }, 1000);
     } catch (err) {
       toast.error("Erro ao acessar microfone", { description: String(err) });
@@ -989,19 +1087,24 @@ export function ChatPanel({
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.onstop = null;
       mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+      mediaRecorderRef.current.stream.getTracks().forEach((t) => t.stop());
       setIsRecording(false);
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     }
   };
 
-  const insertQuickMessage = (qm: { content: string; media_url?: string | null; media_type?: string | null }) => {
+  const insertQuickMessage = (qm: {
+    content: string;
+    media_url?: string | null;
+    media_type?: string | null;
+  }) => {
     const t = fillQuickMessageVariables(qm.content || "", {
       clientName: conv.contact?.name,
       phone: conv.contact?.phone,
       email: conv.contact?.email,
       agentName: profile?.name,
-      companyName: companyData?.name || qc.getQueryData<string>(["company-name", targetCompanyId]) || "",
+      companyName:
+        companyData?.name || qc.getQueryData<string>(["company-name", targetCompanyId]) || "",
       unitName: conv.unit?.name,
       departmentName: conv.department?.name,
       instanceName: conv.whatsapp_instance?.name,
@@ -1012,12 +1115,12 @@ export function ChatPanel({
 
     setText(t);
     setIsQuickMsgDismissed(true);
-    
+
     if (qm.media_url && qm.media_type) {
       setSelectedFile({
         file: null,
         base64: qm.media_url,
-        type: qm.media_type as any
+        type: qm.media_type as any,
       });
     }
 
@@ -1038,17 +1141,27 @@ export function ChatPanel({
       return;
     }
 
-    const quotedPayload = replyingTo ? {
-      quotedMessageId: replyingTo.remote_msg_id || undefined,
-      quotedParticipant: replyingTo.participant_jid || undefined,
-      quotedInternalId: replyingTo.id,
-      quotedContent: replyingTo.content || (replyingTo.media_type !== "text" ? `[${replyingTo.media_type}]` : "Anexo"),
-    } : {};
+    const quotedPayload = replyingTo
+      ? {
+          quotedMessageId: replyingTo.remote_msg_id || undefined,
+          quotedParticipant: replyingTo.participant_jid || undefined,
+          quotedInternalId: replyingTo.id,
+          quotedContent:
+            replyingTo.content ||
+            (replyingTo.media_type !== "text" ? `[${replyingTo.media_type}]` : "Anexo"),
+        }
+      : {};
 
     const sendIsInternal = isAdminNoteMode ? true : isInternalNote;
 
     if (selectedFile) {
-      send.mutate({ content: text.trim(), isInternal: sendIsInternal, mediaType: selectedFile.type as any, mediaBase64: selectedFile.base64, ...quotedPayload });
+      send.mutate({
+        content: text.trim(),
+        isInternal: sendIsInternal,
+        mediaType: selectedFile.type as any,
+        mediaBase64: selectedFile.base64,
+        ...quotedPayload,
+      });
     } else if (text.trim()) {
       send.mutate({ content: text.trim(), isInternal: sendIsInternal, ...quotedPayload });
     }
@@ -1089,12 +1202,12 @@ export function ChatPanel({
 
   const resolve = useMutation({
     mutationFn: async ({ reasonId, observation }: { reasonId: string; observation: string }) => {
-      await resolveConversationAction({ 
-        data: { 
-          conversationId: conv.id, 
-          reasonId: reasonId || null, 
-          observation: observation.trim() || null 
-        } 
+      await resolveConversationAction({
+        data: {
+          conversationId: conv.id,
+          reasonId: reasonId || null,
+          observation: observation.trim() || null,
+        },
       });
     },
     onSuccess: () => {
@@ -1109,7 +1222,7 @@ export function ChatPanel({
     },
     onError: (e) => {
       toast.error("Erro ao encerrar atendimento", { description: (e as Error).message });
-    }
+    },
   });
 
   const assignConv = useMutation({
@@ -1151,7 +1264,7 @@ export function ChatPanel({
                         ai_active: false,
                         assigned_agent: profile ? { name: profile.name } : r.assigned_agent,
                       }
-                    : r
+                    : r,
                 ),
               };
             }),
@@ -1171,12 +1284,15 @@ export function ChatPanel({
     onError: (e) => {
       setIsLocallyAssigned(false);
       toast.error("Erro ao puxar atendimento", { description: (e as Error).message });
-    }
+    },
   });
 
   const toggleAi = useMutation({
     mutationFn: async (active: boolean) => {
-      const { error } = await supabase.from("conversations").update({ ai_active: active }).eq("id", conv.id);
+      const { error } = await supabase
+        .from("conversations")
+        .update({ ai_active: active })
+        .eq("id", conv.id);
       if (error) throw error;
     },
     onMutate: async (active) => {
@@ -1190,14 +1306,18 @@ export function ChatPanel({
               if (!page || !page.rows) return page;
               return {
                 ...page,
-                rows: page.rows.map((r: any) => (r.id === conv.id ? { ...r, ai_active: active } : r)),
+                rows: page.rows.map((r: any) =>
+                  r.id === conv.id ? { ...r, ai_active: active } : r,
+                ),
               };
             }),
           };
         }
         return oldData;
       });
-      qc.setQueryData(["direct-conversation", conv.id], (old: any) => (old ? { ...old, ai_active: active } : old));
+      qc.setQueryData(["direct-conversation", conv.id], (old: any) =>
+        old ? { ...old, ai_active: active } : old,
+      );
     },
     onSuccess: (_, active) => {
       toast.success(active ? "IA ativada neste atendimento" : "IA pausada neste atendimento");
@@ -1206,16 +1326,21 @@ export function ChatPanel({
     },
     onError: (e: any) => {
       toast.error("Erro ao alterar status da IA", { description: e.message });
-    }
+    },
   });
 
-  const isGroup = !!(conv.contact?.phone && (conv.contact.phone.startsWith("120363") || (conv.contact.phone.includes("-") && conv.contact.phone.length > 18)));
+  const isGroup = !!(
+    conv.contact?.phone &&
+    (conv.contact.phone.startsWith("120363") ||
+      (conv.contact.phone.includes("-") && conv.contact.phone.length > 18))
+  );
   // Contato recebido nesta conversa vira indicação da cliente no Todoo ("+ Indicação")
   const todooReferrer =
     !isGroup && conv.contact?.id && canAccessMenu("todoo", profile)
       ? { contactId: conv.contact.id, phone: conv.contact.phone, unitId: conv.unit_id || null }
       : null;
-  const contactName = isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  const contactName =
+    isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 
   // Detecção da Janela de 24 horas da Meta WhatsApp
   const lastContactMessage = useMemo(() => {
@@ -1243,28 +1368,55 @@ export function ChatPanel({
     let focusCount = 0;
 
     if (isSearch) {
-      const filtered = quickMessages.filter(qm => 
-        qm.shortcut.toLowerCase().includes(search) || 
-        (qm.name && qm.name.toLowerCase().includes(search)) ||
-        (qm.content && qm.content.toLowerCase().includes(search))
-      ).sort((a, b) => a.shortcut.localeCompare(b.shortcut));
-      
-      items = filtered.map(qm => ({ type: "message", id: qm.id, qm, index: focusCount++ }));
+      const filtered = quickMessages
+        .filter(
+          (qm) =>
+            qm.shortcut.toLowerCase().includes(search) ||
+            (qm.name && qm.name.toLowerCase().includes(search)) ||
+            (qm.content && qm.content.toLowerCase().includes(search)),
+        )
+        .sort((a, b) => a.shortcut.localeCompare(b.shortcut));
+
+      items = filtered.map((qm) => ({ type: "message", id: qm.id, qm, index: focusCount++ }));
     } else {
-      const rootMsgs = quickMessages.filter(qm => !qm.folder_id).sort((a, b) => a.shortcut.localeCompare(b.shortcut));
+      const rootMsgs = quickMessages
+        .filter((qm) => !qm.folder_id)
+        .sort((a, b) => a.shortcut.localeCompare(b.shortcut));
       if (rootMsgs.length > 0) {
-        items.push({ type: "header", id: "root", name: "Geral", folderId: null, isExpanded: true, count: rootMsgs.length });
-        rootMsgs.forEach(qm => items.push({ type: "message", id: qm.id, qm, index: focusCount++ }));
+        items.push({
+          type: "header",
+          id: "root",
+          name: "Geral",
+          folderId: null,
+          isExpanded: true,
+          count: rootMsgs.length,
+        });
+        rootMsgs.forEach((qm) =>
+          items.push({ type: "message", id: qm.id, qm, index: focusCount++ }),
+        );
       }
 
-      const sortedFolders = [...(quickMessageFolders || [])].sort((a, b) => a.name.localeCompare(b.name));
-      sortedFolders.forEach(folder => {
-        const folderMsgs = quickMessages.filter(qm => qm.folder_id === folder.id).sort((a, b) => a.shortcut.localeCompare(b.shortcut));
+      const sortedFolders = [...(quickMessageFolders || [])].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
+      sortedFolders.forEach((folder) => {
+        const folderMsgs = quickMessages
+          .filter((qm) => qm.folder_id === folder.id)
+          .sort((a, b) => a.shortcut.localeCompare(b.shortcut));
         if (folderMsgs.length > 0) {
           const isExpanded = !collapsedFolders.has(folder.id);
-          items.push({ type: "header", id: folder.id, name: folder.name, folderId: folder.id, isExpanded, count: folderMsgs.length });
+          items.push({
+            type: "header",
+            id: folder.id,
+            name: folder.name,
+            folderId: folder.id,
+            isExpanded,
+            count: folderMsgs.length,
+          });
           if (isExpanded) {
-            folderMsgs.forEach(qm => items.push({ type: "message", id: qm.id, qm, index: focusCount++ }));
+            folderMsgs.forEach((qm) =>
+              items.push({ type: "message", id: qm.id, qm, index: focusCount++ }),
+            );
           }
         }
       });
@@ -1280,16 +1432,19 @@ export function ChatPanel({
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Header */}
         <header className="flex items-center justify-between border-b border-border bg-card px-3 md:px-5 py-3 shadow-sm z-10 min-w-0 w-full">
-          <div 
+          <div
             className="flex items-center gap-2 md:gap-3 cursor-pointer hover:bg-muted/50 rounded-md p-1 -ml-1 transition-colors"
             onClick={onToggleSidebar}
           >
             {onBack && (
-              <Button 
-                variant="ghost" 
-                size="icon" 
+              <Button
+                variant="ghost"
+                size="icon"
                 className="md:hidden h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
-                onClick={(e) => { e.stopPropagation(); onBack(); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onBack();
+                }}
               >
                 <ChevronLeft className="h-5 w-5" />
               </Button>
@@ -1312,13 +1467,16 @@ export function ChatPanel({
                 {conv.department?.name && <span>{conv.department.name}</span>}
 
                 {slaInfo.isWaiting && (
-                  <Badge 
-                    variant="outline" 
+                  <Badge
+                    variant="outline"
                     className={cn(
                       "text-[10px] h-5 px-1.5 font-semibold transition-all flex items-center gap-1",
-                      slaInfo.status === "breached" && "bg-destructive/15 text-destructive border-destructive/30 animate-pulse font-bold",
-                      slaInfo.status === "warning" && "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
-                      slaInfo.status === "ok" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                      slaInfo.status === "breached" &&
+                        "bg-destructive/15 text-destructive border-destructive/30 animate-pulse font-bold",
+                      slaInfo.status === "warning" &&
+                        "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
+                      slaInfo.status === "ok" &&
+                        "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
                     )}
                     title={slaInfo.tooltipText}
                   >
@@ -1335,17 +1493,28 @@ export function ChatPanel({
           </div>
           <div className="flex items-center gap-1 sm:gap-1.5">
             {!isGroup && (
-              <div 
+              <div
                 className={cn(
                   "flex items-center gap-1.5 sm:gap-2 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border transition-all select-none mr-0.5",
-                  conv.ai_active 
-                    ? "bg-primary/10 border-primary/20 text-primary shadow-xs" 
-                    : "bg-muted/40 border-border/60 text-muted-foreground hover:bg-muted/60"
+                  conv.ai_active
+                    ? "bg-primary/10 border-primary/20 text-primary shadow-xs"
+                    : "bg-muted/40 border-border/60 text-muted-foreground hover:bg-muted/60",
                 )}
-                title={conv.ai_active ? "A IA está respondendo neste ticket" : "IA pausada neste ticket"}
+                title={
+                  conv.ai_active ? "A IA está respondendo neste ticket" : "IA pausada neste ticket"
+                }
               >
-                <div className={cn("p-1 rounded-md shrink-0", conv.ai_active ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground")}>
-                  <Bot className={cn("h-3.5 w-3.5", conv.ai_active && "text-primary animate-pulse")} />
+                <div
+                  className={cn(
+                    "p-1 rounded-md shrink-0",
+                    conv.ai_active
+                      ? "bg-primary/20 text-primary"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  <Bot
+                    className={cn("h-3.5 w-3.5", conv.ai_active && "text-primary animate-pulse")}
+                  />
                 </div>
                 <div className="hidden sm:flex flex-col text-left">
                   <span className="text-[11px] font-semibold leading-tight">
@@ -1355,9 +1524,9 @@ export function ChatPanel({
                     {conv.ai_active ? "Respondendo" : "Pausada"}
                   </span>
                 </div>
-                <Switch 
-                  checked={conv.ai_active || false} 
-                  onCheckedChange={(v) => toggleAi.mutate(v)} 
+                <Switch
+                  checked={conv.ai_active || false}
+                  onCheckedChange={(v) => toggleAi.mutate(v)}
                   disabled={toggleAi.isPending}
                   className="scale-75 origin-right cursor-pointer"
                 />
@@ -1365,29 +1534,81 @@ export function ChatPanel({
             )}
             {conv.status === "active" && !isGroup && (
               <>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-10 w-10 text-muted-foreground hover:bg-muted/50 rounded-full"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (conv.contact?.phone) {
-                      const name = conv.contact.name !== "Desconhecido" ? conv.contact.name : undefined;
-                      const currentInstance = instances?.find((i: any) => i.id === conv.whatsapp_instance_id);
-                      const callToken = currentInstance?.atendicalls_token || currentInstance?.wavoip_token;
-                      startCall(conv.contact.phone, name, callToken);
-                    }
-                  }}
-                  title="Ligar para contato"
-                >
-                  <Phone className="h-5 w-5" />
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10 text-muted-foreground hover:bg-muted/50 rounded-full"
+                      title="Ligar para contato (AtendiCalls)"
+                    >
+                      <Phone className="h-5 w-5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56 z-[60]">
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (conv.contact?.phone) {
+                          const name =
+                            conv.contact.name !== "Desconhecido" ? conv.contact.name : undefined;
+                          const currentInstance = instances?.find(
+                            (i: any) => i.id === conv.whatsapp_instance_id,
+                          );
+                          const callToken =
+                            currentInstance?.atendicalls_token || currentInstance?.wavoip_token;
+                          startCall(conv.contact.phone, name, callToken, "human");
+                        }
+                      }}
+                      className="flex items-center gap-2 cursor-pointer py-2"
+                    >
+                      <Phone className="h-4 w-4 text-emerald-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="font-medium text-xs text-foreground">
+                          Ligar pelo Navegador
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          Falar no microfone (Operador)
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (conv.contact?.phone) {
+                          const name =
+                            conv.contact.name !== "Desconhecido" ? conv.contact.name : undefined;
+                          const currentInstance = instances?.find(
+                            (i: any) => i.id === conv.whatsapp_instance_id,
+                          );
+                          const callToken =
+                            currentInstance?.atendicalls_token || currentInstance?.wavoip_token;
+                          startCall(conv.contact.phone, name, callToken, "ai");
+                        }
+                      }}
+                      className="flex items-center gap-2 cursor-pointer py-2"
+                    >
+                      <Bot className="h-4 w-4 text-purple-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="font-medium text-xs text-foreground">
+                          Ligar com Agente IA
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          Voz autônoma inteligente
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <TransferDialog conv={conv} />
                 <Button
                   variant="ghost"
                   size="icon"
                   className="h-10 w-10 text-muted-foreground hover:bg-muted/50 rounded-full"
-                  onClick={(e) => { e.stopPropagation(); setResolveDialogOpen(true); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setResolveDialogOpen(true);
+                  }}
                   title="Encerrar Atendimento"
                 >
                   <CheckCircle2 className="h-5 w-5" />
@@ -1411,9 +1632,10 @@ export function ChatPanel({
                         <Label htmlFor="resolve-reason">
                           Motivo do Encerramento <span className="text-destructive">*</span>
                         </Label>
-                        {(!resolutionReasons || resolutionReasons.length === 0) ? (
+                        {!resolutionReasons || resolutionReasons.length === 0 ? (
                           <div className="text-sm text-muted-foreground border border-dashed rounded-md p-3 text-center">
-                            Nenhum motivo cadastrado. Configure os motivos em <strong>Configurações</strong>.
+                            Nenhum motivo cadastrado. Configure os motivos em{" "}
+                            <strong>Configurações</strong>.
                           </div>
                         ) : (
                           <Select value={selectedReasonId} onValueChange={setSelectedReasonId}>
@@ -1433,7 +1655,8 @@ export function ChatPanel({
 
                       <div className="space-y-2">
                         <Label htmlFor="resolve-observation">
-                          Observação <span className="text-xs text-muted-foreground">(opcional)</span>
+                          Observação{" "}
+                          <span className="text-xs text-muted-foreground">(opcional)</span>
                         </Label>
                         <Textarea
                           id="resolve-observation"
@@ -1459,8 +1682,18 @@ export function ChatPanel({
                         Cancelar
                       </Button>
                       <Button
-                        onClick={() => resolve.mutate({ reasonId: selectedReasonId, observation: resolveObservation })}
-                        disabled={!selectedReasonId || resolve.isPending || (!resolutionReasons || resolutionReasons.length === 0)}
+                        onClick={() =>
+                          resolve.mutate({
+                            reasonId: selectedReasonId,
+                            observation: resolveObservation,
+                          })
+                        }
+                        disabled={
+                          !selectedReasonId ||
+                          resolve.isPending ||
+                          !resolutionReasons ||
+                          resolutionReasons.length === 0
+                        }
                       >
                         {resolve.isPending ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1484,7 +1717,9 @@ export function ChatPanel({
           >
             <WifiOff className="h-4 w-4 shrink-0" />
             <p className="flex-1 min-w-0">
-              <span className="font-semibold">{canalDaConversa?.name || "O canal"} está desconectado.</span>{" "}
+              <span className="font-semibold">
+                {canalDaConversa?.name || "O canal"} está desconectado.
+              </span>{" "}
               As mensagens não serão enviadas até reconectar o WhatsApp pelo QR Code.
             </p>
             {canAccessMenu("settings", profile) ? (
@@ -1563,17 +1798,20 @@ export function ChatPanel({
               )}
 
               {(messages ?? [])
-                .reduce<{ day: string; key: string; items: NonNullable<typeof messages> }[]>((groups, m) => {
-                  const key = new Date(m.created_at).toDateString();
-                  const last = groups[groups.length - 1];
-                  if (last && last.day === key) last.items.push(m);
-                  else {
-                    // Mensagem fora de ordem (realtime/otimista) pode repetir o dia: a key precisa ser única
-                    const repeat = groups.filter((g) => g.day === key).length;
-                    groups.push({ day: key, key: repeat ? `${key}-${repeat}` : key, items: [m] });
-                  }
-                  return groups;
-                }, [])
+                .reduce<{ day: string; key: string; items: NonNullable<typeof messages> }[]>(
+                  (groups, m) => {
+                    const key = new Date(m.created_at).toDateString();
+                    const last = groups[groups.length - 1];
+                    if (last && last.day === key) last.items.push(m);
+                    else {
+                      // Mensagem fora de ordem (realtime/otimista) pode repetir o dia: a key precisa ser única
+                      const repeat = groups.filter((g) => g.day === key).length;
+                      groups.push({ day: key, key: repeat ? `${key}-${repeat}` : key, items: [m] });
+                    }
+                    return groups;
+                  },
+                  [],
+                )
                 .map((group) => (
                   <div key={group.key} className="space-y-3">
                     <div className="sticky top-0 z-10 flex justify-center py-1 pointer-events-none">
@@ -1582,21 +1820,26 @@ export function ChatPanel({
                       </span>
                     </div>
                     {group.items.map((m) => (
-                    <MessageBubble 
-                      key={m.id} 
-                      m={m} 
-                      isGroup={isGroup}
-                      onReact={(emoji) => {
-                        const isAlreadyActive = m.reactions && Boolean(m.reactions[emoji]);
-                        react.mutate({ messageId: m.id, emoji: isAlreadyActive ? "" : emoji });
-                      }} 
-                      onReply={(msg) => { setReplyingTo(msg); document.getElementById("chat-input")?.focus(); }}
-                      onEdit={startEdit}
-                      onDelete={(msg) => deleteMsg.mutate(msg.id)}
-                      onTranscribe={(id) => transcribeAudio.mutate(id)}
-                      isTranscribingId={transcribeAudio.isPending ? transcribeAudio.variables : null}
-                      todooReferrer={todooReferrer}
-                    />
+                      <MessageBubble
+                        key={m.id}
+                        m={m}
+                        isGroup={isGroup}
+                        onReact={(emoji) => {
+                          const isAlreadyActive = m.reactions && Boolean(m.reactions[emoji]);
+                          react.mutate({ messageId: m.id, emoji: isAlreadyActive ? "" : emoji });
+                        }}
+                        onReply={(msg) => {
+                          setReplyingTo(msg);
+                          document.getElementById("chat-input")?.focus();
+                        }}
+                        onEdit={startEdit}
+                        onDelete={(msg) => deleteMsg.mutate(msg.id)}
+                        onTranscribe={(id) => transcribeAudio.mutate(id)}
+                        isTranscribingId={
+                          transcribeAudio.isPending ? transcribeAudio.variables : null
+                        }
+                        todooReferrer={todooReferrer}
+                      />
                     ))}
                   </div>
                 ))}
@@ -1614,7 +1857,7 @@ export function ChatPanel({
                     "shadow-lg border gap-1.5 transition-all cursor-pointer",
                     newMessagesBelow > 0
                       ? "bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-3.5 py-1.5 h-8 font-medium border-primary/20 shadow-primary/20"
-                      : "bg-background/90 hover:bg-background text-muted-foreground hover:text-foreground rounded-full h-8 w-8 p-0 backdrop-blur-sm border-border/80"
+                      : "bg-background/90 hover:bg-background text-muted-foreground hover:text-foreground rounded-full h-8 w-8 p-0 backdrop-blur-sm border-border/80",
                   )}
                   title="Rolar para as mensagens mais recentes"
                 >
@@ -1632,26 +1875,40 @@ export function ChatPanel({
 
         {/* Input / Composer */}
         <div className="border-t border-border bg-card p-3 flex flex-col gap-2 relative">
-          {(!isGroup && !isLocallyAssigned && (conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id))))) && (
-            !isAdminNoteMode ? (
+          {!isGroup &&
+            !isLocallyAssigned &&
+            (conv.status === "waiting" ||
+              (conv.status === "active" &&
+                (!conv.assigned_agent_id ||
+                  conv.assigned_agent_id !== profile?.id ||
+                  (conv.ai_active && !conv.assigned_agent_id)))) &&
+            (!isAdminNoteMode ? (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-card gap-2">
-                {(!conv.assigned_agent_id || conv.assigned_agent_id === profile?.id || isManagerOrAdmin) ? (
+                {!conv.assigned_agent_id ||
+                conv.assigned_agent_id === profile?.id ||
+                isManagerOrAdmin ? (
                   <>
                     <p className="text-sm font-medium text-muted-foreground text-center px-4">
                       {!conv.assigned_agent_id
-                        ? (conv.status === "waiting" 
-                            ? "Esta conversa está na fila e aguardando um agente." 
-                            : "Esta conversa está em andamento sem atendente atribuído.")
-                        : conv.assigned_agent_id === profile?.id 
-                          ? "Esta conversa foi transferida para você." 
+                        ? conv.status === "waiting"
+                          ? "Esta conversa está na fila e aguardando um agente."
+                          : "Esta conversa está em andamento sem atendente atribuído."
+                        : conv.assigned_agent_id === profile?.id
+                          ? "Esta conversa foi transferida para você."
                           : conv.status === "active"
                             ? `Esta conversa está sendo atendida por ${conv.ai_active ? `🤖 ${conv.ai_agent?.name || "IA"}` : conv.assigned_agent?.name || "outro agente"}.`
                             : `Esta conversa foi transferida para ${conv.assigned_agent?.name || "outro agente"}.`}
                     </p>
                     <div className="flex items-center gap-2 flex-wrap justify-center">
                       <Button onClick={() => assignConv.mutate()} disabled={assignConv.isPending}>
-                        {assignConv.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        {!conv.assigned_agent_id ? "Atender Cliente" : (conv.assigned_agent_id === profile?.id ? "Aceitar Transferência" : "Assumir Conversa")}
+                        {assignConv.isPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : null}
+                        {!conv.assigned_agent_id
+                          ? "Atender Cliente"
+                          : conv.assigned_agent_id === profile?.id
+                            ? "Aceitar Transferência"
+                            : "Assumir Conversa"}
                       </Button>
                       {isAdmin && (
                         <Button
@@ -1674,64 +1931,77 @@ export function ChatPanel({
                   </>
                 ) : (
                   <p className="text-sm font-medium text-muted-foreground">
-                    {conv.status === "active" 
-                      ? `Em atendimento por ${conv.ai_active ? `🤖 ${conv.ai_agent?.name || "IA"}` : conv.assigned_agent?.name || "outro agente"}.` 
+                    {conv.status === "active"
+                      ? `Em atendimento por ${conv.ai_active ? `🤖 ${conv.ai_agent?.name || "IA"}` : conv.assigned_agent?.name || "outro agente"}.`
                       : `Aguardando aceite de ${conv.assigned_agent?.name || "outro agente"}.`}
                   </p>
                 )}
               </div>
-            ) : null
-          )}
+            ) : null)}
 
           {/* Banner de Modo Nota Interna para Administrador */}
-          {(!isGroup && !isLocallyAssigned && isAdminNoteMode && (conv.status === "waiting" || (conv.status === "active" && (!conv.assigned_agent_id || conv.assigned_agent_id !== profile?.id || (conv.ai_active && !conv.assigned_agent_id))))) && (
-            <div className="flex items-center justify-between gap-2 px-3 py-2 bg-amber-500/15 border border-amber-500/30 text-amber-900 dark:text-amber-100 rounded-lg text-xs animate-in fade-in duration-200">
-              <div className="flex items-center gap-2 truncate">
-                <FileText className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                <span className="truncate">
-                  <strong>Nota Interna (Administrador):</strong> Visível apenas internamente. O atendimento permanece com{" "}
-                  <span className="font-semibold underline">
-                    {conv.assigned_agent?.name || (conv.status === "waiting" ? "a fila de espera" : "o atendente atual")}
-                  </span>.
-                </span>
+          {!isGroup &&
+            !isLocallyAssigned &&
+            isAdminNoteMode &&
+            (conv.status === "waiting" ||
+              (conv.status === "active" &&
+                (!conv.assigned_agent_id ||
+                  conv.assigned_agent_id !== profile?.id ||
+                  (conv.ai_active && !conv.assigned_agent_id)))) && (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-amber-500/15 border border-amber-500/30 text-amber-900 dark:text-amber-100 rounded-lg text-xs animate-in fade-in duration-200">
+                <div className="flex items-center gap-2 truncate">
+                  <FileText className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span className="truncate">
+                    <strong>Nota Interna (Administrador):</strong> Visível apenas internamente. O
+                    atendimento permanece com{" "}
+                    <span className="font-semibold underline">
+                      {conv.assigned_agent?.name ||
+                        (conv.status === "waiting" ? "a fila de espera" : "o atendente atual")}
+                    </span>
+                    .
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 text-xs px-2 hover:bg-amber-500/20 text-amber-900 dark:text-amber-100"
+                    onClick={() => {
+                      setIsAdminNoteMode(false);
+                      setIsInternalNote(false);
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-6 text-xs px-2"
+                    onClick={() => assignConv.mutate()}
+                    disabled={assignConv.isPending}
+                  >
+                    {assignConv.isPending ? (
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    ) : null}
+                    Assumir Conversa
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 text-xs px-2 hover:bg-amber-500/20 text-amber-900 dark:text-amber-100"
-                  onClick={() => {
-                    setIsAdminNoteMode(false);
-                    setIsInternalNote(false);
-                  }}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-6 text-xs px-2"
-                  onClick={() => assignConv.mutate()}
-                  disabled={assignConv.isPending}
-                >
-                  {assignConv.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                  Assumir Conversa
-                </Button>
-              </div>
-            </div>
-          )}
+            )}
 
           {/* Indicador Proativo da Janela de 24h Meta */}
           {is24hExpired && (
             <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 rounded-lg text-xs">
               <div className="flex items-center gap-1.5 truncate">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Janela de 24h da Meta expirada. Envie um Template oficial para retomar.</span>
+                <span className="truncate">
+                  Janela de 24h da Meta expirada. Envie um Template oficial para retomar.
+                </span>
               </div>
-              <Button 
-                size="sm" 
-                variant="outline" 
+              <Button
+                size="sm"
+                variant="outline"
                 className="h-6 text-[11px] px-2 text-amber-700 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/20"
                 onClick={() => setTemplateDialogOpen(true)}
               >
@@ -1742,23 +2012,27 @@ export function ChatPanel({
 
           {selectedFile && (
             <div className="flex items-center gap-3 p-2 border border-border rounded-md bg-muted/50 w-fit relative pr-8 shadow-2xs">
-              <button 
-                onClick={() => setSelectedFile(null)} 
+              <button
+                onClick={() => setSelectedFile(null)}
                 className="absolute top-1 right-1 p-0.5 rounded-full bg-background border border-border hover:bg-accent text-muted-foreground transition-colors cursor-pointer"
                 title="Remover anexo"
               >
                 <X className="h-3 w-3" />
               </button>
               {selectedFile.type === "image" ? (
-                <img src={selectedFile.base64} alt="preview" className="h-12 w-12 object-cover rounded-md border border-border/40 bg-background" />
+                <img
+                  src={selectedFile.base64}
+                  alt="preview"
+                  className="h-12 w-12 object-cover rounded-md border border-border/40 bg-background"
+                />
               ) : selectedFile.type === "video" ? (
                 <div className="relative h-12 w-12 rounded-md overflow-hidden bg-black shrink-0 border border-border/40 flex items-center justify-center">
-                  <video 
-                    src={`${selectedFile.base64}#t=0.1`} 
-                    className="h-full w-full object-cover opacity-90" 
-                    muted 
-                    preload="metadata" 
-                    playsInline 
+                  <video
+                    src={`${selectedFile.base64}#t=0.1`}
+                    className="h-full w-full object-cover opacity-90"
+                    muted
+                    preload="metadata"
+                    playsInline
                   />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/25 pointer-events-none">
                     <Play className="h-4 w-4 text-white fill-white drop-shadow-sm" />
@@ -1774,41 +2048,59 @@ export function ChatPanel({
                 </div>
               )}
               <div className="text-xs truncate max-w-[160px] font-medium">
-                {selectedFile.file?.name || (selectedFile.type === "image" ? "Imagem" : selectedFile.type === "video" ? "Vídeo" : selectedFile.type === "audio" ? "Áudio" : "Anexo")}
+                {selectedFile.file?.name ||
+                  (selectedFile.type === "image"
+                    ? "Imagem"
+                    : selectedFile.type === "video"
+                      ? "Vídeo"
+                      : selectedFile.type === "audio"
+                        ? "Áudio"
+                        : "Anexo")}
               </div>
             </div>
           )}
-          
+
           {replyingTo && (
             <div className="flex items-center gap-3 p-2 border-l-4 border-l-primary rounded-md bg-muted/30 relative pr-8 text-sm">
-              <button 
-                onClick={() => setReplyingTo(null)} 
+              <button
+                onClick={() => setReplyingTo(null)}
                 className="absolute top-1 right-1 p-0.5 rounded-full bg-background border border-border hover:bg-accent text-muted-foreground"
               >
                 <X className="h-3 w-3" />
               </button>
               <div className="flex-1 min-w-0">
-                <span className="font-semibold block mb-0.5 text-[10px] uppercase opacity-70">Respondendo a</span>
-                <span className="line-clamp-2 opacity-90 text-xs">{replyingTo.content || `[${replyingTo.media_type}]`}</span>
+                <span className="font-semibold block mb-0.5 text-[10px] uppercase opacity-70">
+                  Respondendo a
+                </span>
+                <span className="line-clamp-2 opacity-90 text-xs">
+                  {replyingTo.content || `[${replyingTo.media_type}]`}
+                </span>
               </div>
             </div>
           )}
 
           {editingMessage && (
             <div className="flex items-center gap-3 p-2 border-l-4 border-l-amber-500 rounded-md bg-amber-500/10 relative pr-8 text-sm">
-              <button 
-                onClick={() => { setEditingMessage(null); setText(""); }} 
+              <button
+                onClick={() => {
+                  setEditingMessage(null);
+                  setText("");
+                }}
                 className="absolute top-1 right-1 p-0.5 rounded-full bg-background border border-border hover:bg-accent text-muted-foreground"
               >
                 <X className="h-3 w-3" />
               </button>
               <div className="flex-1 min-w-0">
-                <span className="font-semibold block mb-0.5 text-[10px] uppercase text-amber-600 opacity-90">Editando mensagem</span>
-                <span className="line-clamp-2 opacity-90 text-xs">{editingMessage.content?.replace(/^\*(.+?)\*:\s*/, "")}</span>
+                <span className="font-semibold block mb-0.5 text-[10px] uppercase text-amber-600 opacity-90">
+                  Editando mensagem
+                </span>
+                <span className="line-clamp-2 opacity-90 text-xs">
+                  {editingMessage.content?.replace(/^\*(.+?)\*:\s*/, "")}
+                </span>
               </div>
             </div>
           )}
-          
+
           <div className="flex items-end gap-2">
             {!isRecording ? (
               <>
@@ -1822,456 +2114,532 @@ export function ChatPanel({
                   }}
                 >
                   <PopoverAnchor asChild>
-                    <div 
+                    <div
                       id="chat-composer-container"
                       onPaste={handlePaste}
                       className={cn(
                         "flex-1 flex items-end bg-muted/50 rounded-3xl border border-transparent shadow-sm px-1 py-1 focus-within:border-border transition-colors",
-                        isInternalNote && "bg-amber-100/50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50"
+                        isInternalNote &&
+                          "bg-amber-100/50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50",
                       )}
                     >
-                  
-                  {/* Left Side: Emoji */}
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <button className="rounded-full p-2.5 text-muted-foreground hover:text-foreground mb-0.5 shrink-0 transition-colors" title="Emoji">
-                        <Smile className="h-6 w-6" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent side="top" align="start" className="p-0 border-none w-auto shadow-xl" sideOffset={10}>
-                      <EmojiPicker onEmojiClick={(e) => setText(prev => prev + e.emoji)} />
-                    </PopoverContent>
-                  </Popover>
-
-                  {/* Left Side: Sales Coach */}
-                  {showCoach && (
-                    <button 
-                      className="rounded-full p-2.5 text-amber-500 hover:text-amber-600 mb-0.5 shrink-0 transition-colors bg-amber-500/10 hover:bg-amber-500/20" 
-                      title="Sales Coach (Analisar com IA)"
-                      disabled={isCoaching}
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        if (isCoaching) return;
-                        setIsCoaching(true);
-                        try {
-                          toast.loading("Sales Coach analisando a conversa...", { id: "coach" });
-                          await salesCoachAction({ data: { conversationId: conv.id } });
-                          const res = await salesCoachSuggestAction({ data: { conversationId: conv.id } });
-                          if (res?.success && res.text) {
-                            await send.mutateAsync({ 
-                              content: `🤖 **Guia Tático do Coach**\n\n${res.text}`,
-                              isInternal: true
-                            });
-                            toast.success("Guia Tático adicionado às notas internas!", { id: "coach" });
-                          } else {
-                            toast.dismiss("coach");
-                          }
-                        } catch (err: any) {
-                          toast.error(err.message || "Falha ao gerar análise", { id: "coach" });
-                        } finally {
-                          setIsCoaching(false);
-                        }
-                      }}
-                    >
-                      {isCoaching ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bot className="h-5 w-5" />}
-                    </button>
-                  )}
-
-                  {/* Left Side: Playbook */}
-                  <button 
-                    type="button"
-                    className="rounded-full p-2.5 text-emerald-600 hover:text-emerald-700 mb-0.5 shrink-0 transition-colors bg-emerald-500/10 hover:bg-emerald-500/20" 
-                    title="Playbook Comercial (Procedimentos e Scripts)"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsPlaybookSheetOpen(true);
-                    }}
-                  >
-                    <BookOpen className="h-5 w-5" />
-                  </button>
-
-                  <PlaybookSheet
-                    isOpen={isPlaybookSheetOpen}
-                    onClose={() => setIsPlaybookSheetOpen(false)}
-                    companyId={activeCompanyId || ""}
-                    onInsertText={(content) => {
-                      setText((prev) => prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + content);
-                      setTimeout(() => document.getElementById("chat-input")?.focus(), 100);
-                    }}
-                  />
-
-                  {/* Text Input */}
-                  <TextareaAutosize
-                    id="chat-input"
-                    spellCheck={true}
-                    autoCorrect="on"
-                    value={text}
-                    onChange={(e) => {
-                      setText(e.target.value);
-                      setQuickMsgIndex(0);
-                      setIsQuickMsgDismissed(false);
-                    }}
-                    onPaste={handlePaste}
-                    onKeyDown={(e) => {
-                      if (isQuickMsgOpen) {
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setIsQuickMsgDismissed(true);
-                          if (text === "/") setText("");
-                          return;
-                        }
-                        if (quickMsgItems.focusableCount > 0) {
-                          if (e.key === "ArrowDown") {
-                            e.preventDefault();
-                            setQuickMsgIndex(prev => Math.min(prev + 1, quickMsgItems.focusableCount - 1));
-                            return;
-                          }
-                          if (e.key === "ArrowUp") {
-                            e.preventDefault();
-                            setQuickMsgIndex(prev => Math.max(prev - 1, 0));
-                            return;
-                          }
-                          if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
-                            e.preventDefault();
-                            const selectedItem = quickMsgItems.items.find(i => i.type === "message" && i.index === quickMsgIndex);
-                            if (selectedItem) insertQuickMessage(selectedItem.qm);
-                            setQuickMsgIndex(0);
-                            return;
-                          }
-                        }
-                      }
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSend();
-                      }
-                    }}
-                    placeholder={
-                      isAdminNoteMode
-                        ? "Adicionar nota interna como administrador..."
-                        : isInternalNote
-                          ? "Adicionar nota interna..."
-                          : "Mensagem"
-                    }
-                    minRows={1}
-                    maxRows={6}
-                    className={cn(
-                      "flex-1 w-full bg-transparent px-1 py-2.5 pb-2.5 text-[15px] placeholder:text-muted-foreground focus-visible:outline-none resize-none leading-relaxed",
-                      isInternalNote && "placeholder:text-amber-700/50 dark:placeholder:text-amber-400/50"
-                    )}
-                  />
-
-                  {/* Right Side: Attach Menu */}
-                  <input type="file" id="file-upload" hidden onChange={handleFileChange} />
-                  
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button 
-                        data-clip-trigger="true"
-                        className="rounded-full p-2.5 text-muted-foreground hover:text-foreground mb-0.5 shrink-0 transition-colors" 
-                        title="Anexos e Ações"
-                      >
-                        <Paperclip className="h-5 w-5 -rotate-45" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent 
-                      align="end" 
-                      className="w-56" 
-                      sideOffset={16}
-                      onCloseAutoFocus={(e) => {
-                        e.preventDefault();
-                      }}
-                    >
-                      <DropdownMenuItem asChild>
-                        <label htmlFor="file-upload" className="cursor-pointer flex items-center w-full">
-                          <ImageIcon className="mr-2 h-4 w-4 text-blue-500" />
-                          Galeria / Arquivo
-                        </label>
-                      </DropdownMenuItem>
-                      
-                      <DropdownMenuSeparator />
-
-                      <DropdownMenuItem onSelect={() => {
-                        setIsQuickMsgDismissed(false);
-                        setText(prev => prev.startsWith("/") ? prev : "/" + prev);
-                        setTimeout(() => {
-                          const input = document.getElementById("chat-input");
-                          input?.focus();
-                        }, 50);
-                      }}>
-                        <MessageSquarePlus className="mr-2 h-4 w-4 text-violet-500" />
-                        Mensagens Rápidas
-                      </DropdownMenuItem>
-                      
-                      {conv.channel === "whatsapp" && !isAdminNoteMode && (
-                        <DropdownMenuItem onClick={() => setTemplateDialogOpen(true)}>
-                          <LayoutTemplate className="mr-2 h-4 w-4 text-emerald-500" />
-                          Enviar Template
-                        </DropdownMenuItem>
-                      )}
-                      
-                      <DropdownMenuSeparator />
-                      
-                      <DropdownMenuItem 
-                        onClick={() => {
-                          if (!isAdminNoteMode) {
-                            setIsInternalNote(!isInternalNote);
-                          }
-                        }}
-                        disabled={isAdminNoteMode}
-                      >
-                        <FileText className="mr-2 h-4 w-4 text-amber-500" />
-                        {isAdminNoteMode
-                          ? "Nota Interna (Obrigatória)"
-                          : isInternalNote
-                            ? "Desativar Nota Interna"
-                            : "Nota Interna"}
-                      </DropdownMenuItem>
-                      
-                      <DropdownMenuItem 
-                        onClick={() => fixTextMutation.mutate(text)}
-                        disabled={!text.trim()}
-                      >
-                        <Sparkles className="mr-2 h-4 w-4 text-sky-500" />
-                        Corrigir texto com IA
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-
-                </div>
-              </PopoverAnchor>
-
-              {/* Quick Messages Popover Content */}
-              <PopoverContent 
-                side="top" 
-                align="start" 
-                sideOffset={10}
-                className="w-[380px] sm:w-[480px] max-w-[calc(100vw-32px)] p-0 shadow-2xl border-border rounded-xl overflow-hidden bg-popover z-50"
-                onOpenAutoFocus={(e) => e.preventDefault()}
-                onCloseAutoFocus={(e) => {
-                  e.preventDefault();
-                  document.getElementById("chat-input")?.focus();
-                }}
-                onFocusOutside={(e) => {
-                  // O foco fica no textarea do chat (#chat-input), que fica fora do PopoverContent.
-                  // Prevenir default impede que o Popover feche ao focar o input ou ao fechar o dropdown.
-                  e.preventDefault();
-                }}
-                onPointerDownOutside={(e) => {
-                  const target = e.target as HTMLElement | null;
-                  // Se o clique foi no dropdown menu (anexos/clips), não fecha o popover
-                  if (target?.closest('[role="menu"]') || target?.closest('[data-radix-popper-content-wrapper]')) {
-                    e.preventDefault();
-                    return;
-                  }
-                  const composer = document.getElementById("chat-composer-container");
-                  // Se o clique foi dentro da barra de composição (textarea, emoji, etc.), mantém aberto
-                  if (composer && composer.contains(target)) {
-                    // Se clicou no botão do clipe (dropdown trigger), deixa fechar para dar espaço ao menu
-                    if (target?.closest('[data-clip-trigger]')) {
-                      return;
-                    }
-                    e.preventDefault();
-                    return;
-                  }
-                }}
-              >
-                {/* Header with Title and Close Button */}
-                <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/40 select-none">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                    <span className="text-xs font-semibold text-foreground truncate">Mensagens Rápidas</span>
-                    {quickMsgItems.focusableCount > 0 && (
-                      <Badge variant="secondary" className="text-[10px] h-4 px-1.5 font-normal shrink-0">
-                        {quickMsgItems.focusableCount}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[10px] text-muted-foreground hidden sm:inline-block mr-0.5">
-                      <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[9px]">Esc</kbd> fechar
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsQuickMsgDismissed(true);
-                        if (text === "/") setText("");
-                        document.getElementById("chat-input")?.focus();
-                      }}
-                      className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
-                      title="Fechar (Esc)"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Popover Body */}
-                {isLoadingQuickMessages ? (
-                  <div className="py-8 flex flex-col items-center justify-center text-xs text-muted-foreground gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                    <span>Carregando mensagens rápidas...</span>
-                  </div>
-                ) : quickMsgItems.items.length === 0 ? (
-                  <div className="py-8 px-4 text-center">
-                    {quickMessages && quickMessages.length === 0 ? (
-                      <>
-                        <MessageSquarePlus className="h-7 w-7 text-muted-foreground/40 mx-auto mb-2" />
-                        <p className="text-xs font-medium text-foreground">Nenhuma mensagem rápida cadastrada</p>
-                        <p className="text-[11px] text-muted-foreground mt-1">
-                          Cadastre atalhos em Configurações &gt; Canais &gt; Mensagens Rápidas.
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-xs text-muted-foreground">
-                          Nenhum atalho encontrado para <span className="font-mono text-primary font-medium">{text}</span>
-                        </p>
-                        <p className="text-[11px] text-muted-foreground/60 mt-1.5">
-                          Pressione <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[9px]">Esc</kbd> para fechar ou <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[9px]">Backspace</kbd> para apagar.
-                        </p>
-                      </>
-                    )}
-                  </div>
-                ) : (
-                  <div className="max-h-[340px] overflow-y-auto p-1.5 space-y-0.5">
-                    {quickMsgItems.items.map((item) => {
-                      if (item.type === "header") {
-                        const isExpanded = item.folderId ? !collapsedFolders.has(item.folderId) : true;
-                        return (
-                          <div 
-                            key={`header-${item.id}`}
-                            onClick={() => {
-                              if (item.folderId) {
-                                setCollapsedFolders(prev => {
-                                  const next = new Set(prev);
-                                  if (next.has(item.folderId)) next.delete(item.folderId);
-                                  else next.add(item.folderId);
-                                  return next;
-                                });
-                              }
-                            }}
-                            className={cn(
-                              "px-2.5 py-1.5 mt-1.5 mb-1 text-[11px] font-semibold text-muted-foreground bg-muted/60 sticky top-0 backdrop-blur-md z-10 flex items-center justify-between rounded-md select-none",
-                              item.folderId ? "cursor-pointer hover:bg-muted/90 hover:text-foreground transition-colors" : ""
-                            )}
+                      {/* Left Side: Emoji */}
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button
+                            className="rounded-full p-2.5 text-muted-foreground hover:text-foreground mb-0.5 shrink-0 transition-colors"
+                            title="Emoji"
                           >
-                            <div className="flex items-center gap-2">
-                              {item.folderId === null ? (
-                                <MessageSquarePlus className="h-3.5 w-3.5 text-primary" />
-                              ) : isExpanded ? (
-                                <FolderOpen className="h-3.5 w-3.5 text-amber-500" />
-                              ) : (
-                                <Folder className="h-3.5 w-3.5 text-amber-500/70" />
-                              )}
-                              <span>{item.name}</span>
-                              <span className="text-[10px] text-muted-foreground/70 font-normal">({item.count})</span>
-                            </div>
-                            {item.folderId && (
-                              isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                            )}
-                          </div>
-                        );
-                      }
+                            <Smile className="h-6 w-6" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side="top"
+                          align="start"
+                          className="p-0 border-none w-auto shadow-xl"
+                          sideOffset={10}
+                        >
+                          <EmojiPicker onEmojiClick={(e) => setText((prev) => prev + e.emoji)} />
+                        </PopoverContent>
+                      </Popover>
 
-                      const { qm, index } = item;
-                      const isSelected = index === quickMsgIndex;
-                      const hasVisualMedia = Boolean(qm.media_url && (qm.media_type === "image" || qm.media_type === "video"));
-                      return (
-                        <div
-                          key={qm.id}
-                          ref={(el) => {
-                            if (isSelected && el) {
-                              el.scrollIntoView({ block: "nearest" });
+                      {/* Left Side: Sales Coach */}
+                      {showCoach && (
+                        <button
+                          className="rounded-full p-2.5 text-amber-500 hover:text-amber-600 mb-0.5 shrink-0 transition-colors bg-amber-500/10 hover:bg-amber-500/20"
+                          title="Sales Coach (Analisar com IA)"
+                          disabled={isCoaching}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (isCoaching) return;
+                            setIsCoaching(true);
+                            try {
+                              toast.loading("Sales Coach analisando a conversa...", {
+                                id: "coach",
+                              });
+                              await salesCoachAction({ data: { conversationId: conv.id } });
+                              const res = await salesCoachSuggestAction({
+                                data: { conversationId: conv.id },
+                              });
+                              if (res?.success && res.text) {
+                                await send.mutateAsync({
+                                  content: `🤖 **Guia Tático do Coach**\n\n${res.text}`,
+                                  isInternal: true,
+                                });
+                                toast.success("Guia Tático adicionado às notas internas!", {
+                                  id: "coach",
+                                });
+                              } else {
+                                toast.dismiss("coach");
+                              }
+                            } catch (err: any) {
+                              toast.error(err.message || "Falha ao gerar análise", { id: "coach" });
+                            } finally {
+                              setIsCoaching(false);
                             }
                           }}
-                          onClick={() => {
-                            insertQuickMessage(qm);
-                            setQuickMsgIndex(0);
-                          }}
-                          onMouseEnter={() => setQuickMsgIndex(index)}
-                          className={cn(
-                            "flex items-center gap-2.5 px-2.5 py-2 cursor-pointer rounded-lg transition-colors text-left w-full group", 
-                            isSelected 
-                              ? "bg-primary/10 text-foreground border border-primary/20 shadow-2xs" 
-                              : "hover:bg-muted/60 text-foreground border border-transparent"
-                          )}
                         >
-                          {hasVisualMedia && (
-                            <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-muted/80 border border-border/60 shrink-0 flex items-center justify-center shadow-2xs">
-                              {qm.media_type === "image" ? (
-                                <>
-                                  <ImageIcon className="h-5 w-5 text-muted-foreground/30 absolute" />
-                                  <img
-                                    src={qm.media_url!}
-                                    alt={qm.name || "Imagem"}
-                                    className="w-full h-full object-cover relative z-1"
-                                    loading="lazy"
-                                    onError={(e) => {
-                                      (e.currentTarget as HTMLElement).style.opacity = "0";
-                                    }}
-                                  />
-                                </>
-                              ) : (
-                                <div className="relative w-full h-full bg-black/90 flex items-center justify-center">
-                                  <video
-                                    src={`${qm.media_url}#t=0.1`}
-                                    className="w-full h-full object-cover opacity-90"
-                                    preload="metadata"
-                                    muted
-                                    playsInline
-                                  />
-                                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
-                                    <Play className="h-4 w-4 text-white fill-white drop-shadow-sm" />
-                                  </div>
-                                  <span className="absolute bottom-0.5 right-0.5 bg-black/75 text-[8px] font-bold text-white px-1 py-0.2 rounded uppercase tracking-wider">
-                                    VÍDEO
+                          {isCoaching ? (
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                          ) : (
+                            <Bot className="h-5 w-5" />
+                          )}
+                        </button>
+                      )}
+
+                      {/* Left Side: Playbook */}
+                      <button
+                        type="button"
+                        className="rounded-full p-2.5 text-emerald-600 hover:text-emerald-700 mb-0.5 shrink-0 transition-colors bg-emerald-500/10 hover:bg-emerald-500/20"
+                        title="Playbook Comercial (Procedimentos e Scripts)"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsPlaybookSheetOpen(true);
+                        }}
+                      >
+                        <BookOpen className="h-5 w-5" />
+                      </button>
+
+                      <PlaybookSheet
+                        isOpen={isPlaybookSheetOpen}
+                        onClose={() => setIsPlaybookSheetOpen(false)}
+                        companyId={activeCompanyId || ""}
+                        onInsertText={(content) => {
+                          setText(
+                            (prev) =>
+                              prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + content,
+                          );
+                          setTimeout(() => document.getElementById("chat-input")?.focus(), 100);
+                        }}
+                      />
+
+                      {/* Text Input */}
+                      <TextareaAutosize
+                        id="chat-input"
+                        spellCheck={true}
+                        autoCorrect="on"
+                        value={text}
+                        onChange={(e) => {
+                          setText(e.target.value);
+                          setQuickMsgIndex(0);
+                          setIsQuickMsgDismissed(false);
+                        }}
+                        onPaste={handlePaste}
+                        onKeyDown={(e) => {
+                          if (isQuickMsgOpen) {
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setIsQuickMsgDismissed(true);
+                              if (text === "/") setText("");
+                              return;
+                            }
+                            if (quickMsgItems.focusableCount > 0) {
+                              if (e.key === "ArrowDown") {
+                                e.preventDefault();
+                                setQuickMsgIndex((prev) =>
+                                  Math.min(prev + 1, quickMsgItems.focusableCount - 1),
+                                );
+                                return;
+                              }
+                              if (e.key === "ArrowUp") {
+                                e.preventDefault();
+                                setQuickMsgIndex((prev) => Math.max(prev - 1, 0));
+                                return;
+                              }
+                              if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+                                e.preventDefault();
+                                const selectedItem = quickMsgItems.items.find(
+                                  (i) => i.type === "message" && i.index === quickMsgIndex,
+                                );
+                                if (selectedItem) insertQuickMessage(selectedItem.qm);
+                                setQuickMsgIndex(0);
+                                return;
+                              }
+                            }
+                          }
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSend();
+                          }
+                        }}
+                        placeholder={
+                          isAdminNoteMode
+                            ? "Adicionar nota interna como administrador..."
+                            : isInternalNote
+                              ? "Adicionar nota interna..."
+                              : "Mensagem"
+                        }
+                        minRows={1}
+                        maxRows={6}
+                        className={cn(
+                          "flex-1 w-full bg-transparent px-1 py-2.5 pb-2.5 text-[15px] placeholder:text-muted-foreground focus-visible:outline-none resize-none leading-relaxed",
+                          isInternalNote &&
+                            "placeholder:text-amber-700/50 dark:placeholder:text-amber-400/50",
+                        )}
+                      />
+
+                      {/* Right Side: Attach Menu */}
+                      <input type="file" id="file-upload" hidden onChange={handleFileChange} />
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            data-clip-trigger="true"
+                            className="rounded-full p-2.5 text-muted-foreground hover:text-foreground mb-0.5 shrink-0 transition-colors"
+                            title="Anexos e Ações"
+                          >
+                            <Paperclip className="h-5 w-5 -rotate-45" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          className="w-56"
+                          sideOffset={16}
+                          onCloseAutoFocus={(e) => {
+                            e.preventDefault();
+                          }}
+                        >
+                          <DropdownMenuItem asChild>
+                            <label
+                              htmlFor="file-upload"
+                              className="cursor-pointer flex items-center w-full"
+                            >
+                              <ImageIcon className="mr-2 h-4 w-4 text-blue-500" />
+                              Galeria / Arquivo
+                            </label>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuSeparator />
+
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setIsQuickMsgDismissed(false);
+                              setText((prev) => (prev.startsWith("/") ? prev : "/" + prev));
+                              setTimeout(() => {
+                                const input = document.getElementById("chat-input");
+                                input?.focus();
+                              }, 50);
+                            }}
+                          >
+                            <MessageSquarePlus className="mr-2 h-4 w-4 text-violet-500" />
+                            Mensagens Rápidas
+                          </DropdownMenuItem>
+
+                          {conv.channel === "whatsapp" && !isAdminNoteMode && (
+                            <DropdownMenuItem onClick={() => setTemplateDialogOpen(true)}>
+                              <LayoutTemplate className="mr-2 h-4 w-4 text-emerald-500" />
+                              Enviar Template
+                            </DropdownMenuItem>
+                          )}
+
+                          <DropdownMenuSeparator />
+
+                          <DropdownMenuItem
+                            onClick={() => {
+                              if (!isAdminNoteMode) {
+                                setIsInternalNote(!isInternalNote);
+                              }
+                            }}
+                            disabled={isAdminNoteMode}
+                          >
+                            <FileText className="mr-2 h-4 w-4 text-amber-500" />
+                            {isAdminNoteMode
+                              ? "Nota Interna (Obrigatória)"
+                              : isInternalNote
+                                ? "Desativar Nota Interna"
+                                : "Nota Interna"}
+                          </DropdownMenuItem>
+
+                          <DropdownMenuItem
+                            onClick={() => fixTextMutation.mutate(text)}
+                            disabled={!text.trim()}
+                          >
+                            <Sparkles className="mr-2 h-4 w-4 text-sky-500" />
+                            Corrigir texto com IA
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </PopoverAnchor>
+
+                  {/* Quick Messages Popover Content */}
+                  <PopoverContent
+                    side="top"
+                    align="start"
+                    sideOffset={10}
+                    className="w-[380px] sm:w-[480px] max-w-[calc(100vw-32px)] p-0 shadow-2xl border-border rounded-xl overflow-hidden bg-popover z-50"
+                    onOpenAutoFocus={(e) => e.preventDefault()}
+                    onCloseAutoFocus={(e) => {
+                      e.preventDefault();
+                      document.getElementById("chat-input")?.focus();
+                    }}
+                    onFocusOutside={(e) => {
+                      // O foco fica no textarea do chat (#chat-input), que fica fora do PopoverContent.
+                      // Prevenir default impede que o Popover feche ao focar o input ou ao fechar o dropdown.
+                      e.preventDefault();
+                    }}
+                    onPointerDownOutside={(e) => {
+                      const target = e.target as HTMLElement | null;
+                      // Se o clique foi no dropdown menu (anexos/clips), não fecha o popover
+                      if (
+                        target?.closest('[role="menu"]') ||
+                        target?.closest("[data-radix-popper-content-wrapper]")
+                      ) {
+                        e.preventDefault();
+                        return;
+                      }
+                      const composer = document.getElementById("chat-composer-container");
+                      // Se o clique foi dentro da barra de composição (textarea, emoji, etc.), mantém aberto
+                      if (composer && composer.contains(target)) {
+                        // Se clicou no botão do clipe (dropdown trigger), deixa fechar para dar espaço ao menu
+                        if (target?.closest("[data-clip-trigger]")) {
+                          return;
+                        }
+                        e.preventDefault();
+                        return;
+                      }
+                    }}
+                  >
+                    {/* Header with Title and Close Button */}
+                    <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/40 select-none">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                        <span className="text-xs font-semibold text-foreground truncate">
+                          Mensagens Rápidas
+                        </span>
+                        {quickMsgItems.focusableCount > 0 && (
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] h-4 px-1.5 font-normal shrink-0"
+                          >
+                            {quickMsgItems.focusableCount}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] text-muted-foreground hidden sm:inline-block mr-0.5">
+                          <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[9px]">
+                            Esc
+                          </kbd>{" "}
+                          fechar
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsQuickMsgDismissed(true);
+                            if (text === "/") setText("");
+                            document.getElementById("chat-input")?.focus();
+                          }}
+                          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors cursor-pointer"
+                          title="Fechar (Esc)"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Popover Body */}
+                    {isLoadingQuickMessages ? (
+                      <div className="py-8 flex flex-col items-center justify-center text-xs text-muted-foreground gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                        <span>Carregando mensagens rápidas...</span>
+                      </div>
+                    ) : quickMsgItems.items.length === 0 ? (
+                      <div className="py-8 px-4 text-center">
+                        {quickMessages && quickMessages.length === 0 ? (
+                          <>
+                            <MessageSquarePlus className="h-7 w-7 text-muted-foreground/40 mx-auto mb-2" />
+                            <p className="text-xs font-medium text-foreground">
+                              Nenhuma mensagem rápida cadastrada
+                            </p>
+                            <p className="text-[11px] text-muted-foreground mt-1">
+                              Cadastre atalhos em Configurações &gt; Canais &gt; Mensagens Rápidas.
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-xs text-muted-foreground">
+                              Nenhum atalho encontrado para{" "}
+                              <span className="font-mono text-primary font-medium">{text}</span>
+                            </p>
+                            <p className="text-[11px] text-muted-foreground/60 mt-1.5">
+                              Pressione{" "}
+                              <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[9px]">
+                                Esc
+                              </kbd>{" "}
+                              para fechar ou{" "}
+                              <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[9px]">
+                                Backspace
+                              </kbd>{" "}
+                              para apagar.
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="max-h-[340px] overflow-y-auto p-1.5 space-y-0.5">
+                        {quickMsgItems.items.map((item) => {
+                          if (item.type === "header") {
+                            const isExpanded = item.folderId
+                              ? !collapsedFolders.has(item.folderId)
+                              : true;
+                            return (
+                              <div
+                                key={`header-${item.id}`}
+                                onClick={() => {
+                                  if (item.folderId) {
+                                    setCollapsedFolders((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(item.folderId)) next.delete(item.folderId);
+                                      else next.add(item.folderId);
+                                      return next;
+                                    });
+                                  }
+                                }}
+                                className={cn(
+                                  "px-2.5 py-1.5 mt-1.5 mb-1 text-[11px] font-semibold text-muted-foreground bg-muted/60 sticky top-0 backdrop-blur-md z-10 flex items-center justify-between rounded-md select-none",
+                                  item.folderId
+                                    ? "cursor-pointer hover:bg-muted/90 hover:text-foreground transition-colors"
+                                    : "",
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {item.folderId === null ? (
+                                    <MessageSquarePlus className="h-3.5 w-3.5 text-primary" />
+                                  ) : isExpanded ? (
+                                    <FolderOpen className="h-3.5 w-3.5 text-amber-500" />
+                                  ) : (
+                                    <Folder className="h-3.5 w-3.5 text-amber-500/70" />
+                                  )}
+                                  <span>{item.name}</span>
+                                  <span className="text-[10px] text-muted-foreground/70 font-normal">
+                                    ({item.count})
                                   </span>
                                 </div>
-                              )}
-                            </div>
-                          )}
+                                {item.folderId &&
+                                  (isExpanded ? (
+                                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                  ) : (
+                                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                                  ))}
+                              </div>
+                            );
+                          }
 
-                          <div className="flex flex-col items-start gap-1 flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 w-full">
-                              <span className="font-semibold text-xs truncate flex-1">{qm.name || "Mensagem rápida"}</span>
-                              <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded-md shrink-0 border border-primary/20">
-                                {qm.shortcut}
-                              </span>
-                              {!hasVisualMedia && qm.media_url && (
-                                <span className="shrink-0 text-muted-foreground ml-0.5" title={qm.media_type || "Mídia"}>
-                                  {qm.media_type === "audio" ? <Headphones className="h-3.5 w-3.5 text-emerald-500" /> :
-                                   <Paperclip className="h-3.5 w-3.5 text-amber-500" />}
-                                </span>
+                          const { qm, index } = item;
+                          const isSelected = index === quickMsgIndex;
+                          const hasVisualMedia = Boolean(
+                            qm.media_url &&
+                            (qm.media_type === "image" || qm.media_type === "video"),
+                          );
+                          return (
+                            <div
+                              key={qm.id}
+                              ref={(el) => {
+                                if (isSelected && el) {
+                                  el.scrollIntoView({ block: "nearest" });
+                                }
+                              }}
+                              onClick={() => {
+                                insertQuickMessage(qm);
+                                setQuickMsgIndex(0);
+                              }}
+                              onMouseEnter={() => setQuickMsgIndex(index)}
+                              className={cn(
+                                "flex items-center gap-2.5 px-2.5 py-2 cursor-pointer rounded-lg transition-colors text-left w-full group",
+                                isSelected
+                                  ? "bg-primary/10 text-foreground border border-primary/20 shadow-2xs"
+                                  : "hover:bg-muted/60 text-foreground border border-transparent",
                               )}
+                            >
+                              {hasVisualMedia && (
+                                <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-muted/80 border border-border/60 shrink-0 flex items-center justify-center shadow-2xs">
+                                  {qm.media_type === "image" ? (
+                                    <>
+                                      <ImageIcon className="h-5 w-5 text-muted-foreground/30 absolute" />
+                                      <img
+                                        src={qm.media_url!}
+                                        alt={qm.name || "Imagem"}
+                                        className="w-full h-full object-cover relative z-1"
+                                        loading="lazy"
+                                        onError={(e) => {
+                                          (e.currentTarget as HTMLElement).style.opacity = "0";
+                                        }}
+                                      />
+                                    </>
+                                  ) : (
+                                    <div className="relative w-full h-full bg-black/90 flex items-center justify-center">
+                                      <video
+                                        src={`${qm.media_url}#t=0.1`}
+                                        className="w-full h-full object-cover opacity-90"
+                                        preload="metadata"
+                                        muted
+                                        playsInline
+                                      />
+                                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
+                                        <Play className="h-4 w-4 text-white fill-white drop-shadow-sm" />
+                                      </div>
+                                      <span className="absolute bottom-0.5 right-0.5 bg-black/75 text-[8px] font-bold text-white px-1 py-0.2 rounded uppercase tracking-wider">
+                                        VÍDEO
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              <div className="flex flex-col items-start gap-1 flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 w-full">
+                                  <span className="font-semibold text-xs truncate flex-1">
+                                    {qm.name || "Mensagem rápida"}
+                                  </span>
+                                  <span className="font-mono text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded-md shrink-0 border border-primary/20">
+                                    {qm.shortcut}
+                                  </span>
+                                  {!hasVisualMedia && qm.media_url && (
+                                    <span
+                                      className="shrink-0 text-muted-foreground ml-0.5"
+                                      title={qm.media_type || "Mídia"}
+                                    >
+                                      {qm.media_type === "audio" ? (
+                                        <Headphones className="h-3.5 w-3.5 text-emerald-500" />
+                                      ) : (
+                                        <Paperclip className="h-3.5 w-3.5 text-amber-500" />
+                                      )}
+                                    </span>
+                                  )}
+                                </div>
+                                {qm.content ? (
+                                  <span className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                                    {qm.content}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-muted-foreground/70 italic">
+                                    {qm.media_type === "image"
+                                      ? "📷 Imagem anexada"
+                                      : qm.media_type === "video"
+                                        ? "🎥 Vídeo anexado"
+                                        : "Arquivo anexado"}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            {qm.content ? (
-                              <span className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
-                                {qm.content}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] text-muted-foreground/70 italic">
-                                {qm.media_type === "image" ? "📷 Imagem anexada" : qm.media_type === "video" ? "🎥 Vídeo anexado" : "Arquivo anexado"}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </PopoverContent>
-            </Popover>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
 
                 {/* Send / Mic */}
-                {(text.trim() || selectedFile) ? (
+                {text.trim() || selectedFile ? (
                   <Button
                     size="icon"
                     onClick={handleSend}
                     disabled={send.isPending}
                     className={cn(
                       "mb-0.5 rounded-full h-11 w-11 shrink-0 bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-all",
-                      isInternalNote && "bg-amber-500 hover:bg-amber-600 text-amber-950"
+                      isInternalNote && "bg-amber-500 hover:bg-amber-600 text-amber-950",
                     )}
                   >
                     <Send className="h-5 w-5 ml-1" />
@@ -2282,7 +2650,7 @@ export function ChatPanel({
                     variant="ghost"
                     className={cn(
                       "mb-0.5 rounded-full h-11 w-11 shrink-0 bg-primary hover:bg-primary/90 text-primary-foreground shadow-md transition-all",
-                      isInternalNote && "bg-amber-500 hover:bg-amber-600 text-amber-950"
+                      isInternalNote && "bg-amber-500 hover:bg-amber-600 text-amber-950",
                     )}
                     onClick={startRecording}
                   >
@@ -2297,10 +2665,19 @@ export function ChatPanel({
                   <span className="text-sm font-medium">{formatTime(recordingTime)}</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button size="sm" variant="ghost" className="h-7 px-2 hover:bg-destructive/20 hover:text-destructive text-destructive/80" onClick={cancelRecording}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 hover:bg-destructive/20 hover:text-destructive text-destructive/80"
+                    onClick={cancelRecording}
+                  >
                     Cancelar
                   </Button>
-                  <Button size="sm" className="h-7 px-3 bg-destructive hover:bg-destructive/90 text-white" onClick={stopRecording}>
+                  <Button
+                    size="sm"
+                    className="h-7 px-3 bg-destructive hover:bg-destructive/90 text-white"
+                    onClick={stopRecording}
+                  >
                     <Send className="h-3 w-3 mr-1" />
                     Enviar
                   </Button>
@@ -2312,15 +2689,15 @@ export function ChatPanel({
       </div>
 
       {activeCompanyId && conv.whatsapp_instance_id && (
-        <WhatsappTemplateSender 
-          open={templateDialogOpen} 
-          onOpenChange={setTemplateDialogOpen} 
-          companyId={activeCompanyId} 
-          instanceId={conv.whatsapp_instance_id} 
+        <WhatsappTemplateSender
+          open={templateDialogOpen}
+          onOpenChange={setTemplateDialogOpen}
+          companyId={activeCompanyId}
+          instanceId={conv.whatsapp_instance_id}
           onSend={async (payload) => {
-            await send.mutateAsync({ 
-              content: JSON.stringify(payload), 
-              mediaType: "template" 
+            await send.mutateAsync({
+              content: JSON.stringify(payload),
+              mediaType: "template",
             });
           }}
           isSending={send.isPending}

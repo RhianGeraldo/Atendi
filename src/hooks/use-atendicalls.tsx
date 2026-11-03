@@ -8,7 +8,9 @@ import {
   startAtendiCallsVoiceCallAction,
   hangupAtendiCallsVoiceCallAction,
   syncAtendiCallsCallStatusAction,
+  sendAtendiCallsWebRTCOfferAction,
 } from "@/lib/api/atendicalls.functions";
+import { openAtendiCallsWebRTC, type AtendiCallsWebRTCConnection } from "@/lib/audio/webrtc";
 
 export type CallStatus =
   | "CALLING"
@@ -39,13 +41,20 @@ export interface AtendiCallsContextType {
   incomingOffer: CallOffer | null;
   activeCall: CallActive | null;
   callStatus: CallStatus | "CONNECTING" | null;
+  callMode: "human" | "ai";
   instances: any[] | undefined;
   isConnecting: boolean;
   connectingPhone: string | null;
   acceptCall: () => Promise<void>;
   rejectCall: () => Promise<void>;
-  /** true quando a chamada foi iniciada com sucesso pelo AtendiCalls */
-  startCall: (phone: string, contactName?: string, fromToken?: string) => Promise<boolean>;
+  /** Dispara chamada pelo AtendiCalls no modo atendente humano (WebRTC) ou com IA */
+  startCall: (
+    phone: string,
+    contactName?: string,
+    fromToken?: string,
+    mode?: "human" | "ai",
+    agentPrompt?: string,
+  ) => Promise<boolean>;
   endCall: () => Promise<void>;
   mute: () => Promise<void>;
   unmute: () => Promise<void>;
@@ -71,13 +80,19 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectingPhone, setConnectingPhone] = useState<string | null>(null);
+  const [callMode, setCallMode] = useState<"human" | "ai">("human");
 
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const currentCallIdRef = useRef<string | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const webrtcRef = useRef<AtendiCallsWebRTCConnection | null>(null);
 
   const closeCallWithDelay = useCallback(() => {
     setCallStatus("ENDED");
+    if (webrtcRef.current) {
+      webrtcRef.current.close();
+      webrtcRef.current = null;
+    }
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
@@ -261,9 +276,16 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
 
   /**
    * Dispara ligação através do motor AtendiCalls na VPS
+   * Suporta modo atendente humano (WebRTC pelo navegador) ou agente com IA
    */
   const startCall = useCallback(
-    async (phone: string, contactName?: string, fromToken?: string) => {
+    async (
+      phone: string,
+      contactName?: string,
+      fromToken?: string,
+      mode: "human" | "ai" = "human",
+      agentPrompt?: string,
+    ) => {
       const cleanPhone = phone.replace(/\D/g, "");
       if (cleanPhone.length < 8) {
         toast.error("Número de telefone inválido para chamada.");
@@ -272,7 +294,12 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       const finalPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
       const displayName = contactName || finalPhone;
 
-      toast.info(`Iniciando chamada para ${displayName}...`);
+      setCallMode(mode);
+      toast.info(
+        mode === "human"
+          ? `Iniciando ligação para ${displayName}...`
+          : `Iniciando ligação com IA para ${displayName}...`,
+      );
       setActiveContactName(contactName || null);
       if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
       setIsConnecting(true);
@@ -285,6 +312,8 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
             contactName: displayName,
             fromToken,
             companyId: profile?.company_id,
+            mode,
+            systemPrompt: agentPrompt,
           },
         });
 
@@ -310,9 +339,36 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         setActiveCall(callObj);
         setCallStatus("CALLING");
 
+        // Se for modo humano, inicia negociação de áudio WebRTC imediatamente pelo navegador
+        if (mode === "human") {
+          try {
+            const webrtc = await openAtendiCallsWebRTC({
+              sdpAnswerCallback: async (sdpOffer) => {
+                const ans = await sendAtendiCallsWebRTCOfferAction({
+                  data: {
+                    callId: res.callId,
+                    sessionId: res.sessionId,
+                    token: fromToken || res.token,
+                    apiUrl: res.apiUrl,
+                    sdpOffer,
+                  },
+                });
+                return ans.sdpAnswer;
+              },
+            });
+            webrtcRef.current = webrtc;
+          } catch (audioErr: any) {
+            console.warn(
+              "[AtendiCalls WebRTC] Microfone do navegador não pôde ser ativado:",
+              audioErr,
+            );
+            toast.warning("Ligação iniciada, mas o acesso ao microfone não foi concedido.");
+          }
+        }
+
         setTimeout(() => {
           setCallStatus((prev) => (prev === "CALLING" ? "RINGING" : prev));
-        }, 1500);
+        }, 1200);
 
         return true;
       } catch (e: any) {
@@ -332,6 +388,10 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
    * Desliga a chamada de forma segura no AtendiCalls (VPS)
    */
   const endCall = useCallback(async () => {
+    if (webrtcRef.current) {
+      webrtcRef.current.close();
+      webrtcRef.current = null;
+    }
     const callId = currentCallIdRef.current || activeCall?.id;
     if (callId) {
       try {
@@ -350,11 +410,13 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
 
   const mute = useCallback(async () => {
     setIsMuted(true);
+    webrtcRef.current?.mute();
     toast.info("Microfone silenciado");
   }, []);
 
   const unmute = useCallback(async () => {
     setIsMuted(false);
+    webrtcRef.current?.unmute();
     toast.info("Microfone ativado");
   }, []);
 
@@ -369,6 +431,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         incomingOffer,
         activeCall,
         callStatus,
+        callMode,
         acceptCall,
         rejectCall,
         startCall,

@@ -30,7 +30,7 @@ const DEFAULT_FALLBACK_TOKEN = process.env.ATENDICALLS_TOKEN || "264ddb564614e93
  */
 export async function resolveAtendiCallsConfig(
   instanceId?: string | null,
-  companyId?: string | null
+  companyId?: string | null,
 ): Promise<AtendiCallsConfig> {
   let apiUrl = DEFAULT_API_URL;
   let token = "";
@@ -115,7 +115,9 @@ export async function createAtendiCallsInstance(params: {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    throw new Error(`Falha ao criar instância no AtendiCalls (${res.status}): ${errText || res.statusText}`);
+    throw new Error(
+      `Falha ao criar instância no AtendiCalls (${res.status}): ${errText || res.statusText}`,
+    );
   }
 
   const data = await res.json();
@@ -159,15 +161,25 @@ export async function getAtendiCallsConnectStatus(config: AtendiCallsConfig): Pr
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
-    throw new Error(`Erro ao conectar com AtendiCalls (${res.status}): ${errText || res.statusText}`);
+    throw new Error(
+      `Erro ao conectar com AtendiCalls (${res.status}): ${errText || res.statusText}`,
+    );
   }
 
   const data = await res.json();
-  const isConnected = data.status === "connected" || data.instance?.paired === true || data.instance?.state === "open";
-  const qrcodeBase64 = data.qrcode?.base64 || (typeof data.qrcode === "string" ? data.qrcode : null);
+  const isConnected =
+    data.status === "connected" ||
+    data.instance?.paired === true ||
+    data.instance?.state === "open";
+  const qrcodeBase64 =
+    data.qrcode?.base64 || (typeof data.qrcode === "string" ? data.qrcode : null);
 
   return {
-    status: isConnected ? ("connected" as const) : qrcodeBase64 ? ("qrcode_ready" as const) : ("disconnected" as const),
+    status: isConnected
+      ? ("connected" as const)
+      : qrcodeBase64
+        ? ("qrcode_ready" as const)
+        : ("disconnected" as const),
     isConnected,
     qrcode: qrcodeBase64,
     instance: data.instance || null,
@@ -195,7 +207,8 @@ export async function startAtendiCallsVoiceCall(params: {
     voice: "alloy",
     systemPrompt:
       "Você é uma consultora de atendimento da clínica Estética e Laser. Seja educada, acolhedora, objetiva e esclareça as dúvidas sobre nossos procedimentos e agendamentos.",
-    firstMessage: "Olá! Tudo bem? Estou ligando para dar continuidade ao seu atendimento na Estética e Laser.",
+    firstMessage:
+      "Olá! Tudo bem? Estou ligando para dar continuidade ao seu atendimento na Estética e Laser.",
     variables: {},
   };
 
@@ -232,7 +245,9 @@ export async function startAtendiCallsVoiceCall(params: {
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     console.error(`[AtendiCalls] Erro ao disparar chamada (${res.status}):`, errText);
-    throw new Error(`Falha ao iniciar ligação via AtendiCalls (${res.status}): ${errText || res.statusText}`);
+    throw new Error(
+      `Falha ao iniciar ligação via AtendiCalls (${res.status}): ${errText || res.statusText}`,
+    );
   }
 
   const data = await res.json();
@@ -242,13 +257,150 @@ export async function startAtendiCallsVoiceCall(params: {
     console.warn(`[AtendiCalls] Resposta sem callId explícito:`, data);
   }
 
-  return { callId, raw: data };
+  const sessionId = data.sessionId || data.session_id || data.call?.sessionId;
+  return { callId, sessionId, raw: data };
+}
+
+/**
+ * Sincroniza as chaves de inteligência artificial da empresa com o motor AtendiCalls (VPS)
+ */
+export async function syncCompanyKeysToAtendiCalls(
+  companyId: string,
+  config: AtendiCallsConfig,
+): Promise<void> {
+  if (!companyId) return;
+  try {
+    const { data: comp } = await supabaseAdmin
+      .from("companies")
+      .select("ai_settings")
+      .eq("id", companyId)
+      .maybeSingle();
+
+    const keys = (comp?.ai_settings as any)?.keys || {};
+    if (!keys.openrouter && !keys.openai && !keys.groq) return;
+
+    const url = `${config.apiUrl}/api/settings`;
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        "X-API-Key": config.token,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        openrouterApiKey: keys.openrouter || "",
+        openaiApiKey: keys.openai || "",
+        groqApiKey: keys.groq || "",
+        defaultProvider: "openrouter",
+        defaultModel: "google/gemini-2.0-flash-001",
+        defaultVoice: "alloy",
+      }),
+    });
+  } catch (err: any) {
+    console.warn(
+      "[AtendiCalls] Falha ao sincronizar chaves de IA com AtendiCalls:",
+      err?.message || err,
+    );
+  }
+}
+
+/**
+ * Inicia chamada de voz com atendente humano (Softphone WebRTC)
+ */
+export async function startAtendiCallsHumanCall(params: {
+  phone: string;
+  config: AtendiCallsConfig;
+  sessionId?: string;
+}): Promise<{ callId: string; sessionId?: string; raw: any }> {
+  const cleanPhone = params.phone.replace(/\D/g, "");
+  const formattedPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
+
+  let sid = params.sessionId;
+  if (!sid) {
+    const conn = await getAtendiCallsConnectStatus(params.config).catch(() => null);
+    sid = conn?.instance?.id || conn?.instance?.sessionId;
+  }
+
+  const endpoint = sid
+    ? `${params.config.apiUrl}/api/sessions/${encodeURIComponent(sid)}/calls`
+    : `${params.config.apiUrl}/api/v1/voice/calls`;
+
+  const payload = sid ? { phone: formattedPhone, record: true } : { to: formattedPhone };
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "X-API-Key": params.config.token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(
+      `Falha ao iniciar ligação humana via AtendiCalls (${res.status}): ${errText || res.statusText}`,
+    );
+  }
+
+  const data = await res.json();
+  const callId = data.call?.callId || data.callId || data.id || data.call_id;
+  const returnedSid = data.sessionId || data.session_id || sid;
+
+  return { callId, sessionId: returnedSid, raw: data };
+}
+
+/**
+ * Negocia SDP Offer com AtendiCalls e retorna SDP Answer para estabelecer o canal de áudio WebRTC
+ */
+export async function sendAtendiCallsWebRTCOffer(params: {
+  callId: string;
+  sessionId?: string;
+  sdpOffer: string;
+  config: AtendiCallsConfig;
+}): Promise<{ sdpAnswer: string }> {
+  let sid = params.sessionId;
+  if (!sid) {
+    const conn = await getAtendiCallsConnectStatus(params.config).catch(() => null);
+    sid = conn?.instance?.id || conn?.instance?.sessionId;
+  }
+
+  if (!sid) {
+    throw new Error("Sessão da linha não identificada para conexão WebRTC.");
+  }
+
+  const url = `${params.config.apiUrl}/api/sessions/${encodeURIComponent(sid)}/calls/${encodeURIComponent(params.callId)}/webrtc`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "X-API-Key": params.config.token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ sdp_offer: params.sdpOffer }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(
+      `Falha na negociação WebRTC com AtendiCalls (${res.status}): ${errText || res.statusText}`,
+    );
+  }
+
+  const data = await res.json();
+  const sdpAnswer = data.sdp_answer || data.sdpAnswer || data.sdp;
+  if (!sdpAnswer) {
+    throw new Error("AtendiCalls não retornou resposta SDP (sdp_answer).");
+  }
+
+  return { sdpAnswer };
 }
 
 /**
  * Desliga uma chamada em andamento
  */
-export async function hangupAtendiCallsVoiceCall(callId: string, config: AtendiCallsConfig): Promise<boolean> {
+export async function hangupAtendiCallsVoiceCall(
+  callId: string,
+  config: AtendiCallsConfig,
+): Promise<boolean> {
   const url = `${config.apiUrl}/api/v1/voice/calls/${callId}/hangup`;
   const res = await fetch(url, {
     method: "POST",
@@ -271,7 +423,7 @@ export async function hangupAtendiCallsVoiceCall(callId: string, config: AtendiC
  */
 export async function getAtendiCallsCallDetails(
   callId: string,
-  config: AtendiCallsConfig
+  config: AtendiCallsConfig,
 ): Promise<{
   call?: {
     CallID: string;
@@ -306,7 +458,8 @@ export async function getAtendiCallsCallDetails(
   const rawCall = data.call || {};
   const status = (rawCall.status || rawCall.Status || "").toLowerCase();
   const isConnected = status === "connected" || status === "active" || status === "in_progress";
-  const isEnded = !isConnected && (status === "ended" || status === "terminated" || status === "failed");
+  const isEnded =
+    !isConnected && (status === "ended" || status === "terminated" || status === "failed");
 
   const normalizedCall = {
     ...rawCall,
@@ -325,7 +478,10 @@ export async function getAtendiCallsCallDetails(
 /**
  * Busca o áudio da gravação de uma chamada
  */
-export async function fetchAtendiCallsAudioStream(callId: string, config: AtendiCallsConfig): Promise<Response> {
+export async function fetchAtendiCallsAudioStream(
+  callId: string,
+  config: AtendiCallsConfig,
+): Promise<Response> {
   const url = `${config.apiUrl}/api/calls/${callId}/audio`;
   return await fetch(url, {
     method: "GET",

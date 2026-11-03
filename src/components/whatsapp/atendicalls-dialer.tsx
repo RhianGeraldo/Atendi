@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useAtendiCalls } from "@/hooks/use-atendicalls";
-import { Phone, Delete, X, PhoneForwarded } from "lucide-react";
+import { Phone, Delete, X, PhoneForwarded, Bot, User } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -20,6 +20,7 @@ export interface AtendiCallsDialerProps {
 
 export function AtendiCallsDialer({ open, onOpenChange }: AtendiCallsDialerProps) {
   const [phone, setPhone] = useState("");
+  const [callMode, setCallMode] = useState<"human" | "ai">("human");
   const { startCall, instances } = useAtendiCalls();
   const { profile } = useAuth();
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
@@ -59,7 +60,7 @@ export function AtendiCallsDialer({ open, onOpenChange }: AtendiCallsDialerProps
 
       const selectedInstance = instances?.find((i) => i.id === selectedInstanceId);
       const token = selectedInstance?.atendicalls_token || selectedInstance?.wavoip_token;
-      startCall(phone, contactName, token);
+      startCall(phone, contactName, token, callMode);
       onOpenChange(false);
       setPhone("");
     }
@@ -148,8 +149,34 @@ export function AtendiCallsDialer({ open, onOpenChange }: AtendiCallsDialerProps
       </div>
 
       <div className="flex-1 px-6 pb-6 flex flex-col overflow-hidden">
+        {/* Mode Selector */}
+        <div className="flex bg-slate-100 p-1 rounded-xl mx-auto w-full max-w-[260px] mt-2 mb-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setCallMode("human")}
+            className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 font-medium transition-all ${
+              callMode === "human"
+                ? "bg-white text-slate-800 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <User className="w-3.5 h-3.5 text-emerald-600" /> Atendente
+          </button>
+          <button
+            type="button"
+            onClick={() => setCallMode("ai")}
+            className={`flex-1 py-1.5 rounded-lg flex items-center justify-center gap-1.5 font-medium transition-all ${
+              callMode === "ai"
+                ? "bg-white text-purple-700 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <Bot className="w-3.5 h-3.5 text-purple-600" /> Agente IA
+          </button>
+        </div>
+
         {/* Input Display */}
-        <div className="flex flex-col items-center justify-center h-16 shrink-0 mb-2 mt-2">
+        <div className="flex flex-col items-center justify-center h-14 shrink-0 mb-2 mt-1">
           <div className="text-3xl font-light tracking-wide truncate w-full text-center text-slate-700">
             {phone ? formatDisplayNumber(phone) : <span className="text-slate-400">Digite...</span>}
           </div>
@@ -190,9 +217,18 @@ export function AtendiCallsDialer({ open, onOpenChange }: AtendiCallsDialerProps
           <button
             onClick={makeCall}
             disabled={phone.length < 8 || !selectedInstanceId}
-            className="w-[60px] h-[60px] rounded-full bg-[#10b981] hover:bg-[#059669] active:bg-[#047857] flex items-center justify-center transition-colors mx-auto mt-1 disabled:opacity-50"
+            title={callMode === "ai" ? "Ligar com Agente IA" : "Ligar pelo Navegador"}
+            className={`w-[60px] h-[60px] rounded-full ${
+              callMode === "ai"
+                ? "bg-purple-600 hover:bg-purple-700 active:bg-purple-800"
+                : "bg-[#10b981] hover:bg-[#059669] active:bg-[#047857]"
+            } flex items-center justify-center transition-colors mx-auto mt-1 disabled:opacity-50 shadow-md`}
           >
-            <Phone className="w-7 h-7 text-white fill-white" />
+            {callMode === "ai" ? (
+              <Bot className="w-7 h-7 text-white" />
+            ) : (
+              <Phone className="w-7 h-7 text-white fill-white" />
+            )}
           </button>
           <div className="flex items-center justify-center mt-1">
             {phone.length > 0 && (
