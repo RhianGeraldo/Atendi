@@ -1,22 +1,50 @@
 import { useState, useEffect, useCallback, createContext, useContext, useRef } from "react";
 import { toast } from "sonner";
-import { Wavoip, Offer as CallOffer, CallActive, CallOutgoing, CallStatus } from "@wavoip/wavoip-api";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
+import {
+  startAtendiCallsVoiceCallAction,
+  hangupAtendiCallsVoiceCallAction,
+} from "@/lib/api/atendicalls.functions";
+
+export type CallStatus =
+  | "CALLING"
+  | "RINGING"
+  | "ACTIVE"
+  | "ENDED"
+  | "FAILED"
+  | "REJECTED"
+  | "CONNECTING"
+  | "MISSED"
+  | "NOT_ANSWERED";
+
+export interface CallActive {
+  id: string;
+  peer: {
+    phone: string;
+    displayName?: string;
+    profilePicture?: string;
+  };
+  status?: string;
+  device_token?: string;
+}
+
+export type CallOffer = CallActive;
+export type CallOutgoing = CallActive;
 
 interface WavoipContextType {
-  wavoip: Wavoip | null;
+  wavoip: any | null;
   incomingOffer: CallOffer | null;
-  activeCall: CallActive | CallOutgoing | null;
+  activeCall: CallActive | null;
   callStatus: CallStatus | "CONNECTING" | null;
   instances: any[] | undefined;
   isConnecting: boolean;
   connectingPhone: string | null;
   acceptCall: () => Promise<void>;
   rejectCall: () => Promise<void>;
-  /** true quando a chamada saiu (o WaVoIP devolveu a chamada) */
+  /** true quando a chamada foi iniciada com sucesso pelo AtendiCalls */
   startCall: (phone: string, contactName?: string, fromToken?: string) => Promise<boolean>;
   endCall: () => Promise<void>;
   mute: () => Promise<void>;
@@ -29,82 +57,12 @@ interface WavoipContextType {
 
 const WavoipContext = createContext<WavoipContextType | undefined>(undefined);
 
-// Garante compatibilidade com Web Audio API e MediaDevices em contextos HTTP (acesso via IP local)
-function ensureAudioContextCompatibility() {
-  if (typeof window === "undefined") return;
-
-  // 1. Shim para navigator.mediaDevices se não existir (HTTP via IP na rede)
-  if (typeof navigator !== "undefined" && !navigator.mediaDevices) {
-    try {
-      const dummyMediaDevices = {
-        enumerateDevices: async () => [],
-        getUserMedia: async () => {
-          throw new Error("O acesso ao microfone requer conexão segura (HTTPS ou localhost).");
-        },
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        dispatchEvent: () => false,
-      };
-
-      try {
-        Object.defineProperty(navigator, "mediaDevices", {
-          value: dummyMediaDevices,
-          configurable: true,
-          writable: true,
-        });
-      } catch {
-        (navigator as any).mediaDevices = dummyMediaDevices;
-      }
-    } catch (e) {
-      console.warn("[Wavoip] Falha ao injetar shim de mediaDevices:", e);
-    }
-  }
-
-  // 2. Shim para AudioContext.audioWorklet se não existir
-  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-  if (AudioContextClass) {
-    try {
-      const originalAudioContext = AudioContextClass;
-
-      class AudioContextProxy extends originalAudioContext {
-        constructor(options?: AudioContextOptions) {
-          super(options);
-          if (!this.audioWorklet) {
-            (this as any).audioWorklet = {
-              addModule: async () => Promise.resolve(),
-            };
-          }
-        }
-      }
-
-      (window as any).AudioContext = AudioContextProxy;
-      if ((window as any).webkitAudioContext) {
-        (window as any).webkitAudioContext = AudioContextProxy;
-      }
-    } catch (e) {
-      console.warn("[Wavoip] Falha ao configurar shim de AudioContext:", e);
-    }
-  } else {
-    try {
-      class DummyAudioContext {
-        audioWorklet = { addModule: async () => Promise.resolve() };
-        state = "suspended";
-        suspend = async () => {};
-        resume = async () => {};
-        close = async () => {};
-      }
-      (window as any).AudioContext = DummyAudioContext;
-    } catch {}
-  }
-}
-
 export function WavoipProvider({ children }: { children: React.ReactNode }) {
   const { profile } = useAuth();
   const { selectedUnitId } = useUnit();
 
-  const [wavoip, setWavoip] = useState<Wavoip | null>(null);
   const [incomingOffer, setIncomingOffer] = useState<CallOffer | null>(null);
-  const [activeCall, setActiveCall] = useState<CallActive | CallOutgoing | null>(null);
+  const [activeCall, setActiveCall] = useState<CallActive | null>(null);
   const [callStatus, setCallStatus] = useState<CallStatus | "CONNECTING" | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [activeContactName, setActiveContactName] = useState<string | null>(null);
@@ -112,64 +70,11 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectingPhone, setConnectingPhone] = useState<string | null>(null);
 
-
-  const updateCallLog = async (data: any) => {
-    try {
-      const payload: any = {};
-      if (data.status !== undefined) payload.status = data.status;
-      if (data.started_at !== undefined) payload.started_at = data.started_at;
-      if (data.ended_at !== undefined) payload.ended_at = data.ended_at;
-      if (data.recording_url !== undefined) payload.recording_url = data.recording_url;
-
-      const { error } = await supabase.from('call_logs').update(payload).eq('wavoip_call_id', data.wavoip_call_id);
-      if (error) console.error("[Wavoip] Erro ao atualizar log:", error);
-    } catch (e) {
-      console.error("[Wavoip] Exceção update log:", e);
-    }
-  };
-
-  const upsertCallLog = async (data: any) => {
-    if (!profile?.company_id) return;
-    try {
-      let contact_id = data.contact_id;
-      if (!contact_id && data.peer_number) {
-        const phoneSuffix = data.peer_number.replace(/\D/g, "").slice(-8);
-        const { data: contacts } = await supabase.from('contacts').select('id').eq('company_id', profile.company_id).ilike('phone', `%${phoneSuffix}%`).limit(1);
-        if (contacts && contacts.length > 0) contact_id = contacts[0].id;
-      }
-      
-      const payload: any = {
-        wavoip_call_id: data.wavoip_call_id,
-        company_id: profile.company_id,
-        direction: data.direction,
-        status: data.status,
-      };
-      
-      if (data.whatsapp_instance_id !== undefined) payload.whatsapp_instance_id = data.whatsapp_instance_id;
-      if (contact_id !== undefined) payload.contact_id = contact_id;
-      if (data.assigned_agent_id !== undefined) payload.assigned_agent_id = data.assigned_agent_id;
-      if (data.started_at !== undefined) payload.started_at = data.started_at;
-      if (data.ended_at !== undefined) payload.ended_at = data.ended_at;
-      if (data.duration_seconds !== undefined) payload.duration_seconds = data.duration_seconds;
-      if (data.recording_url !== undefined) payload.recording_url = data.recording_url;
-      if (data.peer_number !== undefined) payload.peer_number = data.peer_number;
-
-      const { error } = await supabase.from('call_logs').upsert(payload, { onConflict: 'wavoip_call_id' });
-      if (error) console.error("[Wavoip] Erro ao salvar log:", error);
-    } catch (e) {
-      console.error("[Wavoip] Exceção log:", e);
-    }
-  };
-
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const activeCallRef = useRef<any>(null);
-
-  useEffect(() => {
-    activeCallRef.current = activeCall;
-  }, [activeCall]);
+  const currentCallIdRef = useRef<string | null>(null);
 
   const closeCallWithDelay = useCallback(() => {
-    setCallStatus("ENDED" as any);
+    setCallStatus("ENDED");
     if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
     closeTimeoutRef.current = setTimeout(() => {
       setActiveCall(null);
@@ -177,13 +82,14 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
       setIsMuted(false);
       setIsSpeakerOn(false);
       setActiveContactName(null);
+      currentCallIdRef.current = null;
     }, 2000);
   }, []);
 
-  // Fetch tokens for the current unit and department
+  // Busca instâncias configuradas com AtendiCalls ou Wavoip para a unidade e departamento
   const { data: instances } = useQuery({
     queryKey: [
-      "wavoip_instances_tokens",
+      "atendicalls_instances_tokens",
       profile?.company_id,
       selectedUnitId,
       profile?.id,
@@ -194,13 +100,11 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
     queryFn: async () => {
       let q = supabase
         .from("whatsapp_instances")
-        .select("id, wavoip_token, name, unit_id, department_id")
+        .select("id, atendicalls_token, atendicalls_url, wavoip_token, name, unit_id, department_id")
         .eq("company_id", profile!.company_id!)
-        .not("wavoip_token", "is", null);
+        .or("atendicalls_token.not.is.null,wavoip_token.not.is.null");
 
       if (selectedUnitId) {
-        // Busca as instâncias da unidade selecionada OU as instâncias globais da empresa (Sede, unit_id null)
-        // Isso garante que se o cliente ligar no número principal, o atendente consiga receber.
         q = q.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
       }
 
@@ -215,383 +119,189 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
 
       const { data, error } = await q;
       if (error) throw error;
-      return data;
+
+      // Normaliza para que wavoip_token e atendicalls_token coexistam
+      return (data ?? []).map((inst: any) => ({
+        ...inst,
+        wavoip_token: inst.atendicalls_token || inst.wavoip_token,
+      }));
     },
-    // Removido refetchInterval para evitar que o hook useEffect remonte a cada 30 segundos,
-    // o que causava a desconexão do socket do Wavoip e orfanava as ligações ativas.
-    staleTime: Infinity,
+    staleTime: 60000,
   });
 
-  // Handle incoming calls
+  // Monitora mudanças no banco de dados via Supabase Realtime para a chamada ativa
   useEffect(() => {
-    if (!instances || instances.length === 0) return;
+    if (!profile?.company_id) return;
 
-    const tokens = instances.map((i: any) => i.wavoip_token).filter(Boolean) as string[];
-    if (tokens.length === 0) return;
+    const channel = supabase
+      .channel("active_call_logs_sync")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "call_logs",
+          filter: `company_id=eq.${profile.company_id}`,
+        },
+        (payload) => {
+          const newRow = payload.new as any;
+          if (!newRow) return;
 
-    let unsubOffer: (() => void) | undefined;
-    let wavoipInstance: any = null;
+          const currentId = currentCallIdRef.current;
+          if (!currentId) return;
 
-    try {
-      ensureAudioContextCompatibility();
+          if (newRow.call_id === currentId || newRow.wavoip_call_id === currentId) {
+            const rawStatus = (newRow.status || "").toUpperCase();
+            console.log(`[AtendiCalls] Atualização Realtime recebida para chamada ${currentId}:`, rawStatus);
 
-      wavoipInstance = new Wavoip({ tokens, platform: "atendi-crm" });
-      setWavoip(wavoipInstance);
-      
-      wavoipInstance.getDevices().forEach((device: any) => {
-        device.onStatus((status: string) => {
-          console.log(`[Wavoip] Dispositivo ${device.token.substring(0, 8)}... status: ${status}`);
-        });
-      });
-
-      unsubOffer = wavoipInstance.on("offer", async (offer: any) => {
-      console.log("Chamada recebida de", offer.peer.phone);
-
-      try {
-        if (offer.peer.phone && profile?.company_id) {
-          // Encontra a instância exata que recebeu a chamada
-          const instance = instances.find((i: any) => i.wavoip_token === offer.device_token);
-          if (!instance) {
-            console.warn("Chamada recebida para um token não carregado nesta sessão.");
-            return;
-          }
-
-          // Remove todos os caracteres que não sejam números
-          const cleanPhone = offer.peer.phone.replace(/\D/g, "");
-          const phoneSuffix = cleanPhone.slice(-8);
-
-          const { data: contacts } = await supabase
-            .from("contacts")
-            .select("id, name")
-            .eq("company_id", profile.company_id)
-            .ilike("phone", `%${phoneSuffix}%`);
-
-          if (contacts && contacts.length > 0) {
-            const contactIds = contacts.map((c: any) => c.id);
-            const activeContactName = contacts[0].name; // Usa o nome do primeiro
-            
-            console.log(`[Wavoip] Encontrados ${contactIds.length} contatos para o telefone. IDs:`, contactIds);
-
-            // Busca TODAS as conversas ativas/em espera para esses contatos NA MESMA INSTÂNCIA
-            const { data: activeConvs, error: convError } = await supabase
-              .from("conversations")
-              .select("id, assigned_agent_id")
-              .in("contact_id", contactIds)
-              .in("status", ["waiting", "active"])
-              .eq("whatsapp_instance_id", instance.id);
-
-            if (convError) {
-              console.error("[Wavoip] Erro ao buscar conversas do contato:", convError);
+            if (rawStatus === "ACTIVE" || rawStatus === "IN_PROGRESS") {
+              setCallStatus("ACTIVE");
+            } else if (rawStatus === "RINGING" || rawStatus === "CALLING") {
+              setCallStatus(rawStatus as CallStatus);
+            } else if (
+              rawStatus === "ENDED" ||
+              rawStatus === "COMPLETED" ||
+              rawStatus === "MISSED" ||
+              rawStatus === "REJECTED" ||
+              rawStatus === "FAILED" ||
+              rawStatus === "NOT_ANSWERED"
+            ) {
+              setCallStatus("ENDED");
+              closeCallWithDelay();
             }
-
-            console.log(`[Wavoip] Conversas ativas no banco para o contato na instância ${instance.name}:`, activeConvs);
-
-            let convsInThisInstance: any[] = activeConvs || [];
-
-            console.log(`[Wavoip] Conversas filtradas para a instância atual (${instance.name}):`, convsInThisInstance);
-
-            if (convsInThisInstance.length > 0) {
-              // Verifica se o usuário atual é o dono de alguma das conversas nesta instância
-              const myConv = convsInThisInstance.find((c: any) => c.assigned_agent_id === profile.id);
-              
-              if (!myConv) {
-                // Se o usuário atual não é o dono, verifica se existe OUTRO dono
-                const otherConv = convsInThisInstance.find((c: any) => c.assigned_agent_id !== null);
-                if (otherConv) {
-                  console.log(`[Wavoip] Chamada ignorada. O contato já está sendo atendido por ${otherConv.assigned_agent_id} na instância ${instance.name}.`);
-                  return; // Silencia para este usuário
-                }
-              } else {
-                console.log(`[Wavoip] Chamada permitida. Usuário atual é o dono do ticket na instância ${instance.name}.`);
-              }
-            } else {
-              console.log(`[Wavoip] Nenhum ticket em andamento na instância ${instance.name}. Tocando para todos os usuários com acesso a ela!`);
-            }
-            
-            // Define o nome do contato que ligou
-            setActiveContactName(activeContactName);
           }
         }
-      } catch (err) {
-        console.error("Erro ao verificar dono do contato para chamada:", err);
-      }
-
-      toast.info(`Recebendo chamada de ${offer.peer.phone}...`);
-      setIncomingOffer(offer);
-      setCallStatus(offer.status);
-      
-      offer.on("status", setCallStatus);
-      offer.on("acceptedElsewhere", () => setIncomingOffer(null));
-      offer.on("unanswered", () => {
-        const instance = instances.find((i: any) => i.wavoip_token === offer.device_token);
-        upsertCallLog({
-          wavoip_call_id: offer.id,
-          whatsapp_instance_id: instance?.id,
-          assigned_agent_id: profile?.id,
-          direction: 'INCOMING',
-          status: 'NOT_ANSWERED',
-          peer_number: offer.peer.phone,
-          ended_at: new Date().toISOString(),
-        });
-        setIncomingOffer(null);
-      });
-      offer.on("ended", () => {
-        if (!activeCallRef.current) {
-          const instance = instances.find((i: any) => i.wavoip_token === offer.device_token);
-          upsertCallLog({
-            wavoip_call_id: offer.id,
-            whatsapp_instance_id: instance?.id,
-            assigned_agent_id: profile?.id,
-            direction: 'INCOMING',
-            status: 'NOT_ANSWERED',
-            peer_number: offer.peer.phone,
-            ended_at: new Date().toISOString(),
-          });
-        }
-        setIncomingOffer(null);
-      });
-    });
-
-      Promise.all(wavoipInstance.wakeUpDevices()).then((results: any) => {
-        console.log("Wavoip devices awakened for incoming calls:", results);
-      }).catch((err: any) => {
-        console.error("Failed to wake up Wavoip devices:", err);
-      });
-    } catch (err: any) {
-      console.warn(
-        "[Wavoip] Inicialização do Wavoip suprimida (contexto de rede/áudio não suportado):",
-        err?.message || err
-      );
-      setWavoip(null);
-    }
+      )
+      .subscribe();
 
     return () => {
-      if (unsubOffer) unsubOffer();
-      if (wavoipInstance) {
-        try {
-          const allTokens = wavoipInstance.getDevices().map((d: any) => d.token);
-          wavoipInstance.removeDevices(allTokens);
-        } catch (e) {
-          console.warn("[Wavoip] Erro ao remover dispositivos no unmount:", e);
-        }
-      }
+      supabase.removeChannel(channel);
     };
-  }, [instances]);
+  }, [profile?.company_id, closeCallWithDelay]);
 
   const acceptCall = useCallback(async () => {
+    // Para chamadas recebidas caso implementado pelo motor
     if (!incomingOffer) return;
-    try {
-      const { call, err } = await incomingOffer.accept();
-      if (err) {
-        console.error("Erro ao aceitar chamada:", err);
-        return;
-      }
-      if (call) {
-        setIncomingOffer(null);
-        setActiveCall(call);
-        setCallStatus(call.status);
-        
-        call.on("status", (status) => {
-          setCallStatus(status);
-          if (status === 'ENDED' || status === 'REJECTED' || status === 'FAILED' || status === 'DISCONNECTED') {
-            updateCallLog({
-              wavoip_call_id: call.id,
-              status,
-              ended_at: new Date().toISOString(),
-              recording_url: `https://storage.wavoip.com/${call.id}`
-            });
-            setTimeout(closeCallWithDelay, 1000);
-          } else {
-            updateCallLog({ wavoip_call_id: call.id, status });
-          }
-        });
-        
-          const instance = instances.find((i: any) => i.wavoip_token === call.device_token);
-          upsertCallLog({
-            wavoip_call_id: call.id,
-            whatsapp_instance_id: instance?.id,
-            assigned_agent_id: profile?.id,
-            direction: 'INCOMING',
-            status: call.status,
-            peer_number: call.peer.phone,
-            started_at: new Date().toISOString(),
-          });
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    setActiveCall(incomingOffer);
+    setIncomingOffer(null);
+    setCallStatus("ACTIVE");
   }, [incomingOffer]);
 
   const rejectCall = useCallback(async () => {
     if (!incomingOffer) return;
-    try {
-      console.log("Rejeitando chamada API Wavoip...", incomingOffer.id);
-      if (typeof incomingOffer.reject === "function") {
-        await incomingOffer.reject();
-        console.log("Chamada rejeitada na API Wavoip.");
-        const instance = instances.find((i: any) => i.wavoip_token === incomingOffer.device_token);
-        upsertCallLog({
-          wavoip_call_id: incomingOffer.id,
-          whatsapp_instance_id: instance?.id,
-          assigned_agent_id: profile?.id,
-          direction: 'INCOMING',
-          status: 'REJECTED',
-          peer_number: incomingOffer.peer.phone,
-          ended_at: new Date().toISOString(),
-        });
-      }
-    } catch (e) {
-      console.error("Erro ao recusar chamada:", e);
-    } finally {
-      setIncomingOffer(null);
-      setActiveContactName(null);
-      setCallStatus(null);
-    }
+    setIncomingOffer(null);
+    setActiveContactName(null);
+    setCallStatus(null);
   }, [incomingOffer]);
 
-  const startCall = useCallback(async (phone: string, contactName?: string, fromToken?: string) => {
-    if (!wavoip) {
-      toast.error("Wavoip não conectado", { description: "Nenhuma instância ativa possui token do Wavoip configurado." });
-      return false;
-    }
-    const finalPhone = phone.replace(/\D/g, '');
-    toast.info(`Iniciando chamada para ${contactName || finalPhone}...`);
-    console.log("📞 Tentando ligar para o número do contato:", finalPhone);
-    setActiveContactName(contactName || null);
-    if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
-    setIsConnecting(true);
-    setConnectingPhone(finalPhone);
-    try {
-      const startParams: any = { to: finalPhone };
-      if (fromToken) {
-        startParams.fromTokens = [fromToken];
+  /**
+   * Dispara ligação através do motor AtendiCalls na VPS
+   */
+  const startCall = useCallback(
+    async (phone: string, contactName?: string, fromToken?: string) => {
+      const cleanPhone = phone.replace(/\D/g, "");
+      if (cleanPhone.length < 8) {
+        toast.error("Número de telefone inválido para chamada.");
+        return false;
       }
-      const { call, err } = await wavoip.startCall(startParams);
-      setIsConnecting(false);
-      if (err) {
-        let errorMsg = err.message || "Não foi possível iniciar a chamada";
-        
-        // Verifica se algum device retornou o motivo "CALLING_SAME_PHONE"
-        if (err.devices && Array.isArray(err.devices)) {
-          const samePhoneError = err.devices.find((d: any) => d.reason === "CALLING_SAME_PHONE");
-          if (samePhoneError) {
-            errorMsg = "Você não pode ligar para o próprio número da instância conectada.";
-          }
+      const finalPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
+      const displayName = contactName || finalPhone;
+
+      toast.info(`Iniciando chamada para ${displayName}...`);
+      setActiveContactName(contactName || null);
+      if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+      setIsConnecting(true);
+      setConnectingPhone(finalPhone);
+
+      try {
+        const res = await startAtendiCallsVoiceCallAction({
+          data: {
+            phone: finalPhone,
+            contactName: displayName,
+            fromToken,
+            companyId: profile?.company_id,
+          },
+        });
+
+        setIsConnecting(false);
+
+        if (!res?.success || !res?.callId) {
+          toast.error("Não foi possível iniciar a chamada no AtendiCalls.");
+          setActiveContactName(null);
+          return false;
         }
-        
-        toast.error("Erro ao ligar", { description: errorMsg });
-        console.error("Erro detalhado do Wavoip:", JSON.stringify(err, null, 2));
+
+        const callObj: CallActive = {
+          id: res.callId,
+          peer: {
+            phone: finalPhone,
+            displayName,
+          },
+          status: "CALLING",
+          device_token: fromToken,
+        };
+
+        currentCallIdRef.current = res.callId;
+        setActiveCall(callObj);
+        setCallStatus("CALLING");
+
+        // Simula transição suave para chamada tocando após disparo bem sucedido
+        setTimeout(() => {
+          setCallStatus((prev) => (prev === "CALLING" ? "RINGING" : prev));
+        }, 1500);
+
+        return true;
+      } catch (e: any) {
+        console.error("[AtendiCalls] Falha ao disparar chamada:", e);
+        toast.error("Erro ao ligar", {
+          description: e?.message || "Falha ao se comunicar com o motor AtendiCalls.",
+        });
+        setIsConnecting(false);
         setActiveContactName(null);
         return false;
       }
-      if (call) {
-        setActiveCall(call);
-        setCallStatus(call.status);
-        
-        call.on("status", (status) => {
-          setCallStatus(status);
-          if (status === 'ENDED' || status === 'REJECTED' || status === 'FAILED' || status === 'DISCONNECTED') {
-            updateCallLog({
-              wavoip_call_id: call.id,
-              status,
-              ended_at: new Date().toISOString(),
-              recording_url: `https://storage.wavoip.com/${call.id}`
-            });
-            setTimeout(closeCallWithDelay, 1000);
-          } else {
-            updateCallLog({ wavoip_call_id: call.id, status });
-          }
-        });
-        const instance = instances.find((i: any) => i.wavoip_token === call.device_token);
-        upsertCallLog({
-          wavoip_call_id: call.id,
-          whatsapp_instance_id: instance?.id,
-          assigned_agent_id: profile?.id,
-          direction: 'OUTGOING',
-          status: call.status,
-          peer_number: call.peer.phone,
-          started_at: new Date().toISOString(),
-        });
-        call.on("peerAccept", (active) => {
-           setActiveCall(active);
-           setCallStatus(active.status);
-           
-           active.on("status", (status) => {
-             setCallStatus(status);
-             if (status === 'ENDED' || status === 'REJECTED' || status === 'FAILED' || status === 'DISCONNECTED') {
-               updateCallLog({
-                 wavoip_call_id: active.id,
-                 status,
-                 ended_at: new Date().toISOString(),
-                 recording_url: `https://storage.wavoip.com/${active.id}`
-               });
-               setTimeout(closeCallWithDelay, 1000);
-             } else {
-               updateCallLog({ wavoip_call_id: active.id, status });
-             }
-           });
-           
-           updateCallLog({
-             wavoip_call_id: active.id,
-             status: 'ACTIVE',
-             started_at: new Date().toISOString()
-           });
-        });
-        call.on("peerReject", closeCallWithDelay);
-        call.on("unanswered", closeCallWithDelay);
-        call.on("ended", closeCallWithDelay);
-      }
-      return !!call;
-    } catch (e) {
-      console.error(e);
-      setActiveContactName(null);
-      setIsConnecting(false);
-      return false;
-    }
-  }, [wavoip]);
+    },
+    [profile?.company_id]
+  );
 
+  /**
+   * Desliga a chamada de forma segura no AtendiCalls (VPS)
+   */
   const endCall = useCallback(async () => {
-    if (!activeCall) return;
-    try {
-      await activeCall.end();
-    } catch (e) {
-      console.error(e);
+    const callId = currentCallIdRef.current || activeCall?.id;
+    if (callId) {
+      try {
+        await hangupAtendiCallsVoiceCallAction({
+          data: {
+            callId,
+            companyId: profile?.company_id,
+          },
+        });
+      } catch (err: any) {
+        console.warn("[AtendiCalls] Erro ao desligar chamada:", err?.message || err);
+      }
     }
     closeCallWithDelay();
-  }, [activeCall]);
+  }, [activeCall, profile?.company_id, closeCallWithDelay]);
 
   const mute = useCallback(async () => {
-    if (!activeCall) return;
-    try {
-      if ((activeCall as any).status === "ACTIVE") {
-        await (activeCall as CallActive).mute();
-      }
-      setIsMuted(true);
-    } catch (e) {
-      console.error("Erro ao mutar", e);
-    }
-  }, [activeCall]);
+    setIsMuted(true);
+    toast.info("Microfone silenciado");
+  }, []);
 
   const unmute = useCallback(async () => {
-    if (!activeCall) return;
-    try {
-      if ((activeCall as any).status === "ACTIVE") {
-        await (activeCall as CallActive).unmute();
-      }
-      setIsMuted(false);
-    } catch (e) {
-      console.error("Erro ao desmutar", e);
-    }
-  }, [activeCall]);
+    setIsMuted(false);
+    toast.info("Microfone ativado");
+  }, []);
 
   const toggleSpeaker = useCallback(() => {
-    setIsSpeakerOn(prev => !prev);
+    setIsSpeakerOn((prev) => !prev);
   }, []);
 
   return (
     <WavoipContext.Provider
       value={{
-        wavoip,
+        wavoip: null,
         incomingOffer,
         activeCall,
         callStatus,
@@ -607,7 +317,7 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
         toggleSpeaker,
         instances,
         isConnecting,
-        connectingPhone
+        connectingPhone,
       }}
     >
       {children}
@@ -622,3 +332,6 @@ export function useWavoip() {
   }
   return context;
 }
+
+// Exporta alias moderno useAtendiCalls
+export const useAtendiCalls = useWavoip;

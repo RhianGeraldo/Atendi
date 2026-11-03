@@ -1,0 +1,227 @@
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import {
+  resolveAtendiCallsConfig,
+  getAtendiCallsConnectStatus,
+  startAtendiCallsVoiceCall,
+  hangupAtendiCallsVoiceCall,
+  type AtendiCallsAgentConfig,
+} from "@/lib/server/atendicalls-api";
+import { getPhoneVariants } from "@/lib/utils";
+
+/**
+ * Consulta o status da linha WhatsApp no AtendiCalls (conectada ou QR Code)
+ */
+export const getAtendiCallsStatusAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      instanceId: z.string().uuid().optional().nullable(),
+      companyId: z.string().uuid().optional().nullable(),
+      token: z.string().optional().nullable(),
+      apiUrl: z.string().optional().nullable(),
+    })
+  )
+  .handler(async ({ data, context }) => {
+    let config: { token: string; apiUrl: string };
+    if (data.token && data.token.trim()) {
+      config = {
+        token: data.token.trim(),
+        apiUrl: (data.apiUrl?.trim() || "https://calls.esteticaelaser.com.br").replace(/\/+$/, ""),
+      };
+    } else {
+      config = await resolveAtendiCallsConfig(data.instanceId, data.companyId);
+    }
+    try {
+      const status = await getAtendiCallsConnectStatus(config);
+      return { success: true, ...status, apiUrl: config.apiUrl };
+    } catch (err: any) {
+      return {
+        success: false,
+        status: "disconnected" as const,
+        isConnected: false,
+        qrcode: null,
+        instance: null,
+        error: err.message,
+        apiUrl: config.apiUrl,
+      };
+    }
+  });
+
+/**
+ * Dispara uma chamada telefônica de voz com IA pelo AtendiCalls
+ */
+export const startAtendiCallsVoiceCallAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      phone: z.string().min(8),
+      contactName: z.string().optional().nullable(),
+      contactId: z.string().uuid().optional().nullable(),
+      instanceId: z.string().uuid().optional().nullable(),
+      fromToken: z.string().optional().nullable(),
+      companyId: z.string().uuid().optional().nullable(),
+      systemPrompt: z.string().optional().nullable(),
+      firstMessage: z.string().optional().nullable(),
+      variables: z.record(z.any()).optional().nullable(),
+      voice: z.string().optional().nullable(),
+      model: z.string().optional().nullable(),
+      provider: z.string().optional().nullable(),
+    })
+  )
+  .handler(async ({ data, context }) => {
+    const cleanPhone = data.phone.replace(/\D/g, "");
+    const formattedPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
+
+    // 1. Resolver instância se fromToken foi passado
+    let effectiveInstanceId = data.instanceId;
+    let effectiveCompanyId = data.companyId;
+
+    if (!effectiveInstanceId && data.fromToken) {
+      const { data: instByToken } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("id, company_id")
+        .or(`atendicalls_token.eq.${data.fromToken},wavoip_token.eq.${data.fromToken}`)
+        .limit(1);
+      if (instByToken && instByToken.length > 0) {
+        effectiveInstanceId = instByToken[0].id;
+        if (!effectiveCompanyId) effectiveCompanyId = instByToken[0].company_id;
+      }
+    }
+
+    // 2. Resolver empresa e contato
+    let effectiveContactId = data.contactId;
+
+    if (!effectiveContactId) {
+      const variants = getPhoneVariants(formattedPhone);
+      const { data: contacts } = await supabaseAdmin
+        .from("contacts")
+        .select("id, company_id, name")
+        .in("phone", variants.length ? variants : [formattedPhone])
+        .limit(1);
+
+      if (contacts && contacts.length > 0) {
+        effectiveContactId = contacts[0].id;
+        if (!effectiveCompanyId) effectiveCompanyId = contacts[0].company_id;
+      }
+    }
+
+    if (!effectiveCompanyId) {
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("company_id")
+        .eq("id", context.userId)
+        .single();
+      effectiveCompanyId = profile?.company_id;
+    }
+
+    if (!effectiveCompanyId) {
+      throw new Error("Não foi possível identificar a empresa para realizar a ligação.");
+    }
+
+    // 3. Resolver instância padrão se ainda não identificada
+    if (!effectiveInstanceId) {
+      const { data: inst } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("id")
+        .eq("company_id", effectiveCompanyId)
+        .order("status", { ascending: false })
+        .limit(1);
+      effectiveInstanceId = inst?.[0]?.id || null;
+    }
+
+    // 3. Resolver credenciais AtendiCalls
+    const config = await resolveAtendiCallsConfig(effectiveInstanceId, effectiveCompanyId);
+
+    // 4. Montar configuração do agente de voz
+    const contactDisplayName = data.contactName || "Cliente";
+    const agentConfig: AtendiCallsAgentConfig = {
+      provider: data.provider || "openrouter",
+      model: data.model || "google/gemini-2.0-flash-001",
+      voice: data.voice || "alloy",
+      systemPrompt:
+        data.systemPrompt ||
+        `Você é a consultora de atendimento da clínica Estética e Laser. Seja gentil, acolhedora e objetiva. Confirme o interesse e as dúvidas do cliente {{nome}} e ofereça o melhor encaminhamento para agendamento.`,
+      firstMessage:
+        data.firstMessage ||
+        `Olá {{nome}}, tudo bem? Aqui é da Estética e Laser. Estou ligando para dar continuidade ao seu atendimento!`,
+      variables: {
+        nome: contactDisplayName,
+        telefone: formattedPhone,
+        ...(data.variables || {}),
+      },
+    };
+
+    // Monta a webhookUrl baseada no ambiente
+    const appOrigin = process.env.APP_ORIGIN || process.env.NEXT_PUBLIC_APP_URL || "https://atendi.online";
+    const webhookUrl = `${appOrigin.replace(/\/+$/, "")}/api/webhooks/calls`;
+
+    // 5. Iniciar chamada na VPS
+    const result = await startAtendiCallsVoiceCall({
+      to: formattedPhone,
+      webhookUrl,
+      agent: agentConfig,
+      config,
+    });
+
+    const callId = result.callId;
+
+    // 6. Registrar entrada inicial em call_logs com status CALLING
+    if (callId) {
+      await supabaseAdmin.from("call_logs").upsert(
+        {
+          call_id: callId,
+          wavoip_call_id: callId,
+          company_id: effectiveCompanyId,
+          whatsapp_instance_id: effectiveInstanceId,
+          contact_id: effectiveContactId,
+          assigned_agent_id: context.userId,
+          direction: "OUTGOING",
+          status: "CALLING",
+          peer_number: formattedPhone,
+          started_at: new Date().toISOString(),
+          provider: "atendicalls",
+          metadata: {
+            agent: agentConfig,
+            initiated_by: context.userId,
+          },
+        },
+        { onConflict: "call_id" }
+      );
+    }
+
+    return {
+      success: true,
+      callId,
+      phone: formattedPhone,
+      contactName: contactDisplayName,
+    };
+  });
+
+/**
+ * Desliga chamada em andamento
+ */
+export const hangupAtendiCallsVoiceCallAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      callId: z.string().min(1),
+      instanceId: z.string().uuid().optional().nullable(),
+      companyId: z.string().uuid().optional().nullable(),
+    })
+  )
+  .handler(async ({ data }) => {
+    const config = await resolveAtendiCallsConfig(data.instanceId, data.companyId);
+    const hungUp = await hangupAtendiCallsVoiceCall(data.callId, config);
+
+    if (hungUp) {
+      await supabaseAdmin
+        .from("call_logs")
+        .update({ status: "ENDED", ended_at: new Date().toISOString() })
+        .eq("call_id", data.callId);
+    }
+
+    return { success: hungUp };
+  });

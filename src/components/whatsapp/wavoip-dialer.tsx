@@ -113,7 +113,7 @@ export function WavoipDialer({ open, onOpenChange }: WavoipDialerProps) {
               <SelectContent className="z-[200]">
                 {instances.map((instance) => (
                   <SelectItem key={instance.id} value={instance.id} className="text-xs">
-                    {instance.name || "Instância Wavoip"}
+                    {instance.name || "Instância AtendiCalls"}
                   </SelectItem>
                 ))}
               </SelectContent>

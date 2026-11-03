@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings, Loader2, Save, Globe, Copy, Building } from "lucide-react";
+import { Settings, Loader2, Save, Globe, Copy, Building, PhoneCall, QrCode, CheckCircle2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { EvoGoClient } from "@/integrations/evogo/client";
 import { StevoClient } from "@/integrations/stevo/client";
@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { WhatsappTemplatesTab } from "./whatsapp-templates-tab";
 import { enderecoLocal, origemPublica } from "@/lib/endereco-publico";
+import { getAtendiCallsStatusAction } from "@/lib/api/atendicalls.functions";
 
 interface InstanceSettingsModalProps {
   instance: any; // { id, name, instance_name, evogo_api_key, evogo_instance_id, webhook_url, department_id }
@@ -33,6 +34,11 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const [customHost, setCustomHost] = useState("");
   const [customApiKey, setCustomApiKey] = useState("");
   const [wavoipToken, setWavoipToken] = useState("");
+  const [atendicallsToken, setAtendicallsToken] = useState("");
+  const [atendicallsUrl, setAtendicallsUrl] = useState("https://calls.esteticaelaser.com.br");
+  const [atendicallsStatus, setAtendicallsStatus] = useState<any>(null);
+  const [checkingAtendicalls, setCheckingAtendicalls] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
   const [oficialPhoneId, setOficialPhoneId] = useState("");
   const [oficialWabaId, setOficialWabaId] = useState("");
   const [oficialAccessToken, setOficialAccessToken] = useState("");
@@ -102,7 +108,11 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     setWebhookSugerido(currentDomainWebhook);
     setCustomHost(instance.custom_host || "");
     setCustomApiKey(instance.provider === "stevo" ? (instance.stevo_api_key || "") : (instance.evogo_api_key || ""));
-    setWavoipToken(instance.wavoip_token || "");
+    const tokenChamada = instance.atendicalls_token || instance.wavoip_token || "";
+    setWavoipToken(tokenChamada);
+    setAtendicallsToken(tokenChamada);
+    setAtendicallsUrl(instance.atendicalls_url || "https://calls.esteticaelaser.com.br");
+    setAtendicallsStatus(null);
     setOficialPhoneId(instance.oficial_phone_number_id || "");
     setOficialWabaId(instance.oficial_waba_id || "");
     setOficialAccessToken(instance.oficial_access_token || "");
@@ -151,6 +161,42 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     fetchSettings();
   }, [open, instance, company]);
 
+  const handleCheckAtendiCalls = async () => {
+    const tokenToTest = atendicallsToken.trim() || wavoipToken.trim();
+    if (!tokenToTest) {
+      toast.error("Informe o Token da Instância do AtendiCalls");
+      return;
+    }
+    setCheckingAtendicalls(true);
+    try {
+      const res = await getAtendiCallsStatusAction({
+        data: {
+          instanceId: instance?.id,
+          companyId: instance?.company_id,
+          token: tokenToTest,
+          apiUrl: atendicallsUrl.trim() || undefined,
+        },
+      });
+      setAtendicallsStatus(res);
+      if (res.isConnected) {
+        toast.success("AtendiCalls Conectado!", {
+          description: `Linha ativa: ${res.instance?.pushName || res.instance?.jid || 'WhatsApp'}`
+        });
+      } else if (res.qrcode?.base64) {
+        setShowQrModal(true);
+        toast.info("Aguardando leitura do QR Code do WhatsApp");
+      } else {
+        toast.warning("Status AtendiCalls", {
+          description: res.error || `Status retornado: ${res.status}`
+        });
+      }
+    } catch (err: any) {
+      toast.error("Erro ao verificar AtendiCalls", { description: err.message });
+    } finally {
+      setCheckingAtendicalls(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!instance) return;
     
@@ -187,6 +233,9 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
       return;
     }
 
+    const tokenFinal = atendicallsToken.trim() || wavoipToken.trim() || null;
+    const urlFinal = atendicallsUrl.trim() || "https://calls.esteticaelaser.com.br";
+
     setSaving(true);
 
     try {
@@ -195,7 +244,9 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           .from("whatsapp_instances")
           .update({ 
             webhook_url: webhookFinal,
-            wavoip_token: wavoipToken || null,
+            wavoip_token: tokenFinal,
+            atendicalls_token: tokenFinal,
+            atendicalls_url: urlFinal,
             department_id: selectedDepartmentId || null,
             name,
           })
@@ -206,6 +257,9 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           .from("whatsapp_instances")
           .update({ 
              webhook_url: webhookFinal, 
+             wavoip_token: tokenFinal,
+             atendicalls_token: tokenFinal,
+             atendicalls_url: urlFinal,
              oficial_phone_number_id: oficialPhoneId,
              oficial_waba_id: oficialWabaId,
              oficial_access_token: oficialAccessToken,
@@ -226,7 +280,9 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           }
           const { error: dbErr } = await supabase.from("whatsapp_instances").update({ 
             webhook_url: webhookFinal, 
-            wavoip_token: wavoipToken || null, 
+            wavoip_token: tokenFinal,
+            atendicalls_token: tokenFinal,
+            atendicalls_url: urlFinal,
             custom_host: customHost || null, 
             stevo_api_key: customApiKey || instance.stevo_api_key,
             department_id: selectedDepartmentId || null,
@@ -245,7 +301,9 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           }
           const { error: dbErr } = await supabase.from("whatsapp_instances").update({ 
             webhook_url: webhookFinal, 
-            wavoip_token: wavoipToken || null, 
+            wavoip_token: tokenFinal,
+            atendicalls_token: tokenFinal,
+            atendicalls_url: urlFinal,
             custom_host: customHost || null, 
             evogo_api_key: customApiKey || instance.evogo_api_key,
             department_id: selectedDepartmentId || null,
@@ -277,37 +335,84 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const isCloudAPI = isOficial || isInstagram || isMessenger;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={isOficial ? "sm:max-w-4xl max-h-[90vh] overflow-y-auto" : "sm:max-w-[425px] max-h-[90vh] overflow-y-auto"}>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5 text-primary" />
-            Configurações da Instância
-          </DialogTitle>
-          <DialogDescription>
-            {instance?.name} {!(isOficial || isInstagram || isMessenger) && <span className="font-mono text-xs">({instance?.instance_name})</span>}
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className={isOficial ? "sm:max-w-4xl max-h-[90vh] overflow-y-auto" : "sm:max-w-[480px] max-h-[90vh] overflow-y-auto"}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5 text-primary" />
+              Configurações da Instância
+            </DialogTitle>
+            <DialogDescription>
+              {instance?.name} {!(isOficial || isInstagram || isMessenger) && <span className="font-mono text-xs">({instance?.instance_name})</span>}
+            </DialogDescription>
+          </DialogHeader>
 
-        {loading ? (
-          <div className="flex flex-col items-center justify-center p-8 text-muted-foreground">
-            <Loader2 className="h-8 w-8 animate-spin mb-2" />
-            <p className="text-sm">Carregando configurações...</p>
-          </div>
-        ) : (
-          <>
-            {isOficial ? (
-              <Tabs defaultValue="settings" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="settings">Configurações</TabsTrigger>
-                  <TabsTrigger value="templates">Templates</TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="settings" className="space-y-4 pt-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center p-8 text-muted-foreground">
+              <Loader2 className="h-8 w-8 animate-spin mb-2" />
+              <p className="text-sm">Carregando configurações...</p>
+            </div>
+          ) : (
+            <>
+              {isOficial ? (
+                <Tabs defaultValue="settings" className="w-full">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="settings">Configurações</TabsTrigger>
+                    <TabsTrigger value="templates">Templates</TabsTrigger>
+                  </TabsList>
+                  
+                  <TabsContent value="settings" className="space-y-4 pt-4">
+                    <SettingsFormContent 
+                      channelName={channelName} setChannelName={setChannelName}
+                      webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl} webhookSugerido={webhookSugerido}
+                      wavoipToken={wavoipToken} setWavoipToken={setWavoipToken}
+                      atendicallsToken={atendicallsToken} setAtendicallsToken={setAtendicallsToken}
+                      atendicallsUrl={atendicallsUrl} setAtendicallsUrl={setAtendicallsUrl}
+                      atendicallsStatus={atendicallsStatus}
+                      checkingAtendicalls={checkingAtendicalls}
+                      handleCheckAtendiCalls={handleCheckAtendiCalls}
+                      showQrModal={showQrModal} setShowQrModal={setShowQrModal}
+                      oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
+                      oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
+                      oficialAccessToken={oficialAccessToken} setOficialAccessToken={setOficialAccessToken}
+                      customHost={customHost} setCustomHost={setCustomHost}
+                      customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
+                      advSettings={advSettings} setAdvSettings={setAdvSettings} advCarregadas={!!advSettingsOriginal}
+                      selectedDepartmentId={selectedDepartmentId}
+                      setSelectedDepartmentId={setSelectedDepartmentId}
+                      departments={filteredDepartments}
+                      isOficial={isOficial}
+                      isInstagram={isInstagram}
+                      isMessenger={isMessenger}
+                      instance={instance}
+                    />
+                    <Button 
+                      className="w-full mt-4" 
+                      onClick={handleSave} 
+                      disabled={saving}
+                    >
+                      {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                      Salvar Configurações
+                    </Button>
+                  </TabsContent>
+                  
+                  <TabsContent value="templates" className="pt-4">
+                    <WhatsappTemplatesTab companyId={company?.id} instanceId={instance?.id} />
+                  </TabsContent>
+                </Tabs>
+              ) : (
+                <div className="space-y-4 py-4">
                   <SettingsFormContent 
                     channelName={channelName} setChannelName={setChannelName}
-                  webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl} webhookSugerido={webhookSugerido}
+                    webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl} webhookSugerido={webhookSugerido}
                     wavoipToken={wavoipToken} setWavoipToken={setWavoipToken}
+                    atendicallsToken={atendicallsToken} setAtendicallsToken={setAtendicallsToken}
+                    atendicallsUrl={atendicallsUrl} setAtendicallsUrl={setAtendicallsUrl}
+                    atendicallsStatus={atendicallsStatus}
+                    checkingAtendicalls={checkingAtendicalls}
+                    handleCheckAtendiCalls={handleCheckAtendiCalls}
+                    showQrModal={showQrModal} setShowQrModal={setShowQrModal}
                     oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
                     oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
                     oficialAccessToken={oficialAccessToken} setOficialAccessToken={setOficialAccessToken}
@@ -330,46 +435,63 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
                     {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                     Salvar Configurações
                   </Button>
-                </TabsContent>
-                
-                <TabsContent value="templates" className="pt-4">
-                  <WhatsappTemplatesTab companyId={company?.id} instanceId={instance?.id} />
-                </TabsContent>
-              </Tabs>
-            ) : (
-              <div className="space-y-4 py-4">
-                <SettingsFormContent 
-                  channelName={channelName} setChannelName={setChannelName}
-                  webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl} webhookSugerido={webhookSugerido}
-                  wavoipToken={wavoipToken} setWavoipToken={setWavoipToken}
-                  oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
-                  oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
-                  oficialAccessToken={oficialAccessToken} setOficialAccessToken={setOficialAccessToken}
-                  customHost={customHost} setCustomHost={setCustomHost}
-                  customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
-                  advSettings={advSettings} setAdvSettings={setAdvSettings} advCarregadas={!!advSettingsOriginal}
-                  selectedDepartmentId={selectedDepartmentId}
-                  setSelectedDepartmentId={setSelectedDepartmentId}
-                  departments={filteredDepartments}
-                  isOficial={isOficial}
-                  isInstagram={isInstagram}
-                  isMessenger={isMessenger}
-                  instance={instance}
-                />
-                <Button 
-                  className="w-full mt-4" 
-                  onClick={handleSave} 
-                  disabled={saving}
-                >
-                  {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                  Salvar Configurações
-                </Button>
-              </div>
-            )}
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
+                </div>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal para leitura do QR Code do AtendiCalls */}
+      <Dialog open={showQrModal} onOpenChange={setShowQrModal}>
+        <DialogContent className="sm:max-w-md text-center">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-center gap-2">
+              <QrCode className="h-5 w-5 text-primary" />
+              Conectar WhatsApp no AtendiCalls
+            </DialogTitle>
+            <DialogDescription>
+              Abra o WhatsApp no celular, vá em <strong>Aparelhos Conectados &gt; Conectar aparelho</strong> e aponte para o QR Code abaixo.
+            </DialogDescription>
+          </DialogHeader>
+
+          {atendicallsStatus?.qrcode?.base64 ? (
+            <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-inner border my-2">
+              <img
+                src={atendicallsStatus.qrcode.base64}
+                alt="QR Code WhatsApp AtendiCalls"
+                className="w-64 h-64 object-contain"
+              />
+            </div>
+          ) : (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              {atendicallsStatus?.isConnected
+                ? "Esta instância já está conectada ao WhatsApp!"
+                : "QR Code indisponível no momento. Clique em Atualizar para tentar novamente."}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 pt-2 border-t">
+            <Button variant="outline" size="sm" onClick={() => setShowQrModal(false)}>
+              Fechar
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleCheckAtendiCalls}
+              disabled={checkingAtendicalls}
+              className="gap-1.5"
+            >
+              {checkingAtendicalls ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Verificar Conexão
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -378,6 +500,12 @@ function SettingsFormContent({
   channelName, setChannelName,
   webhookUrl, setWebhookUrl, webhookSugerido,
   wavoipToken, setWavoipToken, 
+  atendicallsToken, setAtendicallsToken,
+  atendicallsUrl, setAtendicallsUrl,
+  atendicallsStatus,
+  checkingAtendicalls,
+  handleCheckAtendiCalls,
+  showQrModal, setShowQrModal,
   oficialPhoneId, setOficialPhoneId, 
   oficialWabaId, setOficialWabaId, 
   oficialAccessToken, setOficialAccessToken, 
@@ -508,15 +636,109 @@ function SettingsFormContent({
                 onChange={(e) => setCustomApiKey(e.target.value)}
               />
             </div>
-            <div className="space-y-1 mt-4">
-              <label className="text-xs text-muted-foreground">Wavoip Token (Chamadas)</label>
-              <Input 
-                placeholder="Seu token de dispositivo Wavoip" 
-                value={wavoipToken}
-                onChange={(e) => setWavoipToken(e.target.value)}
-              />
-            </div>
           </>
+        )}
+      </div>
+
+      {/* Seção AtendiCalls (Chamadas WhatsApp com IA) */}
+      <div className="space-y-3 p-3.5 rounded-xl border border-primary/20 bg-primary/5 mt-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <PhoneCall className="h-4 w-4 text-primary" />
+            <h4 className="text-sm font-semibold text-foreground">AtendiCalls (Voz e IA)</h4>
+          </div>
+          {atendicallsStatus?.isConnected ? (
+            <Badge className="bg-emerald-600 text-white gap-1 text-[11px] py-0.5">
+              <CheckCircle2 className="h-3 w-3" /> Conectado
+            </Badge>
+          ) : atendicallsStatus?.qrcode?.base64 ? (
+            <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 gap-1 text-[11px] py-0.5">
+              <QrCode className="h-3 w-3" /> QR Code Pendente
+            </Badge>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Motor AtendiCalls na VPS para chamadas VoIP WhatsApp de baixa latência (UDP RTP) com IA de voz e transcrição estéreo automática.
+        </p>
+
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground font-medium">URL da API (VPS)</label>
+          <Input 
+            placeholder="https://calls.esteticaelaser.com.br" 
+            value={atendicallsUrl}
+            onChange={(e) => setAtendicallsUrl(e.target.value)}
+            className="text-xs font-mono"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground font-medium">Token da Instância (X-API-Key)</label>
+          <Input 
+            placeholder="Ex: 264ddb564614e930aadca44121650f03" 
+            value={atendicallsToken}
+            onChange={(e) => {
+              setAtendicallsToken(e.target.value);
+              setWavoipToken(e.target.value);
+            }}
+            className="text-xs font-mono"
+          />
+        </div>
+
+        <div className="flex items-center gap-2 pt-1">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleCheckAtendiCalls}
+            disabled={checkingAtendicalls || !atendicallsToken}
+            className="text-xs h-8 gap-1.5"
+          >
+            {checkingAtendicalls ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Verificar Conexão / QR Code
+          </Button>
+
+          {atendicallsStatus?.qrcode?.base64 && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowQrModal(true)}
+              className="text-xs h-8 gap-1.5"
+            >
+              <QrCode className="h-3.5 w-3.5" />
+              Exibir QR Code
+            </Button>
+          )}
+        </div>
+
+        {atendicallsStatus && (
+          <div className="text-xs p-2.5 rounded-lg bg-background/80 border text-muted-foreground space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-foreground">Status do Motor:</span>
+              <span className="font-mono text-foreground font-semibold">{atendicallsStatus.status}</span>
+            </div>
+            {atendicallsStatus.instance?.pushName && (
+              <div className="flex items-center justify-between">
+                <span>Nome WhatsApp:</span>
+                <span className="font-medium text-foreground">{atendicallsStatus.instance.pushName}</span>
+              </div>
+            )}
+            {atendicallsStatus.instance?.jid && (
+              <div className="flex items-center justify-between">
+                <span>JID / Número:</span>
+                <span className="font-mono text-[11px]">{atendicallsStatus.instance.jid}</span>
+              </div>
+            )}
+            {atendicallsStatus.error && (
+              <div className="text-red-500 text-[11px] pt-1">
+                Erro: {atendicallsStatus.error}
+              </div>
+            )}
+          </div>
         )}
       </div>
 

@@ -110,6 +110,28 @@ export default {
       if (url.pathname === '/api/wavoip/webhook' && request.method === 'POST') {
         return await handleWavoipWebhook(request);
       }
+      if ((url.pathname === '/api/webhooks/calls' || url.pathname === '/api/calls/webhook') && request.method === 'POST') {
+        const { handleAtendiCallsWebhook } = await import('./lib/server/atendicalls-webhook');
+        return await handleAtendiCallsWebhook(request);
+      }
+
+      // Proxy de áudio das gravações do AtendiCalls
+      if (url.pathname.startsWith('/api/calls/') && url.pathname.endsWith('/audio') && request.method === 'GET') {
+        const parts = url.pathname.split('/');
+        const callId = parts[3];
+        if (callId) {
+          const { resolveAtendiCallsConfig, fetchAtendiCallsAudioStream } = await import('./lib/server/atendicalls-api');
+          const config = await resolveAtendiCallsConfig();
+          const upstream = await fetchAtendiCallsAudioStream(callId, config);
+          return new Response(upstream.body, {
+            status: upstream.status,
+            headers: {
+              'Content-Type': upstream.headers.get('Content-Type') || 'audio/wav',
+              'Cache-Control': 'public, max-age=86400',
+            },
+          });
+        }
+      }
       if (url.pathname === '/api/cron/follow-ups') {
         return await handleCronFollowUps(request);
       }

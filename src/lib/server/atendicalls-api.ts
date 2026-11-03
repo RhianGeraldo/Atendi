@@ -1,0 +1,204 @@
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
+
+export interface AtendiCallsAgentConfig {
+  provider?: string; // "openrouter" | "gemini_live" | "openai"
+  model?: string; // "google/gemini-2.0-flash-001" | "gemini-2.5-flash-native-audio-latest"
+  voice?: string; // "alloy" | "Aoede" | "Charon" | "Fenrir" | "Kore" | "Puck"
+  systemPrompt?: string;
+  firstMessage?: string;
+  variables?: Record<string, any>;
+}
+
+export interface AtendiCallsConfig {
+  apiUrl: string;
+  token: string;
+}
+
+const DEFAULT_API_URL = process.env.ATENDICALLS_URL || "https://calls.esteticaelaser.com.br";
+const DEFAULT_FALLBACK_TOKEN = process.env.ATENDICALLS_TOKEN || "264ddb564614e930aadca44121650f03";
+
+/**
+ * Resolve as credenciais do AtendiCalls:
+ * 1. Da instância específica (atendicalls_token ou wavoip_token legado)
+ * 2. Da empresa (atendicalls_token)
+ * 3. Das variáveis de ambiente / fallback global
+ */
+export async function resolveAtendiCallsConfig(
+  instanceId?: string | null,
+  companyId?: string | null
+): Promise<AtendiCallsConfig> {
+  let apiUrl = DEFAULT_API_URL;
+  let token = "";
+
+  if (instanceId) {
+    const { data: inst } = await supabaseAdmin
+      .from("whatsapp_instances")
+      .select("atendicalls_token, atendicalls_url, wavoip_token, company_id")
+      .eq("id", instanceId)
+      .maybeSingle();
+
+    if (inst) {
+      if (inst.atendicalls_token) token = inst.atendicalls_token;
+      else if (inst.wavoip_token) token = inst.wavoip_token;
+
+      if (inst.atendicalls_url) apiUrl = inst.atendicalls_url;
+      if (!companyId && inst.company_id) companyId = inst.company_id;
+    }
+  }
+
+  if (!token && companyId) {
+    const { data: comp } = await supabaseAdmin
+      .from("companies")
+      .select("atendicalls_token, atendicalls_url")
+      .eq("id", companyId)
+      .maybeSingle();
+
+    if (comp) {
+      if (comp.atendicalls_token) token = comp.atendicalls_token;
+      if (comp.atendicalls_url) apiUrl = comp.atendicalls_url;
+    }
+  }
+
+  if (!token) {
+    token = DEFAULT_FALLBACK_TOKEN;
+  }
+
+  // Remove barra final se houver
+  apiUrl = apiUrl.replace(/\/+$/, "");
+
+  return { apiUrl, token };
+}
+
+/**
+ * Consulta o status da linha e busca o QR Code se estiver desconectada
+ */
+export async function getAtendiCallsConnectStatus(config: AtendiCallsConfig) {
+  const url = `${config.apiUrl}/api/v1/instance/connect`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      "X-API-Key": config.token,
+    },
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Erro ao conectar com AtendiCalls (${res.status}): ${errText || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const isConnected = data.status === "connected" || data.instance?.paired === true || data.instance?.state === "open";
+  const qrcodeBase64 = data.qrcode?.base64 || (typeof data.qrcode === "string" ? data.qrcode : null);
+
+  return {
+    status: isConnected ? ("connected" as const) : qrcodeBase64 ? ("qrcode_ready" as const) : ("disconnected" as const),
+    isConnected,
+    qrcode: qrcodeBase64,
+    instance: data.instance || null,
+    message: data.message || null,
+    raw: data,
+  };
+}
+
+/**
+ * Inicia uma ligação telefônica via WhatsApp com IA de voz
+ */
+export async function startAtendiCallsVoiceCall(params: {
+  to: string;
+  webhookUrl?: string;
+  agent?: AtendiCallsAgentConfig;
+  config: AtendiCallsConfig;
+}): Promise<{ callId: string; raw: any }> {
+  const { to, webhookUrl, agent, config } = params;
+  const cleanPhone = to.replace(/\D/g, "");
+  const formattedPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
+
+  const defaultAgent: AtendiCallsAgentConfig = {
+    provider: "openrouter",
+    model: "google/gemini-2.0-flash-001",
+    voice: "alloy",
+    systemPrompt:
+      "Você é uma consultora de atendimento da clínica Estética e Laser. Seja educada, acolhedora, objetiva e esclareça as dúvidas sobre nossos procedimentos e agendamentos.",
+    firstMessage: "Olá! Tudo bem? Estou ligando para dar continuidade ao seu atendimento na Estética e Laser.",
+    variables: {},
+  };
+
+  const finalAgent = {
+    ...defaultAgent,
+    ...(agent || {}),
+    variables: {
+      ...(defaultAgent.variables || {}),
+      ...(agent?.variables || {}),
+    },
+  };
+
+  const payload: any = {
+    to: formattedPhone,
+    agent: finalAgent,
+  };
+
+  if (webhookUrl) {
+    payload.webhookUrl = webhookUrl;
+  }
+
+  const url = `${config.apiUrl}/api/v1/voice/calls`;
+  console.log(`[AtendiCalls] Disparando chamada para ${formattedPhone} via ${url}...`);
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "X-API-Key": config.token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error(`[AtendiCalls] Erro ao disparar chamada (${res.status}):`, errText);
+    throw new Error(`Falha ao iniciar ligação via AtendiCalls (${res.status}): ${errText || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const callId = data.callId || data.id || data.call_id;
+
+  if (!callId) {
+    console.warn(`[AtendiCalls] Resposta sem callId explícito:`, data);
+  }
+
+  return { callId, raw: data };
+}
+
+/**
+ * Desliga uma chamada em andamento
+ */
+export async function hangupAtendiCallsVoiceCall(callId: string, config: AtendiCallsConfig): Promise<boolean> {
+  const url = `${config.apiUrl}/api/v1/voice/calls/${callId}/hangup`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "X-API-Key": config.token,
+    },
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.warn(`[AtendiCalls] Erro ao desligar chamada ${callId} (${res.status}):`, errText);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Busca o áudio da gravação de uma chamada
+ */
+export async function fetchAtendiCallsAudioStream(callId: string, config: AtendiCallsConfig): Promise<Response> {
+  const url = `${config.apiUrl}/api/calls/${callId}/audio`;
+  return await fetch(url, {
+    method: "GET",
+    headers: {
+      "X-API-Key": config.token,
+    },
+  });
+}
