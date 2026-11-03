@@ -40,7 +40,7 @@ async function processCallAnsweredEvent(payload: any) {
   await supabaseAdmin
     .from("call_logs")
     .update({ status: "ACTIVE" })
-    .eq("call_id", callId)
+    .or(`call_id.eq.${callId},wavoip_call_id.eq.${callId}`)
     .neq("status", "ACTIVE")
     .neq("status", "ENDED");
 }

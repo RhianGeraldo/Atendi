@@ -378,9 +378,9 @@ export const syncAtendiCallsCallStatusAction = createServerFn({ method: "POST" }
 
     try {
       const details = await getAtendiCallsCallDetails(data.callId, config);
-      const rawStatus = (details.call?.Status || "").toLowerCase();
-      const isConnected = rawStatus === "connected" || rawStatus === "active";
-      const isEnded = details.isEnded || rawStatus === "ended" || rawStatus === "terminated" || rawStatus === "failed";
+      const rawStatus = (details.call?.status || details.call?.Status || "").toLowerCase();
+      const isConnected = rawStatus === "connected" || rawStatus === "active" || rawStatus === "in_progress";
+      const isEnded = !isConnected && (details.isEnded || rawStatus === "ended" || rawStatus === "terminated" || rawStatus === "failed");
 
       if (isConnected) {
         // Marca como ACTIVE no banco se ainda não estiver

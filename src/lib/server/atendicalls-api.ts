@@ -303,9 +303,23 @@ export async function getAtendiCallsCallDetails(
   }
 
   const data = await res.json();
-  const status = (data.call?.Status || "").toLowerCase();
-  const isEnded = status === "ended" || status === "terminated" || status === "failed";
-  return { ...data, isEnded };
+  const rawCall = data.call || {};
+  const status = (rawCall.status || rawCall.Status || "").toLowerCase();
+  const isConnected = status === "connected" || status === "active" || status === "in_progress";
+  const isEnded = !isConnected && (status === "ended" || status === "terminated" || status === "failed");
+
+  const normalizedCall = {
+    ...rawCall,
+    callId: rawCall.callId || rawCall.CallID || callId,
+    status,
+    Status: status,
+    peer: rawCall.peer || rawCall.Peer,
+    direction: rawCall.direction || rawCall.Direction,
+    startedAt: rawCall.startedAt || rawCall.StartedAt,
+    connectedAt: rawCall.connectedAt || rawCall.ConnectedAt,
+  };
+
+  return { ...data, call: normalizedCall, isEnded };
 }
 
 /**
