@@ -7,6 +7,7 @@ import { useUnit } from "@/lib/unit-context";
 import {
   startAtendiCallsVoiceCallAction,
   hangupAtendiCallsVoiceCallAction,
+  syncAtendiCallsCallStatusAction,
 } from "@/lib/api/atendicalls.functions";
 
 export type CallStatus =
@@ -72,9 +73,14 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
 
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const currentCallIdRef = useRef<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const closeCallWithDelay = useCallback(() => {
     setCallStatus("ENDED");
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
     if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
     closeTimeoutRef.current = setTimeout(() => {
       setActiveCall(null);
@@ -85,6 +91,58 @@ export function WavoipProvider({ children }: { children: React.ReactNode }) {
       currentCallIdRef.current = null;
     }, 2000);
   }, []);
+
+  // Polling em tempo real durante chamadas ativas para sincronizar atendimento e encerramento
+  useEffect(() => {
+    const currentId = currentCallIdRef.current;
+    const isCallLive = callStatus === "CALLING" || callStatus === "RINGING" || callStatus === "ACTIVE";
+
+    if (!currentId || !isCallLive) {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      return;
+    }
+
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+
+    pollIntervalRef.current = setInterval(async () => {
+      const activeId = currentCallIdRef.current;
+      if (!activeId) return;
+
+      try {
+        const res = await syncAtendiCallsCallStatusAction({
+          data: {
+            callId: activeId,
+            companyId: profile?.company_id,
+          },
+        });
+
+        if (res?.success) {
+          if (res.status === "ACTIVE") {
+            setCallStatus((prev) => (prev !== "ACTIVE" ? "ACTIVE" : prev));
+          } else if (res.status === "ENDED") {
+            setCallStatus("ENDED");
+            closeCallWithDelay();
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
+          }
+        }
+      } catch (err) {
+        // Ignora erros transitórios no loop de polling
+      }
+    }, 1500);
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [callStatus, profile?.company_id, closeCallWithDelay]);
 
   // Busca instâncias configuradas com AtendiCalls ou Wavoip para a unidade e departamento
   const { data: instances } = useQuery({

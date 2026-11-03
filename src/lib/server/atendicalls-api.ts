@@ -267,6 +267,48 @@ export async function hangupAtendiCallsVoiceCall(callId: string, config: AtendiC
 }
 
 /**
+ * Consulta detalhes e status em tempo real de uma chamada no motor AtendiCalls
+ */
+export async function getAtendiCallsCallDetails(
+  callId: string,
+  config: AtendiCallsConfig
+): Promise<{
+  call?: {
+    CallID: string;
+    Status: string; // "connected" | "active" | "ringing" | "ended" | "initiating"
+    Peer: string;
+    Direction: string;
+    StartedAt?: number;
+    ConnectedAt?: number;
+  };
+  mode?: string;
+  transcript?: Array<{ role: string; text: string }>;
+  isEnded?: boolean;
+}> {
+  const cleanUrl = config.apiUrl.replace(/\/+$/, "");
+  const res = await fetch(`${cleanUrl}/api/v1/voice/calls/${encodeURIComponent(callId)}`, {
+    method: "GET",
+    headers: {
+      "X-API-Key": config.token,
+    },
+  });
+
+  if (res.status === 404) {
+    return { isEnded: true };
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Falha ao consultar chamada no AtendiCalls (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  const status = (data.call?.Status || "").toLowerCase();
+  const isEnded = status === "ended" || status === "terminated" || status === "failed";
+  return { ...data, isEnded };
+}
+
+/**
  * Busca o áudio da gravação de uma chamada
  */
 export async function fetchAtendiCallsAudioStream(callId: string, config: AtendiCallsConfig): Promise<Response> {

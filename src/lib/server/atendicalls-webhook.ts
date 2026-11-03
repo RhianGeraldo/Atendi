@@ -10,7 +10,9 @@ export async function handleAtendiCallsWebhook(request: Request): Promise<Respon
 
     console.log("[atendicalls-webhook] Evento recebido:", JSON.stringify(body));
 
-    if (body.event === "call.ended") {
+    if (body.event === "call.answered") {
+      await processCallAnsweredEvent(body);
+    } else if (body.event === "call.ended") {
       await processCallEndedEvent(body);
     } else {
       console.log(`[atendicalls-webhook] Evento ignorado ou não suportado: ${body.event}`);
@@ -29,17 +31,30 @@ export async function handleAtendiCallsWebhook(request: Request): Promise<Respon
   }
 }
 
-async function processCallEndedEvent(payload: {
-  event: string;
-  callId: string;
-  sessionId?: string;
-  reason?: string;
-  peer: string;
-  durationSec?: number;
-  transcript?: string;
-  timestamp?: number;
-}) {
-  const { callId, sessionId, reason, peer, durationSec = 0, transcript, timestamp } = payload;
+async function processCallAnsweredEvent(payload: any) {
+  const data = payload.data || {};
+  const callId = payload.callId || payload.CallID || payload.call_id || data.callId || data.call_id;
+  if (!callId) return;
+
+  console.log(`[atendicalls-webhook] Chamada atendida pelo cliente: ${callId}`);
+  await supabaseAdmin
+    .from("call_logs")
+    .update({ status: "ACTIVE" })
+    .eq("call_id", callId)
+    .neq("status", "ACTIVE")
+    .neq("status", "ENDED");
+}
+
+async function processCallEndedEvent(payload: any) {
+  const data = payload.data || {};
+  const callId = payload.callId || payload.CallID || payload.call_id || data.callId || data.call_id;
+  const sessionId = payload.sessionId || payload.SessionID || payload.session_id || data.sessionId || data.session_id;
+  const reason = data.reason || payload.reason || "completed";
+  const peer = data.peer || payload.peer || "";
+  const timestamp = payload.timestamp || data.timestamp;
+  let durationSec = data.durationSec || payload.durationSec || data.duration_sec || payload.duration_sec || 0;
+  const rawTranscript = data.transcript || payload.transcript;
+
   const cleanPeerPhone = (peer || "").replace(/\D/g, "");
 
   if (!callId) {
@@ -47,8 +62,18 @@ async function processCallEndedEvent(payload: {
     return;
   }
 
+  // Formata a transcrição se vier como lista de turnos (IA e Cliente)
+  let transcript = "";
+  if (Array.isArray(rawTranscript)) {
+    transcript = rawTranscript
+      .map((t: any) => `${t.role === "assistant" ? "Atendente (IA)" : "Cliente"}: ${t.text || t.message || ""}`)
+      .join("\n");
+  } else if (typeof rawTranscript === "string") {
+    transcript = rawTranscript;
+  }
+
   console.log(
-    `[atendicalls-webhook] Processando fim da chamada ${callId} (${reason || "completed"}) para ${cleanPeerPhone}. Duração: ${durationSec}s`
+    `[atendicalls-webhook] Processando fim da chamada ${callId} (${reason}) para ${cleanPeerPhone}. Duração: ${durationSec}s`
   );
 
   // 1. Tentar encontrar a instância pelo sessionId / token

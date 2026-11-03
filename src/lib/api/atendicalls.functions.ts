@@ -8,6 +8,7 @@ import {
   createAtendiCallsInstance,
   startAtendiCallsVoiceCall,
   hangupAtendiCallsVoiceCall,
+  getAtendiCallsCallDetails,
   type AtendiCallsAgentConfig,
 } from "@/lib/server/atendicalls-api";
 import { getPhoneVariants } from "@/lib/utils";
@@ -285,8 +286,8 @@ export const startAtendiCallsVoiceCallAction = createServerFn({ method: "POST" }
       },
     };
 
-    // Monta a webhookUrl baseada no ambiente
-    const appOrigin = process.env.APP_ORIGIN || process.env.NEXT_PUBLIC_APP_URL || "https://atendi.online";
+    // Monta a webhookUrl baseada no ambiente de produção
+    const appOrigin = process.env.APP_ORIGIN || process.env.NEXT_PUBLIC_APP_URL || "https://atendiai.vercel.app";
     const webhookUrl = `${appOrigin.replace(/\/+$/, "")}/api/webhooks/calls`;
 
     // 5. Iniciar chamada na VPS
@@ -355,4 +356,73 @@ export const hangupAtendiCallsVoiceCallAction = createServerFn({ method: "POST" 
     }
 
     return { success: hungUp };
+  });
+
+/**
+ * Consulta e sincroniza em tempo real o status de uma chamada ativa com o motor AtendiCalls
+ */
+export const syncAtendiCallsCallStatusAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      callId: z.string().min(1),
+      instanceId: z.string().uuid().optional().nullable(),
+      companyId: z.string().uuid().optional().nullable(),
+    })
+  )
+  .handler(async ({ data }) => {
+    const config = await resolveAtendiCallsConfig(data.instanceId, data.companyId);
+    if (!config.token) {
+      return { success: false, status: "unknown" };
+    }
+
+    try {
+      const details = await getAtendiCallsCallDetails(data.callId, config);
+      const rawStatus = (details.call?.Status || "").toLowerCase();
+      const isConnected = rawStatus === "connected" || rawStatus === "active";
+      const isEnded = details.isEnded || rawStatus === "ended" || rawStatus === "terminated" || rawStatus === "failed";
+
+      if (isConnected) {
+        // Marca como ACTIVE no banco se ainda não estiver
+        await supabaseAdmin
+          .from("call_logs")
+          .update({ status: "ACTIVE" })
+          .eq("call_id", data.callId)
+          .neq("status", "ACTIVE")
+          .neq("status", "ENDED");
+
+        return { success: true, status: "ACTIVE" };
+      }
+
+      if (isEnded) {
+        // Formata transcrição das falas da IA e do Cliente
+        let transcriptText: string | null = null;
+        if (Array.isArray(details.transcript) && details.transcript.length > 0) {
+          transcriptText = details.transcript
+            .map((t: any) => `${t.role === "assistant" ? "Atendente (IA)" : "Cliente"}: ${t.text}`)
+            .join("\n");
+        }
+
+        const updatePayload: any = {
+          status: "ENDED",
+          ended_at: new Date().toISOString(),
+          recording_url: `/api/calls/${data.callId}/audio`,
+        };
+        if (transcriptText) {
+          updatePayload.transcription = transcriptText;
+        }
+
+        await supabaseAdmin
+          .from("call_logs")
+          .update(updatePayload)
+          .eq("call_id", data.callId)
+          .neq("status", "ENDED");
+
+        return { success: true, status: "ENDED", transcript: transcriptText };
+      }
+
+      return { success: true, status: "RINGING" };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
   });
