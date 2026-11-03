@@ -33,14 +33,16 @@ export const getAtendiCallsStatusAction = createServerFn({ method: "POST" })
     if (data.autoCreate && data.instanceId && !data.token) {
       const { data: inst } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("id, name, atendicalls_token, atendicalls_url")
+        .select("id, name, instance_name, atendicalls_token, atendicalls_url")
         .eq("id", data.instanceId)
         .maybeSingle();
 
       if (inst && !inst.atendicalls_token) {
         try {
+          // O mesmo nome que já está no Atendi / na outra conexão (EvoGo/Stevo)
+          const targetName = inst.instance_name || inst.name || "whatsapp";
           const created = await createAtendiCallsInstance({
-            name: inst.name || "Linha WhatsApp",
+            name: targetName,
             apiUrl: inst.atendicalls_url || undefined,
           });
           const newToken = created.token || created.instance?.token;
@@ -119,7 +121,7 @@ export const createAtendiCallsInstanceAction = createServerFn({ method: "POST" }
   .handler(async ({ data }) => {
     const { data: inst, error } = await supabaseAdmin
       .from("whatsapp_instances")
-      .select("id, name, company_id, atendicalls_token, atendicalls_url")
+      .select("id, name, instance_name, company_id, atendicalls_token, atendicalls_url")
       .eq("id", data.instanceId)
       .single();
 
@@ -127,7 +129,8 @@ export const createAtendiCallsInstanceAction = createServerFn({ method: "POST" }
       throw new Error("Instância não encontrada.");
     }
 
-    const lineName = data.name?.trim() || inst.name || "Linha WhatsApp Atendi";
+    // O mesmo nome que já está no Atendi / na outra conexão (EvoGo/Stevo)
+    const lineName = inst.instance_name || data.name?.trim() || inst.name || "whatsapp";
     const res = await createAtendiCallsInstance({
       name: lineName,
       token: data.customToken?.trim() || undefined,

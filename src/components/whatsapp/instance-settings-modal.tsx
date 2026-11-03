@@ -524,7 +524,7 @@ function AtendiCallsTabContent({
       const res = await createAtendiCallsInstanceAction({
         data: {
           instanceId: instance.id,
-          name: instance.name || "Linha Atendi",
+          name: instance.instance_name || instance.name,
         },
       });
       if (res.token) setAtendicallsToken(res.token);

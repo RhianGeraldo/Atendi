@@ -152,7 +152,7 @@ export function AtendiCallsQrModal({
       const res = await createAtendiCallsInstanceAction({
         data: {
           instanceId: instance.id,
-          name: instance.name || "Linha Atendi",
+          name: instance.instance_name || instance.name,
         },
       });
 
