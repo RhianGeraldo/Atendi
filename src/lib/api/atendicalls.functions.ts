@@ -66,6 +66,15 @@ export const getAtendiCallsStatusAction = createServerFn({ method: "POST" })
           };
         } catch (createErr: any) {
           console.warn("[AtendiCalls] Falha ao auto-criar instância na VPS:", createErr);
+          return {
+            success: false,
+            status: "disconnected" as const,
+            isConnected: false,
+            qrcode: null,
+            instance: null,
+            error: createErr.message || "Falha ao criar linha de voz na VPS",
+            apiUrl: inst.atendicalls_url || "https://calls.esteticaelaser.com.br",
+          };
         }
       }
     }

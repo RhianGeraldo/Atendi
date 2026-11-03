@@ -83,6 +83,10 @@ export function AtendiCallsQrModal({
           setQrCodeBase64(res.qrcode);
           setLineInfo(res.instance);
           setLoading(false);
+        } else if (res.error) {
+          setStatus("error");
+          setErrorMessage(res.error);
+          setLoading(false);
         } else {
           setStatus("loading");
         }

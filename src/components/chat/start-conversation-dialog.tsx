@@ -275,7 +275,7 @@ export function StartConversationDialog({
         <div className="space-y-4 py-4">
           <div className="space-y-2">
             <Label>Instância (Remetente)</Label>
-            <Select value={instanceName || undefined} onValueChange={(val) => setInstanceName(val || "")}>
+            <Select value={instanceName || ""} onValueChange={(val) => setInstanceName(val || "")}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Selecione a instância">
                   {selectedInstance ? (

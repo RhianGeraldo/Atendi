@@ -1,4 +1,9 @@
+import dns from "node:dns";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {}
 
 export interface AtendiCallsAgentConfig {
   provider?: string; // "openrouter" | "gemini_live" | "openai"
@@ -59,7 +64,7 @@ export async function resolveAtendiCallsConfig(
     }
   }
 
-  if (!token) {
+  if (!token && !instanceId) {
     token = DEFAULT_FALLBACK_TOKEN;
   }
 
@@ -129,7 +134,21 @@ export async function createAtendiCallsInstance(params: {
 /**
  * Consulta o status da linha e busca o QR Code se estiver desconectada
  */
-export async function getAtendiCallsConnectStatus(config: AtendiCallsConfig) {
+export async function getAtendiCallsConnectStatus(config: AtendiCallsConfig): Promise<{
+  status: "connected" | "scan_qr_code" | "disconnected";
+  isConnected: boolean;
+  qrcode: string | null;
+  instance: any;
+}> {
+  if (!config.token || !config.token.trim()) {
+    return {
+      status: "disconnected",
+      isConnected: false,
+      qrcode: null,
+      instance: null,
+    };
+  }
+
   const url = `${config.apiUrl}/api/v1/instance/connect`;
   const res = await fetch(url, {
     method: "GET",

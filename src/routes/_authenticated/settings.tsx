@@ -2659,17 +2659,19 @@ function InstanceRow({
             </Button>
           ))}
 
-        {/* Botão de Conexão de Voz & IA (AtendiCalls) */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onVoiceConnect}
-          className="text-xs h-8 gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-          title="Conectar ou gerenciar linha de chamadas com IA (AtendiCalls)"
-        >
-          <PhoneCall className="h-3.5 w-3.5 text-emerald-600" />
-          {instance.atendicalls_token ? "Voz (IA)" : "Conectar Voz"}
-        </Button>
+        {/* Botão de Conexão de Voz & IA (AtendiCalls - Apenas WhatsApp) */}
+        {!isInstagram && !isMessenger && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onVoiceConnect}
+            className="text-xs h-8 gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+            title="Conectar ou gerenciar linha de chamadas com IA (AtendiCalls)"
+          >
+            <PhoneCall className="h-3.5 w-3.5 text-emerald-600" />
+            {instance.atendicalls_token ? "Voz (IA)" : "Conectar Voz"}
+          </Button>
+        )}
 
         <Button
           variant="outline"

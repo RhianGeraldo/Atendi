@@ -995,19 +995,21 @@ function UnitManagementSheet({
                               )}
                             </>
                           )}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 px-2.5 text-xs gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-                            onClick={() => {
-                              setSelectedInstance(inst);
-                              setVoiceModalOpen(true);
-                            }}
-                            title="Conectar ou gerenciar linha de chamadas com IA (AtendiCalls)"
-                          >
-                            <PhoneCall className="h-3.5 w-3.5 text-emerald-600" />
-                            {inst.atendicalls_token ? "Voz (IA)" : "QR Voz"}
-                          </Button>
+                          {!["instagram", "messenger", "facebook"].includes(inst.provider) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2.5 text-xs gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                              onClick={() => {
+                                setSelectedInstance(inst);
+                                setVoiceModalOpen(true);
+                              }}
+                              title="Conectar ou gerenciar linha de chamadas com IA (AtendiCalls)"
+                            >
+                              <PhoneCall className="h-3.5 w-3.5 text-emerald-600" />
+                              {inst.atendicalls_token ? "Voz (IA)" : "QR Voz"}
+                            </Button>
+                          )}
                           <Button
                             variant="secondary"
                             size="icon"
