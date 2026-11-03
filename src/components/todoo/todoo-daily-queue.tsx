@@ -69,7 +69,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
-import { useWavoip } from "@/hooks/use-wavoip";
+import { useAtendiCalls } from "@/hooks/use-atendicalls";
 import { TodooLead, TodooOutcomeType, TodooCampaign } from "@/types/todoo";
 import { TodooOutcomeDialog } from "./todoo-outcome-dialog";
 import { formatTodooPhone } from "./todoo-period";
@@ -112,7 +112,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   const { activeCompanyId } = useActiveCompany();
   const { selectedUnitId } = useUnit();
   const queryClient = useQueryClient();
-  const { startCall, instances: wavoipInstances } = useWavoip();
+  const { startCall, instances: callInstances } = useAtendiCalls();
 
   // Filtros
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>("all");
@@ -542,11 +542,11 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
       return;
     }
 
-    // Liga pelo número da unidade do lead (senão o da sede); sem WaVoIP, abre o discador
+    // Liga pelo número da unidade do lead (senão o da sede); sem AtendiCalls, abre o discador
     const instance =
-      wavoipInstances?.find((i) => i.wavoip_token && i.unit_id === lead.unit_id) ??
-      wavoipInstances?.find((i) => i.wavoip_token && !i.unit_id) ??
-      wavoipInstances?.find((i) => i.wavoip_token);
+      callInstances?.find((i) => (i.atendicalls_token || i.wavoip_token) && i.unit_id === lead.unit_id) ??
+      callInstances?.find((i) => (i.atendicalls_token || i.wavoip_token) && !i.unit_id) ??
+      callInstances?.find((i) => i.atendicalls_token || i.wavoip_token);
     if (!instance) {
       window.open(`tel:${lead.contact_phone}`, "_self");
       return;
@@ -554,8 +554,9 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
 
     const cleanPhone = lead.contact_phone.replace(/\D/g, "");
     const formattedPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
+    const token = instance.atendicalls_token || instance.wavoip_token;
     // startCall já avisa o erro; só registra a tentativa quando a chamada saiu
-    const started = await startCall(formattedPhone, lead.contact_name, instance.wavoip_token);
+    const started = await startCall(formattedPhone, lead.contact_name, token);
     if (started && profile) {
       const { error } = await (supabase.from("todoo_events") as any).insert({
         lead_id: lead.id,
@@ -563,7 +564,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
         company_id: lead.company_id,
         user_id: profile.id,
         event_type: "call_attempted",
-        notes: "Chamada iniciada via WaVoIP",
+        notes: "Chamada iniciada via AtendiCalls",
         metadata: { phone: lead.contact_phone, instance_id: instance.id },
       });
       if (error) console.warn("[todoo] evento da chamada:", error.message);

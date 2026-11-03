@@ -58,7 +58,7 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
-import { useWavoip } from "@/hooks/use-wavoip";
+import { useAtendiCalls } from "@/hooks/use-atendicalls";
 import { cn } from "@/lib/utils";
 import { fillQuickMessageVariables } from "@/lib/quick-message-vars";
 import { TodooConversationBanner } from "@/components/todoo/todoo-conversation-banner";
@@ -133,7 +133,7 @@ export function ChatPanel({
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
   const qc = useQueryClient();
-  const { startCall, instances } = useWavoip();
+  const { startCall, instances } = useAtendiCalls();
   const { selectedUnitId } = useUnit();
   const [text, setText] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
@@ -1374,7 +1374,8 @@ export function ChatPanel({
                     if (conv.contact?.phone) {
                       const name = conv.contact.name !== "Desconhecido" ? conv.contact.name : undefined;
                       const currentInstance = instances?.find((i: any) => i.id === conv.whatsapp_instance_id);
-                      startCall(conv.contact.phone, name, currentInstance?.wavoip_token);
+                      const callToken = currentInstance?.atendicalls_token || currentInstance?.wavoip_token;
+                      startCall(conv.contact.phone, name, callToken);
                     }
                   }}
                   title="Ligar para contato"

@@ -8,7 +8,7 @@ export const callsActions: CopilotAction[] = [
     name: "listar_chamadas",
     label: "Listar Histórico de Chamadas Telefônicas",
     description:
-      "Lista o histórico de chamadas telefônicas (Wavoip/Voz) da empresa ou de um contato específico, com status, duração, atendente e links de gravação/transcrição.",
+      "Lista o histórico de chamadas telefônicas (AtendiCalls/Voz) da empresa ou de um contato específico, com status, duração, atendente e links de gravação/transcrição.",
     minRole: "agent",
     requiredMenu: "conversations",
     parameters: {

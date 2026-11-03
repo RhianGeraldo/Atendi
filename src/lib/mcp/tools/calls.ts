@@ -6,7 +6,7 @@ export const callsTools: McpToolDefinition[] = [
   {
     name: "listar_chamadas",
     description:
-      "Lista o histórico de chamadas telefônicas (Wavoip/Voz) da empresa ou de um contato específico, com status, duração e direção.",
+      "Lista o histórico de chamadas telefônicas (AtendiCalls/Voz) da empresa ou de um contato específico, com status, duração e direção.",
     inputSchema: {
       type: "object",
       properties: {

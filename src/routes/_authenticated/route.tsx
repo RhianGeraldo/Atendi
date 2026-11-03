@@ -2,8 +2,8 @@ import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AppShell } from "@/components/layout/app-shell";
 import { useAuth } from "@/lib/auth-context";
-import { WavoipProvider } from "@/hooks/use-wavoip";
-import { WavoipCallOverlay } from "@/components/whatsapp/wavoip-call-overlay";
+import { AtendiCallsProvider } from "@/hooks/use-atendicalls";
+import { AtendiCallsCallOverlay } from "@/components/whatsapp/atendicalls-call-overlay";
 import { CopilotProvider } from "@/hooks/use-copilot";
 import { CopilotDrawer } from "@/components/copilot/copilot-drawer";
 import { useActivityTracker } from "@/lib/hooks/use-activity-tracker";
@@ -40,14 +40,14 @@ function AuthenticatedLayout() {
   }
 
   return (
-    <WavoipProvider>
+    <AtendiCallsProvider>
       <CopilotProvider>
         <AppShell>
           <Outlet />
         </AppShell>
-        <WavoipCallOverlay />
+        <AtendiCallsCallOverlay />
         <CopilotDrawer />
       </CopilotProvider>
-    </WavoipProvider>
+    </AtendiCallsProvider>
   );
 }

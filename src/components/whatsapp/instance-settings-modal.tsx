@@ -58,7 +58,6 @@ export function InstanceSettingsModal({
   const [webhookSugerido, setWebhookSugerido] = useState("");
   const [customHost, setCustomHost] = useState("");
   const [customApiKey, setCustomApiKey] = useState("");
-  const [wavoipToken, setWavoipToken] = useState("");
   const [atendicallsToken, setAtendicallsToken] = useState("");
   const [atendicallsUrl, setAtendicallsUrl] = useState("https://calls.esteticaelaser.com.br");
   const [atendicallsStatus, setAtendicallsStatus] = useState<any>(null);
@@ -131,7 +130,6 @@ export function InstanceSettingsModal({
     setCustomHost(instance.custom_host || "");
     setCustomApiKey(instance.provider === "stevo" ? (instance.stevo_api_key || "") : (instance.evogo_api_key || ""));
     const tokenChamada = instance.atendicalls_token || instance.wavoip_token || "";
-    setWavoipToken(tokenChamada);
     setAtendicallsToken(tokenChamada);
     setAtendicallsUrl(instance.atendicalls_url || "https://calls.esteticaelaser.com.br");
     setAtendicallsStatus(null);
@@ -184,7 +182,7 @@ export function InstanceSettingsModal({
   }, [open, instance, company, defaultTab]);
 
   const handleCheckAtendiCalls = async () => {
-    const tokenToTest = atendicallsToken.trim() || wavoipToken.trim();
+    const tokenToTest = atendicallsToken.trim();
     setCheckingAtendicalls(true);
     try {
       const res = await getAtendiCallsStatusAction({
@@ -248,7 +246,7 @@ export function InstanceSettingsModal({
       return;
     }
 
-    const tokenFinal = atendicallsToken.trim() || wavoipToken.trim() || null;
+    const tokenFinal = atendicallsToken.trim() || null;
     const urlFinal = atendicallsUrl.trim() || "https://calls.esteticaelaser.com.br";
 
     setSaving(true);

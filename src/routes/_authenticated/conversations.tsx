@@ -29,7 +29,7 @@ import {
   DropdownMenuPortal,
 } from "@/components/ui/dropdown-menu";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
-import { WavoipDialer } from "@/components/whatsapp/wavoip-dialer";
+import { AtendiCallsDialer } from "@/components/whatsapp/atendicalls-dialer";
 
 import {
   ConvRow,
@@ -2020,7 +2020,7 @@ function ConversationsPage() {
             >
               <Phone className="h-4 w-4" />
             </Button>
-            <WavoipDialer open={dialerOpen} onOpenChange={setDialerOpen} />
+            <AtendiCallsDialer open={dialerOpen} onOpenChange={setDialerOpen} />
           </div>
           <Tabs value={tab} onValueChange={(v) => handleTabChange(v as TabType)} className="mt-3">
             <TabsList className="grid w-full grid-cols-3 h-auto py-1">
