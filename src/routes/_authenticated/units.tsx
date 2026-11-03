@@ -19,6 +19,7 @@ import {
   Globe,
   Facebook,
   CheckCircle2,
+  PhoneCall,
 } from "lucide-react";
 
 import {
@@ -37,6 +38,7 @@ import { useActiveCompany } from "@/lib/active-company-context";
 import { supabase } from "@/integrations/supabase/client";
 import { EvoGoClient } from "@/integrations/evogo/client";
 import { QrCodeModal } from "@/components/whatsapp/qr-code-modal";
+import { AtendiCallsQrModal } from "@/components/whatsapp/atendicalls-qr-modal";
 import { InstanceSettingsModal } from "@/components/whatsapp/instance-settings-modal";
 import { CreateChannelDialog } from "@/components/channels/create-channel-dialog";
 import {
@@ -554,6 +556,7 @@ function UnitManagementSheet({
     dept: any;
   }>({ open: false, type: null, instance: null, dept: null });
   const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [selectedInstance, setSelectedInstance] = useState<any>(null);
   const [refreshingInstance, setRefreshingInstance] = useState<string | null>(null);
@@ -852,6 +855,21 @@ function UnitManagementSheet({
                                 {inst.status === "connected" ? "Online" : "Aguardando"}
                               </Badge>
                             )}
+                            {inst.atendicalls_token ? (
+                              <Badge
+                                variant="outline"
+                                className="border-emerald-500/30 text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-[10px] py-0 h-4 font-semibold gap-1"
+                              >
+                                <PhoneCall className="h-2.5 w-2.5 text-emerald-600" /> Voz Ativa
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="border-slate-200 text-slate-500 text-[10px] py-0 h-4 font-normal gap-1"
+                              >
+                                <PhoneCall className="h-2.5 w-2.5 text-slate-400" /> Sem Voz
+                              </Badge>
+                            )}
                           </div>
                           <p className="text-[10px] text-muted-foreground font-mono">
                             {inst.instance_name}
@@ -977,6 +995,19 @@ function UnitManagementSheet({
                               )}
                             </>
                           )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-2.5 text-xs gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                            onClick={() => {
+                              setSelectedInstance(inst);
+                              setVoiceModalOpen(true);
+                            }}
+                            title="Conectar ou gerenciar linha de chamadas com IA (AtendiCalls)"
+                          >
+                            <PhoneCall className="h-3.5 w-3.5 text-emerald-600" />
+                            {inst.atendicalls_token ? "Voz (IA)" : "QR Voz"}
+                          </Button>
                           <Button
                             variant="secondary"
                             size="icon"
@@ -1135,6 +1166,11 @@ function UnitManagementSheet({
           onOpenChange={setQrModalOpen}
           instance={selectedInstance}
           company={company}
+        />
+        <AtendiCallsQrModal
+          open={voiceModalOpen}
+          onOpenChange={setVoiceModalOpen}
+          instance={selectedInstance}
         />
         <InstanceSettingsModal
           open={settingsModalOpen}

@@ -70,6 +70,63 @@ export async function resolveAtendiCallsConfig(
 }
 
 /**
+ * Cria uma nova instância de WhatsApp no motor AtendiCalls (VPS)
+ * Retorna o token gerado e o QR Code em base64 PNG para pareamento imediato
+ */
+export async function createAtendiCallsInstance(params: {
+  name: string;
+  token?: string;
+  apiUrl?: string;
+  masterKey?: string;
+}): Promise<{
+  status: string;
+  instance: {
+    id: string;
+    name: string;
+    token: string;
+    state?: string;
+    paired?: boolean;
+  };
+  token: string;
+  qrcode: {
+    code?: string;
+    base64?: string;
+  } | null;
+}> {
+  const cleanUrl = (params.apiUrl || DEFAULT_API_URL).replace(/\/+$/, "");
+  const masterKey = params.masterKey || DEFAULT_FALLBACK_TOKEN;
+
+  const res = await fetch(`${cleanUrl}/api/v1/instance/create`, {
+    method: "POST",
+    headers: {
+      "X-API-Key": masterKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name: params.name,
+      ...(params.token ? { token: params.token } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Falha ao criar instância no AtendiCalls (${res.status}): ${errText || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const qrcode = data.qrcode || null;
+  const instance = data.instance || null;
+  const token = instance?.token || params.token || "";
+
+  return {
+    status: data.status || "created",
+    instance,
+    token,
+    qrcode,
+  };
+}
+
+/**
  * Consulta o status da linha e busca o QR Code se estiver desconectada
  */
 export async function getAtendiCallsConnectStatus(config: AtendiCallsConfig) {

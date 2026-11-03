@@ -5,7 +5,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings, Loader2, Save, Globe, Copy, Building, PhoneCall, QrCode, CheckCircle2, RefreshCw } from "lucide-react";
+import {
+  Settings,
+  Loader2,
+  Save,
+  Globe,
+  Copy,
+  Building,
+  PhoneCall,
+  QrCode,
+  CheckCircle2,
+  RefreshCw,
+  MessageSquare,
+  Unlink,
+} from "lucide-react";
 import { toast } from "sonner";
 import { EvoGoClient } from "@/integrations/evogo/client";
 import { StevoClient } from "@/integrations/stevo/client";
@@ -14,19 +27,31 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { WhatsappTemplatesTab } from "./whatsapp-templates-tab";
 import { enderecoLocal, origemPublica } from "@/lib/endereco-publico";
-import { getAtendiCallsStatusAction } from "@/lib/api/atendicalls.functions";
+import {
+  getAtendiCallsStatusAction,
+  createAtendiCallsInstanceAction,
+  disconnectAtendiCallsInstanceAction,
+} from "@/lib/api/atendicalls.functions";
 
 interface InstanceSettingsModalProps {
   instance: any; // { id, name, instance_name, evogo_api_key, evogo_instance_id, webhook_url, department_id }
   company: any; // { evogo_host, evogo_global_token }
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  defaultTab?: "messages" | "voice";
 }
 
-export function InstanceSettingsModal({ instance, company, open, onOpenChange }: InstanceSettingsModalProps) {
+export function InstanceSettingsModal({
+  instance,
+  company,
+  open,
+  onOpenChange,
+  defaultTab = "messages",
+}: InstanceSettingsModalProps) {
   const qc = useQueryClient();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("messages");
   
   const [channelName, setChannelName] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
@@ -38,7 +63,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const [atendicallsUrl, setAtendicallsUrl] = useState("https://calls.esteticaelaser.com.br");
   const [atendicallsStatus, setAtendicallsStatus] = useState<any>(null);
   const [checkingAtendicalls, setCheckingAtendicalls] = useState(false);
-  const [showQrModal, setShowQrModal] = useState(false);
   const [oficialPhoneId, setOficialPhoneId] = useState("");
   const [oficialWabaId, setOficialWabaId] = useState("");
   const [oficialAccessToken, setOficialAccessToken] = useState("");
@@ -48,7 +72,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     readMessages: false,
     alwaysOnline: false
   });
-  // O que veio do provedor. null = não carregou: aí não se manda nada por cima.
   const [advSettingsOriginal, setAdvSettingsOriginal] = useState<typeof advSettings | null>(null);
 
   const { data: departments } = useQuery({
@@ -73,6 +96,8 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   useEffect(() => {
     if (!open || !instance) return;
 
+    setActiveTab(defaultTab || "messages");
+
     const isOficial = instance.provider === 'oficial';
     const isInstagram = instance.provider === 'instagram';
     const isMessenger = instance.provider === 'messenger';
@@ -89,9 +114,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     let defaultWebhook = instance.webhook_url;
     const currentDomainWebhook = `${origemPublica()}/api/webhooks/${providerWebhookPath}`;
     
-    // Corrige se estiver vazio, for do supabase antigo, for de outro provedor ou
-    // apontar para endereço local. Uma URL pública que já funciona não é trocada
-    // sozinha: mudar de domínio fica no botão "Usar endereço atual".
     const webhookKeyword = isZernio ? 'zernio' : providerWebhookPath;
     if (
       !defaultWebhook ||
@@ -118,7 +140,7 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     setOficialAccessToken(instance.oficial_access_token || "");
     setSelectedDepartmentId(instance.department_id || null);
     
-    // Fetch advanced settings from EvoGo
+    // Fetch advanced settings from EvoGo/Stevo
     const fetchSettings = async () => {
       if (isCloudAPI) {
         setLoading(false);
@@ -159,36 +181,31 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
     };
 
     fetchSettings();
-  }, [open, instance, company]);
+  }, [open, instance, company, defaultTab]);
 
   const handleCheckAtendiCalls = async () => {
     const tokenToTest = atendicallsToken.trim() || wavoipToken.trim();
-    if (!tokenToTest) {
-      toast.error("Informe o Token da Instância do AtendiCalls");
-      return;
-    }
     setCheckingAtendicalls(true);
     try {
       const res = await getAtendiCallsStatusAction({
         data: {
           instanceId: instance?.id,
           companyId: instance?.company_id,
-          token: tokenToTest,
+          token: tokenToTest || undefined,
           apiUrl: atendicallsUrl.trim() || undefined,
+          autoCreate: !tokenToTest,
         },
       });
       setAtendicallsStatus(res);
+      if (res.token && !atendicallsToken) {
+        setAtendicallsToken(res.token);
+      }
       if (res.isConnected) {
         toast.success("AtendiCalls Conectado!", {
           description: `Linha ativa: ${res.instance?.pushName || res.instance?.jid || 'WhatsApp'}`
         });
-      } else if (res.qrcode?.base64) {
-        setShowQrModal(true);
+      } else if (res.qrcode) {
         toast.info("Aguardando leitura do QR Code do WhatsApp");
-      } else {
-        toast.warning("Status AtendiCalls", {
-          description: res.error || `Status retornado: ${res.status}`
-        });
       }
     } catch (err: any) {
       toast.error("Erro ao verificar AtendiCalls", { description: err.message });
@@ -218,7 +235,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
       return;
     }
 
-    // O EvoGo/Stevo roda fora daqui: não tem como entregar num endereço local.
     if (isProvedorQr && enderecoLocal(webhookFinal)) {
       toast.error("URL do webhook inválida", {
         description: "O EvoGo/Stevo não consegue entregar mensagens em localhost ou rede local. Use o endereço público do Atendi.",
@@ -226,7 +242,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
       return;
     }
 
-    // Só o nome de exibição; instance_name é o identificador técnico no EvoGo/Stevo.
     const name = channelName.trim();
     if (!name) {
       toast.error("Informe um nome para o canal.");
@@ -273,8 +288,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
         if (instance.provider === 'evogo' && !company?.evogo_host) throw new Error("Host da EvoGo não configurado na empresa.");
         if (instance.provider === 'stevo') {
           const client = new StevoClient({ host: customHost || company.stevo_host, token: company.stevo_global_token });
-          // Só reenvia ao Stevo quando algo dele mudou: renomear ou trocar o
-          // departamento não depende do servidor do Stevo estar no ar.
           if (webhookFinal !== instance.webhook_url || (customHost || null) !== (instance.custom_host || null) || (customApiKey || instance.stevo_api_key) !== instance.stevo_api_key) {
             await client.connectInstance(webhookFinal, customApiKey || instance.stevo_api_key);
           }
@@ -294,8 +307,6 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
           }
         } else {
           const client = new EvoGoClient({ host: customHost || company.evogo_host, token: company.evogo_global_token });
-          // Só reenvia ao EvoGo quando algo dele mudou: renomear ou trocar o
-          // departamento não depende do servidor do EvoGo estar no ar.
           if (webhookFinal !== instance.webhook_url || (customHost || null) !== (instance.custom_host || null) || (customApiKey || instance.evogo_api_key) !== instance.evogo_api_key) {
             await client.connectInstance(webhookFinal, customApiKey || instance.evogo_api_key);
           }
@@ -331,181 +342,428 @@ export function InstanceSettingsModal({ instance, company, open, onOpenChange }:
   const isOficial = instance?.provider === 'oficial';
   const isInstagram = instance?.provider === 'instagram';
   const isMessenger = instance?.provider === 'messenger';
-  const isZernio = instance?.provider === 'zernio';
-  const isCloudAPI = isOficial || isInstagram || isMessenger;
 
   return (
-    <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className={isOficial ? "sm:max-w-4xl max-h-[90vh] overflow-y-auto" : "sm:max-w-[480px] max-h-[90vh] overflow-y-auto"}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Settings className="h-5 w-5 text-primary" />
-              Configurações da Instância
-            </DialogTitle>
-            <DialogDescription>
-              {instance?.name} {!(isOficial || isInstagram || isMessenger) && <span className="font-mono text-xs">({instance?.instance_name})</span>}
-            </DialogDescription>
-          </DialogHeader>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={isOficial ? "sm:max-w-4xl max-h-[90vh] overflow-y-auto" : "sm:max-w-2xl max-h-[90vh] overflow-y-auto"}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Settings className="h-5 w-5 text-primary" />
+            Configurações da Instância
+          </DialogTitle>
+          <DialogDescription>
+            {instance?.name} {!(isOficial || isInstagram || isMessenger) && <span className="font-mono text-xs">({instance?.instance_name})</span>}
+          </DialogDescription>
+        </DialogHeader>
 
-          {loading ? (
-            <div className="flex flex-col items-center justify-center p-8 text-muted-foreground">
-              <Loader2 className="h-8 w-8 animate-spin mb-2" />
-              <p className="text-sm">Carregando configurações...</p>
-            </div>
-          ) : (
-            <>
-              {isOficial ? (
-                <Tabs defaultValue="settings" className="w-full">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="settings">Configurações</TabsTrigger>
-                    <TabsTrigger value="templates">Templates</TabsTrigger>
-                  </TabsList>
-                  
-                  <TabsContent value="settings" className="space-y-4 pt-4">
-                    <SettingsFormContent 
-                      channelName={channelName} setChannelName={setChannelName}
-                      webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl} webhookSugerido={webhookSugerido}
-                      wavoipToken={wavoipToken} setWavoipToken={setWavoipToken}
-                      atendicallsToken={atendicallsToken} setAtendicallsToken={setAtendicallsToken}
-                      atendicallsUrl={atendicallsUrl} setAtendicallsUrl={setAtendicallsUrl}
-                      atendicallsStatus={atendicallsStatus}
-                      checkingAtendicalls={checkingAtendicalls}
-                      handleCheckAtendiCalls={handleCheckAtendiCalls}
-                      showQrModal={showQrModal} setShowQrModal={setShowQrModal}
-                      oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
-                      oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
-                      oficialAccessToken={oficialAccessToken} setOficialAccessToken={setOficialAccessToken}
-                      customHost={customHost} setCustomHost={setCustomHost}
-                      customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
-                      advSettings={advSettings} setAdvSettings={setAdvSettings} advCarregadas={!!advSettingsOriginal}
-                      selectedDepartmentId={selectedDepartmentId}
-                      setSelectedDepartmentId={setSelectedDepartmentId}
-                      departments={filteredDepartments}
-                      isOficial={isOficial}
-                      isInstagram={isInstagram}
-                      isMessenger={isMessenger}
-                      instance={instance}
-                    />
-                    <Button 
-                      className="w-full mt-4" 
-                      onClick={handleSave} 
-                      disabled={saving}
-                    >
-                      {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                      Salvar Configurações
-                    </Button>
-                  </TabsContent>
-                  
-                  <TabsContent value="templates" className="pt-4">
-                    <WhatsappTemplatesTab companyId={company?.id} instanceId={instance?.id} />
-                  </TabsContent>
-                </Tabs>
-              ) : (
-                <div className="space-y-4 py-4">
-                  <SettingsFormContent 
-                    channelName={channelName} setChannelName={setChannelName}
-                    webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl} webhookSugerido={webhookSugerido}
-                    wavoipToken={wavoipToken} setWavoipToken={setWavoipToken}
-                    atendicallsToken={atendicallsToken} setAtendicallsToken={setAtendicallsToken}
-                    atendicallsUrl={atendicallsUrl} setAtendicallsUrl={setAtendicallsUrl}
-                    atendicallsStatus={atendicallsStatus}
-                    checkingAtendicalls={checkingAtendicalls}
-                    handleCheckAtendiCalls={handleCheckAtendiCalls}
-                    showQrModal={showQrModal} setShowQrModal={setShowQrModal}
-                    oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
-                    oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
-                    oficialAccessToken={oficialAccessToken} setOficialAccessToken={setOficialAccessToken}
-                    customHost={customHost} setCustomHost={setCustomHost}
-                    customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
-                    advSettings={advSettings} setAdvSettings={setAdvSettings} advCarregadas={!!advSettingsOriginal}
-                    selectedDepartmentId={selectedDepartmentId}
-                    setSelectedDepartmentId={setSelectedDepartmentId}
-                    departments={filteredDepartments}
-                    isOficial={isOficial}
-                    isInstagram={isInstagram}
-                    isMessenger={isMessenger}
-                    instance={instance}
-                  />
-                  <Button 
-                    className="w-full mt-4" 
-                    onClick={handleSave} 
-                    disabled={saving}
-                  >
-                    {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                    Salvar Configurações
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal para leitura do QR Code do AtendiCalls */}
-      <Dialog open={showQrModal} onOpenChange={setShowQrModal}>
-        <DialogContent className="sm:max-w-md text-center">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-center gap-2">
-              <QrCode className="h-5 w-5 text-primary" />
-              Conectar WhatsApp no AtendiCalls
-            </DialogTitle>
-            <DialogDescription>
-              Abra o WhatsApp no celular, vá em <strong>Aparelhos Conectados &gt; Conectar aparelho</strong> e aponte para o QR Code abaixo.
-            </DialogDescription>
-          </DialogHeader>
-
-          {atendicallsStatus?.qrcode?.base64 ? (
-            <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-inner border my-2">
-              <img
-                src={atendicallsStatus.qrcode.base64}
-                alt="QR Code WhatsApp AtendiCalls"
-                className="w-64 h-64 object-contain"
-              />
-            </div>
-          ) : (
-            <div className="py-8 text-center text-sm text-muted-foreground">
-              {atendicallsStatus?.isConnected
-                ? "Esta instância já está conectada ao WhatsApp!"
-                : "QR Code indisponível no momento. Clique em Atualizar para tentar novamente."}
-            </div>
-          )}
-
-          <div className="flex items-center justify-between gap-2 pt-2 border-t">
-            <Button variant="outline" size="sm" onClick={() => setShowQrModal(false)}>
-              Fechar
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleCheckAtendiCalls}
-              disabled={checkingAtendicalls}
-              className="gap-1.5"
-            >
-              {checkingAtendicalls ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4" />
-              )}
-              Verificar Conexão
-            </Button>
+        {loading ? (
+          <div className="flex flex-col items-center justify-center p-8 text-muted-foreground">
+            <Loader2 className="h-8 w-8 animate-spin mb-2" />
+            <p className="text-sm">Carregando configurações...</p>
           </div>
-        </DialogContent>
-      </Dialog>
-    </>
+        ) : (
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className={`grid w-full ${isOficial ? "grid-cols-3" : "grid-cols-2"}`}>
+              <TabsTrigger value="messages" className="gap-2 text-xs sm:text-sm">
+                <MessageSquare className="h-4 w-4 text-blue-500" />
+                Mensagens (Chat)
+              </TabsTrigger>
+              <TabsTrigger value="voice" className="gap-2 text-xs sm:text-sm">
+                <PhoneCall className="h-4 w-4 text-emerald-500" />
+                Voz & IA (AtendiCalls)
+              </TabsTrigger>
+              {isOficial && (
+                <TabsTrigger value="templates" className="text-xs sm:text-sm">Templates</TabsTrigger>
+              )}
+            </TabsList>
+
+            {/* Aba 1: Conexão de Mensagens e CRM */}
+            <TabsContent value="messages" className="space-y-4 pt-4">
+              <SettingsFormContent 
+                channelName={channelName} setChannelName={setChannelName}
+                webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl} webhookSugerido={webhookSugerido}
+                oficialPhoneId={oficialPhoneId} setOficialPhoneId={setOficialPhoneId}
+                oficialWabaId={oficialWabaId} setOficialWabaId={setOficialWabaId}
+                oficialAccessToken={oficialAccessToken} setOficialAccessToken={setOficialAccessToken}
+                customHost={customHost} setCustomHost={setCustomHost}
+                customApiKey={customApiKey} setCustomApiKey={setCustomApiKey}
+                advSettings={advSettings} setAdvSettings={setAdvSettings} advCarregadas={!!advSettingsOriginal}
+                selectedDepartmentId={selectedDepartmentId}
+                setSelectedDepartmentId={setSelectedDepartmentId}
+                departments={filteredDepartments}
+                isOficial={isOficial}
+                isInstagram={isInstagram}
+                isMessenger={isMessenger}
+                instance={instance}
+                onGoToVoice={() => setActiveTab("voice")}
+              />
+              <Button 
+                className="w-full mt-4" 
+                onClick={handleSave} 
+                disabled={saving}
+              >
+                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                Salvar Configurações de Mensagens
+              </Button>
+            </TabsContent>
+
+            {/* Aba 2: Conexão de Voz & IA (AtendiCalls) */}
+            <TabsContent value="voice" className="space-y-4 pt-4">
+              <AtendiCallsTabContent
+                instance={instance}
+                atendicallsToken={atendicallsToken}
+                setAtendicallsToken={setAtendicallsToken}
+                atendicallsUrl={atendicallsUrl}
+                setAtendicallsUrl={setAtendicallsUrl}
+                atendicallsStatus={atendicallsStatus}
+                setAtendicallsStatus={setAtendicallsStatus}
+                handleCheckAtendiCalls={handleCheckAtendiCalls}
+                checkingAtendicalls={checkingAtendicalls}
+                onSave={handleSave}
+                saving={saving}
+              />
+            </TabsContent>
+
+            {/* Aba 3: Templates (Oficial) */}
+            {isOficial && (
+              <TabsContent value="templates" className="pt-4">
+                <WhatsappTemplatesTab companyId={company?.id} instanceId={instance?.id} />
+              </TabsContent>
+            )}
+          </Tabs>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
-// Subcomponente criado para reaproveitar os campos de input, não poluindo o retorno principal
+/**
+ * Conteúdo da Aba de Voz & Ligações AtendiCalls
+ */
+function AtendiCallsTabContent({
+  instance,
+  atendicallsToken,
+  setAtendicallsToken,
+  atendicallsUrl,
+  setAtendicallsUrl,
+  atendicallsStatus,
+  setAtendicallsStatus,
+  handleCheckAtendiCalls,
+  checkingAtendicalls,
+  onSave,
+  saving,
+}: any) {
+  const qc = useQueryClient();
+  const [generating, setGenerating] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
+
+  // Consulta status ou auto-cria linha na VPS
+  useEffect(() => {
+    if (!instance?.id) return;
+    let isPolling = true;
+
+    const check = async () => {
+      try {
+        const res = await getAtendiCallsStatusAction({
+          data: {
+            instanceId: instance.id,
+            companyId: instance.company_id,
+            autoCreate: true,
+          },
+        });
+        setAtendicallsStatus(res);
+        if (res.qrcode) {
+          setQrCodeBase64(res.qrcode);
+        }
+        if (res.token && !atendicallsToken) {
+          setAtendicallsToken(res.token);
+        }
+      } catch (e) {
+        console.warn("[AtendiCallsTab] Falha ao consultar status:", e);
+      }
+    };
+
+    check();
+
+    // Polling caso aguardando leitura do QR
+    const poll = async () => {
+      if (!isPolling) return;
+      if (qrCodeBase64 || atendicallsStatus?.qrcode) {
+        try {
+          const res = await getAtendiCallsStatusAction({
+            data: {
+              instanceId: instance.id,
+              companyId: instance.company_id,
+            },
+          });
+          if (res.isConnected) {
+            setAtendicallsStatus(res);
+            toast.success("Linha de voz conectada com sucesso!");
+            qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+            return;
+          }
+        } catch {}
+      }
+      if (isPolling) setTimeout(poll, 3000);
+    };
+
+    const timer = setTimeout(poll, 3000);
+
+    return () => {
+      isPolling = false;
+      clearTimeout(timer);
+    };
+  }, [instance?.id]);
+
+  const handleGenerateQr = async () => {
+    if (!instance?.id) return;
+    setGenerating(true);
+    try {
+      const res = await createAtendiCallsInstanceAction({
+        data: {
+          instanceId: instance.id,
+          name: instance.name || "Linha Atendi",
+        },
+      });
+      if (res.token) setAtendicallsToken(res.token);
+      if (res.qrcode) {
+        setQrCodeBase64(res.qrcode);
+        setAtendicallsStatus({ ...res, isConnected: false });
+        toast.info("QR Code gerado! Aponte a câmera do WhatsApp.");
+      } else {
+        toast.success("Linha criada no AtendiCalls!");
+      }
+      qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+    } catch (e: any) {
+      toast.error("Erro ao gerar QR Code", { description: e.message });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleDisconnectVoice = async () => {
+    if (!instance?.id) return;
+    setDisconnecting(true);
+    try {
+      await disconnectAtendiCallsInstanceAction({
+        data: { instanceId: instance.id },
+      });
+      setAtendicallsToken("");
+      setAtendicallsStatus(null);
+      setQrCodeBase64(null);
+      toast.success("Linha de voz desvinculada.");
+      qc.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+    } catch (e: any) {
+      toast.error("Erro ao desconectar voz", { description: e.message });
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
+  const isConnected = atendicallsStatus?.isConnected;
+  const qrDisplay = qrCodeBase64 || atendicallsStatus?.qrcode?.base64 || atendicallsStatus?.qrcode;
+
+  return (
+    <div className="space-y-4">
+      {/* Banner Explicativo das 2 Conexões */}
+      <div className="p-3.5 rounded-xl border border-primary/20 bg-primary/5 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <PhoneCall className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold text-foreground">
+              2ª Conexão: Linha de Chamadas WhatsApp (IA)
+            </span>
+          </div>
+          {isConnected ? (
+            <Badge className="bg-emerald-600 text-white gap-1 text-[11px] py-0.5">
+              <CheckCircle2 className="h-3 w-3" /> Voz Ativa
+            </Badge>
+          ) : qrDisplay ? (
+            <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 gap-1 text-[11px] py-0.5">
+              <QrCode className="h-3 w-3 animate-pulse" /> Aguardando QR Code
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="text-[11px] py-0.5">
+              Não Conectado
+            </Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Enquanto a aba <strong>Mensagens</strong> conecta o WhatsApp para envio e recebimento de textos/CRM, esta aba conecta a linha de áudio VoIP (UDP RTP) responsável por ligações com IA.
+        </p>
+      </div>
+
+      {/* Estado: Conectado */}
+      {isConnected ? (
+        <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 space-y-3">
+          <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-semibold text-sm">
+            <CheckCircle2 className="h-5 w-5" />
+            Linha de Voz Ativa e Pronta para Ligações
+          </div>
+
+          <div className="bg-background/90 rounded-lg p-3 border space-y-1.5 text-xs text-left">
+            {atendicallsStatus.instance?.pushName && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Nome no WhatsApp:</span>
+                <span className="font-medium text-foreground">{atendicallsStatus.instance.pushName}</span>
+              </div>
+            )}
+            {atendicallsStatus.instance?.jid && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Número / JID:</span>
+                <span className="font-mono text-foreground">{atendicallsStatus.instance.jid}</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">VPS Motor:</span>
+              <span className="font-mono text-muted-foreground">calls.esteticaelaser.com.br</span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleDisconnectVoice}
+              disabled={disconnecting}
+              className="text-xs text-destructive hover:bg-destructive/10 border-destructive/20 gap-1.5"
+            >
+              {disconnecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Unlink className="h-3.5 w-3.5" />}
+              Desconectar Linha de Voz
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleCheckAtendiCalls}
+              disabled={checkingAtendicalls}
+              className="text-xs gap-1.5"
+            >
+              {checkingAtendicalls ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Verificar Conexão
+            </Button>
+          </div>
+        </div>
+      ) : qrDisplay ? (
+        /* Estado: Exibir QR Code inline para leitura imediata */
+        <div className="p-4 rounded-xl border bg-card space-y-3 text-center">
+          <div className="mx-auto flex flex-col items-center justify-center p-3 bg-white rounded-xl shadow-inner border max-w-[260px]">
+            <img
+              src={qrDisplay}
+              alt="QR Code WhatsApp AtendiCalls"
+              className="w-52 h-52 object-contain"
+            />
+          </div>
+
+          <div className="bg-muted/40 border rounded-lg p-2.5 text-left text-xs text-muted-foreground space-y-1">
+            <p className="font-semibold text-foreground">Como conectar:</p>
+            <p>1. Abra o WhatsApp no celular da clínica/empresa.</p>
+            <p>2. Toque em <strong>Aparelhos Conectados &gt; Conectar aparelho</strong>.</p>
+            <p>3. Aponte para o QR Code acima.</p>
+          </div>
+
+          <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-amber-500 animate-ping" />
+              Aguardando leitura no WhatsApp...
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleGenerateQr}
+              disabled={generating}
+              className="text-xs h-7 gap-1"
+            >
+              {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Recarregar QR
+            </Button>
+          </div>
+        </div>
+      ) : (
+        /* Estado: Não inicializado ainda */
+        <div className="p-6 rounded-xl border bg-card text-center space-y-3">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <PhoneCall className="h-6 w-6" />
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-foreground">
+              Linha de Voz ainda não gerada
+            </h4>
+            <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+              Clique no botão abaixo para criar a linha no motor AtendiCalls e exibir o QR Code para leitura.
+            </p>
+          </div>
+
+          <Button
+            type="button"
+            onClick={handleGenerateQr}
+            disabled={generating}
+            className="gap-1.5"
+          >
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+            Gerar QR Code de Voz
+          </Button>
+        </div>
+      )}
+
+      {/* Configurações Técnicas Avançadas (VPS e Token) */}
+      <div className="border rounded-xl p-3.5 space-y-2.5 bg-muted/20">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(!showAdvanced)}
+          className="flex items-center justify-between w-full text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <span>Credenciais Técnicas (Avançado)</span>
+          <span>{showAdvanced ? "▲ Ocultar" : "▼ Expandir"}</span>
+        </button>
+
+        {showAdvanced && (
+          <div className="space-y-3 pt-2 border-t">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">URL da API (VPS AtendiCalls)</label>
+              <Input
+                value={atendicallsUrl}
+                onChange={(e) => setAtendicallsUrl(e.target.value)}
+                placeholder="https://calls.esteticaelaser.com.br"
+                className="text-xs font-mono"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Token da Instância (X-API-Key)</label>
+              <Input
+                value={atendicallsToken}
+                onChange={(e) => setAtendicallsToken(e.target.value)}
+                placeholder="Token gerado pelo motor"
+                className="text-xs font-mono"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onSave}
+              disabled={saving}
+              className="text-xs gap-1.5 w-full"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              Salvar Credenciais
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Subcomponente com os campos de Mensagens & CRM
 function SettingsFormContent({ 
   channelName, setChannelName,
   webhookUrl, setWebhookUrl, webhookSugerido,
-  wavoipToken, setWavoipToken, 
-  atendicallsToken, setAtendicallsToken,
-  atendicallsUrl, setAtendicallsUrl,
-  atendicallsStatus,
-  checkingAtendicalls,
-  handleCheckAtendiCalls,
-  showQrModal, setShowQrModal,
   oficialPhoneId, setOficialPhoneId, 
   oficialWabaId, setOficialWabaId, 
   oficialAccessToken, setOficialAccessToken, 
@@ -514,20 +772,40 @@ function SettingsFormContent({
   advSettings, setAdvSettings, advCarregadas,
   selectedDepartmentId, setSelectedDepartmentId,
   departments,
-  isOficial, isInstagram, isMessenger, instance
+  isOficial, isInstagram, isMessenger, instance,
+  onGoToVoice,
 }: any) {
   const isZernio = instance?.provider === 'zernio';
   const isCloudAPI = isOficial || isInstagram || isMessenger || isZernio;
   
   return (
     <>
+      {/* Banner de atalho para a conexão de voz */}
+      <div className="flex items-center justify-between p-2.5 rounded-lg border border-primary/20 bg-primary/5 text-xs">
+        <div className="flex items-center gap-2">
+          <PhoneCall className="h-3.5 w-3.5 text-primary" />
+          <span className="text-muted-foreground">
+            Quer conectar o WhatsApp para <strong>ligações com IA</strong>?
+          </span>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onGoToVoice}
+          className="h-6 text-xs text-primary hover:text-primary font-semibold px-2"
+        >
+          Acessar Aba Voz →
+        </Button>
+      </div>
+
       {/* Nome de exibição do canal */}
       <div className="space-y-2">
         <label className="text-sm font-semibold text-foreground">Nome do canal</label>
         <Input
           value={channelName}
           onChange={(e) => setChannelName(e.target.value)}
-          placeholder="Ex: Instagram São Mateus"
+          placeholder="Ex: WhatsApp Unidade Centro"
           maxLength={80}
         />
         <p className="text-xs text-muted-foreground">
@@ -565,10 +843,11 @@ function SettingsFormContent({
           </Select>
         </div>
       </div>
+
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-muted-foreground" />
-          <h4 className="text-sm font-medium">Webhook e Eventos</h4>
+          <h4 className="text-sm font-medium">Webhook e Eventos de Mensagens</h4>
         </div>
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">URL do Webhook</label>
@@ -640,108 +919,6 @@ function SettingsFormContent({
         )}
       </div>
 
-      {/* Seção AtendiCalls (Chamadas WhatsApp com IA) */}
-      <div className="space-y-3 p-3.5 rounded-xl border border-primary/20 bg-primary/5 mt-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <PhoneCall className="h-4 w-4 text-primary" />
-            <h4 className="text-sm font-semibold text-foreground">AtendiCalls (Voz e IA)</h4>
-          </div>
-          {atendicallsStatus?.isConnected ? (
-            <Badge className="bg-emerald-600 text-white gap-1 text-[11px] py-0.5">
-              <CheckCircle2 className="h-3 w-3" /> Conectado
-            </Badge>
-          ) : atendicallsStatus?.qrcode?.base64 ? (
-            <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 gap-1 text-[11px] py-0.5">
-              <QrCode className="h-3 w-3" /> QR Code Pendente
-            </Badge>
-          ) : null}
-        </div>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          Motor AtendiCalls na VPS para chamadas VoIP WhatsApp de baixa latência (UDP RTP) com IA de voz e transcrição estéreo automática.
-        </p>
-
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground font-medium">URL da API (VPS)</label>
-          <Input 
-            placeholder="https://calls.esteticaelaser.com.br" 
-            value={atendicallsUrl}
-            onChange={(e) => setAtendicallsUrl(e.target.value)}
-            className="text-xs font-mono"
-          />
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground font-medium">Token da Instância (X-API-Key)</label>
-          <Input 
-            placeholder="Ex: 264ddb564614e930aadca44121650f03" 
-            value={atendicallsToken}
-            onChange={(e) => {
-              setAtendicallsToken(e.target.value);
-              setWavoipToken(e.target.value);
-            }}
-            className="text-xs font-mono"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 pt-1">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleCheckAtendiCalls}
-            disabled={checkingAtendicalls || !atendicallsToken}
-            className="text-xs h-8 gap-1.5"
-          >
-            {checkingAtendicalls ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
-            )}
-            Verificar Conexão / QR Code
-          </Button>
-
-          {atendicallsStatus?.qrcode?.base64 && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowQrModal(true)}
-              className="text-xs h-8 gap-1.5"
-            >
-              <QrCode className="h-3.5 w-3.5" />
-              Exibir QR Code
-            </Button>
-          )}
-        </div>
-
-        {atendicallsStatus && (
-          <div className="text-xs p-2.5 rounded-lg bg-background/80 border text-muted-foreground space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-foreground">Status do Motor:</span>
-              <span className="font-mono text-foreground font-semibold">{atendicallsStatus.status}</span>
-            </div>
-            {atendicallsStatus.instance?.pushName && (
-              <div className="flex items-center justify-between">
-                <span>Nome WhatsApp:</span>
-                <span className="font-medium text-foreground">{atendicallsStatus.instance.pushName}</span>
-              </div>
-            )}
-            {atendicallsStatus.instance?.jid && (
-              <div className="flex items-center justify-between">
-                <span>JID / Número:</span>
-                <span className="font-mono text-[11px]">{atendicallsStatus.instance.jid}</span>
-              </div>
-            )}
-            {atendicallsStatus.error && (
-              <div className="text-red-500 text-[11px] pt-1">
-                Erro: {atendicallsStatus.error}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
       {isZernio ? (
         <div className="space-y-3 mt-4 p-3 bg-slate-50 dark:bg-slate-900/50 border rounded-lg">
           <div className="flex items-center justify-between">
@@ -802,7 +979,7 @@ function SettingsFormContent({
         </div>
       ) : (
         <div className="space-y-4 mt-4">
-          <h4 className="text-sm font-medium border-b pb-1">Opções Avançadas</h4>
+          <h4 className="text-sm font-medium border-b pb-1">Opções Avançadas de Mensagens</h4>
           {!advCarregadas && (
             <p className="text-xs text-muted-foreground">
               Não foi possível ler estas opções do servidor do WhatsApp agora. Elas ficam como estão; tente de novo mais tarde para alterar.
@@ -811,8 +988,8 @@ function SettingsFormContent({
           
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <label className="text-sm font-medium">Rejeitar Ligações</label>
-              <p className="text-xs text-muted-foreground">Recusa chamadas de voz e vídeo automaticamente.</p>
+              <label className="text-sm font-medium">Rejeitar Ligações Diretas</label>
+              <p className="text-xs text-muted-foreground">Recusa chamadas normais do WhatsApp automaticamente.</p>
             </div>
             <Switch 
               checked={advSettings.rejectCall}

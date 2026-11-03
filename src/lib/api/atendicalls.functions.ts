@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
   resolveAtendiCallsConfig,
   getAtendiCallsConnectStatus,
+  createAtendiCallsInstance,
   startAtendiCallsVoiceCall,
   hangupAtendiCallsVoiceCall,
   type AtendiCallsAgentConfig,
@@ -12,7 +13,9 @@ import {
 import { getPhoneVariants } from "@/lib/utils";
 
 /**
- * Consulta o status da linha WhatsApp no AtendiCalls (conectada ou QR Code)
+ * Consulta o status da linha WhatsApp no AtendiCalls (conectada ou QR Code).
+ * Se autoCreate for true e a instância ainda não possuir linha na VPS,
+ * cria automaticamente e retorna o QR Code gerado.
  */
 export const getAtendiCallsStatusAction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -22,9 +25,51 @@ export const getAtendiCallsStatusAction = createServerFn({ method: "POST" })
       companyId: z.string().uuid().optional().nullable(),
       token: z.string().optional().nullable(),
       apiUrl: z.string().optional().nullable(),
+      autoCreate: z.boolean().optional(),
     })
   )
   .handler(async ({ data, context }) => {
+    // 1. Se autoCreate ativo e temos instanceId, verifica se precisa criar a linha
+    if (data.autoCreate && data.instanceId && !data.token) {
+      const { data: inst } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("id, name, atendicalls_token, atendicalls_url")
+        .eq("id", data.instanceId)
+        .maybeSingle();
+
+      if (inst && !inst.atendicalls_token) {
+        try {
+          const created = await createAtendiCallsInstance({
+            name: inst.name || "Linha WhatsApp",
+            apiUrl: inst.atendicalls_url || undefined,
+          });
+          const newToken = created.token || created.instance?.token;
+          if (newToken) {
+            await supabaseAdmin
+              .from("whatsapp_instances")
+              .update({
+                atendicalls_token: newToken,
+                atendicalls_url: "https://calls.esteticaelaser.com.br",
+                wavoip_token: newToken,
+              })
+              .eq("id", data.instanceId);
+          }
+          const qrcodeBase64 = created.qrcode?.base64 || (typeof created.qrcode === "string" ? created.qrcode : null);
+          return {
+            success: true,
+            status: created.status as any,
+            isConnected: false,
+            qrcode: qrcodeBase64,
+            instance: created.instance,
+            apiUrl: inst.atendicalls_url || "https://calls.esteticaelaser.com.br",
+            token: newToken,
+          };
+        } catch (createErr: any) {
+          console.warn("[AtendiCalls] Falha ao auto-criar instância na VPS:", createErr);
+        }
+      }
+    }
+
     let config: { token: string; apiUrl: string };
     if (data.token && data.token.trim()) {
       config = {
@@ -48,6 +93,80 @@ export const getAtendiCallsStatusAction = createServerFn({ method: "POST" })
         apiUrl: config.apiUrl,
       };
     }
+  });
+
+/**
+ * Cria ou regenera a linha do AtendiCalls no motor da VPS para uma instância
+ */
+export const createAtendiCallsInstanceAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      instanceId: z.string().uuid(),
+      name: z.string().optional().nullable(),
+      customToken: z.string().optional().nullable(),
+    })
+  )
+  .handler(async ({ data }) => {
+    const { data: inst, error } = await supabaseAdmin
+      .from("whatsapp_instances")
+      .select("id, name, company_id, atendicalls_token, atendicalls_url")
+      .eq("id", data.instanceId)
+      .single();
+
+    if (error || !inst) {
+      throw new Error("Instância não encontrada.");
+    }
+
+    const lineName = data.name?.trim() || inst.name || "Linha WhatsApp Atendi";
+    const res = await createAtendiCallsInstance({
+      name: lineName,
+      token: data.customToken?.trim() || undefined,
+      apiUrl: inst.atendicalls_url || undefined,
+    });
+
+    const token = res.token || res.instance?.token;
+    if (token) {
+      await supabaseAdmin
+        .from("whatsapp_instances")
+        .update({
+          atendicalls_token: token,
+          atendicalls_url: "https://calls.esteticaelaser.com.br",
+          wavoip_token: token,
+        })
+        .eq("id", data.instanceId);
+    }
+
+    const qrcodeBase64 = res.qrcode?.base64 || (typeof res.qrcode === "string" ? res.qrcode : null);
+
+    return {
+      success: true,
+      status: res.status,
+      token,
+      qrcode: qrcodeBase64,
+      instance: res.instance,
+    };
+  });
+
+/**
+ * Desconecta / desvincula a linha de voz do AtendiCalls da instância
+ */
+export const disconnectAtendiCallsInstanceAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      instanceId: z.string().uuid(),
+    })
+  )
+  .handler(async ({ data }) => {
+    await supabaseAdmin
+      .from("whatsapp_instances")
+      .update({
+        atendicalls_token: null,
+      })
+      .eq("id", data.instanceId);
+
+    return { success: true };
   });
 
 /**

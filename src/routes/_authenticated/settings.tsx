@@ -67,6 +67,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useUnit } from "@/lib/unit-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { QrCodeModal } from "@/components/whatsapp/qr-code-modal";
+import { AtendiCallsQrModal } from "@/components/whatsapp/atendicalls-qr-modal";
 import { QuickMessagesTab } from "@/components/settings/quick-messages-tab";
 import { ResolutionReasonsTab } from "@/components/settings/resolution-reasons-tab";
 import { InstanceSettingsModal } from "@/components/whatsapp/instance-settings-modal";
@@ -180,6 +181,7 @@ function SettingsPage() {
   const [channelSubTab, setChannelSubTab] = useState("whatsapp");
   const [selectedInstance, setSelectedInstance] = useState<any>(null);
   const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
 
@@ -916,6 +918,10 @@ function SettingsPage() {
                             onConnect={() => {
                               setSelectedInstance(inst);
                               setQrModalOpen(true);
+                            }}
+                            onVoiceConnect={() => {
+                              setSelectedInstance(inst);
+                              setVoiceModalOpen(true);
                             }}
                             onSettings={() => {
                               setSelectedInstance(inst);
@@ -2324,6 +2330,11 @@ function SettingsPage() {
         instance={selectedInstance}
         company={company}
       />
+      <AtendiCallsQrModal
+        open={voiceModalOpen}
+        onOpenChange={setVoiceModalOpen}
+        instance={selectedInstance}
+      />
       <InstanceSettingsModal
         open={settingsModalOpen}
         onOpenChange={setSettingsModalOpen}
@@ -2345,11 +2356,13 @@ function InstanceRow({
   instance,
   company,
   onConnect,
+  onVoiceConnect,
   onSettings,
 }: {
   instance: any;
   company: any;
   onConnect: () => void;
+  onVoiceConnect: () => void;
   onSettings: () => void;
 }) {
   const qc = useQueryClient();
@@ -2587,6 +2600,18 @@ function InstanceRow({
                 {isConnected ? "Conectado" : "Aguardando Leitura"}
               </span>
             )}
+            <span className="text-muted-foreground/40">•</span>
+            <span
+              className={cn(
+                "flex items-center gap-1.5 font-medium",
+                instance.atendicalls_token
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-muted-foreground",
+              )}
+            >
+              <PhoneCall className="w-3 h-3" />
+              {instance.atendicalls_token ? "Voz Ativa" : "Voz s/ Conexão"}
+            </span>
           </div>
         </div>
       </div>
@@ -2610,6 +2635,7 @@ function InstanceRow({
           </Button>
         )}
 
+        {/* Botão de Conexão de Mensagens */}
         {!isOfficial &&
           !isMetaDirect &&
           (isConnected ? (
@@ -2632,6 +2658,18 @@ function InstanceRow({
               Conectar QR
             </Button>
           ))}
+
+        {/* Botão de Conexão de Voz & IA (AtendiCalls) */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onVoiceConnect}
+          className="text-xs h-8 gap-1.5 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+          title="Conectar ou gerenciar linha de chamadas com IA (AtendiCalls)"
+        >
+          <PhoneCall className="h-3.5 w-3.5 text-emerald-600" />
+          {instance.atendicalls_token ? "Voz (IA)" : "Conectar Voz"}
+        </Button>
 
         <Button
           variant="outline"
