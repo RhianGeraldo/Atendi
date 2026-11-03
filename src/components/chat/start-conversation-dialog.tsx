@@ -65,33 +65,6 @@ export function StartConversationDialog({
 
   const cleanPhone = phone.replace(/\D/g, "");
 
-  // Se não foi fornecido unitId explicitamente via prop, mas temos o telefone, busca a unidade onde o contato está cadastrado
-  const { data: detectedContactUnitId } = useQuery({
-    queryKey: ["contact_unit_by_phone", activeCompanyId, cleanPhone],
-    queryFn: async () => {
-      if (!activeCompanyId || cleanPhone.length < 10) return null;
-      const rawPhone = cleanPhone.startsWith("55") ? cleanPhone : "55" + cleanPhone;
-      const phoneVariants = [
-        rawPhone,
-        rawPhone.slice(2),
-        ...(rawPhone.length === 13 ? [rawPhone.slice(0, 4) + rawPhone.slice(5)] : []),
-        ...(rawPhone.length === 12 ? [rawPhone.slice(0, 4) + '9' + rawPhone.slice(4)] : []),
-      ];
-      const { data } = await supabase
-        .from("contacts")
-        .select("unit_id")
-        .eq("company_id", activeCompanyId)
-        .in("phone", phoneVariants)
-        .not("unit_id", "is", null)
-        .limit(1)
-        .maybeSingle();
-      return data?.unit_id || null;
-    },
-    enabled: !unitId && open && !!activeCompanyId && cleanPhone.length >= 10,
-  });
-
-  const effectiveUnitId = unitId || detectedContactUnitId || null;
-
   const { data: company } = useQuery({
     queryKey: ["company_name", activeCompanyId],
     queryFn: async () => {
@@ -108,8 +81,6 @@ export function StartConversationDialog({
     queryKey: [
       "whatsapp_instances",
       activeCompanyId,
-      selectedUnitId,
-      effectiveUnitId,
       profile?.id,
       profile?.role,
       profile?.department_id,
@@ -123,16 +94,9 @@ export function StartConversationDialog({
         )
         .eq("company_id", activeCompanyId)
         .order("name", { ascending: true });
-      
-      // Se houver unidade específica onde o contato está cadastrado, filtra ESTRITAMENTE por ela!
-      if (effectiveUnitId) {
-        query = query.eq("unit_id", effectiveUnitId);
-      } else if (selectedUnitId && selectedUnitId !== "all") {
-        query = query.eq("unit_id", selectedUnitId);
-      }
 
-      // Se NÃO for filtrado por unidade do contato e o usuário não for da gestão, aplica filtro departamental
-      if (!effectiveUnitId && !isManagement) {
+      // Se o usuário não for da gestão, aplica filtro departamental
+      if (!isManagement) {
         if (profile?.department_id) {
           query = query.or(`department_id.eq.${profile.department_id},department_id.is.null`);
         } else {
@@ -151,16 +115,16 @@ export function StartConversationDialog({
     enabled: !!activeCompanyId && open,
   });
 
-  // Auto-seleciona a instância adequada ao abrir o diálogo
+  // Seleciona uma instância inicial apenas ao abrir caso nenhuma esteja selecionada
   useEffect(() => {
     if (open && instances && instances.length > 0) {
       // Se a instância atualmente selecionada já é válida entre as opções retornadas, mantém
       const isCurrentValid = instanceName && instances.some((i) => i.instance_name === instanceName);
       if (isCurrentValid) return;
 
-      // 1. Se tem unidade específica onde o contato está cadastrado, seleciona a primeira da unidade
-      if (effectiveUnitId) {
-        const matchingUnitInst = instances.find((i) => i.unit_id === effectiveUnitId);
+      // 1. Se foi passado unitId específico via prop, tenta selecionar uma dessa unidade
+      if (unitId) {
+        const matchingUnitInst = instances.find((i) => i.unit_id === unitId);
         if (matchingUnitInst) {
           setInstanceName(matchingUnitInst.instance_name);
           return;
@@ -179,7 +143,7 @@ export function StartConversationDialog({
     } else if (open && instances && instances.length === 0 && instanceName) {
       setInstanceName("");
     }
-  }, [open, instances, effectiveUnitId, selectedUnitId, instanceName]);
+  }, [open, instances]);
 
   // Agrupa as instâncias: Sede (Empresa Mãe) e por Unidade
   const groupedInstances = useMemo(() => {
@@ -338,7 +302,7 @@ export function StartConversationDialog({
                   </div>
                 ) : !instances?.length ? (
                   <div className="p-4 text-center text-xs text-muted-foreground">
-                    Nenhuma instância encontrada{effectiveUnitId ? " para esta unidade" : ""}.
+                    Nenhuma instância encontrada.
                   </div>
                 ) : (
                   <>
