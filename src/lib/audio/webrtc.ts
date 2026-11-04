@@ -94,6 +94,7 @@ export async function openAtendiCallsWebRTC(params: {
   const playbackNode = new AudioWorkletNode(audioCtx, PLAYBACK_PROCESSOR_NAME);
   const streamDest = audioCtx.createMediaStreamDestination();
   playbackNode.connect(streamDest);
+  playbackNode.connect(audioCtx.destination);
   dc.onmessage = (e: MessageEvent<ArrayBuffer>) => {
     playbackNode.port.postMessage(int16LEToFloat32(e.data));
   };

@@ -160,7 +160,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       } catch (err) {
         // Ignora erros transitórios no loop de polling
       }
-    }, 1200);
+    }, 800);
 
     return () => {
       if (pollIntervalRef.current) {
@@ -218,22 +218,29 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
 
   // Conexão Realtime SSE direta com o motor AtendiCalls para eventos instantâneos (ringing, connected, ended)
   useEffect(() => {
-    if (!instances || instances.length === 0) return;
-    const inst = instances[0];
-    const token = inst.atendicalls_token || inst.wavoip_token;
-    if (!token) return;
+    const effectiveToken =
+      currentTokenRef.current ||
+      instances?.find((i: any) => i.atendicalls_token || i.wavoip_token)?.atendicalls_token ||
+      instances?.find((i: any) => i.atendicalls_token || i.wavoip_token)?.wavoip_token;
+    if (!effectiveToken) return;
 
-    const apiUrl = (inst.atendicalls_url || "https://calls.esteticaelaser.com.br").replace(
-      /\/+$/,
-      "",
+    const matchedInst = instances?.find(
+      (i: any) =>
+        i.atendicalls_token === effectiveToken || i.wavoip_token === effectiveToken,
     );
+    const apiUrl = (
+      currentApiUrlRef.current ||
+      matchedInst?.atendicalls_url ||
+      "https://calls.esteticaelaser.com.br"
+    ).replace(/\/+$/, "");
+
     let clientId = localStorage.getItem("atendicalls.clientId");
     if (!clientId) {
       clientId = "c-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
       localStorage.setItem("atendicalls.clientId", clientId);
     }
 
-    const sseUrl = `${apiUrl}/api/events?clientId=${encodeURIComponent(clientId)}&token=${encodeURIComponent(token)}`;
+    const sseUrl = `${apiUrl}/api/events?clientId=${encodeURIComponent(clientId)}&token=${encodeURIComponent(effectiveToken)}`;
     let eventSource: EventSource | null = null;
     try {
       eventSource = new EventSource(sseUrl);
@@ -249,7 +256,11 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
               !currentId || payload.id === currentId || payload.callId === currentId;
 
             if (matchesCall) {
-              if (rawStatus === "connected" || rawStatus === "active") {
+              if (
+                rawStatus === "connected" ||
+                rawStatus === "active" ||
+                rawStatus === "connecting"
+              ) {
                 setCallStatus("ACTIVE");
               } else if (rawStatus === "ringing" || rawStatus === "calling") {
                 setCallStatus("RINGING");
@@ -284,7 +295,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         eventSource.close();
       }
     };
-  }, [instances, closeCallWithDelay]);
+  }, [instances, callStatus, closeCallWithDelay]);
 
   // Monitora mudanças no banco de dados via Supabase Realtime para a chamada ativa
   useEffect(() => {
@@ -466,6 +477,8 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
    * Desliga a chamada de forma segura no AtendiCalls (VPS)
    */
   const endCall = useCallback(async () => {
+    // Atualiza imediatamente o status para ENDED para a interface responder sem nenhum delay
+    setCallStatus("ENDED");
     if (webrtcRef.current) {
       webrtcRef.current.close();
       webrtcRef.current = null;

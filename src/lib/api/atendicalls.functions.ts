@@ -425,7 +425,10 @@ export const syncAtendiCallsCallStatusAction = createServerFn({ method: "POST" }
       const details = await getAtendiCallsCallDetails(data.callId, config);
       const rawStatus = (details.call?.status || details.call?.Status || "").toLowerCase();
       const isConnected =
-        rawStatus === "connected" || rawStatus === "active" || rawStatus === "in_progress";
+        rawStatus === "connected" ||
+        rawStatus === "active" ||
+        rawStatus === "in_progress" ||
+        rawStatus === "connecting";
       const isEnded =
         !isConnected &&
         (details.isEnded ||
