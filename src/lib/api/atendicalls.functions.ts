@@ -275,9 +275,6 @@ export const startAtendiCallsVoiceCallAction = createServerFn({ method: "POST" }
 
     // 4. Resolver credenciais AtendiCalls
     const config = await resolveAtendiCallsConfig(effectiveInstanceId, effectiveCompanyId);
-    if (data.fromToken && data.fromToken.trim()) {
-      config.token = data.fromToken.trim();
-    }
     const contactDisplayName = data.contactName || "Cliente";
 
     // Inicia chamada para o operador humano atender pelo navegador via WebRTC
