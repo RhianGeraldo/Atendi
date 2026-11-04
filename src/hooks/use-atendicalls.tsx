@@ -7,6 +7,8 @@ import { useUnit } from "@/lib/unit-context";
 import {
   startAtendiCallsVoiceCallAction,
   hangupAtendiCallsVoiceCallAction,
+  acceptAtendiCallsCallAction,
+  rejectAtendiCallsCallAction,
   syncAtendiCallsCallStatusAction,
   sendAtendiCallsWebRTCOfferAction,
 } from "@/lib/api/atendicalls.functions";
@@ -136,8 +138,9 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
   const isEndingRef = useRef<boolean>(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const webrtcRef = useRef<AtendiCallsWebRTCConnection | null>(null);
+  const webrtcConnectingPromiseRef = useRef<Promise<AtendiCallsWebRTCConnection | null> | null>(null);
 
-  // Estabelece ou reconecta o canal de áudio WebRTC de forma segura
+  // Estabelece ou reconecta o canal de áudio WebRTC de forma segura garantindo conexão única (singleton)
   const establishWebRTC = useCallback(
     async (
       callId: string,
@@ -145,33 +148,47 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       token?: string | null,
       apiUrl?: string | null,
     ) => {
+      // 1. Se já está conectado, retorna a conexão existente
       if (webrtcRef.current) return webrtcRef.current;
-      try {
-        console.log(`[AtendiCalls WebRTC] Conectando áudio para chamada ${callId}...`);
-        const webrtc = await openAtendiCallsWebRTC({
-          sdpAnswerCallback: async (sdpOffer) => {
-            const ans = await sendAtendiCallsWebRTCOfferAction({
-              data: {
-                callId,
-                sessionId,
-                token,
-                apiUrl,
-                sdpOffer,
-              },
-            });
-            return ans.sdpAnswer;
-          },
-        });
-        webrtcRef.current = webrtc;
-        setRemoteStream(webrtc.remoteStream);
-        return webrtc;
-      } catch (audioErr: any) {
-        console.warn(
-          "[AtendiCalls WebRTC] Microfone do navegador não pôde ser ativado:",
-          audioErr,
-        );
-        return null;
+
+      // 2. Se já há uma conexão em andamento, retorna a Promise em voo para não duplicar a negociação WebRTC
+      if (webrtcConnectingPromiseRef.current) {
+        return webrtcConnectingPromiseRef.current;
       }
+
+      const promise = (async () => {
+        try {
+          console.log(`[AtendiCalls WebRTC] Conectando áudio para chamada ${callId}...`);
+          const webrtc = await openAtendiCallsWebRTC({
+            sdpAnswerCallback: async (sdpOffer) => {
+              const ans = await sendAtendiCallsWebRTCOfferAction({
+                data: {
+                  callId,
+                  sessionId,
+                  token,
+                  apiUrl,
+                  sdpOffer,
+                },
+              });
+              return ans.sdpAnswer;
+            },
+          });
+          webrtcRef.current = webrtc;
+          setRemoteStream(webrtc.remoteStream);
+          return webrtc;
+        } catch (audioErr: any) {
+          console.warn(
+            "[AtendiCalls WebRTC] Microfone do navegador não pôde ser ativado:",
+            audioErr,
+          );
+          return null;
+        } finally {
+          webrtcConnectingPromiseRef.current = null;
+        }
+      })();
+
+      webrtcConnectingPromiseRef.current = promise;
+      return promise;
     },
     [],
   );
@@ -180,6 +197,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
     isEndingRef.current = true;
     clearActiveCallSession();
     setCallStatus("ENDED");
+    webrtcConnectingPromiseRef.current = null;
     if (webrtcRef.current) {
       try {
         webrtcRef.current.close();
@@ -458,10 +476,6 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
                 status: mappedStatus,
                 savedAt: Date.now(),
               });
-
-              if (!webrtcRef.current) {
-                establishWebRTC(callId, liveCall.sessionId, effectiveToken, apiUrl);
-              }
             }
           } else if (payload.type === "call-status") {
             const rawStatus = (payload.status || "").toLowerCase();
@@ -469,27 +483,19 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
               currentId && (payload.id === currentId || payload.callId === currentId);
 
             if (matchesCall) {
-              if (
-                rawStatus === "connected" ||
-                rawStatus === "active" ||
-                rawStatus === "connecting"
-              ) {
+              if (rawStatus === "connected" || rawStatus === "active") {
                 if (!isEndingRef.current) {
                   setCallStatus("ACTIVE");
                   const stored = getStoredActiveCallSession();
                   if (stored) {
                     saveActiveCallSession({ ...stored, status: "ACTIVE" });
                   }
-                  if (!webrtcRef.current && (currentId || payload.id || payload.callId)) {
-                    establishWebRTC(
-                      currentId || payload.id || payload.callId,
-                      payload.sessionId || currentSessionIdRef.current,
-                      effectiveToken,
-                      apiUrl,
-                    );
-                  }
                 }
-              } else if (rawStatus === "ringing" || rawStatus === "calling") {
+              } else if (
+                rawStatus === "ringing" ||
+                rawStatus === "calling" ||
+                rawStatus === "connecting"
+              ) {
                 if (!isEndingRef.current) {
                   setCallStatus("RINGING");
                 }
@@ -583,17 +589,74 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
 
   const acceptCall = useCallback(async () => {
     if (!incomingOffer) return;
+    const callId = incomingOffer.id;
+    const token = incomingOffer.device_token || currentTokenRef.current;
+    const matchedInst = instances?.find(
+      (i: any) => i.atendicalls_token === token || i.wavoip_token === token,
+    );
+    const apiUrl = (
+      matchedInst?.atendicalls_url || "https://calls.esteticaelaser.com.br"
+    ).replace(/\/+$/, "");
+
     setActiveCall(incomingOffer);
     setIncomingOffer(null);
     setCallStatus("ACTIVE");
-  }, [incomingOffer]);
+    currentCallIdRef.current = callId;
+
+    try {
+      await acceptAtendiCallsCallAction({
+        data: {
+          callId,
+          token,
+          apiUrl,
+        },
+      });
+    } catch (e) {
+      console.warn("[AtendiCalls] Erro ao enviar aceite de chamada:", e);
+    }
+
+    saveActiveCallSession({
+      callId,
+      sessionId: null,
+      token,
+      apiUrl,
+      instanceId: matchedInst?.id || null,
+      peerPhone: incomingOffer.peer.phone,
+      peerDisplayName: incomingOffer.peer.displayName || incomingOffer.peer.phone,
+      status: "ACTIVE",
+      savedAt: Date.now(),
+    });
+
+    await establishWebRTC(callId, null, token, apiUrl);
+  }, [incomingOffer, instances, establishWebRTC]);
 
   const rejectCall = useCallback(async () => {
     if (!incomingOffer) return;
+    const callId = incomingOffer.id;
+    const token = incomingOffer.device_token || currentTokenRef.current;
+    const matchedInst = instances?.find(
+      (i: any) => i.atendicalls_token === token || i.wavoip_token === token,
+    );
+    const apiUrl = (
+      matchedInst?.atendicalls_url || "https://calls.esteticaelaser.com.br"
+    ).replace(/\/+$/, "");
+
     setIncomingOffer(null);
     setActiveContactName(null);
     setCallStatus(null);
-  }, [incomingOffer]);
+
+    try {
+      await rejectAtendiCallsCallAction({
+        data: {
+          callId,
+          token,
+          apiUrl,
+        },
+      });
+    } catch (e) {
+      console.warn("[AtendiCalls] Erro ao enviar rejeição de chamada:", e);
+    }
+  }, [incomingOffer, instances]);
 
   /**
    * Dispara ligação através do motor AtendiCalls na VPS
@@ -715,6 +778,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
     isEndingRef.current = true;
     clearActiveCallSession();
     setCallStatus("ENDED");
+    webrtcConnectingPromiseRef.current = null;
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
