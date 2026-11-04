@@ -14,7 +14,7 @@ import {
   X,
   MessageCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useDraggable } from "@/hooks/use-draggable";
 
@@ -32,10 +32,20 @@ export function AtendiCallsCallOverlay() {
     activeContactName,
     isConnecting,
     connectingPhone,
+    remoteStream,
   } = useAtendiCalls();
 
   const [callDuration, setCallDuration] = useState(0);
   const { position, handleMouseDown, dragRef, isDragging } = useDraggable();
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    if (!remoteStream || !audioRef.current) return;
+    audioRef.current.srcObject = remoteStream;
+    audioRef.current.play().catch((err) => {
+      console.warn("[AtendiCalls] Autoplay aguardando interação do usuário:", err);
+    });
+  }, [remoteStream]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -266,6 +276,9 @@ export function AtendiCallsCallOverlay() {
             </div>
           </div>
         </div>
+
+        {/* Elemento de áudio no DOM para reprodução confiável do stream remoto */}
+        <audio ref={audioRef} autoPlay playsInline className="hidden" />
       </div>,
       document.body,
     );

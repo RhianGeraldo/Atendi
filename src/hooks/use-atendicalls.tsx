@@ -61,6 +61,7 @@ export interface AtendiCallsContextType {
   activeContactName: string | null;
   isSpeakerOn: boolean;
   toggleSpeaker: () => void;
+  remoteStream: MediaStream | null;
   // Compatibilidade com código legado
   wavoip?: any | null;
 }
@@ -79,6 +80,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectingPhone, setConnectingPhone] = useState<string | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const currentCallIdRef = useRef<string | null>(null);
@@ -110,6 +112,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       setIsMuted(false);
       setIsSpeakerOn(false);
       setActiveContactName(null);
+      setRemoteStream(null);
       currentCallIdRef.current = null;
       currentSessionIdRef.current = null;
       currentTokenRef.current = null;
@@ -469,6 +472,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
             },
           });
           webrtcRef.current = webrtc;
+          setRemoteStream(webrtc.remoteStream);
         } catch (audioErr: any) {
           console.warn(
             "[AtendiCalls WebRTC] Microfone do navegador não pôde ser ativado:",
@@ -566,6 +570,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         instances,
         isConnecting,
         connectingPhone,
+        remoteStream,
       }}
     >
       {children}

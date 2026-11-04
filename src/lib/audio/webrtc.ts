@@ -34,14 +34,7 @@ export async function openAtendiCallsWebRTC(params: {
   });
 
   const pc = new RTCPeerConnection({
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:stun2.l.google.com:19302" },
-      { urls: "stun:stun3.l.google.com:19302" },
-      { urls: "stun:stun4.l.google.com:19302" },
-    ],
-    iceCandidatePoolSize: 2,
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
   });
 
   const dc = pc.createDataChannel(PCM_CHANNEL_LABEL, { ordered: true });
@@ -83,15 +76,14 @@ export async function openAtendiCallsWebRTC(params: {
   const captureNode = new AudioWorkletNode(audioCtx, CAPTURE_PROCESSOR_NAME);
   captureNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
     if (!isMuted && dc.readyState === "open") {
-      dc.send(float32ToInt16LE(e.data));
+      // Se o canal acumular mais de 100ms de áudio em trânsito, descarta para evitar atraso cumulativo
+      if (dc.bufferedAmount < 4096) {
+        dc.send(float32ToInt16LE(e.data));
+      }
     }
   };
   micSource.connect(captureNode);
-  // Conectar através de ganho zero para manter o nó ativo no scheduler sem causar retorno de eco no fone do operador
-  const zeroGain = audioCtx.createGain();
-  zeroGain.gain.value = 0;
-  captureNode.connect(zeroGain);
-  zeroGain.connect(audioCtx.destination);
+  captureNode.connect(audioCtx.destination);
 
   // 2. Recepção do WhatsApp do cliente -> Toca nos fones/caixa do atendente
   const playbackNode = new AudioWorkletNode(audioCtx, PLAYBACK_PROCESSOR_NAME);

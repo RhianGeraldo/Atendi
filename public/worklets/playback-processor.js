@@ -9,6 +9,17 @@ class PlaybackProcessor extends AudioWorkletProcessor {
     this.available = 0;
     this.port.onmessage = (e) => {
       const data = e.data;
+      if (!data || !data.length) return;
+
+      // Descarta áudio atrasado se o buffer acumular mais de 150ms (~2400 samples a 16kHz)
+      // Isso impede que soluços na rede criem um atraso cumulativo de 5 a 8 segundos
+      const MAX_LATENCY_SAMPLES = 2400;
+      if (this.available > MAX_LATENCY_SAMPLES) {
+        const drop = this.available - MAX_LATENCY_SAMPLES;
+        this.read = (this.read + drop) % RING_SIZE;
+        this.available = MAX_LATENCY_SAMPLES;
+      }
+
       for (let i = 0; i < data.length; i += 1) {
         this.ring[this.write] = data[i];
         this.write = (this.write + 1) % RING_SIZE;
