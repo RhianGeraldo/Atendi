@@ -83,6 +83,9 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const currentCallIdRef = useRef<string | null>(null);
   const currentSessionIdRef = useRef<string | null>(null);
+  const currentTokenRef = useRef<string | null>(null);
+  const currentApiUrlRef = useRef<string | null>(null);
+  const currentInstanceIdRef = useRef<string | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const webrtcRef = useRef<AtendiCallsWebRTCConnection | null>(null);
 
@@ -105,6 +108,9 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       setActiveContactName(null);
       currentCallIdRef.current = null;
       currentSessionIdRef.current = null;
+      currentTokenRef.current = null;
+      currentApiUrlRef.current = null;
+      currentInstanceIdRef.current = null;
     }, 2000);
   }, []);
 
@@ -133,6 +139,9 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
           data: {
             callId: activeId,
             companyId: profile?.company_id,
+            instanceId: currentInstanceIdRef.current,
+            token: currentTokenRef.current,
+            apiUrl: currentApiUrlRef.current,
           },
         });
 
@@ -151,7 +160,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       } catch (err) {
         // Ignora erros transitórios no loop de polling
       }
-    }, 1500);
+    }, 1200);
 
     return () => {
       if (pollIntervalRef.current) {
@@ -400,6 +409,13 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
 
         currentCallIdRef.current = res.callId;
         currentSessionIdRef.current = res.sessionId || null;
+        currentTokenRef.current = fromToken || res.token || null;
+        currentApiUrlRef.current = res.apiUrl || null;
+        const matchedInst = instances?.find(
+          (i: any) => i.atendicalls_token === fromToken || i.wavoip_token === fromToken,
+        );
+        currentInstanceIdRef.current = matchedInst?.id || null;
+
         setActiveCall(callObj);
         setCallStatus("CALLING");
 
@@ -443,7 +459,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         return false;
       }
     },
-    [profile?.company_id],
+    [profile?.company_id, instances],
   );
 
   /**
@@ -461,6 +477,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
           data: {
             callId,
             sessionId: currentSessionIdRef.current,
+            instanceId: currentInstanceIdRef.current,
             companyId: profile?.company_id,
           },
         });

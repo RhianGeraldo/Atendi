@@ -33,16 +33,45 @@ export async function openAtendiCallsWebRTC(params: {
     audio: params.micDeviceId ? { deviceId: { exact: params.micDeviceId } } : true,
   });
 
-  const pc = new RTCPeerConnection({ iceServers: [] });
+  const pc = new RTCPeerConnection({
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+    ],
+  });
+
   const dc = pc.createDataChannel(PCM_CHANNEL_LABEL, { ordered: true });
   dc.binaryType = "arraybuffer";
+
+  dc.onopen = () => {
+    console.log("[AtendiCalls WebRTC] ✅ DataChannel 'pcm' aberto com sucesso! Áudio bidirecional ativo.");
+  };
+
+  dc.onclose = () => {
+    console.log("[AtendiCalls WebRTC] ⏹️ DataChannel 'pcm' fechado.");
+  };
+
+  dc.onerror = (e) => {
+    console.error("[AtendiCalls WebRTC] ⚠️ Erro no DataChannel 'pcm':", e);
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    console.log(`[AtendiCalls WebRTC] ICE connection state: ${pc.iceConnectionState}`);
+  };
+
+  pc.onconnectionstatechange = () => {
+    console.log(`[AtendiCalls WebRTC] Peer connection state: ${pc.connectionState}`);
+  };
 
   const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
   const audioCtx = new AudioContextClass({ sampleRate: SAMPLE_RATE });
 
   await audioCtx.audioWorklet.addModule(CAPTURE_WORKLET_URL);
   await audioCtx.audioWorklet.addModule(PLAYBACK_WORKLET_URL);
-  await audioCtx.resume();
+  if (audioCtx.state === "suspended") {
+    await audioCtx.resume();
+  }
 
   let isMuted = false;
 
@@ -65,7 +94,6 @@ export async function openAtendiCallsWebRTC(params: {
   const playbackNode = new AudioWorkletNode(audioCtx, PLAYBACK_PROCESSOR_NAME);
   const streamDest = audioCtx.createMediaStreamDestination();
   playbackNode.connect(streamDest);
-  playbackNode.connect(audioCtx.destination);
   dc.onmessage = (e: MessageEvent<ArrayBuffer>) => {
     playbackNode.port.postMessage(int16LEToFloat32(e.data));
   };
@@ -93,7 +121,7 @@ export async function openAtendiCallsWebRTC(params: {
         }
       };
       pc.addEventListener("icegatheringstatechange", checkIce);
-      setTimeout(resolve, 2000);
+      setTimeout(resolve, 2500);
     }
   });
 
@@ -101,7 +129,7 @@ export async function openAtendiCallsWebRTC(params: {
   const sdpAnswer = await params.sdpAnswerCallback(sdpOffer);
 
   await pc.setRemoteDescription({ type: "answer", sdp: sdpAnswer });
-  console.log("[AtendiCalls WebRTC] Áudio bidirecional conectado com sucesso!");
+  console.log("[AtendiCalls WebRTC] SDP Answer aplicado. Aguardando estabelecimento do canal ICE/P2P...");
 
   return {
     pc,

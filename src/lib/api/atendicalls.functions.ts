@@ -387,10 +387,36 @@ export const syncAtendiCallsCallStatusAction = createServerFn({ method: "POST" }
       callId: z.string().min(1),
       instanceId: z.string().uuid().optional().nullable(),
       companyId: z.string().uuid().optional().nullable(),
+      token: z.string().optional().nullable(),
+      apiUrl: z.string().optional().nullable(),
     }),
   )
   .handler(async ({ data }) => {
-    const config = await resolveAtendiCallsConfig(data.instanceId, data.companyId);
+    let effectiveInstanceId = data.instanceId;
+    let effectiveCompanyId = data.companyId;
+
+    // Se não tiver instanceId ou token, consulta o call_logs para descobrir a instância exata da chamada
+    if (!data.token && !effectiveInstanceId) {
+      const { data: callLogRow } = await supabaseAdmin
+        .from("call_logs")
+        .select("whatsapp_instance_id, company_id")
+        .eq("call_id", data.callId)
+        .maybeSingle();
+
+      if (callLogRow) {
+        effectiveInstanceId = callLogRow.whatsapp_instance_id;
+        if (!effectiveCompanyId) effectiveCompanyId = callLogRow.company_id;
+      }
+    }
+
+    const config = await resolveAtendiCallsConfig(effectiveInstanceId, effectiveCompanyId);
+    if (data.token && data.token.trim()) {
+      config.token = data.token.trim();
+    }
+    if (data.apiUrl && data.apiUrl.trim()) {
+      config.apiUrl = data.apiUrl.trim().replace(/\/+$/, "");
+    }
+
     if (!config.token) {
       return { success: false, status: "unknown" };
     }
