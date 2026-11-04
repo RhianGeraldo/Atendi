@@ -141,8 +141,8 @@ export function AtendiCallsCallOverlay() {
     );
   }
 
-  // Chamada ativa e conectada
-  if (activeCall && callStatus === "ACTIVE") {
+  // Chamada ativa e conectada (ou em finalização)
+  if (activeCall && (callStatus === "ACTIVE" || callStatus === "ENDED")) {
     const peer = activeCall.peer;
     const displayName = activeContactName || peer.displayName || "Desconhecido";
 
@@ -175,8 +175,12 @@ export function AtendiCallsCallOverlay() {
             </div>
 
             <div className="flex flex-col flex-1 overflow-hidden">
-              <div className="text-slate-400 text-xs mb-0.5 truncate">
-                {formatDuration(callDuration)}
+              <div className="text-slate-400 text-xs mb-0.5 truncate flex items-center gap-1.5">
+                {callStatus === "ENDED" ? (
+                  <span className="text-red-500 font-medium animate-pulse">Chamada finalizada</span>
+                ) : (
+                  formatDuration(callDuration)
+                )}
               </div>
               <h3 className="text-xl font-light text-slate-800 truncate">{displayName}</h3>
               {displayName !== peer.phone && (
@@ -190,14 +194,20 @@ export function AtendiCallsCallOverlay() {
         <div className="px-8 mt-auto mb-10">
           <div className="grid grid-cols-3 gap-y-6 gap-x-4">
             <div className="flex flex-col items-center gap-2">
-              <button className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] flex items-center justify-center transition-colors text-slate-700">
+              <button
+                disabled={callStatus === "ENDED"}
+                className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] disabled:opacity-50 flex items-center justify-center transition-colors text-slate-700"
+              >
                 <Pause className="w-5 h-5 fill-current" />
               </button>
               <span className="text-[10px] text-slate-400 tracking-wider">Espera</span>
             </div>
 
             <div className="flex flex-col items-center gap-2">
-              <button className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] flex items-center justify-center transition-colors text-slate-700">
+              <button
+                disabled={callStatus === "ENDED"}
+                className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] disabled:opacity-50 flex items-center justify-center transition-colors text-slate-700"
+              >
                 <Video className="w-5 h-5 fill-current" />
               </button>
               <span className="text-[10px] text-slate-400 tracking-wider">Vídeo</span>
@@ -205,8 +215,9 @@ export function AtendiCallsCallOverlay() {
 
             <div className="flex flex-col items-center gap-2">
               <button
+                disabled={callStatus === "ENDED"}
                 onClick={isMuted ? unmute : mute}
-                className={`w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors ${
+                className={`w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors disabled:opacity-50 ${
                   isMuted
                     ? "bg-slate-800 text-white"
                     : "bg-[#f3f4f6] hover:bg-[#e5e7eb] text-slate-700"
@@ -222,7 +233,10 @@ export function AtendiCallsCallOverlay() {
             </div>
 
             <div className="flex flex-col items-center gap-2">
-              <button className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] flex items-center justify-center transition-colors text-slate-700">
+              <button
+                disabled={callStatus === "ENDED"}
+                className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] disabled:opacity-50 flex items-center justify-center transition-colors text-slate-700"
+              >
                 <PhoneForwarded className="w-5 h-5 fill-current" />
               </button>
               <span className="text-[10px] text-slate-400 tracking-wider">Transferir</span>
@@ -230,16 +244,22 @@ export function AtendiCallsCallOverlay() {
 
             <div className="flex flex-col items-center gap-2">
               <button
+                disabled={callStatus === "ENDED"}
                 onClick={endCall}
-                className="w-[52px] h-[52px] rounded-full bg-[#ef4444] hover:bg-[#dc2626] flex items-center justify-center transition-transform hover:scale-105 shadow-md text-white"
+                className={`w-[52px] h-[52px] rounded-full bg-[#ef4444] ${callStatus === "ENDED" ? "opacity-50 cursor-not-allowed" : "hover:bg-[#dc2626] transition-transform hover:scale-105"} flex items-center justify-center shadow-md text-white`}
               >
                 <PhoneOff className="w-5 h-5 fill-current" />
               </button>
-              <span className="text-[10px] text-slate-400 tracking-wider">Finalizar</span>
+              <span className="text-[10px] text-slate-400 tracking-wider">
+                {callStatus === "ENDED" ? "Finalizada" : "Finalizar"}
+              </span>
             </div>
 
             <div className="flex flex-col items-center gap-2">
-              <button className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] flex items-center justify-center transition-colors text-slate-700">
+              <button
+                disabled={callStatus === "ENDED"}
+                className="w-[52px] h-[52px] rounded-full bg-[#f3f4f6] hover:bg-[#e5e7eb] disabled:opacity-50 flex items-center justify-center transition-colors text-slate-700"
+              >
                 <Grip className="w-5 h-5 fill-current" />
               </button>
               <span className="text-[10px] text-slate-400 tracking-wider">Teclado</span>
@@ -251,8 +271,8 @@ export function AtendiCallsCallOverlay() {
     );
   }
 
-  // Chamada iniciando (dialing) ou chamando (ringing)
-  if (isConnecting || (activeCall && callStatus !== "ACTIVE")) {
+  // Chamada iniciando (dialing) ou chamando (ringing) antes de conectar
+  if (isConnecting || (activeCall && callStatus !== "ACTIVE" && callStatus !== "ENDED")) {
     const peer = activeCall?.peer;
     const displayName = activeContactName || peer?.displayName || "Desconhecido";
     const phone = connectingPhone || peer?.phone;

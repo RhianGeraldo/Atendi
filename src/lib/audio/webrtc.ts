@@ -38,7 +38,10 @@ export async function openAtendiCallsWebRTC(params: {
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
       { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
     ],
+    iceCandidatePoolSize: 2,
   });
 
   const dc = pc.createDataChannel(PCM_CHANNEL_LABEL, { ordered: true });
@@ -95,8 +98,20 @@ export async function openAtendiCallsWebRTC(params: {
   const streamDest = audioCtx.createMediaStreamDestination();
   playbackNode.connect(streamDest);
   playbackNode.connect(audioCtx.destination);
-  dc.onmessage = (e: MessageEvent<ArrayBuffer>) => {
-    playbackNode.port.postMessage(int16LEToFloat32(e.data));
+  dc.onmessage = async (e: MessageEvent) => {
+    try {
+      let buf: ArrayBuffer;
+      if (e.data instanceof ArrayBuffer) {
+        buf = e.data;
+      } else if (e.data instanceof Blob) {
+        buf = await e.data.arrayBuffer();
+      } else {
+        return;
+      }
+      playbackNode.port.postMessage(int16LEToFloat32(buf));
+    } catch (err) {
+      console.warn("[AtendiCalls WebRTC] Erro ao decodificar áudio recebido:", err);
+    }
   };
 
   // Cria elemento de áudio no navegador e vincula ao stream recebido para reprodução
@@ -115,14 +130,19 @@ export async function openAtendiCallsWebRTC(params: {
     if (pc.iceGatheringState === "complete") {
       resolve();
     } else {
+      let timeoutId: NodeJS.Timeout | null = null;
       const checkIce = () => {
         if (pc.iceGatheringState === "complete") {
+          if (timeoutId) clearTimeout(timeoutId);
           pc.removeEventListener("icegatheringstatechange", checkIce);
           resolve();
         }
       };
       pc.addEventListener("icegatheringstatechange", checkIce);
-      setTimeout(resolve, 2500);
+      timeoutId = setTimeout(() => {
+        pc.removeEventListener("icegatheringstatechange", checkIce);
+        resolve();
+      }, 3500);
     }
   });
 

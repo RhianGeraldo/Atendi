@@ -86,13 +86,17 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
   const currentTokenRef = useRef<string | null>(null);
   const currentApiUrlRef = useRef<string | null>(null);
   const currentInstanceIdRef = useRef<string | null>(null);
+  const isEndingRef = useRef<boolean>(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const webrtcRef = useRef<AtendiCallsWebRTCConnection | null>(null);
 
   const closeCallWithDelay = useCallback(() => {
+    isEndingRef.current = true;
     setCallStatus("ENDED");
     if (webrtcRef.current) {
-      webrtcRef.current.close();
+      try {
+        webrtcRef.current.close();
+      } catch {}
       webrtcRef.current = null;
     }
     if (pollIntervalRef.current) {
@@ -111,7 +115,8 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       currentTokenRef.current = null;
       currentApiUrlRef.current = null;
       currentInstanceIdRef.current = null;
-    }, 2000);
+      isEndingRef.current = false;
+    }, 1500);
   }, []);
 
   // Polling em tempo real durante chamadas ativas para sincronizar atendimento e encerramento no AtendiCalls
@@ -120,7 +125,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
     const isCallLive =
       callStatus === "CALLING" || callStatus === "RINGING" || callStatus === "ACTIVE";
 
-    if (!currentId || !isCallLive) {
+    if (!currentId || !isCallLive || isEndingRef.current) {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
@@ -132,7 +137,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
 
     pollIntervalRef.current = setInterval(async () => {
       const activeId = currentCallIdRef.current;
-      if (!activeId) return;
+      if (!activeId || isEndingRef.current) return;
 
       try {
         const res = await syncAtendiCallsCallStatusAction({
@@ -145,10 +150,13 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
           },
         });
 
+        if (isEndingRef.current) return;
+
         if (res?.success) {
           if (res.status === "ACTIVE") {
-            setCallStatus((prev) => (prev !== "ACTIVE" ? "ACTIVE" : prev));
+            setCallStatus((prev) => (prev !== "ACTIVE" && prev !== "ENDED" ? "ACTIVE" : prev));
           } else if (res.status === "ENDED") {
+            isEndingRef.current = true;
             setCallStatus("ENDED");
             closeCallWithDelay();
             if (pollIntervalRef.current) {
@@ -247,6 +255,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
 
       eventSource.onmessage = (event) => {
         try {
+          if (isEndingRef.current) return;
           const payload = JSON.parse(event.data);
           const currentId = currentCallIdRef.current;
 
@@ -261,21 +270,27 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
                 rawStatus === "active" ||
                 rawStatus === "connecting"
               ) {
-                setCallStatus("ACTIVE");
+                if (!isEndingRef.current) {
+                  setCallStatus("ACTIVE");
+                }
               } else if (rawStatus === "ringing" || rawStatus === "calling") {
-                setCallStatus("RINGING");
+                if (!isEndingRef.current) {
+                  setCallStatus("RINGING");
+                }
               } else if (
                 rawStatus === "ended" ||
                 rawStatus === "terminated" ||
                 rawStatus === "rejected" ||
                 rawStatus === "failed"
               ) {
+                isEndingRef.current = true;
                 setCallStatus("ENDED");
                 closeCallWithDelay();
               }
             }
           } else if (payload.type === "call-ended") {
             if (!currentId || payload.id === currentId || payload.callId === currentId) {
+              isEndingRef.current = true;
               setCallStatus("ENDED");
               closeCallWithDelay();
             }
@@ -387,6 +402,13 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       toast.info(`Iniciando ligação para ${displayName}...`);
       setActiveContactName(contactName || null);
       if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+      if (webrtcRef.current) {
+        try {
+          webrtcRef.current.close();
+        } catch {}
+        webrtcRef.current = null;
+      }
+      isEndingRef.current = false;
       setIsConnecting(true);
       setConnectingPhone(finalPhone);
 
@@ -477,10 +499,17 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
    * Desliga a chamada de forma segura no AtendiCalls (VPS)
    */
   const endCall = useCallback(async () => {
-    // Atualiza imediatamente o status para ENDED para a interface responder sem nenhum delay
+    // Marca encerramento e para imediatamente o polling para não reabrir a chamada
+    isEndingRef.current = true;
     setCallStatus("ENDED");
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
     if (webrtcRef.current) {
-      webrtcRef.current.close();
+      try {
+        webrtcRef.current.close();
+      } catch {}
       webrtcRef.current = null;
     }
     const callId = currentCallIdRef.current || activeCall?.id;
