@@ -68,6 +68,51 @@ export interface AtendiCallsContextType {
 
 const AtendiCallsContext = createContext<AtendiCallsContextType | undefined>(undefined);
 
+const ACTIVE_CALL_STORAGE_KEY = "atendicalls_active_call_session";
+
+interface StoredCallSession {
+  callId: string;
+  sessionId: string | null;
+  token: string | null;
+  apiUrl: string | null;
+  instanceId: string | null;
+  peerPhone: string;
+  peerDisplayName: string;
+  status: CallStatus | "CONNECTING";
+  savedAt: number;
+}
+
+function saveActiveCallSession(data: StoredCallSession) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(ACTIVE_CALL_STORAGE_KEY, JSON.stringify(data));
+  } catch {}
+}
+
+function clearActiveCallSession() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(ACTIVE_CALL_STORAGE_KEY);
+  } catch {}
+}
+
+function getStoredActiveCallSession(): StoredCallSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(ACTIVE_CALL_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredCallSession;
+    // Ignora sessões salvas há mais de 2 horas
+    if (Date.now() - parsed.savedAt > 2 * 60 * 60 * 1000) {
+      clearActiveCallSession();
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export function AtendiCallsProvider({ children }: { children: React.ReactNode }) {
   const { profile } = useAuth();
   const { selectedUnitId } = useUnit();
@@ -92,8 +137,48 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const webrtcRef = useRef<AtendiCallsWebRTCConnection | null>(null);
 
+  // Estabelece ou reconecta o canal de áudio WebRTC de forma segura
+  const establishWebRTC = useCallback(
+    async (
+      callId: string,
+      sessionId?: string | null,
+      token?: string | null,
+      apiUrl?: string | null,
+    ) => {
+      if (webrtcRef.current) return webrtcRef.current;
+      try {
+        console.log(`[AtendiCalls WebRTC] Conectando áudio para chamada ${callId}...`);
+        const webrtc = await openAtendiCallsWebRTC({
+          sdpAnswerCallback: async (sdpOffer) => {
+            const ans = await sendAtendiCallsWebRTCOfferAction({
+              data: {
+                callId,
+                sessionId,
+                token,
+                apiUrl,
+                sdpOffer,
+              },
+            });
+            return ans.sdpAnswer;
+          },
+        });
+        webrtcRef.current = webrtc;
+        setRemoteStream(webrtc.remoteStream);
+        return webrtc;
+      } catch (audioErr: any) {
+        console.warn(
+          "[AtendiCalls WebRTC] Microfone do navegador não pôde ser ativado:",
+          audioErr,
+        );
+        return null;
+      }
+    },
+    [],
+  );
+
   const closeCallWithDelay = useCallback(() => {
     isEndingRef.current = true;
+    clearActiveCallSession();
     setCallStatus("ENDED");
     if (webrtcRef.current) {
       try {
@@ -119,8 +204,61 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       currentApiUrlRef.current = null;
       currentInstanceIdRef.current = null;
       isEndingRef.current = false;
+      clearActiveCallSession();
     }, 1500);
   }, []);
+
+  // Recupera chamada em andamento ao navegar ou recarregar a página
+  useEffect(() => {
+    const stored = getStoredActiveCallSession();
+    if (!stored || activeCall) return;
+
+    console.log("[AtendiCalls] Restaurando chamada ativa do armazenamento:", stored);
+    currentCallIdRef.current = stored.callId;
+    currentSessionIdRef.current = stored.sessionId;
+    currentTokenRef.current = stored.token;
+    currentApiUrlRef.current = stored.apiUrl;
+    currentInstanceIdRef.current = stored.instanceId;
+    setActiveContactName(stored.peerDisplayName);
+    setActiveCall({
+      id: stored.callId,
+      peer: {
+        phone: stored.peerPhone,
+        displayName: stored.peerDisplayName,
+      },
+      status: stored.status,
+      device_token: stored.token || undefined,
+    });
+    setCallStatus(stored.status);
+
+    syncAtendiCallsCallStatusAction({
+      data: {
+        callId: stored.callId,
+        companyId: profile?.company_id,
+        instanceId: stored.instanceId,
+        token: stored.token,
+        apiUrl: stored.apiUrl,
+      },
+    })
+      .then((res) => {
+        if (res?.success) {
+          if (res.status === "ACTIVE") {
+            setCallStatus("ACTIVE");
+            saveActiveCallSession({ ...stored, status: "ACTIVE" });
+            establishWebRTC(stored.callId, stored.sessionId, stored.token, stored.apiUrl);
+          } else if (res.status === "ENDED") {
+            closeCallWithDelay();
+          } else {
+            establishWebRTC(stored.callId, stored.sessionId, stored.token, stored.apiUrl);
+          }
+        } else {
+          establishWebRTC(stored.callId, stored.sessionId, stored.token, stored.apiUrl);
+        }
+      })
+      .catch(() => {
+        establishWebRTC(stored.callId, stored.sessionId, stored.token, stored.apiUrl);
+      });
+  }, [profile?.company_id, activeCall, establishWebRTC, closeCallWithDelay]);
 
   // Polling em tempo real durante chamadas ativas para sincronizar atendimento e encerramento no AtendiCalls
   useEffect(() => {
@@ -262,7 +400,69 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
           const payload = JSON.parse(event.data);
           const currentId = currentCallIdRef.current;
 
-          if (payload.type === "call-status") {
+          if (payload.type === "call-list") {
+            const calls = payload.calls || [];
+            const currentId = currentCallIdRef.current;
+            const liveCall = calls.find((c: any) => {
+              const isLive =
+                c.status === "connected" ||
+                c.status === "active" ||
+                c.status === "ringing" ||
+                c.status === "calling" ||
+                c.status === "starting" ||
+                c.status === "connecting";
+              if (!isLive) return false;
+              if (currentId) return c.callId === currentId || c.id === currentId;
+              return true;
+            });
+
+            if (liveCall && !isEndingRef.current) {
+              const callId = liveCall.callId || liveCall.id;
+              const mappedStatus =
+                liveCall.status === "connected" || liveCall.status === "active"
+                  ? "ACTIVE"
+                  : "RINGING";
+              const peerPhone = liveCall.peer || "";
+              const peerName = liveCall.name || peerPhone || "Cliente";
+
+              currentCallIdRef.current = callId;
+              currentSessionIdRef.current = liveCall.sessionId || currentSessionIdRef.current;
+              currentTokenRef.current = effectiveToken;
+              currentApiUrlRef.current = apiUrl;
+
+              setActiveCall((prev) =>
+                prev && prev.id === callId
+                  ? prev
+                  : {
+                      id: callId,
+                      peer: {
+                        phone: peerPhone,
+                        displayName: peerName,
+                      },
+                      status: mappedStatus,
+                      device_token: effectiveToken,
+                    },
+              );
+              setCallStatus((prev) => (prev !== "ENDED" ? mappedStatus : prev));
+              setActiveContactName((prev) => prev || peerName);
+
+              saveActiveCallSession({
+                callId,
+                sessionId: liveCall.sessionId || currentSessionIdRef.current,
+                token: effectiveToken,
+                apiUrl,
+                instanceId: matchedInst?.id || null,
+                peerPhone,
+                peerDisplayName: peerName,
+                status: mappedStatus,
+                savedAt: Date.now(),
+              });
+
+              if (!webrtcRef.current) {
+                establishWebRTC(callId, liveCall.sessionId, effectiveToken, apiUrl);
+              }
+            }
+          } else if (payload.type === "call-status") {
             const rawStatus = (payload.status || "").toLowerCase();
             const matchesCall =
               !currentId || payload.id === currentId || payload.callId === currentId;
@@ -275,6 +475,18 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
               ) {
                 if (!isEndingRef.current) {
                   setCallStatus("ACTIVE");
+                  const stored = getStoredActiveCallSession();
+                  if (stored) {
+                    saveActiveCallSession({ ...stored, status: "ACTIVE" });
+                  }
+                  if (!webrtcRef.current && (currentId || payload.id || payload.callId)) {
+                    establishWebRTC(
+                      currentId || payload.id || payload.callId,
+                      payload.sessionId || currentSessionIdRef.current,
+                      effectiveToken,
+                      apiUrl,
+                    );
+                  }
                 }
               } else if (rawStatus === "ringing" || rawStatus === "calling") {
                 if (!isEndingRef.current) {
@@ -455,31 +667,20 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         setActiveCall(callObj);
         setCallStatus("CALLING");
 
+        saveActiveCallSession({
+          callId: res.callId,
+          sessionId: res.sessionId || null,
+          token: fromToken || res.token || null,
+          apiUrl: res.apiUrl || null,
+          instanceId: matchedInst?.id || null,
+          peerPhone: finalPhone,
+          peerDisplayName: displayName,
+          status: "CALLING",
+          savedAt: Date.now(),
+        });
+
         // Inicia negociação de áudio WebRTC imediatamente pelo navegador
-        try {
-          const webrtc = await openAtendiCallsWebRTC({
-            sdpAnswerCallback: async (sdpOffer) => {
-              const ans = await sendAtendiCallsWebRTCOfferAction({
-                data: {
-                  callId: res.callId,
-                  sessionId: res.sessionId,
-                  token: fromToken || res.token,
-                  apiUrl: res.apiUrl,
-                  sdpOffer,
-                },
-              });
-              return ans.sdpAnswer;
-            },
-          });
-          webrtcRef.current = webrtc;
-          setRemoteStream(webrtc.remoteStream);
-        } catch (audioErr: any) {
-          console.warn(
-            "[AtendiCalls WebRTC] Microfone do navegador não pôde ser ativado:",
-            audioErr,
-          );
-          toast.warning("Ligação iniciada, mas o acesso ao microfone não foi concedido.");
-        }
+        await establishWebRTC(res.callId, res.sessionId, fromToken || res.token, res.apiUrl);
 
         setTimeout(() => {
           setCallStatus((prev) => (prev === "CALLING" ? "RINGING" : prev));
@@ -496,7 +697,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         return false;
       }
     },
-    [profile?.company_id, instances],
+    [profile?.company_id, instances, establishWebRTC],
   );
 
   /**
@@ -505,6 +706,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
   const endCall = useCallback(async () => {
     // Marca encerramento e para imediatamente o polling para não reabrir a chamada
     isEndingRef.current = true;
+    clearActiveCallSession();
     setCallStatus("ENDED");
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
