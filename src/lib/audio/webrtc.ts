@@ -13,7 +13,6 @@ export interface AtendiCallsWebRTCConnection {
   micStream: MediaStream;
   remoteStream: MediaStream;
   audioCtx: AudioContext;
-  remoteAudio: HTMLAudioElement;
   close: () => void;
   mute: () => void;
   unmute: () => void;
@@ -29,8 +28,16 @@ export async function openAtendiCallsWebRTC(params: {
   sdpAnswerCallback: (sdpOffer: string) => Promise<string>;
   micDeviceId?: string | null;
 }): Promise<AtendiCallsWebRTCConnection> {
+  // Ativa cancelamento de eco acústico, supressão de ruído e controle de ganho automático
   const micStream = await navigator.mediaDevices.getUserMedia({
-    audio: params.micDeviceId ? { deviceId: { exact: params.micDeviceId } } : true,
+    audio: {
+      deviceId: params.micDeviceId ? { exact: params.micDeviceId } : undefined,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      sampleRate: SAMPLE_RATE,
+      channelCount: 1,
+    },
   });
 
   const pc = new RTCPeerConnection({
@@ -83,13 +90,21 @@ export async function openAtendiCallsWebRTC(params: {
     }
   };
   micSource.connect(captureNode);
-  captureNode.connect(audioCtx.destination);
+  // Conectar com ganho zero para manter o worklet ativo no scheduler Web Audio sem retorno do microfone nas caixas
+  const zeroGain = audioCtx.createGain();
+  zeroGain.gain.value = 0;
+  captureNode.connect(zeroGain);
+  zeroGain.connect(audioCtx.destination);
 
-  // 2. Recepção do WhatsApp do cliente -> Toca nos fones/caixa do atendente
+  // 2. Recepção do WhatsApp do cliente -> Toca diretamente com baixa latência no destino do AudioContext
+  // IMPORTANTE: Toca exclusivamente aqui para evitar tocar duplicado (o que causava eco)
   const playbackNode = new AudioWorkletNode(audioCtx, PLAYBACK_PROCESSOR_NAME);
+  playbackNode.connect(audioCtx.destination);
+
+  // Também mantemos streamDest para expor como MediaStream caso seja necessário para visualização
   const streamDest = audioCtx.createMediaStreamDestination();
   playbackNode.connect(streamDest);
-  playbackNode.connect(audioCtx.destination);
+
   dc.onmessage = async (e: MessageEvent) => {
     try {
       let buf: ArrayBuffer;
@@ -105,14 +120,6 @@ export async function openAtendiCallsWebRTC(params: {
       console.warn("[AtendiCalls WebRTC] Erro ao decodificar áudio recebido:", err);
     }
   };
-
-  // Cria elemento de áudio no navegador e vincula ao stream recebido para reprodução
-  const remoteAudio = new Audio();
-  remoteAudio.srcObject = streamDest.stream;
-  remoteAudio.autoplay = true;
-  remoteAudio.play().catch((err) => {
-    console.warn("[AtendiCalls WebRTC] Autoplay aguardando interação:", err);
-  });
 
   // 3. Negociação SDP Offer / Answer
   const offer = await pc.createOffer();
@@ -150,7 +157,6 @@ export async function openAtendiCallsWebRTC(params: {
     micStream,
     remoteStream: streamDest.stream,
     audioCtx,
-    remoteAudio,
     mute: () => {
       isMuted = true;
       micStream.getAudioTracks().forEach((t) => (t.enabled = false));
@@ -161,10 +167,6 @@ export async function openAtendiCallsWebRTC(params: {
     },
     isMuted: () => isMuted,
     close: () => {
-      try {
-        remoteAudio.pause();
-        remoteAudio.srcObject = null;
-      } catch {}
       try {
         micStream.getTracks().forEach((t) => t.stop());
       } catch {}

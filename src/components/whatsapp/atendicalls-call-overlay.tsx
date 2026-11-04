@@ -37,15 +37,6 @@ export function AtendiCallsCallOverlay() {
 
   const [callDuration, setCallDuration] = useState(0);
   const { position, handleMouseDown, dragRef, isDragging } = useDraggable();
-  const audioRef = useRef<HTMLAudioElement>(null);
-
-  useEffect(() => {
-    if (!remoteStream || !audioRef.current) return;
-    audioRef.current.srcObject = remoteStream;
-    audioRef.current.play().catch((err) => {
-      console.warn("[AtendiCalls] Autoplay aguardando interação do usuário:", err);
-    });
-  }, [remoteStream]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -276,9 +267,6 @@ export function AtendiCallsCallOverlay() {
             </div>
           </div>
         </div>
-
-        {/* Elemento de áudio no DOM para reprodução confiável do stream remoto */}
-        <audio ref={audioRef} autoPlay playsInline className="hidden" />
       </div>,
       document.body,
     );
