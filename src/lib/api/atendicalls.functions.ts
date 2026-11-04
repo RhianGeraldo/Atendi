@@ -11,6 +11,8 @@ import {
   sendAtendiCallsWebRTCOffer,
   syncCompanyKeysToAtendiCalls,
   hangupAtendiCallsVoiceCall,
+  acceptAtendiCallsVoiceCall,
+  rejectAtendiCallsVoiceCall,
   getAtendiCallsCallDetails,
   type AtendiCallsAgentConfig,
 } from "@/lib/server/atendicalls-api";
@@ -272,6 +274,9 @@ export const startAtendiCallsVoiceCallAction = createServerFn({ method: "POST" }
 
     // 4. Resolver credenciais AtendiCalls
     const config = await resolveAtendiCallsConfig(effectiveInstanceId, effectiveCompanyId);
+    if (data.fromToken && data.fromToken.trim()) {
+      config.token = data.fromToken.trim();
+    }
     const contactDisplayName = data.contactName || "Cliente";
 
     // Inicia chamada para o operador humano atender pelo navegador via WebRTC
@@ -375,6 +380,62 @@ export const hangupAtendiCallsVoiceCallAction = createServerFn({ method: "POST" 
     }
 
     return { success: hungUp };
+  });
+
+/**
+ * Atende uma chamada recebida (atendente clica em Aceitar)
+ */
+export const acceptAtendiCallsCallAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      callId: z.string().min(1),
+      sessionId: z.string().optional().nullable(),
+      instanceId: z.string().uuid().optional().nullable(),
+      companyId: z.string().uuid().optional().nullable(),
+      token: z.string().optional().nullable(),
+      apiUrl: z.string().optional().nullable(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const config = await resolveAtendiCallsConfig(data.instanceId, data.companyId);
+    if (data.token) config.token = data.token;
+    if (data.apiUrl) config.apiUrl = data.apiUrl;
+
+    const accepted = await acceptAtendiCallsVoiceCall(
+      data.callId,
+      config,
+      data.sessionId || undefined,
+    );
+    return { success: accepted };
+  });
+
+/**
+ * Rejeita uma chamada recebida (atendente clica em Recusar)
+ */
+export const rejectAtendiCallsCallAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      callId: z.string().min(1),
+      sessionId: z.string().optional().nullable(),
+      instanceId: z.string().uuid().optional().nullable(),
+      companyId: z.string().uuid().optional().nullable(),
+      token: z.string().optional().nullable(),
+      apiUrl: z.string().optional().nullable(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const config = await resolveAtendiCallsConfig(data.instanceId, data.companyId);
+    if (data.token) config.token = data.token;
+    if (data.apiUrl) config.apiUrl = data.apiUrl;
+
+    const rejected = await rejectAtendiCallsVoiceCall(
+      data.callId,
+      config,
+      data.sessionId || undefined,
+    );
+    return { success: rejected };
   });
 
 /**

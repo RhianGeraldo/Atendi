@@ -459,6 +459,67 @@ export async function hangupAtendiCallsVoiceCall(
 }
 
 /**
+ * Atende uma chamada recebida (operador clica em Aceitar)
+ */
+export async function acceptAtendiCallsVoiceCall(
+  callId: string,
+  config: AtendiCallsConfig,
+  sessionId?: string,
+): Promise<boolean> {
+  const headers = {
+    Authorization: `Bearer ${config.token}`,
+    "X-API-Key": config.token,
+    "X-Client-Id": "atendi",
+    "Content-Type": "application/json",
+  };
+
+  let sid = sessionId;
+  if (!sid) {
+    const conn = await getAtendiCallsConnectStatus(config).catch(() => null);
+    sid = conn?.instance?.id || conn?.instance?.sessionId;
+  }
+
+  if (sid) {
+    try {
+      const res = await fetch(
+        `${config.apiUrl}/api/sessions/${encodeURIComponent(sid)}/calls/${encodeURIComponent(callId)}/accept`,
+        {
+          method: "POST",
+          headers,
+          body: "{}",
+        },
+      );
+      if (res.ok) return true;
+    } catch {}
+  }
+
+  try {
+    const res = await fetch(
+      `${config.apiUrl}/api/v1/voice/calls/${encodeURIComponent(callId)}/accept`,
+      {
+        method: "POST",
+        headers,
+        body: "{}",
+      },
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rejeita uma chamada recebida (operador clica em Recusar)
+ */
+export async function rejectAtendiCallsVoiceCall(
+  callId: string,
+  config: AtendiCallsConfig,
+  sessionId?: string,
+): Promise<boolean> {
+  return hangupAtendiCallsVoiceCall(callId, config, sessionId);
+}
+
+/**
  * Consulta detalhes e status em tempo real de uma chamada no motor AtendiCalls
  */
 export async function getAtendiCallsCallDetails(

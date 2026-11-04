@@ -7,6 +7,8 @@ import { useUnit } from "@/lib/unit-context";
 import {
   startAtendiCallsVoiceCallAction,
   hangupAtendiCallsVoiceCallAction,
+  acceptAtendiCallsCallAction,
+  rejectAtendiCallsCallAction,
   syncAtendiCallsCallStatusAction,
   sendAtendiCallsWebRTCOfferAction,
 } from "@/lib/api/atendicalls.functions";
@@ -365,23 +367,9 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
     staleTime: 60000,
   });
 
-  // Conexão Realtime SSE direta com o motor AtendiCalls para eventos instantâneos (ringing, connected, ended)
+  // Conexão Realtime SSE direta com o motor AtendiCalls para eventos instantâneos em todas as instâncias disponíveis
   useEffect(() => {
-    const effectiveToken =
-      currentTokenRef.current ||
-      instances?.find((i: any) => i.atendicalls_token || i.wavoip_token)?.atendicalls_token ||
-      instances?.find((i: any) => i.atendicalls_token || i.wavoip_token)?.wavoip_token;
-    if (!effectiveToken) return;
-
-    const matchedInst = instances?.find(
-      (i: any) =>
-        i.atendicalls_token === effectiveToken || i.wavoip_token === effectiveToken,
-    );
-    const apiUrl = (
-      currentApiUrlRef.current ||
-      matchedInst?.atendicalls_url ||
-      "https://calls.esteticaelaser.com.br"
-    ).replace(/\/+$/, "");
+    if (!instances || !instances.length) return;
 
     let clientId = localStorage.getItem("atendicalls.clientId");
     if (!clientId) {
@@ -389,143 +377,188 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       localStorage.setItem("atendicalls.clientId", clientId);
     }
 
-    const sseUrl = `${apiUrl}/api/events?clientId=${encodeURIComponent(clientId)}&token=${encodeURIComponent(effectiveToken)}`;
-    let eventSource: EventSource | null = null;
-    try {
-      eventSource = new EventSource(sseUrl);
+    // Coleta todas as instâncias únicas com token configurado (suporta múltiplas instâncias simultâneas)
+    const uniqueInstances = new Map<string, { token: string; apiUrl: string; instanceId: string }>();
+    for (const inst of instances) {
+      const token = inst.atendicalls_token || inst.wavoip_token;
+      if (token && !uniqueInstances.has(token)) {
+        uniqueInstances.set(token, {
+          token,
+          apiUrl: (inst.atendicalls_url || "https://calls.esteticaelaser.com.br").replace(/\/+$/, ""),
+          instanceId: inst.id,
+        });
+      }
+    }
 
-      eventSource.onmessage = (event) => {
-        try {
-          if (isEndingRef.current) return;
-          const payload = JSON.parse(event.data);
-          const currentId = currentCallIdRef.current;
+    // Se houver chamada em andamento com token específico não mapeado, inclui no monitoramento
+    if (currentTokenRef.current && !uniqueInstances.has(currentTokenRef.current)) {
+      uniqueInstances.set(currentTokenRef.current, {
+        token: currentTokenRef.current,
+        apiUrl: (currentApiUrlRef.current || "https://calls.esteticaelaser.com.br").replace(/\/+$/, ""),
+        instanceId: currentInstanceIdRef.current || "",
+      });
+    }
 
-          if (payload.type === "call-list") {
-            const calls = payload.calls || [];
+    const eventSources: EventSource[] = [];
+
+    uniqueInstances.forEach(({ token, apiUrl, instanceId }) => {
+      try {
+        const sseUrl = `${apiUrl}/api/events?clientId=${encodeURIComponent(clientId)}&token=${encodeURIComponent(token)}`;
+        const es = new EventSource(sseUrl);
+
+        es.onmessage = (event) => {
+          try {
+            if (isEndingRef.current) return;
+            const payload = JSON.parse(event.data);
             const currentId = currentCallIdRef.current;
-            const liveCall = calls.find((c: any) => {
-              const isLive =
-                c.status === "connected" ||
-                c.status === "active" ||
-                c.status === "ringing" ||
-                c.status === "calling" ||
-                c.status === "starting" ||
-                c.status === "connecting";
-              if (!isLive) return false;
-              if (currentId) return c.callId === currentId || c.id === currentId;
-              return true;
-            });
 
-            if (liveCall && !isEndingRef.current) {
-              const callId = liveCall.callId || liveCall.id;
-              const mappedStatus =
-                liveCall.status === "connected" || liveCall.status === "active"
-                  ? "ACTIVE"
-                  : "RINGING";
-              const peerPhone = liveCall.peer || "";
-              const peerName = liveCall.name || peerPhone || "Cliente";
+            if (payload.type === "call-list") {
+              const calls = payload.calls || [];
+              // Importante: Apenas restaura se este navegador já possuir o ID da chamada (evita roubar chamadas de outros operadores)
+              if (!currentId) return;
 
-              currentCallIdRef.current = callId;
-              currentSessionIdRef.current = liveCall.sessionId || currentSessionIdRef.current;
-              currentTokenRef.current = effectiveToken;
-              currentApiUrlRef.current = apiUrl;
-
-              setActiveCall((prev) =>
-                prev && prev.id === callId
-                  ? prev
-                  : {
-                      id: callId,
-                      peer: {
-                        phone: peerPhone,
-                        displayName: peerName,
-                      },
-                      status: mappedStatus,
-                      device_token: effectiveToken,
-                    },
-              );
-              setCallStatus((prev) => (prev !== "ENDED" ? mappedStatus : prev));
-              setActiveContactName((prev) => prev || peerName);
-
-              saveActiveCallSession({
-                callId,
-                sessionId: liveCall.sessionId || currentSessionIdRef.current,
-                token: effectiveToken,
-                apiUrl,
-                instanceId: matchedInst?.id || null,
-                peerPhone,
-                peerDisplayName: peerName,
-                status: mappedStatus,
-                savedAt: Date.now(),
+              const liveCall = calls.find((c: any) => {
+                const isLive =
+                  c.status === "connected" ||
+                  c.status === "active" ||
+                  c.status === "ringing" ||
+                  c.status === "calling" ||
+                  c.status === "starting" ||
+                  c.status === "connecting";
+                if (!isLive) return false;
+                return c.callId === currentId || c.id === currentId;
               });
 
-              if (!webrtcRef.current) {
-                establishWebRTC(callId, liveCall.sessionId, effectiveToken, apiUrl);
-              }
-            }
-          } else if (payload.type === "call-status") {
-            const rawStatus = (payload.status || "").toLowerCase();
-            const matchesCall =
-              !currentId || payload.id === currentId || payload.callId === currentId;
+              if (liveCall && !isEndingRef.current) {
+                const callId = liveCall.callId || liveCall.id;
+                const mappedStatus =
+                  liveCall.status === "connected" || liveCall.status === "active"
+                    ? "ACTIVE"
+                    : "RINGING";
+                const peerPhone = liveCall.peer || "";
+                const peerName = liveCall.name || peerPhone || "Cliente";
 
-            if (matchesCall) {
-              if (
-                rawStatus === "connected" ||
-                rawStatus === "active" ||
-                rawStatus === "connecting"
-              ) {
-                if (!isEndingRef.current) {
-                  setCallStatus("ACTIVE");
-                  const stored = getStoredActiveCallSession();
-                  if (stored) {
-                    saveActiveCallSession({ ...stored, status: "ACTIVE" });
-                  }
-                  if (!webrtcRef.current && (currentId || payload.id || payload.callId)) {
-                    establishWebRTC(
-                      currentId || payload.id || payload.callId,
-                      payload.sessionId || currentSessionIdRef.current,
-                      effectiveToken,
-                      apiUrl,
-                    );
-                  }
+                currentCallIdRef.current = callId;
+                currentSessionIdRef.current = liveCall.sessionId || currentSessionIdRef.current;
+                currentTokenRef.current = token;
+                currentApiUrlRef.current = apiUrl;
+                currentInstanceIdRef.current = instanceId;
+
+                setActiveCall((prev) =>
+                  prev && prev.id === callId
+                    ? prev
+                    : {
+                        id: callId,
+                        peer: {
+                          phone: peerPhone,
+                          displayName: peerName,
+                        },
+                        status: mappedStatus,
+                        device_token: token,
+                      },
+                );
+                setCallStatus((prev) => (prev !== "ENDED" ? mappedStatus : prev));
+                setActiveContactName((prev) => prev || peerName);
+
+                saveActiveCallSession({
+                  callId,
+                  sessionId: liveCall.sessionId || currentSessionIdRef.current,
+                  token,
+                  apiUrl,
+                  instanceId,
+                  peerPhone,
+                  peerDisplayName: peerName,
+                  status: mappedStatus,
+                  savedAt: Date.now(),
+                });
+
+                if (!webrtcRef.current) {
+                  establishWebRTC(callId, liveCall.sessionId, token, apiUrl);
                 }
-              } else if (rawStatus === "ringing" || rawStatus === "calling") {
-                if (!isEndingRef.current) {
-                  setCallStatus("RINGING");
+              }
+            } else if (payload.type === "call-status") {
+              const rawStatus = (payload.status || "").toLowerCase();
+              const matchesCall =
+                currentId && (payload.id === currentId || payload.callId === currentId);
+
+              if (matchesCall) {
+                if (
+                  rawStatus === "connected" ||
+                  rawStatus === "active" ||
+                  rawStatus === "connecting"
+                ) {
+                  if (!isEndingRef.current) {
+                    setCallStatus("ACTIVE");
+                    const stored = getStoredActiveCallSession();
+                    if (stored) {
+                      saveActiveCallSession({ ...stored, status: "ACTIVE" });
+                    }
+                    if (!webrtcRef.current) {
+                      establishWebRTC(
+                        currentId,
+                        payload.sessionId || currentSessionIdRef.current,
+                        token,
+                        apiUrl,
+                      );
+                    }
+                  }
+                } else if (rawStatus === "ringing" || rawStatus === "calling") {
+                  if (!isEndingRef.current) {
+                    setCallStatus("RINGING");
+                  }
+                } else if (
+                  rawStatus === "ended" ||
+                  rawStatus === "terminated" ||
+                  rawStatus === "rejected" ||
+                  rawStatus === "failed"
+                ) {
+                  isEndingRef.current = true;
+                  setCallStatus("ENDED");
+                  closeCallWithDelay();
                 }
-              } else if (
-                rawStatus === "ended" ||
-                rawStatus === "terminated" ||
-                rawStatus === "rejected" ||
-                rawStatus === "failed"
-              ) {
+              }
+            } else if (payload.type === "call-ended") {
+              if (currentId && (payload.id === currentId || payload.callId === currentId)) {
                 isEndingRef.current = true;
                 setCallStatus("ENDED");
                 closeCallWithDelay();
               }
+            } else if (payload.type === "incoming") {
+              // Notifica chamada recebida para esta instância se o atendente estiver livre
+              if (!currentCallIdRef.current && (!activeCall || callStatus === "ENDED")) {
+                setIncomingOffer({
+                  id: payload.id,
+                  peer: {
+                    phone: payload.peer || "",
+                    displayName: payload.name || payload.peer || "Cliente",
+                    profilePicture: payload.pictureUrl,
+                  },
+                  status: "RINGING",
+                  device_token: token,
+                });
+                setCallStatus("RINGING");
+              }
+            } else if (payload.type === "incoming-claimed") {
+              // Se outro operador atendeu em outro computador, descarta o modal de chamada recebida
+              setIncomingOffer((prev) => (prev?.id === payload.id ? null : prev));
             }
-          } else if (payload.type === "call-ended") {
-            if (!currentId || payload.id === currentId || payload.callId === currentId) {
-              isEndingRef.current = true;
-              setCallStatus("ENDED");
-              closeCallWithDelay();
-            }
-          }
-        } catch {}
-      };
+          } catch {}
+        };
 
-      eventSource.onerror = () => {
-        // O navegador reconecta o EventSource automaticamente
-      };
-    } catch (err) {
-      console.warn("[AtendiCalls SSE] Erro ao conectar EventSource:", err);
-    }
+        es.onerror = () => {
+          // Reconexão automática pelo navegador
+        };
+
+        eventSources.push(es);
+      } catch (err) {
+        console.warn(`[AtendiCalls SSE] Erro ao conectar instância ${instanceId}:`, err);
+      }
+    });
 
     return () => {
-      if (eventSource) {
-        eventSource.close();
-      }
+      eventSources.forEach((es) => es.close());
     };
-  }, [instances, callStatus, closeCallWithDelay]);
+  }, [instances, activeCall, callStatus, establishWebRTC, closeCallWithDelay]);
 
   // Monitora mudanças no banco de dados via Supabase Realtime para a chamada ativa
   useEffect(() => {
@@ -582,17 +615,78 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
 
   const acceptCall = useCallback(async () => {
     if (!incomingOffer) return;
+    const callId = incomingOffer.id;
+    const token = incomingOffer.device_token || currentTokenRef.current;
+    const matchedInst = instances?.find(
+      (i: any) => i.atendicalls_token === token || i.wavoip_token === token,
+    );
+    const apiUrl = (
+      matchedInst?.atendicalls_url || "https://calls.esteticaelaser.com.br"
+    ).replace(/\/+$/, "");
+
+    currentCallIdRef.current = callId;
+    currentTokenRef.current = token;
+    currentApiUrlRef.current = apiUrl;
+    currentInstanceIdRef.current = matchedInst?.id || null;
+
     setActiveCall(incomingOffer);
     setIncomingOffer(null);
     setCallStatus("ACTIVE");
-  }, [incomingOffer]);
+
+    try {
+      await acceptAtendiCallsCallAction({
+        data: {
+          callId,
+          token,
+          apiUrl,
+        },
+      });
+    } catch (e) {
+      console.warn("[AtendiCalls] Erro ao enviar aceite de chamada:", e);
+    }
+
+    saveActiveCallSession({
+      callId,
+      sessionId: null,
+      token,
+      apiUrl,
+      instanceId: matchedInst?.id || null,
+      peerPhone: incomingOffer.peer.phone,
+      peerDisplayName: incomingOffer.peer.displayName || incomingOffer.peer.phone,
+      status: "ACTIVE",
+      savedAt: Date.now(),
+    });
+
+    await establishWebRTC(callId, null, token, apiUrl);
+  }, [incomingOffer, instances, establishWebRTC]);
 
   const rejectCall = useCallback(async () => {
     if (!incomingOffer) return;
+    const callId = incomingOffer.id;
+    const token = incomingOffer.device_token || currentTokenRef.current;
+    const matchedInst = instances?.find(
+      (i: any) => i.atendicalls_token === token || i.wavoip_token === token,
+    );
+    const apiUrl = (
+      matchedInst?.atendicalls_url || "https://calls.esteticaelaser.com.br"
+    ).replace(/\/+$/, "");
+
     setIncomingOffer(null);
     setActiveContactName(null);
     setCallStatus(null);
-  }, [incomingOffer]);
+
+    try {
+      await rejectAtendiCallsCallAction({
+        data: {
+          callId,
+          token,
+          apiUrl,
+        },
+      });
+    } catch (e) {
+      console.warn("[AtendiCalls] Erro ao enviar rejeição de chamada:", e);
+    }
+  }, [incomingOffer, instances]);
 
   /**
    * Dispara ligação através do motor AtendiCalls na VPS
@@ -611,6 +705,12 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         toast.error("Número de telefone inválido para chamada.");
         return false;
       }
+
+      if (activeCall && (callStatus === "ACTIVE" || callStatus === "CALLING" || callStatus === "RINGING")) {
+        toast.warning("Você já possui uma chamada em andamento neste navegador.");
+        return false;
+      }
+
       const finalPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
       const displayName = contactName || finalPhone;
 
