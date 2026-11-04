@@ -267,6 +267,7 @@ export const startAtendiCallsVoiceCallAction = createServerFn({ method: "POST" }
         .from("whatsapp_instances")
         .select("id")
         .eq("company_id", effectiveCompanyId)
+        .or("atendicalls_token.not.is.null,wavoip_token.not.is.null")
         .order("status", { ascending: false })
         .limit(1);
       effectiveInstanceId = inst?.[0]?.id || null;
@@ -484,6 +485,29 @@ export const syncAtendiCallsCallStatusAction = createServerFn({ method: "POST" }
 
     try {
       const details = await getAtendiCallsCallDetails(data.callId, config);
+
+      // Se não encontrou registro na API de chamadas de voz IA (ex: chamada de softphone nativo WebRTC),
+      // respeita o status atual registrado no banco local
+      if (details.notFound) {
+        const { data: currentLog } = await supabaseAdmin
+          .from("call_logs")
+          .select("status")
+          .eq("call_id", data.callId)
+          .maybeSingle();
+
+        const currentStatus = (currentLog?.status || "RINGING").toUpperCase();
+        if (
+          currentStatus === "ENDED" ||
+          currentStatus === "FAILED" ||
+          currentStatus === "REJECTED" ||
+          currentStatus === "MISSED"
+        ) {
+          return { success: true, status: "ENDED" };
+        }
+
+        return { success: true, status: currentStatus };
+      }
+
       const rawStatus = (details.call?.status || details.call?.Status || "").toLowerCase();
       const isConnected =
         rawStatus === "connected" ||
@@ -495,7 +519,10 @@ export const syncAtendiCallsCallStatusAction = createServerFn({ method: "POST" }
         (details.isEnded ||
           rawStatus === "ended" ||
           rawStatus === "terminated" ||
-          rawStatus === "failed");
+          rawStatus === "failed" ||
+          rawStatus === "rejected" ||
+          rawStatus === "busy" ||
+          rawStatus === "no_answer");
 
       if (isConnected) {
         // Marca como ACTIVE no banco se ainda não estiver

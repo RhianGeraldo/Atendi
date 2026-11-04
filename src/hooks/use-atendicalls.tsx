@@ -138,6 +138,10 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
   const isEndingRef = useRef<boolean>(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const webrtcRef = useRef<AtendiCallsWebRTCConnection | null>(null);
+  const activeCallRef = useRef<CallActive | null>(activeCall);
+  activeCallRef.current = activeCall;
+  const callStatusRef = useRef<CallStatus>(callStatus);
+  callStatusRef.current = callStatus;
 
   // Estabelece ou reconecta o canal de áudio WebRTC de forma segura
   const establishWebRTC = useCallback(
@@ -367,6 +371,15 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
     staleTime: 60000,
   });
 
+  // Identificador estável de instâncias para evitar reconexões desnecessárias de SSE
+  const instancesTokenKey = useMemo(() => {
+    if (!instances?.length) return "";
+    return instances
+      .map((i: any) => `${i.id}:${i.atendicalls_token || i.wavoip_token || ""}`)
+      .sort()
+      .join("|");
+  }, [instances]);
+
   // Conexão Realtime SSE direta com o motor AtendiCalls para eventos instantâneos em todas as instâncias disponíveis
   useEffect(() => {
     if (!instances || !instances.length) return;
@@ -525,7 +538,12 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
               }
             } else if (payload.type === "incoming") {
               // Notifica chamada recebida para esta instância se o atendente estiver livre
-              if (!currentCallIdRef.current && (!activeCall || callStatus === "ENDED")) {
+              if (
+                !currentCallIdRef.current &&
+                (!activeCallRef.current ||
+                  callStatusRef.current === "ENDED" ||
+                  callStatusRef.current === null)
+              ) {
                 setIncomingOffer({
                   id: payload.id,
                   peer: {
@@ -558,7 +576,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
     return () => {
       eventSources.forEach((es) => es.close());
     };
-  }, [instances, activeCall, callStatus, establishWebRTC, closeCallWithDelay]);
+  }, [instancesTokenKey, instances, establishWebRTC, closeCallWithDelay]);
 
   // Monitora mudanças no banco de dados via Supabase Realtime para a chamada ativa
   useEffect(() => {
@@ -727,12 +745,22 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
       setIsConnecting(true);
       setConnectingPhone(finalPhone);
 
+      const effectiveToken =
+        fromToken ||
+        instances?.[0]?.atendicalls_token ||
+        instances?.[0]?.wavoip_token;
+      const matchedInst = instances?.find(
+        (i: any) =>
+          i.atendicalls_token === effectiveToken || i.wavoip_token === effectiveToken,
+      );
+
       try {
         const res = await startAtendiCallsVoiceCallAction({
           data: {
             phone: finalPhone,
             contactName: displayName,
-            fromToken,
+            fromToken: effectiveToken,
+            instanceId: matchedInst?.id,
             companyId: profile?.company_id,
           },
         });
@@ -752,16 +780,13 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
             displayName,
           },
           status: "CALLING",
-          device_token: fromToken,
+          device_token: effectiveToken,
         };
 
         currentCallIdRef.current = res.callId;
         currentSessionIdRef.current = res.sessionId || null;
-        currentTokenRef.current = fromToken || res.token || null;
+        currentTokenRef.current = effectiveToken || res.token || null;
         currentApiUrlRef.current = res.apiUrl || null;
-        const matchedInst = instances?.find(
-          (i: any) => i.atendicalls_token === fromToken || i.wavoip_token === fromToken,
-        );
         currentInstanceIdRef.current = matchedInst?.id || null;
 
         setActiveCall(callObj);
@@ -770,7 +795,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         saveActiveCallSession({
           callId: res.callId,
           sessionId: res.sessionId || null,
-          token: fromToken || res.token || null,
+          token: effectiveToken || res.token || null,
           apiUrl: res.apiUrl || null,
           instanceId: matchedInst?.id || null,
           peerPhone: finalPhone,
@@ -780,7 +805,7 @@ export function AtendiCallsProvider({ children }: { children: React.ReactNode })
         });
 
         // Inicia negociação de áudio WebRTC imediatamente pelo navegador
-        await establishWebRTC(res.callId, res.sessionId, fromToken || res.token, res.apiUrl);
+        await establishWebRTC(res.callId, res.sessionId, effectiveToken || res.token, res.apiUrl);
 
         setTimeout(() => {
           setCallStatus((prev) => (prev === "CALLING" ? "RINGING" : prev));

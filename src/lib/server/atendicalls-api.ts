@@ -537,6 +537,7 @@ export async function getAtendiCallsCallDetails(
   mode?: string;
   transcript?: Array<{ role: string; text: string }>;
   isEnded?: boolean;
+  notFound?: boolean;
 }> {
   const cleanUrl = config.apiUrl.replace(/\/+$/, "");
   const res = await fetch(`${cleanUrl}/api/v1/voice/calls/${encodeURIComponent(callId)}`, {
@@ -547,7 +548,7 @@ export async function getAtendiCallsCallDetails(
   });
 
   if (res.status === 404) {
-    return { isEnded: true };
+    return { notFound: true, isEnded: false };
   }
 
   if (!res.ok) {
@@ -573,7 +574,7 @@ export async function getAtendiCallsCallDetails(
     connectedAt: rawCall.connectedAt || rawCall.ConnectedAt,
   };
 
-  return { ...data, call: normalizedCall, isEnded };
+  return { ...data, call: normalizedCall, isEnded, notFound: false };
 }
 
 /**
