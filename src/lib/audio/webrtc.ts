@@ -96,14 +96,39 @@ export async function openAtendiCallsWebRTC(params: {
   captureNode.connect(zeroGain);
   zeroGain.connect(audioCtx.destination);
 
-  // 2. Recepção do WhatsApp do cliente -> Toca diretamente com baixa latência no destino do AudioContext
+  // 2. Recepção do WhatsApp do cliente -> Filtros de áudio para clareza e redução de ruído -> Toca no destino
   // IMPORTANTE: Toca exclusivamente aqui para evitar tocar duplicado (o que causava eco)
   const playbackNode = new AudioWorkletNode(audioCtx, PLAYBACK_PROCESSOR_NAME);
-  playbackNode.connect(audioCtx.destination);
+
+  // Filtro passa-altas (85Hz): Elimina zumbido elétrico (50/60Hz), ruídos de manuseio e deslocamento DC
+  const highpass = audioCtx.createBiquadFilter();
+  highpass.type = "highpass";
+  highpass.frequency.setValueAtTime(85, audioCtx.currentTime);
+  highpass.Q.setValueAtTime(0.7, audioCtx.currentTime);
+
+  // Filtro passa-baixas (7000Hz): Remove chiado de alta frequência e ruído digital de aliasing
+  const lowpass = audioCtx.createBiquadFilter();
+  lowpass.type = "lowpass";
+  lowpass.frequency.setValueAtTime(7000, audioCtx.currentTime);
+  lowpass.Q.setValueAtTime(0.7, audioCtx.currentTime);
+
+  // Compressor de dinâmica suave para estabilizar o volume da fala e evitar estalos de pico
+  const voiceCompressor = audioCtx.createDynamicsCompressor();
+  voiceCompressor.threshold.setValueAtTime(-24, audioCtx.currentTime);
+  voiceCompressor.knee.setValueAtTime(10, audioCtx.currentTime);
+  voiceCompressor.ratio.setValueAtTime(2.5, audioCtx.currentTime);
+  voiceCompressor.attack.setValueAtTime(0.003, audioCtx.currentTime);
+  voiceCompressor.release.setValueAtTime(0.2, audioCtx.currentTime);
+
+  // Encadeia: playbackNode -> highpass -> lowpass -> voiceCompressor -> destination
+  playbackNode.connect(highpass);
+  highpass.connect(lowpass);
+  lowpass.connect(voiceCompressor);
+  voiceCompressor.connect(audioCtx.destination);
 
   // Também mantemos streamDest para expor como MediaStream caso seja necessário para visualização
   const streamDest = audioCtx.createMediaStreamDestination();
-  playbackNode.connect(streamDest);
+  voiceCompressor.connect(streamDest);
 
   dc.onmessage = async (e: MessageEvent) => {
     try {
