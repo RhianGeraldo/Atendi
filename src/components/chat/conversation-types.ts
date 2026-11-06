@@ -3,7 +3,7 @@ export type TabType = Status | "groups";
 
 export interface ConvRow {
   id: string;
-  channel: "whatsapp" | "instagram" | "whatsapp_group" | string;
+  channel: "whatsapp" | "instagram" | "messenger" | "facebook" | string;
   remote_id?: string | null;
   status: Status;
   last_message_at: string;

@@ -1207,9 +1207,6 @@ export async function processEvogoWebhookBody(
           last_message_preview: textContent ? textContent.slice(0, 150) : null,
           remote_id: isGroup ? remoteJid : (extractedLid || phoneNumber),
         };
-        if (isGroup) {
-          updatePayload.channel = "whatsapp_group";
-        }
         if (!isFromMe) {
           updatePayload.ai_followup_count = 0;
           updatePayload.unread_count = (conv.unread_count || 0) + 1;
@@ -1345,7 +1342,7 @@ export async function processEvogoWebhookBody(
             whatsapp_instance_id: instance_id,
             department_id: instanceDepartmentId || null,
             contact_id: contactId,
-            channel: isGroup ? "whatsapp_group" : "whatsapp",
+            channel: "whatsapp",
             remote_id: isGroup ? remoteJid : (extractedLid || phoneNumber),
             status: isGroup ? "active" : isFromMe ? "resolved" : isActiveByDefault ? "active" : "waiting",
             last_message_at: new Date().toISOString(),
