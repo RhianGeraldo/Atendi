@@ -153,24 +153,28 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
 
         if (!info || !msg) return;
 
-        // Ignorar mensagens de grupos, status/broadcasts e newsletters
+        // Ignorar status/broadcasts e newsletters
         if (
-          info.IsGroup ||
-          info.Chat?.includes("@g.us") ||
-          info.RecipientAlt?.includes("@g.us") ||
-          info.Sender?.includes("@g.us") ||
           info.Chat?.includes("@broadcast") ||
-          info.Chat?.includes("@newsletter")
+          info.Chat?.includes("@newsletter") ||
+          info.RecipientAlt?.includes("@broadcast") ||
+          info.RecipientAlt?.includes("@newsletter")
         ) {
           console.log(
-            `[stevo-webhook] Ignorando mensagem de grupo/broadcast (${info.Chat || info.Sender})`,
+            `[stevo-webhook] Ignorando mensagem de broadcast/newsletter (${info.Chat || info.Sender})`,
           );
           return;
         }
 
         isFromMe = info.IsFromMe;
+        const isGroupMsg = Boolean(info.IsGroup || info.Chat?.includes("@g.us"));
 
         const getPhone = (jids: (string | undefined)[]) => {
+          if (isGroupMsg) {
+            const groupJid = jids.find((j) => j && j.includes("@g.us"));
+            if (groupJid) return groupJid.split("@")[0];
+          }
+
           const real = jids.find((j) => j && j.includes("@s.whatsapp.net"));
           if (real) return real.split("@")[0];
 
@@ -188,12 +192,17 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         };
 
         const getLid = (jids: (string | undefined)[]) => {
+          if (isGroupMsg) return null;
           const lid = jids.find((j) => j && j.includes("@lid"));
           if (lid) return lid.split("@")[0];
           return null;
         };
 
-        if (isFromMe) {
+        if (isGroupMsg) {
+          remoteJid = info.Chat;
+          phoneNumber = info.Chat.split("@")[0];
+          extractedLid = null;
+        } else if (isFromMe) {
           remoteJid = info.Chat || info.RecipientAlt;
           phoneNumber = getPhone([info.Chat, info.RecipientAlt]);
           extractedLid = getLid([info.Chat, info.RecipientAlt]);
@@ -205,8 +214,12 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         pushName = info.PushName || "Desconhecido";
         remoteMsgId = info.ID;
 
-        if (body.data?.groupData?.Name) {
-          actualGroupName = body.data.groupData.Name;
+        if (body.data?.groupData?.Name || body.data?.groupName || body.data?.chatName || body.data?.name) {
+          actualGroupName =
+            body.data?.groupData?.Name ||
+            body.data?.groupName ||
+            body.data?.chatName ||
+            body.data?.name;
         }
 
         // Parse quoted messages and external ad reply
@@ -514,18 +527,19 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         remoteJid = messageData.key?.remoteJid || "";
         pushName = messageData.pushName || "Desconhecido";
 
-        // Ignorar mensagens de grupos, status/broadcasts e newsletters
+        // Ignorar broadcasts e newsletters
         if (
-          remoteJid.includes("@g.us") ||
           remoteJid.includes("@broadcast") ||
-          remoteJid.includes("@newsletter") ||
-          Boolean(messageData.key?.participant)
+          remoteJid.includes("@newsletter")
         ) {
-          console.log(`[stevo-webhook] Ignorando mensagem de grupo/broadcast (${remoteJid})`);
+          console.log(`[stevo-webhook] Ignorando broadcast/newsletter (${remoteJid})`);
           return;
         }
 
-        if (remoteJid.includes("@lid")) {
+        if (remoteJid.includes("@g.us")) {
+          phoneNumber = remoteJid.split("@")[0];
+          extractedLid = null;
+        } else if (remoteJid.includes("@lid")) {
           extractedLid = remoteJid.split("@")[0];
           phoneNumber = null;
         } else {
@@ -858,16 +872,13 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         }
       }
 
-      // Trava final: grupos, broadcasts, canais e IDs de grupo jamais abrem atendimento
+      // Trava de segurança: status/broadcasts e canais/newsletters jamais abrem atendimento
       if (
-        remoteJid.includes("@g.us") ||
         remoteJid.includes("@broadcast") ||
-        remoteJid.includes("@newsletter") ||
-        Boolean(phoneNumber?.includes("-")) ||
-        Boolean(phoneNumber?.startsWith("120363"))
+        remoteJid.includes("@newsletter")
       ) {
         console.log(
-          `[stevo-webhook] Trava de segurança: ignorando grupo/broadcast (${remoteJid || phoneNumber})`,
+          `[stevo-webhook] Trava de segurança: ignorando broadcast/newsletter (${remoteJid || phoneNumber})`,
         );
         return;
       }
@@ -879,6 +890,18 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
 
       if (!textContent) {
         textContent = "[Mídia/Mensagem não suportada]";
+      }
+
+      const isGroup = remoteJid.includes("@g.us");
+      if (isGroup && !isFromMe && textContent) {
+        const senderDisplayName =
+          (pushName && pushName !== "Desconhecido" ? pushName : null) ||
+          (body.data?.Info?.Sender ? body.data.Info.Sender.split("@")[0] : null) ||
+          (body.data?.message?.key?.participant ? body.data.message.key.participant.split("@")[0] : null) ||
+          "Participante";
+        if (!textContent.startsWith(`${senderDisplayName}:\n`)) {
+          textContent = `${senderDisplayName}:\n${textContent}`;
+        }
       }
 
       // 2. Find or create Contact
@@ -1078,8 +1101,11 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         const updatePayload: any = {
           last_message_at: new Date().toISOString(),
           last_message_preview: textContent ? textContent.slice(0, 150) : null,
-          remote_id: extractedLid || phoneNumber,
+          remote_id: isGroup ? remoteJid : (extractedLid || phoneNumber),
         };
+        if (isGroup) {
+          updatePayload.channel = "whatsapp_group";
+        }
         if (!isFromMe) {
           updatePayload.ai_followup_count = 0;
           updatePayload.unread_count = (conv.unread_count || 0) + 1;
@@ -1107,14 +1133,20 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
             resolvedAgentId = defaultAgents?.[0]?.id ?? null;
           }
 
-          updatePayload.status = previouslyAiActive ? "active" : "waiting";
-          updatePayload.ai_active = previouslyAiActive;
-          updatePayload.ai_agent_id = resolvedAgentId;
+          if (isGroup) {
+            updatePayload.status = "active";
+            updatePayload.ai_active = false;
+            updatePayload.ai_agent_id = null;
+            aiActive = false;
+          } else {
+            updatePayload.status = previouslyAiActive ? "active" : "waiting";
+            updatePayload.ai_active = previouslyAiActive;
+            updatePayload.ai_agent_id = resolvedAgentId;
+            aiActive = previouslyAiActive;
+          }
           updatePayload.assigned_agent_id = null;
           updatePayload.resolved_at = null;
           updatePayload.unread_count = 1;
-
-          aiActive = previouslyAiActive;
 
           // Abre um novo ticket (sessão)
           let sessionId = null;
@@ -1198,7 +1230,8 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
           defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
         const isActiveByDefault =
           defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
-        if (isActiveByDefault) aiActive = true;
+        if (isActiveByDefault && !isGroup) aiActive = true;
+        if (isGroup) aiActive = false;
 
         // Create new conversation
         const { data: newConv, error: convErr } = await supabaseAdmin
@@ -1208,15 +1241,15 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
             whatsapp_instance_id: instance_id,
             department_id: instanceDepartmentId || null,
             contact_id: contactId,
-            channel: "whatsapp",
-            remote_id: extractedLid || phoneNumber,
-            status: isFromMe ? "resolved" : isActiveByDefault ? "active" : "waiting",
+            channel: isGroup ? "whatsapp_group" : "whatsapp",
+            remote_id: isGroup ? remoteJid : (extractedLid || phoneNumber),
+            status: isGroup ? "active" : isFromMe ? "resolved" : isActiveByDefault ? "active" : "waiting",
             last_message_at: new Date().toISOString(),
             last_message_preview: textContent ? textContent.slice(0, 150) : null,
             unread_count: isFromMe ? 0 : 1,
             resolved_at: isFromMe ? new Date().toISOString() : null,
-            ai_active: isActiveByDefault,
-            ai_agent_id: defaultAgentId,
+            ai_active: isGroup ? false : isActiveByDefault,
+            ai_agent_id: isGroup ? null : defaultAgentId,
           })
           .select()
           .single();
@@ -1354,7 +1387,12 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
 
       // 6. Insert message
       let participantJid: string | null = null;
-      if (isFromMe && body.data?.message?.key?.participant) {
+      if (isGroup) {
+        participantJid =
+          (isFromMe
+            ? body.data?.message?.key?.participant || messageData?.key?.participant || body.data?.Info?.Sender
+            : messageData?.key?.participant || body.data?.Info?.Sender || body.data?.Info?.SenderAlt) || null;
+      } else if (isFromMe && body.data?.message?.key?.participant) {
         participantJid = body.data.message.key.participant;
       } else if (isFromMe && messageData?.key?.participant) {
         participantJid = messageData.key.participant;
@@ -1569,7 +1607,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
       }
 
       // 7. Check if we need to queue AI response
-      if (aiActive && newMessage && !isFromMe) {
+      if (aiActive && newMessage && !isFromMe && !isGroup) {
         // Enqueue the AI message generator to allow for 10s buffer
         console.log(
           `[stevo-webhook] Queueing AI response for conversation ${conversationId}, message ${newMessage.id}`,

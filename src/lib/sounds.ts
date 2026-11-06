@@ -153,13 +153,8 @@ export function playClientMessageSound() {
 export const playMessageSound = playTeamMessageSound;
 
 /**
- * Som de login de bom dia
+ * Som de login de bom dia (desativado)
  */
 export function playLoginSound() {
-  if (typeof window === "undefined") return;
-  try {
-    const audio = new Audio("/sounds/bom-dia.mp3");
-    audio.volume = 0.85;
-    audio.play().catch(() => {});
-  } catch {}
+  // Desativado por padrão
 }

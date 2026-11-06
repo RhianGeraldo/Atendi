@@ -1,5 +1,5 @@
 import { differenceInMinutes } from "date-fns";
-import type { ConvRow } from "@/components/chat/conversation-types";
+import { type ConvRow, isGroupConversation } from "@/components/chat/conversation-types";
 
 export interface SlaSettings {
   enabled: boolean;
@@ -100,11 +100,7 @@ export function calculateConversationSla(
   overrideWaitingSince?: string | null,
 ): ConversationSlaInfo {
   // Ignora se SLA desabilitado, se resolvido ou se for grupo do WhatsApp
-  const isGroup = !!(
-    conv.contact?.phone &&
-    (conv.contact.phone.startsWith("120363") ||
-      (conv.contact.phone.includes("-") && conv.contact.phone.length > 18))
-  );
+  const isGroup = isGroupConversation(conv);
 
   if (!settings.enabled || conv.status === "resolved" || isGroup) {
     return {

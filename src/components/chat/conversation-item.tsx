@@ -7,7 +7,7 @@ import { getSourceIcon } from "@/lib/use-contact-sources";
 import { cn } from "@/lib/utils";
 import { formatConversationTime } from "@/lib/format";
 import { calculateConversationSla, type SlaSettings } from "@/lib/sla";
-import type { ConvRow } from "./conversation-types";
+import { type ConvRow, isGroupConversation } from "./conversation-types";
 
 interface ConversationItemProps {
   conv: ConvRow;
@@ -37,10 +37,7 @@ export const ConversationItem = memo(function ConversationItem({
     return () => clearInterval(interval);
   }, [slaSettings?.enabled, conv.status]);
 
-  const isGroup =
-    conv.contact?.phone &&
-    (conv.contact.phone.startsWith("120363") ||
-      (conv.contact.phone.includes("-") && conv.contact.phone.length > 18));
+  const isGroup = isGroupConversation(conv);
   const contactName =
     isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
   const slaInfo = calculateConversationSla(conv, slaSettings);
@@ -49,7 +46,7 @@ export const ConversationItem = memo(function ConversationItem({
     if (!conv.last_message_preview) return null;
     const raw = conv.last_message_preview.trim();
     const sigMatch = raw.match(/^\*(.+?)\*:\s*([\s\S]*)$/);
-    const text = sigMatch ? sigMatch[2] : raw;
+    const text = (sigMatch ? sigMatch[2] : raw).replace(/\n+/g, " ");
     const lastMsg = conv.last_message?.find((m) => !m.is_internal) || conv.last_message?.[0];
     const isFromAgent = (lastMsg && lastMsg.sender_type === "agent") || !!sigMatch;
     return { text, isFromAgent };

@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth-context";
-import { playLoginSound } from "@/lib/sounds";
 
 export const Route = createFileRoute("/auth")({
   component: AuthPage,
@@ -46,7 +45,6 @@ function AuthPage() {
         toast.error("Falha no login", { description: error });
       } else {
         toast.success("Bem-vindo!");
-        playLoginSound();
         navigate({ to: "/dashboard", replace: true });
       }
     }

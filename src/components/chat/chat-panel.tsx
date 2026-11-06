@@ -107,6 +107,7 @@ import {
   ConvRow,
   MessageRow,
   fetchConversationMessages,
+  isGroupConversation,
 } from "@/components/chat/conversation-types";
 
 let ffmpegInstance: FFmpeg | null = null;
@@ -627,11 +628,7 @@ export function ChatPanel({
           };
         });
 
-        const isGroup = !!(
-          conv.contact?.phone &&
-          (conv.contact.phone.startsWith("120363") ||
-            (conv.contact.phone.includes("-") && conv.contact.phone.length > 18))
-        );
+        const isGroup = isGroupConversation(conv);
         const tabKey = isGroup ? "groups" : conv.status || "active";
         qc.setQueriesData({ queryKey: ["unread-counts"] }, (oldData: any) => {
           if (!oldData) return oldData;
@@ -1329,11 +1326,7 @@ export function ChatPanel({
     },
   });
 
-  const isGroup = !!(
-    conv.contact?.phone &&
-    (conv.contact.phone.startsWith("120363") ||
-      (conv.contact.phone.includes("-") && conv.contact.phone.length > 18))
-  );
+  const isGroup = isGroupConversation(conv);
   // Contato recebido nesta conversa vira indicação da cliente no Todoo ("+ Indicação")
   const todooReferrer =
     !isGroup && conv.contact?.id && canAccessMenu("todoo", profile)

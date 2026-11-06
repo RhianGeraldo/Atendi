@@ -3,7 +3,8 @@ export type TabType = Status | "groups";
 
 export interface ConvRow {
   id: string;
-  channel: "whatsapp" | "instagram";
+  channel: "whatsapp" | "instagram" | "whatsapp_group" | string;
+  remote_id?: string | null;
   status: Status;
   last_message_at: string;
   started_at: string;
@@ -76,4 +77,21 @@ export const fetchConversationMessages = async (convId: string, limitCount = 50)
   if (error) throw error;
   return ((data ?? []) as MessageRow[]).reverse();
 };
+
+export function isGroupConversation(c?: {
+  channel?: string | null;
+  remote_id?: string | null;
+  contact?: { phone?: string | null; whatsapp_lid?: string | null } | null;
+} | null): boolean {
+  if (!c) return false;
+  if (c.channel === "whatsapp_group") return true;
+  if (c.remote_id && c.remote_id.includes("@g.us")) return true;
+  const phone = c.contact?.phone;
+  if (!phone) return false;
+  return (
+    phone.includes("@g.us") ||
+    phone.startsWith("120363") ||
+    (phone.includes("-") && phone.length > 18)
+  );
+}
 

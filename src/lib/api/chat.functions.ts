@@ -69,13 +69,21 @@ async function resolveWhatsAppChatJid({
   // 1. Group checks: always use group JID
   const isGroup =
     channel === "whatsapp_group" ||
-    (remoteId && remoteId.includes("@g.us")) ||
-    (rawPhone && rawPhone.includes("@g.us"));
+    Boolean(remoteId && remoteId.includes("@g.us")) ||
+    Boolean(
+      rawPhone &&
+        (rawPhone.includes("@g.us") ||
+          rawPhone.startsWith("120363") ||
+          (rawPhone.includes("-") && rawPhone.length > 18)),
+    );
 
   if (isGroup) {
     if (remoteId && remoteId.includes("@g.us")) return remoteId;
     if (rawPhone && rawPhone.includes("@g.us")) return rawPhone;
-    if (rawPhone) return `${rawPhone.replace(/\D/g, "")}@g.us`;
+    if (rawPhone) {
+      const cleanGroupPhone = rawPhone.replace(/[^\d-]/g, "");
+      return `${cleanGroupPhone}@g.us`;
+    }
     if (remoteId) return `${remoteId}@g.us`;
   }
 
@@ -231,7 +239,17 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       userProfile?.role === "admin_company" ||
       userProfile?.role === "super_admin";
 
-    if (!data.isInternal) {
+    const isGroupConv =
+      conv.channel === "whatsapp_group" ||
+      Boolean(conv.remote_id && conv.remote_id.includes("@g.us")) ||
+      Boolean(
+        conv.contacts?.phone &&
+          (conv.contacts.phone.startsWith("120363") ||
+            conv.contacts.phone.includes("@g.us") ||
+            (conv.contacts.phone.includes("-") && conv.contacts.phone.length > 18)),
+      );
+
+    if (!data.isInternal && !isGroupConv) {
       if (
         conv.status === "active" &&
         conv.assigned_agent_id &&
@@ -341,16 +359,24 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     // - In 1-on-1 chats: participant is ALWAYS the contact's canonical WhatsApp JID (phoneToSend, e.g. 554491529987@s.whatsapp.net)
     // - In group chats: participant is the specific member's JID (qMsg.participant_jid)
     if (quotedSenderType === "contact") {
-      if (
-        qMsg?.participant_jid &&
-        qMsg.participant_jid.includes("@") &&
-        !qMsg.participant_jid.includes("@s.whatsapp.net")
-      ) {
-        finalParticipant = qMsg.participant_jid.replace(/:\d+@/, "@");
+      if (isGroupConv) {
+        if (qMsg?.participant_jid && qMsg.participant_jid.includes("@")) {
+          finalParticipant = qMsg.participant_jid.replace(/:\d+@/, "@");
+        } else {
+          finalParticipant = undefined;
+        }
       } else {
-        finalParticipant = phoneToSend.includes("@")
-          ? phoneToSend.replace(/:\d+@/, "@")
-          : `${phoneToSend}@s.whatsapp.net`;
+        if (
+          qMsg?.participant_jid &&
+          qMsg.participant_jid.includes("@") &&
+          !qMsg.participant_jid.includes("@s.whatsapp.net")
+        ) {
+          finalParticipant = qMsg.participant_jid.replace(/:\d+@/, "@");
+        } else {
+          finalParticipant = phoneToSend.includes("@")
+            ? phoneToSend.replace(/:\d+@/, "@")
+            : `${phoneToSend}@s.whatsapp.net`;
+        }
       }
     } else {
       // If quoting an agent / company message (fromMe):

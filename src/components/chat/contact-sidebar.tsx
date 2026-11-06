@@ -31,7 +31,7 @@ import {
 import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/contact-details-sheet";
 import { ContactBlockDialog } from "@/components/contacts/contact-block-dialog";
 import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
-import type { ConvRow } from "./conversation-types";
+import { ConvRow, isGroupConversation } from "./conversation-types";
 
 interface ContactSidebarProps {
   conv: ConvRow;
@@ -205,10 +205,7 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
     },
   });
 
-  const isGroup =
-    conv.contact?.phone &&
-    (conv.contact.phone.startsWith("120363") ||
-      (conv.contact.phone.includes("-") && conv.contact.phone.length > 18));
+  const isGroup = isGroupConversation(conv);
   const contactName =
     isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
 

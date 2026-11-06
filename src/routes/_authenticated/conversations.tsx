@@ -37,6 +37,7 @@ import {
   Status,
   TabType,
   fetchConversationMessages,
+  isGroupConversation,
 } from "@/components/chat/conversation-types";
 import { ConversationItem } from "@/components/chat/conversation-item";
 import { ContactSidebar } from "@/components/chat/contact-sidebar";
@@ -77,9 +78,7 @@ function ConversationsPage() {
   const navigate = Route.useNavigate();
   const qc = useQueryClient();
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const [tab, setTab] = useState<TabType>(
-    searchTab && searchTab !== "groups" ? searchTab : "waiting",
-  );
+  const [tab, setTab] = useState<TabType>(searchTab || "waiting");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(searchConvId || null);
@@ -374,7 +373,7 @@ function ConversationsPage() {
         }
 
         if (tab === "groups") {
-          query = query.or("phone.like.120363%,phone.like.%-%", { foreignTable: "contact" });
+          query = query.or("phone.like.120363%,phone.like.%-%,phone.like.%@g.us%", { foreignTable: "contact" });
         }
 
         // Server-side status filter for non-group tabs
@@ -454,22 +453,10 @@ function ConversationsPage() {
 
       // Client-side: separate groups from regular convs
       if (tab === "groups") {
-        rows = rows.filter(
-          (c) =>
-            c.contact?.phone &&
-            (c.contact.phone.startsWith("120363") ||
-              (c.contact.phone.includes("-") && c.contact.phone.length > 18)),
-        );
+        rows = rows.filter(isGroupConversation);
       } else {
         // Exclude groups from all other tabs
-        rows = rows.filter(
-          (c) =>
-            !(
-              c.contact?.phone &&
-              (c.contact.phone.startsWith("120363") ||
-                (c.contact.phone.includes("-") && c.contact.phone.length > 18))
-            ),
-        );
+        rows = rows.filter((c) => !isGroupConversation(c));
       }
 
       // Deduplicate by contact (phone or id) + instance to ensure no duplicate cards appear
@@ -574,7 +561,7 @@ function ConversationsPage() {
   );
 
   useEffect(() => {
-    if (searchTab && searchTab !== tab && searchTab !== "groups") {
+    if (searchTab && searchTab !== tab) {
       setTab(searchTab as TabType);
     }
   }, [searchTab]);
@@ -631,12 +618,7 @@ function ConversationsPage() {
   // Sincroniza a aba apenas na carga inicial se o usuário abriu a página diretamente via link com parâmetro "c" e sem "tab"
   useEffect(() => {
     if (directSelectedConv && selectedId === directSelectedConv.id) {
-      const isGroup = !!(
-        directSelectedConv.contact?.phone &&
-        (directSelectedConv.contact.phone.startsWith("120363") ||
-          (directSelectedConv.contact.phone.includes("-") &&
-            directSelectedConv.contact.phone.length > 18))
-      );
+      const isGroup = isGroupConversation(directSelectedConv);
       const convTab = isGroup ? "groups" : (directSelectedConv.status as TabType);
       if (convTab && searchConvId && !searchTab) {
         setTab(convTab);
@@ -761,10 +743,7 @@ function ConversationsPage() {
             }
           }
 
-          const isGroup =
-            c.contact?.phone &&
-            (c.contact.phone.startsWith("120363") ||
-              (c.contact.phone.includes("-") && c.contact.phone.length > 18));
+          const isGroup = isGroupConversation(c);
           if (isGroup) {
             counts.groups.total++;
             counts.groups.unread += c.unread_count || 0;
@@ -843,11 +822,7 @@ function ConversationsPage() {
       }
 
       // 2. Tab / Grupo / Status
-      const isGroup = !!(
-        conv.contact?.phone &&
-        (conv.contact.phone.startsWith("120363") ||
-          (conv.contact.phone.includes("-") && conv.contact.phone.length > 18))
-      );
+      const isGroup = isGroupConversation(conv);
 
       if (queryTab === "groups") {
         if (!isGroup) return false;
@@ -1127,11 +1102,7 @@ function ConversationsPage() {
           last_message: slaLast ? [slaLast] : [],
         };
 
-        const isGroup = !!(
-          fullConv.contact?.phone &&
-          (fullConv.contact.phone.startsWith("120363") ||
-            (fullConv.contact.phone.includes("-") && fullConv.contact.phone.length > 18))
-        );
+        const isGroup = isGroupConversation(fullConv);
         let targetStatus: TabType = "waiting";
         if (isGroup) {
           targetStatus = "groups";
@@ -1182,11 +1153,7 @@ function ConversationsPage() {
       oldStatus: "waiting" | "active" | "resolved",
       newStatus: "waiting" | "active" | "resolved",
     ) => {
-      const isGroup = !!(
-        conv.contact?.phone &&
-        (conv.contact.phone.startsWith("120363") ||
-          (conv.contact.phone.includes("-") && conv.contact.phone.length > 18))
-      );
+      const isGroup = isGroupConversation(conv);
       if (isGroup) return;
 
       updateUnreadCountsInCache(oldStatus, -1, -(conv.unread_count || 0));
@@ -1243,12 +1210,7 @@ function ConversationsPage() {
               });
 
               if (oldConv) {
-                const isGroup = !!(
-                  (oldConv as ConvRow).contact?.phone &&
-                  ((oldConv as ConvRow).contact.phone!.startsWith("120363") ||
-                    ((oldConv as ConvRow).contact.phone!.includes("-") &&
-                      (oldConv as ConvRow).contact.phone!.length > 18))
-                );
+                const isGroup = isGroupConversation(oldConv as ConvRow);
                 const targetStatus = isGroup ? "groups" : updatedConv.status || "active";
                 const isMovingToWaiting =
                   updatedConv.status === "waiting" && (oldConv as ConvRow).status !== "waiting";
@@ -1364,12 +1326,7 @@ function ConversationsPage() {
 
             if (existingConv) {
               const nextUnread = ((existingConv as ConvRow).unread_count || 0) + unreadIncrement;
-              const isGroup = !!(
-                (existingConv as ConvRow).contact?.phone &&
-                ((existingConv as ConvRow).contact.phone!.startsWith("120363") ||
-                  ((existingConv as ConvRow).contact.phone!.includes("-") &&
-                    (existingConv as ConvRow).contact.phone!.length > 18))
-              );
+              const isGroup = isGroupConversation(existingConv as ConvRow);
 
               // Se a mensagem veio do contato e a conversa estava resolvida, seu novo status é 'waiting'!
               let targetStatus = isGroup ? "groups" : (existingConv as ConvRow).status || "active";
@@ -2023,46 +1980,68 @@ function ConversationsPage() {
             <AtendiCallsDialer open={dialerOpen} onOpenChange={setDialerOpen} />
           </div>
           <Tabs value={tab} onValueChange={(v) => handleTabChange(v as TabType)} className="mt-3">
-            <TabsList className="grid w-full grid-cols-3 h-auto py-1">
+            <TabsList className="grid w-full grid-cols-4 h-auto p-1 gap-1">
               <TabsTrigger
                 value="waiting"
-                className="group px-1 py-1.5 text-xs relative flex items-center justify-center gap-1.5"
+                className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
               >
-                <span>Aguardando</span>
-                <span className="rounded-full bg-muted-foreground/15 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground group-data-[state=active]:bg-primary/15 group-data-[state=active]:text-primary transition-colors">
+                <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
                   {unreadCounts?.waiting?.total || 0}
                 </span>
+                <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
+                  Aguardando
+                </span>
                 {unreadCounts && unreadCounts.waiting?.unread > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
                     {unreadCounts.waiting.unread > 99 ? "99+" : unreadCounts.waiting.unread}
                   </span>
                 )}
               </TabsTrigger>
               <TabsTrigger
                 value="active"
-                className="group px-1 py-1.5 text-xs relative flex items-center justify-center gap-1.5"
+                className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
               >
-                <span>Andamento</span>
-                <span className="rounded-full bg-muted-foreground/15 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground group-data-[state=active]:bg-primary/15 group-data-[state=active]:text-primary transition-colors">
+                <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
                   {unreadCounts?.active?.total || 0}
                 </span>
+                <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
+                  Andamento
+                </span>
                 {unreadCounts && unreadCounts.active?.unread > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
                     {unreadCounts.active.unread > 99 ? "99+" : unreadCounts.active.unread}
                   </span>
                 )}
               </TabsTrigger>
               <TabsTrigger
                 value="resolved"
-                className="group px-1 py-1.5 text-xs relative flex items-center justify-center gap-1.5"
+                className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
               >
-                <span>Resolvido</span>
-                <span className="rounded-full bg-muted-foreground/15 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground group-data-[state=active]:bg-primary/15 group-data-[state=active]:text-primary transition-colors">
+                <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
                   {unreadCounts?.resolved?.total || 0}
                 </span>
+                <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
+                  Resolvido
+                </span>
                 {unreadCounts && unreadCounts.resolved?.unread > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-sm">
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
                     {unreadCounts.resolved.unread > 99 ? "99+" : unreadCounts.resolved.unread}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger
+                value="groups"
+                className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
+              >
+                <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
+                  {unreadCounts?.groups?.total || 0}
+                </span>
+                <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
+                  Grupos
+                </span>
+                {unreadCounts && unreadCounts.groups?.unread > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
+                    {unreadCounts.groups.unread > 99 ? "99+" : unreadCounts.groups.unread}
                   </span>
                 )}
               </TabsTrigger>
