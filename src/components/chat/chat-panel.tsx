@@ -1522,7 +1522,17 @@ export function ChatPanel({
               </div>
               <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground mt-0.5">
                 <ChannelIcon channel={conv.channel} className="h-3.5 w-3.5" />
-                {conv.department?.name && <span>{conv.department.name}</span>}
+                {isGroup ? (
+                  <span>Grupo do WhatsApp</span>
+                ) : (
+                  conv.department?.name && <span>{conv.department.name}</span>
+                )}
+                {isGroup && conv.department?.name && (
+                  <>
+                    <span>•</span>
+                    <span>{conv.department.name}</span>
+                  </>
+                )}
 
                 {slaInfo.isWaiting && (
                   <Badge

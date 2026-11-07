@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import React, { useState, useMemo, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Users,
@@ -14,16 +14,25 @@ import {
   Crown,
   AlertCircle,
   Lock,
+  Pencil,
+  Check,
+  Loader2,
+  Info,
+  Maximize2,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ContactAvatar } from "./contact-avatar";
 import { StartConversationDialog } from "./start-conversation-dialog";
 import {
   getWhatsAppGroupDetailsAction,
+  updateWhatsAppGroupNameAction,
+  updateWhatsAppGroupDescriptionAction,
+  syncWhatsAppGroupPhotoAction,
   type WhatsAppGroupParticipant,
 } from "@/lib/api/chat.functions";
 import { ConvRow } from "./conversation-types";
@@ -43,6 +52,13 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
   const [activeCallParticipant, setActiveCallParticipant] = useState<WhatsAppGroupParticipant | null>(
     null,
   );
+
+  // Estados de edição de Nome e Descrição
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState("");
+  const [isEditingDesc, setIsEditingDesc] = useState(false);
+  const [editDescValue, setEditDescValue] = useState("");
+  const [photoPreviewOpen, setPhotoPreviewOpen] = useState(false);
 
   const {
     data: groupDetails,
@@ -67,6 +83,97 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
     (conv.contact?.name !== "Desconhecido" ? conv.contact?.name : "") ||
     "Grupo do WhatsApp";
 
+  useEffect(() => {
+    if (groupDetails?.name) {
+      setEditNameValue(groupDetails.name);
+    }
+  }, [groupDetails?.name]);
+
+  useEffect(() => {
+    if (groupDetails?.topic !== undefined) {
+      setEditDescValue(groupDetails.topic || "");
+    }
+  }, [groupDetails?.topic]);
+
+  // Mutação para atualizar nome do grupo no WhatsApp
+  const updateGroupName = useMutation({
+    mutationFn: async (newName: string) => {
+      return await updateWhatsAppGroupNameAction({
+        data: {
+          conversationId: conv.id,
+          name: newName.trim(),
+        },
+      });
+    },
+    onSuccess: (res) => {
+      toast.success("Nome do grupo atualizado no WhatsApp!");
+      setIsEditingName(false);
+      qc.invalidateQueries({ queryKey: ["whatsapp-group-details", conv.id] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["direct-conversation", conv.id] });
+    },
+    onError: (err: any) => {
+      const msg = err?.message || "";
+      if (
+        msg.toLowerCase().includes("admin") ||
+        msg.toLowerCase().includes("forbidden") ||
+        msg.toLowerCase().includes("permission")
+      ) {
+        toast.error("Apenas administradores do grupo no WhatsApp podem alterar o nome.");
+      } else {
+        toast.error(msg || "Erro ao atualizar nome do grupo.");
+      }
+    },
+  });
+
+  // Mutação para atualizar descrição do grupo no WhatsApp
+  const updateGroupDesc = useMutation({
+    mutationFn: async (newDesc: string) => {
+      return await updateWhatsAppGroupDescriptionAction({
+        data: {
+          conversationId: conv.id,
+          description: newDesc,
+        },
+      });
+    },
+    onSuccess: () => {
+      toast.success("Descrição do grupo atualizada no WhatsApp!");
+      setIsEditingDesc(false);
+      qc.invalidateQueries({ queryKey: ["whatsapp-group-details", conv.id] });
+      qc.invalidateQueries({ queryKey: ["direct-conversation", conv.id] });
+    },
+    onError: (err: any) => {
+      const msg = err?.message || "";
+      if (
+        msg.toLowerCase().includes("admin") ||
+        msg.toLowerCase().includes("forbidden") ||
+        msg.toLowerCase().includes("permission")
+      ) {
+        toast.error("Apenas administradores do grupo no WhatsApp podem alterar a descrição.");
+      } else {
+        toast.error(msg || "Erro ao atualizar descrição do grupo.");
+      }
+    },
+  });
+
+  // Mutação para sincronizar foto do grupo direto do WhatsApp
+  const syncGroupPhoto = useMutation({
+    mutationFn: async () => {
+      return await syncWhatsAppGroupPhotoAction({
+        data: { conversationId: conv.id },
+      });
+    },
+    onSuccess: (res) => {
+      toast.success("Foto do grupo atualizada com sucesso!");
+      qc.invalidateQueries({ queryKey: ["whatsapp-group-details", conv.id] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["direct-conversation", conv.id] });
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Erro ao sincronizar foto do grupo.");
+    },
+  });
+
   const participants = useMemo(() => {
     return groupDetails?.participants || [];
   }, [groupDetails?.participants]);
@@ -86,6 +193,8 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
     return participants.filter((p) => p.inBase).length;
   }, [participants]);
 
+  const avatarUrl = groupDetails?.avatarUrl || conv.contact?.avatar_url;
+
   return (
     <div className="flex h-full flex-col bg-background/50">
       {/* Header com título e botão de fechar */}
@@ -103,7 +212,7 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
             className="h-8 w-8 text-muted-foreground hover:text-foreground cursor-pointer"
             onClick={() => {
               refetch();
-              toast.info("Atualizando participantes...");
+              toast.info("Atualizando participantes e dados...");
             }}
             disabled={isLoading || isRefetching}
             title="Atualizar dados do grupo"
@@ -125,50 +234,234 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
       </div>
 
       <div className="flex-1 overflow-y-auto min-w-0 flex flex-col p-4 space-y-4">
-        {/* Card Principal do Grupo */}
+        {/* Card Principal do Grupo (Foto e Nome) */}
         <div className="bg-card border border-border/60 rounded-xl p-4 shadow-xs space-y-3 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="relative shrink-0">
-              <ContactAvatar
-                url={groupDetails?.avatarUrl || conv.contact?.avatar_url}
-                name={groupName}
-                isGroup={true}
-                className="h-14 w-14 ring-2 ring-background shadow-md"
-                fallbackClassName="text-xl font-medium"
-              />
+          <div className="flex items-start gap-3">
+            {/* Foto do grupo com ação de sincronizar e clique para ampliar */}
+            <div className="relative shrink-0 group">
+              <div
+                className={cn(
+                  "relative rounded-full cursor-pointer overflow-hidden transition-transform active:scale-95",
+                  avatarUrl ? "ring-2 ring-primary/20 hover:ring-primary/40" : "",
+                )}
+                onClick={() => {
+                  if (avatarUrl) setPhotoPreviewOpen(true);
+                }}
+                title={avatarUrl ? "Clique para ver a imagem ampliada" : undefined}
+              >
+                <ContactAvatar
+                  url={avatarUrl}
+                  name={groupName}
+                  isGroup={true}
+                  className="h-14 w-14 shadow-md"
+                  fallbackClassName="text-xl font-medium"
+                />
+                {avatarUrl && (
+                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                    <Maximize2 className="h-4 w-4" />
+                  </div>
+                )}
+              </div>
+
+              {/* Botão flutuante para sincronizar foto do WhatsApp */}
+              <Button
+                variant="secondary"
+                size="icon"
+                className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full shadow-xs opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer bg-background/90 hover:bg-background border border-border"
+                title="Sincronizar foto do WhatsApp"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  syncGroupPhoto.mutate();
+                }}
+                disabled={syncGroupPhoto.isPending}
+              >
+                <RefreshCw
+                  className={cn(
+                    "h-3 w-3 text-muted-foreground",
+                    syncGroupPhoto.isPending ? "animate-spin" : "",
+                  )}
+                />
+              </Button>
             </div>
 
+            {/* Nome do grupo e subtítulo */}
             <div className="flex-1 min-w-0">
-              <h3 className="font-bold text-base text-foreground truncate" title={groupName}>
-                {groupName}
-              </h3>
-              <p className="text-xs text-muted-foreground truncate mt-0.5">
-                Grupo do WhatsApp · {groupDetails?.participantCount || participants.length || 0}{" "}
-                participantes
-              </p>
-              {groupDetails?.isAnnounce && (
-                <Badge
-                  variant="outline"
-                  className="mt-1 text-[10px] px-1.5 py-0 h-4 border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/5 font-medium"
-                >
-                  Somente administradores enviam
-                </Badge>
+              {isEditingName ? (
+                <div className="space-y-2 animate-in fade-in duration-150">
+                  <Input
+                    value={editNameValue}
+                    onChange={(e) => setEditNameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (editNameValue.trim() && !updateGroupName.isPending) {
+                          updateGroupName.mutate(editNameValue);
+                        }
+                      } else if (e.key === "Escape") {
+                        setIsEditingName(false);
+                        setEditNameValue(groupName);
+                      }
+                    }}
+                    className="h-8 text-xs bg-background"
+                    placeholder="Nome do grupo"
+                    autoFocus
+                    maxLength={100}
+                  />
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      className="h-6 text-[11px] px-2 gap-1"
+                      onClick={() => updateGroupName.mutate(editNameValue)}
+                      disabled={!editNameValue.trim() || updateGroupName.isPending}
+                    >
+                      {updateGroupName.isPending ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Check className="h-3 w-3" />
+                      )}
+                      Salvar
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-[11px] px-2 text-muted-foreground"
+                      onClick={() => {
+                        setIsEditingName(false);
+                        setEditNameValue(groupName);
+                      }}
+                      disabled={updateGroupName.isPending}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1.5 group/title">
+                    <h3
+                      className="font-bold text-base text-foreground truncate"
+                      title={groupName}
+                    >
+                      {groupName}
+                    </h3>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground opacity-0 group-hover/title:opacity-100 hover:text-foreground transition-opacity shrink-0 cursor-pointer"
+                      title="Editar nome do grupo no WhatsApp"
+                      onClick={() => {
+                        setEditNameValue(groupName);
+                        setIsEditingName(true);
+                      }}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">
+                    Grupo do WhatsApp · {groupDetails?.participantCount || participants.length || 0}{" "}
+                    participantes
+                  </p>
+
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {groupDetails?.isAnnounce && (
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] px-1.5 py-0 h-4 border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/5 font-medium flex items-center gap-0.5"
+                      >
+                        <Shield className="h-2.5 w-2.5" />
+                        Somente administradores enviam
+                      </Badge>
+                    )}
+                    {groupDetails?.isLocked && (
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] px-1.5 py-0 h-4 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 bg-indigo-500/5 font-medium flex items-center gap-0.5"
+                      >
+                        <Lock className="h-2.5 w-2.5" />
+                        Dados restritos a admins
+                      </Badge>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>
         </div>
 
         {/* Descrição / Tópico do Grupo */}
-        {groupDetails?.topic ? (
-          <div className="p-3.5 rounded-xl border border-border/60 bg-card/60 shadow-2xs space-y-1 shrink-0">
-            <span className="text-[11px] text-muted-foreground font-medium block">
+        <div className="p-3.5 rounded-xl border border-border/60 bg-card/60 shadow-2xs space-y-1.5 shrink-0 group/desc">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-muted-foreground font-medium flex items-center gap-1">
+              <Info className="h-3 w-3" />
               Descrição do grupo
             </span>
-            <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
-              {groupDetails.topic}
-            </p>
+            {!isEditingDesc && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground opacity-0 group-hover/desc:opacity-100 hover:text-foreground transition-opacity cursor-pointer"
+                title="Editar descrição do grupo no WhatsApp"
+                onClick={() => {
+                  setEditDescValue(groupDetails?.topic || "");
+                  setIsEditingDesc(true);
+                }}
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+            )}
           </div>
-        ) : null}
+
+          {isEditingDesc ? (
+            <div className="space-y-2 pt-1 animate-in fade-in duration-150">
+              <Textarea
+                value={editDescValue}
+                onChange={(e) => setEditDescValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setIsEditingDesc(false);
+                    setEditDescValue(groupDetails?.topic || "");
+                  }
+                }}
+                className="text-xs bg-background resize-none min-h-[70px]"
+                placeholder="Insira a descrição do grupo..."
+                autoFocus
+              />
+              <div className="flex items-center justify-end gap-1.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 text-[11px] px-2 text-muted-foreground"
+                  onClick={() => setIsEditingDesc(false)}
+                  disabled={updateGroupDesc.isPending}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-6 text-[11px] px-2 gap-1"
+                  onClick={() => updateGroupDesc.mutate(editDescValue)}
+                  disabled={updateGroupDesc.isPending}
+                >
+                  {updateGroupDesc.isPending ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Check className="h-3 w-3" />
+                  )}
+                  Salvar
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
+              {groupDetails?.topic || (
+                <span className="text-muted-foreground/60 italic">
+                  Nenhuma descrição adicionada neste grupo.
+                </span>
+              )}
+            </p>
+          )}
+        </div>
 
         {/* Bloco de Participantes */}
         <div className="bg-card border border-border/60 rounded-xl shadow-xs overflow-hidden flex-1 flex flex-col min-h-0">
@@ -298,7 +591,7 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
                           {p.phone ? (
                             <span className="font-mono">{formatPhone(p.phone)}</span>
                           ) : (
-                            <span className="italic">Sem número</span>
+                            <span className="italic">Sem número visível</span>
                           )}
 
                           {hasSeparatePushName && (
@@ -361,6 +654,20 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
           </div>
         </div>
       </div>
+
+      {/* Diálogo de visualização da foto do grupo ampliada */}
+      {photoPreviewOpen && avatarUrl && (
+        <Dialog open={photoPreviewOpen} onOpenChange={setPhotoPreviewOpen}>
+          <DialogContent className="max-w-md p-2 bg-background/95 backdrop-blur-sm border-border flex flex-col items-center justify-center">
+            <img
+              src={avatarUrl}
+              alt={groupName}
+              className="max-h-[80vh] w-auto rounded-lg object-contain"
+            />
+            <p className="text-xs font-medium text-muted-foreground mt-2">{groupName}</p>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Diálogo único para iniciar conversa privada com o participante */}
       {activeCallParticipant && (

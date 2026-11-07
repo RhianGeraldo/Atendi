@@ -1012,8 +1012,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
           // If it's a group and we got the actual name, update it if it differs
           if (
             actualGroupName &&
-            targetContact.name !== actualGroupName &&
-            targetContact.name === "Grupo do WhatsApp"
+            targetContact.name !== actualGroupName
           ) {
             updates.name = actualGroupName;
           }

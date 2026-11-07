@@ -26,6 +26,10 @@ import {
   deleteEvogoMessage,
   checkEvogoUser,
   getEvogoGroupInfo,
+  updateEvogoGroupName,
+  updateEvogoGroupDescription,
+  updateEvogoGroupPhoto,
+  getEvogoAvatar,
 } from "../evogo";
 import {
   sendStevoText,
@@ -36,6 +40,10 @@ import {
   deleteStevoMessage,
   checkStevoUser,
   getStevoGroupInfo,
+  updateStevoGroupName,
+  updateStevoGroupDescription,
+  updateStevoGroupPhoto,
+  getStevoAvatar,
 } from "../stevo";
 import { getPhoneVariants } from "@/lib/utils";
 import {
@@ -3685,16 +3693,255 @@ export const getWhatsAppGroupDetailsAction = createServerFn({ method: "POST" })
       return (a.name || a.phone || "").localeCompare(b.name || b.phone || "");
     });
 
+    // 8. Fetch live group avatar and synchronize group metadata into contacts table
+    let groupAvatarUrl = conv.contacts?.profile_picture_url || null;
+    try {
+      if (canal.provedor === "stevo") {
+        const resAv = await getStevoAvatar({ host: canal.host, token: canal.token, number: groupJid });
+        const found = resAv?.data?.url || resAv?.url || resAv?.profilePictureUrl;
+        if (found) groupAvatarUrl = found;
+      } else {
+        const resAv = await getEvogoAvatar({ host: canal.host, token: canal.token, number: groupJid });
+        const found = resAv?.data?.url || resAv?.url || resAv?.profilePictureUrl;
+        if (found) groupAvatarUrl = found;
+      }
+    } catch (avErr) {
+      console.warn("[getWhatsAppGroupDetailsAction] Falha ao consultar avatar do grupo:", avErr);
+    }
+
+    if (conv.contact_id) {
+      const contactUpdates: any = {};
+      if (groupName && groupName !== "Grupo do WhatsApp" && groupName !== "Desconhecido" && conv.contacts?.name !== groupName) {
+        contactUpdates.name = groupName;
+      }
+      if (groupAvatarUrl && conv.contacts?.profile_picture_url !== groupAvatarUrl) {
+        contactUpdates.profile_picture_url = groupAvatarUrl;
+      }
+      if (Object.keys(contactUpdates).length > 0) {
+        await supabaseAdmin.from("contacts").update(contactUpdates).eq("id", conv.contact_id);
+      }
+    }
+
     return {
       success: true,
       groupJid,
       name: groupName,
       topic: groupTopic,
-      avatarUrl: conv.contacts?.profile_picture_url || null,
+      avatarUrl: groupAvatarUrl,
       participantCount: rawGroupData?.ParticipantCount || participants.length,
       isAnnounce,
       isLocked,
       participants,
     };
+  });
+
+export const updateWhatsAppGroupNameAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      conversationId: z.string().uuid(),
+      name: z.string().min(1).max(100),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+    const { data: conv, error: convError } = await supabaseAdmin
+      .from("conversations")
+      .select(`
+        id, company_id, unit_id, channel, whatsapp_instance_id, contact_id, remote_id,
+        contacts ( id, name, phone )
+      `)
+      .eq("id", data.conversationId)
+      .single();
+
+    if (convError || !conv) throw new Error("Conversa não encontrada.");
+    if (conv.company_id) await assertCompanyAccess(userId, conv.company_id);
+
+    let groupJid = "";
+    if (conv.remote_id) {
+      groupJid = conv.remote_id.includes("@g.us")
+        ? conv.remote_id
+        : `${conv.remote_id.replace(/[^\d-]/g, "")}@g.us`;
+    } else if (conv.contacts?.phone) {
+      if (conv.contacts.phone.includes("@g.us")) {
+        groupJid = conv.contacts.phone;
+      } else {
+        const clean = conv.contacts.phone.replace(/[^\d-]/g, "");
+        if (clean.startsWith("120363") || clean.includes("-") || clean.length > 15) {
+          groupJid = `${clean}@g.us`;
+        }
+      }
+    }
+
+    if (!groupJid || !groupJid.includes("@g.us")) {
+      throw new Error("Esta conversa não possui um JID de grupo do WhatsApp válido.");
+    }
+
+    const canal = await abrirCanal({
+      id: conv.id,
+      channel: conv.channel || "whatsapp",
+      unit_id: conv.unit_id,
+      whatsapp_instance_id: conv.whatsapp_instance_id,
+    });
+
+    if (!canal || !canal.host || !canal.token) {
+      throw new Error("Instância do WhatsApp desconectada.");
+    }
+
+    if (canal.provedor === "stevo") {
+      await updateStevoGroupName({ host: canal.host, token: canal.token, groupJid, name: data.name });
+    } else {
+      await updateEvogoGroupName({ host: canal.host, token: canal.token, groupJid, name: data.name });
+    }
+
+    if (conv.contact_id) {
+      await supabaseAdmin.from("contacts").update({ name: data.name }).eq("id", conv.contact_id);
+    }
+
+    return { success: true, name: data.name };
+  });
+
+export const updateWhatsAppGroupDescriptionAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      conversationId: z.string().uuid(),
+      description: z.string(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+    const { data: conv, error: convError } = await supabaseAdmin
+      .from("conversations")
+      .select(`
+        id, company_id, unit_id, channel, whatsapp_instance_id, contact_id, remote_id,
+        contacts ( id, name, phone )
+      `)
+      .eq("id", data.conversationId)
+      .single();
+
+    if (convError || !conv) throw new Error("Conversa não encontrada.");
+    if (conv.company_id) await assertCompanyAccess(userId, conv.company_id);
+
+    let groupJid = "";
+    if (conv.remote_id) {
+      groupJid = conv.remote_id.includes("@g.us")
+        ? conv.remote_id
+        : `${conv.remote_id.replace(/[^\d-]/g, "")}@g.us`;
+    } else if (conv.contacts?.phone) {
+      if (conv.contacts.phone.includes("@g.us")) {
+        groupJid = conv.contacts.phone;
+      } else {
+        const clean = conv.contacts.phone.replace(/[^\d-]/g, "");
+        if (clean.startsWith("120363") || clean.includes("-") || clean.length > 15) {
+          groupJid = `${clean}@g.us`;
+        }
+      }
+    }
+
+    if (!groupJid || !groupJid.includes("@g.us")) {
+      throw new Error("Esta conversa não possui um JID de grupo do WhatsApp válido.");
+    }
+
+    const canal = await abrirCanal({
+      id: conv.id,
+      channel: conv.channel || "whatsapp",
+      unit_id: conv.unit_id,
+      whatsapp_instance_id: conv.whatsapp_instance_id,
+    });
+
+    if (!canal || !canal.host || !canal.token) {
+      throw new Error("Instância do WhatsApp desconectada.");
+    }
+
+    if (canal.provedor === "stevo") {
+      await updateStevoGroupDescription({ host: canal.host, token: canal.token, groupJid, description: data.description });
+    } else {
+      await updateEvogoGroupDescription({ host: canal.host, token: canal.token, groupJid, description: data.description });
+    }
+
+    return { success: true, description: data.description };
+  });
+
+export const syncWhatsAppGroupPhotoAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      conversationId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+    const { data: conv, error: convError } = await supabaseAdmin
+      .from("conversations")
+      .select(`
+        id, company_id, unit_id, channel, whatsapp_instance_id, contact_id, remote_id,
+        contacts ( id, name, phone, profile_picture_url )
+      `)
+      .eq("id", data.conversationId)
+      .single();
+
+    if (convError || !conv) throw new Error("Conversa não encontrada.");
+    if (conv.company_id) await assertCompanyAccess(userId, conv.company_id);
+
+    let groupJid = "";
+    if (conv.remote_id) {
+      groupJid = conv.remote_id.includes("@g.us")
+        ? conv.remote_id
+        : `${conv.remote_id.replace(/[^\d-]/g, "")}@g.us`;
+    } else if (conv.contacts?.phone) {
+      if (conv.contacts.phone.includes("@g.us")) {
+        groupJid = conv.contacts.phone;
+      } else {
+        const clean = conv.contacts.phone.replace(/[^\d-]/g, "");
+        if (clean.startsWith("120363") || clean.includes("-") || clean.length > 15) {
+          groupJid = `${clean}@g.us`;
+        }
+      }
+    }
+
+    if (!groupJid || !groupJid.includes("@g.us")) {
+      throw new Error("Esta conversa não possui um JID de grupo do WhatsApp válido.");
+    }
+
+    const canal = await abrirCanal({
+      id: conv.id,
+      channel: conv.channel || "whatsapp",
+      unit_id: conv.unit_id,
+      whatsapp_instance_id: conv.whatsapp_instance_id,
+    });
+
+    if (!canal || !canal.host || !canal.token) {
+      throw new Error("Instância do WhatsApp desconectada.");
+    }
+
+    let liveAvatarUrl: string | null = null;
+    try {
+      if (canal.provedor === "stevo") {
+        const resAv = await getStevoAvatar({ host: canal.host, token: canal.token, number: groupJid });
+        liveAvatarUrl = resAv?.data?.url || resAv?.url || resAv?.profilePictureUrl || null;
+      } else {
+        const resAv = await getEvogoAvatar({ host: canal.host, token: canal.token, number: groupJid });
+        liveAvatarUrl = resAv?.data?.url || resAv?.url || resAv?.profilePictureUrl || null;
+      }
+    } catch (e: any) {
+      throw new Error("Não foi possível buscar a foto do grupo no WhatsApp.");
+    }
+
+    if (!liveAvatarUrl) {
+      throw new Error("Este grupo não possui foto de perfil configurada no WhatsApp.");
+    }
+
+    let permanentUrl = liveAvatarUrl;
+    if (conv.contact_id) {
+      try {
+        permanentUrl = (await persistirAvatarContatoNoStorage(conv.contact_id, liveAvatarUrl)) || liveAvatarUrl;
+      } catch {
+        // fallback
+      }
+      await supabaseAdmin.from("contacts").update({ profile_picture_url: permanentUrl }).eq("id", conv.contact_id);
+    }
+
+    return { success: true, avatarUrl: permanentUrl };
   });
 

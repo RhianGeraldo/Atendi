@@ -377,3 +377,129 @@ export async function getEvogoGroupInfo({
 
   return response.json();
 }
+
+export async function updateEvogoGroupName({
+  host,
+  token,
+  groupJid,
+  name,
+}: {
+  host: string;
+  token: string;
+  groupJid: string;
+  name: string;
+}) {
+  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/group/name`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ groupJid, name }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('EvoGo Update Group Name Error:', errorText);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
+  }
+
+  return response.json();
+}
+
+export async function updateEvogoGroupDescription({
+  host,
+  token,
+  groupJid,
+  description,
+}: {
+  host: string;
+  token: string;
+  groupJid: string;
+  description: string;
+}) {
+  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/group/description`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ groupJid, description }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('EvoGo Update Group Description Error:', errorText);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
+  }
+
+  return response.json();
+}
+
+export async function updateEvogoGroupPhoto({
+  host,
+  token,
+  groupJid,
+  image,
+}: {
+  host: string;
+  token: string;
+  groupJid: string;
+  image: string;
+}) {
+  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/group/photo`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ groupJid, image }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('EvoGo Update Group Photo Error:', errorText);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
+  }
+
+  return response.json();
+}
+
+export async function getEvogoAvatar({
+  host,
+  token,
+  number,
+}: {
+  host: string;
+  token: string;
+  number: string;
+}) {
+  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/user/avatar`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ number, preview: false }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('EvoGo Get Avatar Error:', errorText);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
+  }
+
+  return response.json();
+}
