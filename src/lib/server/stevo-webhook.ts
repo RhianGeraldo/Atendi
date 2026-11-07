@@ -7,6 +7,7 @@ import { extractExternalAdReply, processAndCacheAdPreview } from "./ad-preview-c
 import { dispatchAutomationEvent } from "./automation-engine";
 import { sendMetaCapiEvent } from "./meta-capi";
 import { insertContactOrFindExisting } from "./whatsapp-lid";
+import { handlePollUpdate } from "./whatsapp-poll";
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
 export async function handleStevoWebhook(request: Request): Promise<Response> {
@@ -149,9 +150,25 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
       if (body.event === "Message" || body.event === "SendMessage") {
         // WhatsMeow / Stevo native format
         const info = body.data?.Info;
-        const msg = body.data?.Message;
+        let msg = body.data?.Message;
 
         if (!info || !msg) return;
+
+        // Se a mensagem foi enviada pelo celular físico, o WhatsApp Multi-Device encapsula em deviceSentMessage
+        const deviceSent =
+          msg?.deviceSentMessage ||
+          body.data?.deviceSentMessage ||
+          body.data?.message?.deviceSentMessage;
+
+        const destinationJid: string | null =
+          deviceSent?.destinationJid ||
+          deviceSent?.destinationJID ||
+          deviceSent?.DestinationJID ||
+          null;
+
+        if (deviceSent?.message) {
+          msg = { ...deviceSent.message, ...msg };
+        }
 
         // Ignorar status/broadcasts e newsletters
         if (
@@ -167,7 +184,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         }
 
         isFromMe = info.IsFromMe;
-        const isGroupMsg = Boolean(info.IsGroup || info.Chat?.includes("@g.us"));
+        const isGroupMsg = Boolean(info.IsGroup || info.Chat?.includes("@g.us") || destinationJid?.includes("@g.us"));
 
         const getPhone = (jids: (string | undefined)[]) => {
           if (isGroupMsg) {
@@ -199,13 +216,26 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         };
 
         if (isGroupMsg) {
-          remoteJid = info.Chat;
-          phoneNumber = info.Chat.split("@")[0];
+          remoteJid = destinationJid || info.Chat;
+          phoneNumber = remoteJid.split("@")[0];
           extractedLid = null;
         } else if (isFromMe) {
-          remoteJid = info.Chat || info.RecipientAlt;
-          phoneNumber = getPhone([info.Chat, info.RecipientAlt]);
-          extractedLid = getLid([info.Chat, info.RecipientAlt]);
+          // Quando a mensagem é enviada pelo celular físico (eco/deviceSentMessage):
+          // 1. Se veio destinationJid, ele é o destinatário real (ex: cliente ou LID da cliente)
+          // 2. Se info.Chat é o próprio número da instância (ou do remetente), prioriza RecipientAlt ou destinationJid
+          const targetJid =
+            destinationJid ||
+            (info.RecipientAlt && !info.RecipientAlt.includes("@broadcast") ? info.RecipientAlt : null) ||
+            info.Chat;
+
+          remoteJid = targetJid || "";
+          if (targetJid?.includes("@lid")) {
+            extractedLid = targetJid.split("@")[0];
+            phoneNumber = getPhone([destinationJid, info.RecipientAlt]);
+          } else {
+            phoneNumber = getPhone([destinationJid, info.RecipientAlt, info.Chat]);
+            extractedLid = getLid([destinationJid, info.RecipientAlt, info.Chat]);
+          }
         } else {
           remoteJid = info.Chat || info.Sender || info.SenderAlt;
           phoneNumber = getPhone([info.Chat, info.Sender, info.SenderAlt]);
@@ -381,7 +411,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
             try {
               const { decryptWhatsAppMedia } = await import("./whatsapp-decrypt");
 
-              let typeKey = "document";
+              let typeKey: "audio" | "video" | "image" | "document" | "ptv" = "document";
               if (msg.ptvMessage || msg.videoMessage) typeKey = "video";
               else if (msg.imageMessage || msg.stickerMessage) typeKey = "image";
               else if (msg.audioMessage) typeKey = "audio";
@@ -454,7 +484,11 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
             sellerJid: msg.orderMessage.sellerJID,
             thumbnail: msg.orderMessage.thumbnail || null,
           };
-        } else if (msg.pollUpdateMessage) {
+        } else if (msg.pollUpdateMessage || info?.Type === "poll") {
+          const pollUpdate = msg.pollUpdateMessage || body.data?.Message?.pollUpdateMessage;
+          if (pollUpdate) {
+            await handlePollUpdate(pollUpdate, info, body.data, "stevo-webhook");
+          }
           return;
         } else if (
           info?.Type === "call" ||
@@ -527,6 +561,21 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         remoteJid = messageData.key?.remoteJid || "";
         pushName = messageData.pushName || "Desconhecido";
 
+        const deviceSent =
+          messageData?.message?.deviceSentMessage ||
+          body.data?.message?.deviceSentMessage ||
+          body.data?.deviceSentMessage;
+
+        const destinationJid =
+          deviceSent?.destinationJid ||
+          deviceSent?.destinationJID ||
+          deviceSent?.DestinationJID ||
+          null;
+
+        if (destinationJid && isFromMe) {
+          remoteJid = destinationJid;
+        }
+
         // Ignorar broadcasts e newsletters
         if (
           remoteJid.includes("@broadcast") ||
@@ -547,7 +596,10 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         }
         remoteMsgId = messageData.key?.id || null;
 
-        const msgType = messageData.message;
+        let msgType = messageData.message;
+        if (deviceSent?.message) {
+          msgType = { ...deviceSent.message, ...msgType };
+        }
         const base64Content = body.base64 || messageData.base64;
 
         const rawContextInfo2 =
@@ -659,7 +711,7 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
               try {
                 const { decryptWhatsAppMedia } = await import("./whatsapp-decrypt");
 
-                let typeKey = "document";
+                let typeKey: "audio" | "video" | "image" | "document" | "ptv" = "document";
                 if (msgType.ptvMessage || msgType.videoMessage) typeKey = "video";
                 else if (msgType.imageMessage || msgType.stickerMessage) typeKey = "image";
                 else if (msgType.audioMessage) typeKey = "audio";
@@ -764,6 +816,11 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
               thumbnail: msgType.orderMessage.thumbnail || null,
             };
           } else if (msgType.pollUpdateMessage) {
+            const voterInfo = {
+              Sender: messageData.key?.participant || messageData.participant || remoteJid,
+              PushName: messageData.pushName || "Participante",
+            };
+            await handlePollUpdate(msgType.pollUpdateMessage, voterInfo, messageData, "stevo-webhook");
             return;
           } else if (msgType.reactionMessage) {
             const targetId = msgType.reactionMessage?.key?.id || msgType.reactionMessage?.key?.ID;

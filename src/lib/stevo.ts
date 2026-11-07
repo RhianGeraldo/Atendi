@@ -1,3 +1,5 @@
+import { getPhoneVariants } from "./utils";
+
 type SendMessageParams = {
   host: string;
   token: string;
@@ -5,7 +7,18 @@ type SendMessageParams = {
   number: string;
   text: string;
   delay?: number;
+  isRetryVariant?: boolean;
 };
+
+function getAlternativePhoneVariant(number: string): string | null {
+  const isJid = number.includes("@");
+  const cleanNumber = number.replace(/@.*$/, "").replace(/\D/g, "");
+  const variants = getPhoneVariants(cleanNumber).filter((v) => v !== cleanNumber);
+  if (variants.length > 0) {
+    return isJid ? `${variants[0]}@s.whatsapp.net` : variants[0];
+  }
+  return null;
+}
 
 function parseStevoError(status: number, statusText: string, errorText: string) {
   let errorMessage = `Failed to send message via Stevo: ${status} ${statusText}`;
@@ -32,6 +45,7 @@ export async function sendStevoText({
   text,
   delay = 0,
   quoted,
+  isRetryVariant = false,
 }: SendMessageParams & { quoted?: QuotedParams }) {
   // Normalize host URL
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
@@ -56,6 +70,30 @@ export async function sendStevoText({
   if (!response.ok) {
     const errorText = await response.text();
     console.error('Stevo API Error:', errorText);
+
+    if (
+      !isRetryVariant &&
+      (errorText.toLowerCase().includes("not registered on whatsapp") ||
+        errorText.toLowerCase().includes("not registered"))
+    ) {
+      const altNumber = getAlternativePhoneVariant(number);
+      if (altNumber) {
+        console.warn(
+          `[sendStevoText] Número ${number} não está registrado no WhatsApp. Tentando variante de 9º dígito: ${altNumber}...`,
+        );
+        return await sendStevoText({
+          host,
+          token,
+          instanceName,
+          number: altNumber,
+          text,
+          delay,
+          quoted,
+          isRetryVariant: true,
+        });
+      }
+    }
+
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -70,6 +108,7 @@ export async function sendStevoLink({
   text,
   delay = 0,
   quoted,
+  isRetryVariant = false,
 }: SendMessageParams & { quoted?: QuotedParams }) {
   // Normalize host URL
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
@@ -94,6 +133,30 @@ export async function sendStevoLink({
   if (!response.ok) {
     const errorText = await response.text();
     console.error('Stevo API Error (link):', errorText);
+
+    if (
+      !isRetryVariant &&
+      (errorText.toLowerCase().includes("not registered on whatsapp") ||
+        errorText.toLowerCase().includes("not registered"))
+    ) {
+      const altNumber = getAlternativePhoneVariant(number);
+      if (altNumber) {
+        console.warn(
+          `[sendStevoLink] Número ${number} não está registrado no WhatsApp. Tentando variante de 9º dígito: ${altNumber}...`,
+        );
+        return await sendStevoLink({
+          host,
+          token,
+          instanceName,
+          number: altNumber,
+          text,
+          delay,
+          quoted,
+          isRetryVariant: true,
+        });
+      }
+    }
+
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -109,6 +172,7 @@ type SendMediaParams = {
   mediatype: 'image' | 'video' | 'audio' | 'document';
   caption?: string;
   delay?: number;
+  isRetryVariant?: boolean;
 };
 
 export async function sendStevoMedia({
@@ -121,6 +185,7 @@ export async function sendStevoMedia({
   caption = '',
   delay = 0,
   quoted,
+  isRetryVariant = false,
 }: SendMediaParams & { quoted?: QuotedParams }) {
   const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/media`;
@@ -174,6 +239,32 @@ export async function sendStevoMedia({
   if (!response.ok) {
     const errorText = await response.text();
     console.error('Stevo Media API Error:', errorText);
+
+    if (
+      !isRetryVariant &&
+      (errorText.toLowerCase().includes("not registered on whatsapp") ||
+        errorText.toLowerCase().includes("not registered"))
+    ) {
+      const altNumber = getAlternativePhoneVariant(number);
+      if (altNumber) {
+        console.warn(
+          `[sendStevoMedia] Número ${number} não está registrado no WhatsApp. Tentando variante de 9º dígito: ${altNumber}...`,
+        );
+        return await sendStevoMedia({
+          host,
+          token,
+          instanceName,
+          number: altNumber,
+          base64,
+          mediatype,
+          caption,
+          delay,
+          quoted,
+          isRetryVariant: true,
+        });
+      }
+    }
+
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -331,6 +422,36 @@ export async function checkStevoUser({ host, token, numbers }: CheckUserParams) 
   if (!response.ok) {
     const errorText = await response.text();
     console.error('Stevo Check User API Error:', errorText);
+    throw new Error(parseStevoError(response.status, response.statusText, errorText));
+  }
+
+  return response.json();
+}
+
+export async function getStevoGroupInfo({
+  host,
+  token,
+  groupJid,
+}: {
+  host: string;
+  token: string;
+  groupJid: string;
+}) {
+  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/group/info`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ groupJid }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Stevo Get Group Info Error:', errorText);
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 

@@ -17,8 +17,9 @@ import {
   Loader2,
   ShoppingBag,
   ExternalLink,
+  Users,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getPhoneVariants } from "@/lib/utils";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
@@ -36,6 +37,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { LinkPreview } from "@/components/chat/link-preview";
 import { StartConversationDialog } from "@/components/chat/start-conversation-dialog";
+import { PollVotesDialog } from "@/components/chat/poll-votes-dialog";
 import type { MessageRow } from "./conversation-types";
 import {
   TodooChatReferralButton,
@@ -193,6 +195,7 @@ export function SystemMessageBubble({ m }: { m: MessageRow }) {
 interface MessageBubbleProps {
   m: MessageRow;
   isGroup?: boolean;
+  knownContactPhones?: Set<string>;
   onReact?: (emoji: string) => void;
   onReply?: (m: MessageRow) => void;
   onEdit?: (m: MessageRow) => void;
@@ -206,6 +209,7 @@ interface MessageBubbleProps {
 export function MessageBubble({
   m,
   isGroup,
+  knownContactPhones,
   onReact,
   onReply,
   onEdit,
@@ -215,6 +219,7 @@ export function MessageBubble({
   todooReferrer,
 }: MessageBubbleProps) {
   const [showMobileActions, setShowMobileActions] = useState(false);
+  const [showPollVotes, setShowPollVotes] = useState(false);
 
   if (m.sender_type === "system") {
     return <SystemMessageBubble m={m} />;
@@ -226,11 +231,29 @@ export function MessageBubble({
   let senderName = null;
   let displayContent = m.content || "";
 
+  const participantPhone = React.useMemo(() => {
+    if (!isGroup || m.sender_type !== "contact" || !m.participant_jid) return null;
+    if (m.participant_jid.includes("@g.us")) return null;
+    const match = m.participant_jid.match(/^(\d+)[:@]/);
+    return match && match[1].length >= 10 ? match[1] : null;
+  }, [isGroup, m.sender_type, m.participant_jid]);
+
+  const isContactInBase = React.useMemo(() => {
+    if (!participantPhone || !knownContactPhones) return false;
+    if (knownContactPhones.has(participantPhone)) return true;
+    const raw = participantPhone.startsWith("55") ? participantPhone : "55" + participantPhone;
+    if (knownContactPhones.has(raw) || knownContactPhones.has(raw.slice(2))) return true;
+    const variants = getPhoneVariants(raw);
+    return variants.some((v) => knownContactPhones.has(v));
+  }, [participantPhone, knownContactPhones]);
+
   if (isGroup && m.sender_type === "contact") {
     const match = displayContent.match(/^(.+?):\n([\s\S]*)$/);
     if (match) {
       senderName = match[1];
       displayContent = match[2];
+    } else if (participantPhone) {
+      senderName = participantPhone;
     }
   } else if (mine) {
     if (m.profiles?.name) {
@@ -282,7 +305,7 @@ export function MessageBubble({
         {senderName && (
           <div
             className={cn(
-              "mb-1 text-xs font-bold",
+              "mb-1 text-xs font-bold flex items-center justify-between gap-2.5",
               mine
                 ? isInternal
                   ? "text-amber-700 dark:text-amber-300"
@@ -292,7 +315,26 @@ export function MessageBubble({
                   : "text-primary/80 dark:text-primary/90",
             )}
           >
-            {senderName}
+            <span className="truncate">{senderName}</span>
+            {isGroup && !mine && participantPhone && !isContactInBase && (
+              <StartConversationDialog
+                initialPhone={participantPhone}
+                contactName={senderName}
+                trigger={
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={(e) => e.stopPropagation()}
+                    title="Chamar este contato (iniciar conversa privada)"
+                    className="h-5 px-1.5 py-0 text-[10px] font-semibold text-primary hover:text-primary hover:bg-primary/10 border border-primary/20 rounded-md shrink-0 flex items-center gap-1 shadow-2xs transition-colors"
+                  >
+                    <MessageSquarePlus className="h-3 w-3" />
+                    <span>Chamar</span>
+                  </Button>
+                }
+              />
+            )}
           </div>
         )}
         {onReact && !m.isOptimistic && !m.is_deleted && (
@@ -844,51 +886,157 @@ export function MessageBubble({
             )}
           </div>
         ) : m.metadata?.poll ? (
-          <div className="mb-1 flex flex-col gap-2">
-            <div
-              className={cn(
-                "p-3 rounded-lg border min-w-[200px] max-w-[280px]",
-                mine
-                  ? "border-transparent bg-black/10 dark:bg-white/10 text-white"
-                  : "border-border bg-background text-foreground",
-              )}
-            >
-              <div className="flex items-start gap-2.5 mb-3 pb-3 border-b border-border/20">
+          (() => {
+            const poll = m.metadata.poll;
+            const pollVotes: Record<
+              string,
+              { voterName?: string; voterPhone?: string; selectedOptions?: string[] }
+            > = poll.votes || {};
+            const totalVoters = Object.values(pollVotes).filter(
+              (v) => (v.selectedOptions?.length || 0) > 0,
+            ).length;
+
+            return (
+              <div className="mb-1 flex flex-col gap-2">
                 <div
                   className={cn(
-                    "p-1.5 rounded-full shrink-0",
-                    mine ? "bg-white/20 text-white" : "bg-primary/10 text-primary",
+                    "p-3 rounded-lg border min-w-[220px] max-w-[320px] sm:max-w-[360px]",
+                    mine
+                      ? "border-transparent bg-black/10 dark:bg-white/10 text-white"
+                      : "border-border bg-background text-foreground",
                   )}
                 >
-                  <List className="h-4 w-4" />
-                </div>
-                <span className="font-semibold text-[13px] leading-snug break-words mt-0.5">
-                  {m.metadata.poll.name}
-                </span>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {m.metadata.poll.options?.map((opt: string, i: number) => (
-                  <div
-                    key={i}
+                  <div className="flex items-start gap-2.5 mb-3 pb-2.5 border-b border-border/20">
+                    <div
+                      className={cn(
+                        "p-1.5 rounded-full shrink-0",
+                        mine ? "bg-white/20 text-white" : "bg-primary/10 text-primary",
+                      )}
+                    >
+                      <List className="h-4 w-4" />
+                    </div>
+                    <div className="flex flex-col flex-1 min-w-0">
+                      <span className="font-semibold text-[13px] leading-snug break-words mt-0.5">
+                        {poll.name}
+                      </span>
+                      <span
+                        className={cn(
+                          "text-[10px] opacity-70 mt-0.5",
+                          mine ? "text-white/70" : "text-muted-foreground",
+                        )}
+                      >
+                        Enquete • {totalVoters} {totalVoters === 1 ? "voto" : "votos"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    {poll.options?.map((opt: string, i: number) => {
+                      const optionVoters = Object.values(pollVotes).filter((v) =>
+                        v.selectedOptions?.includes(opt),
+                      );
+                      const voteCount = optionVoters.length;
+                      const percentage =
+                        totalVoters > 0 ? Math.round((voteCount / totalVoters) * 100) : 0;
+                      const hasVotes = voteCount > 0;
+
+                      return (
+                        <div
+                          key={i}
+                          className={cn(
+                            "relative overflow-hidden flex items-center justify-between px-3 py-2 rounded-md text-[13px] border transition-all",
+                            mine
+                              ? "bg-black/20 border-white/10 hover:bg-black/30"
+                              : "bg-muted/40 border-border/50 hover:bg-muted/70",
+                          )}
+                        >
+                          {/* Barra de progresso de votos */}
+                          {hasVotes && (
+                            <div
+                              className={cn(
+                                "absolute inset-y-0 left-0 transition-all duration-300 pointer-events-none rounded-md",
+                                mine ? "bg-white/20" : "bg-primary/15 dark:bg-primary/25",
+                              )}
+                              style={{ width: `${percentage}%` }}
+                            />
+                          )}
+
+                          <div className="relative z-10 flex items-center gap-2 min-w-0">
+                            <div
+                              className={cn(
+                                "h-3.5 w-3.5 rounded-full border flex items-center justify-center shrink-0 transition-colors",
+                                hasVotes
+                                  ? mine
+                                    ? "border-white bg-white text-black"
+                                    : "border-primary bg-primary text-primary-foreground"
+                                  : "border-current opacity-40",
+                              )}
+                            >
+                              {hasVotes && <div className="h-1.5 w-1.5 rounded-full bg-current" />}
+                            </div>
+                            <span
+                              className={cn(
+                                "truncate font-medium",
+                                hasVotes ? "opacity-100" : "opacity-90",
+                              )}
+                            >
+                              {opt}
+                            </span>
+                          </div>
+
+                          {hasVotes && (
+                            <span
+                              className={cn(
+                                "relative z-10 text-[11px] font-semibold shrink-0 ml-1.5",
+                                mine ? "text-white" : "text-primary",
+                              )}
+                            >
+                              {voteCount} ({percentage}%)
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Botão para abrir o popup com detalhes dos votos */}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowPollVotes(true);
+                    }}
                     className={cn(
-                      "flex items-center gap-2 px-3 py-2 rounded-md text-[13px] border transition-colors",
+                      "mt-2.5 w-full h-7 text-xs font-semibold justify-center gap-1.5 rounded-md border transition-colors",
                       mine
-                        ? "bg-black/20 border-white/10 hover:bg-black/30"
-                        : "bg-muted/50 border-border/50 hover:bg-muted",
+                        ? "border-white/20 bg-white/10 hover:bg-white/20 text-white"
+                        : "border-border/70 bg-background hover:bg-muted text-foreground shadow-2xs",
                     )}
                   >
-                    <div className="h-3.5 w-3.5 rounded-full border border-current opacity-40 shrink-0" />
-                    <span className="truncate opacity-90">{opt}</span>
+                    <Users className="h-3.5 w-3.5" />
+                    <span>Mostrar votos {totalVoters > 0 ? `(${totalVoters})` : ""}</span>
+                  </Button>
+                </div>
+
+                <PollVotesDialog
+                  open={showPollVotes}
+                  onOpenChange={setShowPollVotes}
+                  pollName={poll.name || "Enquete"}
+                  options={poll.options || []}
+                  votes={poll.votes || {}}
+                  knownContactPhones={knownContactPhones}
+                />
+
+                {displayContent && !displayContent.startsWith("📊 Enquete:") && (
+                  <div className="text-xs mt-1">
+                    <FormattedText text={displayContent} mine={mine} />
                   </div>
-                ))}
+                )}
               </div>
-            </div>
-            {displayContent && !displayContent.startsWith("📊 Enquete:") && (
-              <div className="text-xs mt-1">
-                <FormattedText text={displayContent} mine={mine} />
-              </div>
-            )}
-          </div>
+            );
+          })()
         ) : m.metadata?.order ? (
           <div className="mb-1 flex flex-col gap-2">
             <div

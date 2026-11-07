@@ -32,6 +32,7 @@ import { ContactDetailsTabs, ContactEditDialog } from "@/components/contacts/con
 import { ContactBlockDialog } from "@/components/contacts/contact-block-dialog";
 import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
 import { ConvRow, isGroupConversation } from "./conversation-types";
+import { WhatsAppGroupSidebar } from "./whatsapp-group-sidebar";
 
 interface ContactSidebarProps {
   conv: ConvRow;
@@ -206,8 +207,12 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
   });
 
   const isGroup = isGroupConversation(conv);
-  const contactName =
-    isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+
+  if (isGroup) {
+    return <WhatsAppGroupSidebar conv={conv} onClose={onClose} />;
+  }
+
+  const contactName = conv.contact?.name;
 
   return (
     <div className="flex h-full flex-col bg-background/50">

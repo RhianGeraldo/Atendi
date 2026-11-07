@@ -25,6 +25,7 @@ import {
   editEvogoMessage,
   deleteEvogoMessage,
   checkEvogoUser,
+  getEvogoGroupInfo,
 } from "../evogo";
 import {
   sendStevoText,
@@ -34,6 +35,7 @@ import {
   editStevoMessage,
   deleteStevoMessage,
   checkStevoUser,
+  getStevoGroupInfo,
 } from "../stevo";
 import { getPhoneVariants } from "@/lib/utils";
 import {
@@ -827,7 +829,7 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
     // 1. Get instance config
     const { data: instance, error: instanceErr } = await supabaseAdmin
       .from("whatsapp_instances")
-      .select("id, instance_name, evogo_api_key, unit_id, companies(evogo_host)")
+      .select("id, instance_name, evogo_api_key, unit_id, provider, companies(evogo_host)")
       .eq("instance_name", data.instanceName)
       .eq("company_id", data.companyId)
       .single();
@@ -1083,15 +1085,25 @@ export const sendProactiveMessageAction = createServerFn({ method: "POST" })
       }
     }
 
-    // 6. Send message via EvoGo and save in DB (only if text is provided and not just opening)
+    // 6. Send message via EvoGo / Stevo and save in DB (only if text is provided and not just opening)
     if (!isOpeningOnly && textToSend) {
-      await sendEvogoText({
-        host,
-        token,
-        instanceName,
-        number: rawPhone,
-        text: textToSend,
-      });
+      if (instance.provider === "stevo") {
+        await sendStevoText({
+          host,
+          token,
+          instanceName,
+          number: rawPhone,
+          text: textToSend,
+        });
+      } else {
+        await sendEvogoText({
+          host,
+          token,
+          instanceName,
+          number: rawPhone,
+          text: textToSend,
+        });
+      }
 
       const { error: msgErr } = await supabase.from("messages").insert({
         conversation_id: conversationId,
@@ -3352,5 +3364,337 @@ export const unblockContactAction = createServerFn({ method: "POST" })
     }
 
     return { success: true };
+  });
+
+export interface WhatsAppGroupParticipant {
+  jid: string;
+  lid: string;
+  phone: string;
+  name: string;
+  pushName: string | null;
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+  inBase: boolean;
+  contactId: string | null;
+  avatarUrl: string | null;
+}
+
+export interface WhatsAppGroupDetailsResponse {
+  success: boolean;
+  groupJid: string;
+  name: string;
+  topic: string;
+  avatarUrl: string | null;
+  participantCount: number;
+  isAnnounce: boolean;
+  isLocked: boolean;
+  participants: WhatsAppGroupParticipant[];
+}
+
+export const getWhatsAppGroupDetailsAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      conversationId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data, context }): Promise<WhatsAppGroupDetailsResponse> => {
+    const { userId } = context;
+
+    // 1. Fetch conversation and contact
+    const { data: conv, error: convError } = await supabaseAdmin
+      .from("conversations")
+      .select(`
+        id,
+        company_id,
+        unit_id,
+        channel,
+        whatsapp_instance_id,
+        contact_id,
+        remote_id,
+        contacts (
+          id,
+          name,
+          phone,
+          profile_picture_url
+        )
+      `)
+      .eq("id", data.conversationId)
+      .single();
+
+    if (convError || !conv) {
+      throw new Error("Conversa não encontrada.");
+    }
+
+    if (conv.company_id) {
+      await assertCompanyAccess(userId, conv.company_id);
+    }
+
+    // Determine group JID
+    let groupJid = "";
+    if (conv.remote_id) {
+      groupJid = conv.remote_id.includes("@g.us")
+        ? conv.remote_id
+        : `${conv.remote_id.replace(/[^\d-]/g, "")}@g.us`;
+    } else if (conv.contacts?.phone) {
+      if (conv.contacts.phone.includes("@g.us")) {
+        groupJid = conv.contacts.phone;
+      } else {
+        const clean = conv.contacts.phone.replace(/[^\d-]/g, "");
+        if (clean.startsWith("120363") || clean.includes("-") || clean.length > 15) {
+          groupJid = `${clean}@g.us`;
+        }
+      }
+    }
+
+    if (!groupJid || !groupJid.includes("@g.us")) {
+      throw new Error("Esta conversa não possui um JID de grupo do WhatsApp válido.");
+    }
+
+    // 2. Open canal to get credentials
+    const canal = await abrirCanal({
+      id: conv.id,
+      channel: conv.channel || "whatsapp",
+      unit_id: conv.unit_id,
+      whatsapp_instance_id: conv.whatsapp_instance_id,
+    });
+
+    if (!canal || !canal.host || !canal.token) {
+      throw new Error("Instância do WhatsApp não configurada ou sem conexão.");
+    }
+
+    // 3. Fetch group info from EvoGo / Stevo
+    let rawGroupData: any = null;
+    try {
+      if (canal.provedor === "stevo") {
+        const res = await getStevoGroupInfo({
+          host: canal.host,
+          token: canal.token,
+          groupJid,
+        });
+        rawGroupData = res?.data || res;
+      } else {
+        const res = await getEvogoGroupInfo({
+          host: canal.host,
+          token: canal.token,
+          groupJid,
+        });
+        rawGroupData = res?.data || res;
+      }
+    } catch (apiErr: any) {
+      console.error("[getWhatsAppGroupDetailsAction] Falha ao consultar info do grupo na API:", apiErr);
+      throw new Error(apiErr.message || "Erro ao consultar informações do grupo no WhatsApp.");
+    }
+
+    // 4. Extract group details with fallbacks for multiple provider payload formats
+    const groupName =
+      rawGroupData?.Name ||
+      rawGroupData?.name ||
+      rawGroupData?.subject ||
+      conv.contacts?.name ||
+      "Grupo do WhatsApp";
+    const groupTopic =
+      rawGroupData?.Topic ||
+      rawGroupData?.topic ||
+      rawGroupData?.desc ||
+      "";
+    const ownerPn = rawGroupData?.OwnerPN || rawGroupData?.owner || "";
+    const ownerJid = rawGroupData?.OwnerJID || rawGroupData?.ownerJid || "";
+    const isAnnounce = Boolean(rawGroupData?.IsAnnounce || rawGroupData?.announce);
+    const isLocked = Boolean(rawGroupData?.IsLocked || rawGroupData?.restrict);
+    const rawParticipants: any[] = Array.isArray(rawGroupData?.Participants)
+      ? rawGroupData.Participants
+      : Array.isArray(rawGroupData?.participants)
+        ? rawGroupData.participants
+        : [];
+
+    // 5. Gather push names from recent messages in this group
+    const { data: recentMsgs } = await supabaseAdmin
+      .from("messages")
+      .select("sender_id, raw_payload")
+      .eq("conversation_id", conv.id)
+      .order("created_at", { ascending: false })
+      .limit(80);
+
+    const pushNameByPhone = new Map<string, string>();
+    const pushNameByLid = new Map<string, string>();
+
+    if (recentMsgs) {
+      for (const m of recentMsgs) {
+        const payload = m.raw_payload as any;
+        if (!payload) continue;
+        const pushName =
+          payload.PushName ||
+          payload.pushName ||
+          payload.data?.Info?.PushName ||
+          payload.data?.PushName ||
+          payload.Info?.PushName;
+        if (!pushName || typeof pushName !== "string") continue;
+
+        const sender =
+          payload.Sender ||
+          payload.sender ||
+          payload.RawSender ||
+          payload.data?.Info?.Sender ||
+          payload.data?.Info?.RawSender ||
+          m.sender_id;
+        const senderAlt =
+          payload.SenderAlt ||
+          payload.senderAlt ||
+          payload.RawSenderAlt ||
+          payload.data?.Info?.SenderAlt;
+
+        if (sender && typeof sender === "string") {
+          const clean = sender.replace(/[^\d]/g, "");
+          if (clean && !pushNameByPhone.has(clean)) {
+            pushNameByPhone.set(clean, pushName.trim());
+          }
+        }
+        if (senderAlt && typeof senderAlt === "string") {
+          const cleanAlt = senderAlt.replace(/[^\d]/g, "");
+          if (cleanAlt && !pushNameByLid.has(cleanAlt)) {
+            pushNameByLid.set(cleanAlt, pushName.trim());
+          }
+        }
+      }
+    }
+
+    // 6. Gather all phone numbers and LIDs to resolve and check against contacts table
+    const participantsPhones = new Set<string>();
+    const lidsToResolve = new Set<string>();
+
+    for (const p of rawParticipants) {
+      const jid = p.JID || p.id || p.jid || "";
+      const pRaw = p.PhoneNumber || p.phoneNumber || (jid.includes("@s.whatsapp.net") ? jid : "");
+      const clean = pRaw ? pRaw.replace(/[^\d]/g, "") : "";
+      if (clean) {
+        participantsPhones.add(clean);
+      } else {
+        const lidRaw = p.LID || p.lid || (jid.includes("@lid") ? jid : "");
+        const cleanLid = lidRaw ? lidRaw.replace(/[^\d]/g, "") : "";
+        if (cleanLid) lidsToResolve.add(cleanLid);
+      }
+    }
+
+    // Resolve known LIDs to real phones via whatsapp_lid_map
+    const lidToPhoneMap = new Map<string, string>();
+    if (lidsToResolve.size > 0 && conv.company_id) {
+      try {
+        const { data: lidRows } = await (supabaseAdmin.from("whatsapp_lid_map" as any) as any)
+          .select("lid, phone")
+          .eq("company_id", conv.company_id)
+          .in("lid", Array.from(lidsToResolve));
+        if (lidRows) {
+          for (const row of lidRows) {
+            if (row.lid && row.phone) {
+              const cleanP = row.phone.replace(/[^\d]/g, "");
+              if (cleanP) {
+                lidToPhoneMap.set(row.lid, cleanP);
+                participantsPhones.add(cleanP);
+              }
+            }
+          }
+        }
+      } catch (lidErr) {
+        console.warn("[getWhatsAppGroupDetailsAction] Falha ao consultar whatsapp_lid_map:", lidErr);
+      }
+    }
+
+    const phoneVariantToClean = new Map<string, string>();
+    for (const phone of participantsPhones) {
+      const variants = getPhoneVariants(phone);
+      for (const v of variants) {
+        phoneVariantToClean.set(v, phone);
+      }
+    }
+
+    const allSearchVariants = Array.from(phoneVariantToClean.keys());
+    let dbContacts: { id: string; name: string; phone: string; profile_picture_url: string | null }[] = [];
+
+    if (allSearchVariants.length > 0 && conv.company_id) {
+      const { data: contacts } = await supabaseAdmin
+        .from("contacts")
+        .select("id, name, phone, profile_picture_url")
+        .eq("company_id", conv.company_id)
+        .in("phone", allSearchVariants);
+      if (contacts) {
+        dbContacts = contacts;
+      }
+    }
+
+    const matchedContactByPhone = new Map<string, (typeof dbContacts)[0]>();
+    for (const c of dbContacts) {
+      if (!c.phone) continue;
+      const cleanDb = c.phone.replace(/[^\d]/g, "");
+      const targetPhone = phoneVariantToClean.get(cleanDb) || cleanDb;
+      matchedContactByPhone.set(targetPhone, c);
+    }
+
+    // 7. Format normalized participants list
+    const participants: WhatsAppGroupParticipant[] = rawParticipants.map((p) => {
+      const jid = p.JID || p.id || p.jid || "";
+      const lid = p.LID || p.lid || (jid.includes("@lid") ? jid : "");
+      const cleanLid = lid ? lid.replace(/[^\d]/g, "") : "";
+      const pRaw = p.PhoneNumber || p.phoneNumber || (jid.includes("@s.whatsapp.net") ? jid : "");
+      let cleanPhone = pRaw ? pRaw.replace(/[^\d]/g, "") : "";
+
+      // Fallback: resolved phone from whatsapp_lid_map
+      if (!cleanPhone && cleanLid && lidToPhoneMap.has(cleanLid)) {
+        cleanPhone = lidToPhoneMap.get(cleanLid)!;
+      }
+
+      const isAdmin = Boolean(p.IsAdmin || p.isAdmin || p.admin);
+      const isSuperAdmin =
+        Boolean(p.IsSuperAdmin || p.isSuperAdmin || p.isCreator) ||
+        (Boolean(ownerPn) && cleanPhone ? ownerPn.includes(cleanPhone) : false) ||
+        (Boolean(ownerJid) && jid === ownerJid);
+
+      const dbMatch = cleanPhone ? matchedContactByPhone.get(cleanPhone) : null;
+      const inBase = Boolean(dbMatch);
+
+      const pushName =
+        p.DisplayName ||
+        p.displayName ||
+        (cleanPhone ? pushNameByPhone.get(cleanPhone) : null) ||
+        (cleanLid ? pushNameByLid.get(cleanLid) : null) ||
+        null;
+
+      const name = dbMatch?.name || pushName || "";
+      const avatarUrl = dbMatch?.profile_picture_url || null;
+
+      return {
+        jid,
+        lid,
+        phone: cleanPhone,
+        name,
+        pushName,
+        isAdmin,
+        isSuperAdmin,
+        inBase,
+        contactId: dbMatch?.id || null,
+        avatarUrl,
+      };
+    });
+
+    // Sort participants: Creator first, then Admins, then by Name / Phone
+    participants.sort((a, b) => {
+      if (a.isSuperAdmin && !b.isSuperAdmin) return -1;
+      if (!a.isSuperAdmin && b.isSuperAdmin) return 1;
+      if (a.isAdmin && !b.isAdmin) return -1;
+      if (!a.isAdmin && b.isAdmin) return 1;
+      return (a.name || a.phone || "").localeCompare(b.name || b.phone || "");
+    });
+
+    return {
+      success: true,
+      groupJid,
+      name: groupName,
+      topic: groupTopic,
+      avatarUrl: conv.contacts?.profile_picture_url || null,
+      participantCount: rawGroupData?.ParticipantCount || participants.length,
+      isAnnounce,
+      isLocked,
+      participants,
+    };
   });
 

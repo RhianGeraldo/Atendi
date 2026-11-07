@@ -345,9 +345,33 @@ export async function checkEvogoUser({ host, token, numbers }: CheckUserParams) 
     body: JSON.stringify({ number: numbers }),
   });
 
+  return response.json();
+}
+
+export async function getEvogoGroupInfo({
+  host,
+  token,
+  groupJid,
+}: {
+  host: string;
+  token: string;
+  groupJid: string;
+}) {
+  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/group/info`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ groupJid }),
+  });
+
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo Check User API Error:', errorText);
+    console.error('EvoGo Get Group Info Error:', errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 

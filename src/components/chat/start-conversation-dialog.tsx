@@ -245,6 +245,7 @@ export function StartConversationDialog({
       setText("");
       setInstanceName("");
       qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["known-group-contacts"] });
       toast.success(isOpening ? "Chat aberto com sucesso!" : "Mensagem enviada com sucesso!");
     },
     onError: (e) => {

@@ -59,7 +59,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { useAtendiCalls } from "@/hooks/use-atendicalls";
-import { cn } from "@/lib/utils";
+import { cn, getPhoneVariants } from "@/lib/utils";
 import { fillQuickMessageVariables } from "@/lib/quick-message-vars";
 import { TodooConversationBanner } from "@/components/todoo/todoo-conversation-banner";
 import { canAccessMenu } from "@/lib/permissions";
@@ -1327,6 +1327,71 @@ export function ChatPanel({
   });
 
   const isGroup = isGroupConversation(conv);
+
+  // Participantes únicos de mensagens de grupo para verificar existência na base de contatos
+  const groupParticipantPhones = useMemo(() => {
+    if (!messages || messages.length === 0) return [];
+    const phones = new Set<string>();
+    for (const m of messages) {
+      if (isGroup && m.sender_type === "contact" && m.participant_jid && !m.participant_jid.includes("@g.us")) {
+        const match = m.participant_jid.match(/^(\d+)[:@]/);
+        if (match && match[1].length >= 10) {
+          phones.add(match[1]);
+        }
+      }
+      if (m.metadata?.poll?.votes) {
+        for (const v of Object.values(m.metadata.poll.votes as Record<string, any>)) {
+          if (v?.voterPhone && typeof v.voterPhone === "string" && v.voterPhone.length >= 10) {
+            phones.add(v.voterPhone);
+          }
+        }
+      }
+    }
+    return Array.from(phones);
+  }, [isGroup, messages]);
+
+  const { data: knownContactPhones } = useQuery({
+    queryKey: ["known-group-contacts", activeCompanyId, groupParticipantPhones.sort().join(",")],
+    queryFn: async () => {
+      if (!activeCompanyId || groupParticipantPhones.length === 0) return new Set<string>();
+
+      const allVariants: string[] = [];
+      const variantToRaw = new Map<string, string>();
+
+      for (const phone of groupParticipantPhones) {
+        const raw = phone.startsWith("55") ? phone : "55" + phone;
+        const variants = getPhoneVariants(raw);
+        const allNums = Array.from(new Set([phone, raw, raw.slice(2), ...variants]));
+        for (const v of allNums) {
+          allVariants.push(v);
+          variantToRaw.set(v, phone);
+        }
+      }
+
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("phone")
+        .eq("company_id", activeCompanyId)
+        .in("phone", allVariants);
+
+      if (error || !data) return new Set<string>();
+
+      const found = new Set<string>();
+      for (const row of data) {
+        if (row.phone) {
+          const raw = variantToRaw.get(row.phone);
+          if (raw) found.add(raw);
+          const digits = row.phone.replace(/\D/g, "");
+          found.add(digits);
+          if (digits.startsWith("55")) found.add(digits.slice(2));
+          else found.add("55" + digits);
+        }
+      }
+      return found;
+    },
+    enabled: isGroup && groupParticipantPhones.length > 0 && !!activeCompanyId,
+    staleTime: 60_000,
+  });
   // Contato recebido nesta conversa vira indicação da cliente no Todoo ("+ Indicação")
   const todooReferrer =
     !isGroup && conv.contact?.id && canAccessMenu("todoo", profile)
@@ -1772,6 +1837,7 @@ export function ChatPanel({
                         key={m.id}
                         m={m}
                         isGroup={isGroup}
+                        knownContactPhones={knownContactPhones}
                         onReact={(emoji) => {
                           const isAlreadyActive = m.reactions && Boolean(m.reactions[emoji]);
                           react.mutate({ messageId: m.id, emoji: isAlreadyActive ? "" : emoji });
