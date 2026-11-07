@@ -38,8 +38,18 @@ export const ConversationItem = memo(function ConversationItem({
   }, [slaSettings?.enabled, conv.status]);
 
   const isGroup = isGroupConversation(conv);
-  const contactName =
-    isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  const rawName = conv.contact?.name?.trim();
+  const isPhoneOrJidName =
+    rawName &&
+    (rawName.includes("@g.us") ||
+      rawName.startsWith("120363") ||
+      rawName === conv.contact?.phone);
+
+  const contactName = isGroup
+    ? !rawName || rawName === "Desconhecido" || isPhoneOrJidName
+      ? "Grupo do WhatsApp"
+      : rawName
+    : rawName || conv.contact?.phone || "Desconhecido";
   const slaInfo = calculateConversationSla(conv, slaSettings);
 
   const previewDisplay = useMemo(() => {

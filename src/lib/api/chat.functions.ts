@@ -1880,15 +1880,32 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
         .maybeSingle();
       instance = data;
     } else if (contact.company_id) {
-      const { data } = await supabaseAdmin
+      // Prioriza instância conectada da empresa
+      const { data: connectedInst } = await supabaseAdmin
         .from("whatsapp_instances")
         .select(
           "id, instance_name, provider, network, zernio_account_id, evogo_api_key, stevo_api_key, custom_host, companies(id, zernio_api_key, zernio_base_url, evogo_host, stevo_host)",
         )
         .eq("company_id", contact.company_id)
+        .eq("status", "connected")
+        .in("provider", ["evogo", "stevo", "zernio"])
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      instance = data;
+
+      if (connectedInst) {
+        instance = connectedInst;
+      } else {
+        const { data: fallbackInst } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select(
+            "id, instance_name, provider, network, zernio_account_id, evogo_api_key, stevo_api_key, custom_host, companies(id, zernio_api_key, zernio_base_url, evogo_host, stevo_host)",
+          )
+          .eq("company_id", contact.company_id)
+          .limit(1)
+          .maybeSingle();
+        instance = fallbackInst;
+      }
     }
 
     // Caso A: Instância conectada via Zernio (WhatsApp ou Instagram)
@@ -2034,30 +2051,67 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
 
     let pushName = null;
     let avatarUrl = null;
-    const jid = contact.phone.includes("@") ? contact.phone : `${contact.phone}@s.whatsapp.net`;
+    const cleanPhone = contact.phone.replace(/[^\d-]/g, "");
+    const isGroupPhone =
+      contact.phone.includes("@g.us") ||
+      cleanPhone.startsWith("120363") ||
+      (cleanPhone.includes("-") && cleanPhone.length > 14);
+    const jid = isGroupPhone
+      ? (contact.phone.includes("@g.us") ? contact.phone : `${cleanPhone}@g.us`)
+      : (contact.phone.includes("@") ? contact.phone : `${cleanPhone}@s.whatsapp.net`);
 
-    try {
-      console.log(
-        `[syncContactProfile] Fetching info for ${jid} on ${host} (Instance: ${instanceName})`,
-      );
-      const resInfo = await fetch(`${host}/user/info`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: token,
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ number: [jid] }),
-        signal: AbortSignal.timeout(5000),
-      });
+    if (isGroupPhone) {
+      try {
+        console.log(
+          `[syncContactProfile] Fetching group info for ${jid} on ${host} (Instance: ${instanceName})`,
+        );
+        const resInfo = await fetch(`${host}/group/info`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: token,
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ groupJid: jid }),
+          signal: AbortSignal.timeout(6000),
+        });
 
-      if (resInfo.ok) {
-        const jsonInfo = await resInfo.json();
-        pushName =
-          jsonInfo.name || jsonInfo.pushName || jsonInfo.pushname || jsonInfo.contactName || null;
+        if (resInfo.ok) {
+          const jsonInfo = await resInfo.json();
+          pushName =
+            jsonInfo?.data?.Name ||
+            jsonInfo?.data?.name ||
+            jsonInfo?.data?.subject ||
+            jsonInfo?.name ||
+            null;
+        }
+      } catch (e) {
+        console.warn("[syncContactProfile] Failed to fetch group info:", e);
       }
-    } catch (e) {
-      console.warn("[syncContactProfile] Failed to fetch user info:", e);
+    } else {
+      try {
+        console.log(
+          `[syncContactProfile] Fetching info for ${jid} on ${host} (Instance: ${instanceName})`,
+        );
+        const resInfo = await fetch(`${host}/user/info`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: token,
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ number: [jid] }),
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (resInfo.ok) {
+          const jsonInfo = await resInfo.json();
+          pushName =
+            jsonInfo.name || jsonInfo.pushName || jsonInfo.pushname || jsonInfo.contactName || null;
+        }
+      } catch (e) {
+        console.warn("[syncContactProfile] Failed to fetch user info:", e);
+      }
     }
 
     try {
@@ -2069,7 +2123,7 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
           apikey: token,
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ number: jid, preview: true }),
+        body: JSON.stringify({ number: jid, preview: false }),
         signal: AbortSignal.timeout(10000),
       });
 
@@ -2103,7 +2157,9 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
     }
 
     const updatePayload: any = {};
-    if (pushName) updatePayload.name = pushName;
+    if (pushName && pushName !== "null" && pushName !== "undefined" && pushName.trim().length > 0) {
+      updatePayload.name = pushName.trim();
+    }
     if (permanentAvatarUrl || avatarUrl) {
       updatePayload.profile_picture_url = permanentAvatarUrl || avatarUrl;
     }
@@ -3944,4 +4000,79 @@ export const syncWhatsAppGroupPhotoAction = createServerFn({ method: "POST" })
 
     return { success: true, avatarUrl: permanentUrl };
   });
+
+export const syncMissingWhatsAppGroupsAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      conversationIds: z.array(z.string().uuid()).optional(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+
+    let convsQuery = supabaseAdmin
+      .from("conversations")
+      .select(`
+        id, company_id, unit_id, channel, whatsapp_instance_id, contact_id, remote_id,
+        contacts ( id, name, phone, profile_picture_url )
+      `);
+
+    if (data.conversationIds && data.conversationIds.length > 0) {
+      convsQuery = convsQuery.in("id", data.conversationIds.slice(0, 20));
+    } else {
+      convsQuery = convsQuery.limit(20);
+    }
+
+    const { data: convs, error } = await convsQuery;
+    if (error || !convs) return { success: false, updatedCount: 0 };
+
+    let updatedCount = 0;
+    for (const conv of convs) {
+      const contact = (Array.isArray(conv.contacts) ? conv.contacts[0] : conv.contacts) as any;
+      if (!contact || !conv.contact_id) continue;
+
+      if (conv.company_id) {
+        try {
+          await assertCompanyAccess(userId, conv.company_id);
+        } catch {
+          continue;
+        }
+      }
+
+      const cleanPhone = contact.phone ? contact.phone.replace(/[^\d-]/g, "") : "";
+      const isGroup =
+        conv.channel === "whatsapp_group" ||
+        conv.remote_id?.includes("@g.us") ||
+        contact.phone?.includes("@g.us") ||
+        cleanPhone.startsWith("120363") ||
+        (cleanPhone.includes("-") && cleanPhone.length > 14);
+
+      if (!isGroup) continue;
+
+      // Se já tem foto permanente no Supabase Storage e tem nome válido (não é JID/Desconhecido), pula
+      const hasValidName =
+        contact.name &&
+        contact.name !== "Desconhecido" &&
+        contact.name !== "Grupo do WhatsApp" &&
+        !contact.name.startsWith("120363");
+      const hasPermanentPic =
+        contact.profile_picture_url &&
+        contact.profile_picture_url.includes("supabase.co/storage");
+
+      if (hasValidName && hasPermanentPic) continue;
+
+      try {
+        const syncRes = await syncContactProfile(conv.contact_id, conv.whatsapp_instance_id);
+        if (syncRes.success) {
+          updatedCount++;
+        }
+      } catch (e) {
+        console.warn(`[syncMissingWhatsAppGroupsAction] Falha ao sincronizar grupo ${conv.id}:`, e);
+      }
+    }
+
+    return { success: true, updatedCount };
+  });
+
 

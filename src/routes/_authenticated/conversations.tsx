@@ -54,6 +54,7 @@ import { CreateChannelDialog } from "@/components/team-chat/create-channel-dialo
 import { NewDirectChatDialog } from "@/components/team-chat/new-direct-chat-dialog";
 import { MessageSquare, Users } from "lucide-react";
 import { toast } from "sonner";
+import { syncMissingWhatsAppGroupsAction } from "@/lib/api/chat.functions";
 
 export type { ConvRow, MessageRow, Status, TabType };
 
@@ -1608,6 +1609,48 @@ function ConversationsPage() {
     }
     return null;
   }, [filtered, directSelectedConv, selectedId, lastSelectedConv]);
+
+  const attemptedSyncGroupsRef = useRef<Set<string>>(new Set());
+
+  // Auto-sync discreto em background para grupos sem foto ou sem nome real quando o usuário estiver na aba de grupos
+  useEffect(() => {
+    if (tab !== "groups" || !filtered || filtered.length === 0) return;
+
+    const pendingGroups = filtered.filter((c) => {
+      if (attemptedSyncGroupsRef.current.has(c.id)) return false;
+      const isGrp = isGroupConversation(c);
+      if (!isGrp) return false;
+      const hasPic = Boolean(c.contact?.avatar_url);
+      const rawName = c.contact?.name?.trim();
+      const hasRealName =
+        rawName &&
+        rawName !== "Desconhecido" &&
+        rawName !== "Grupo do WhatsApp" &&
+        !rawName.startsWith("120363");
+      return !hasPic || !hasRealName;
+    });
+
+    if (pendingGroups.length === 0) return;
+
+    // Registra imediatamente os IDs para evitar loop caso o grupo no WhatsApp não possua foto cadastrada
+    pendingGroups.forEach((g) => attemptedSyncGroupsRef.current.add(g.id));
+
+    const timer = setTimeout(async () => {
+      try {
+        const ids = pendingGroups.map((g) => g.id);
+        const res = await syncMissingWhatsAppGroupsAction({
+          data: { conversationIds: ids },
+        });
+        if (res?.updatedCount && res.updatedCount > 0) {
+          qc.invalidateQueries({ queryKey: ["conversations"] });
+        }
+      } catch (err) {
+        console.warn("[conversations] Falha no auto-sync de grupos:", err);
+      }
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [tab, filtered, qc]);
 
   return (
     <div className="flex h-full overflow-hidden">

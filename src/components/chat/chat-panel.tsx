@@ -1397,8 +1397,18 @@ export function ChatPanel({
     !isGroup && conv.contact?.id && canAccessMenu("todoo", profile)
       ? { contactId: conv.contact.id, phone: conv.contact.phone, unitId: conv.unit_id || null }
       : null;
-  const contactName =
-    isGroup && conv.contact?.name === "Desconhecido" ? "Grupo do WhatsApp" : conv.contact?.name;
+  const rawContactName = conv.contact?.name?.trim();
+  const isPhoneOrJidName =
+    rawContactName &&
+    (rawContactName.includes("@g.us") ||
+      rawContactName.startsWith("120363") ||
+      rawContactName === conv.contact?.phone);
+
+  const contactName = isGroup
+    ? !rawContactName || rawContactName === "Desconhecido" || isPhoneOrJidName
+      ? "Grupo do WhatsApp"
+      : rawContactName
+    : rawContactName || conv.contact?.phone || "Desconhecido";
 
   // Detecção da Janela de 24 horas da Meta WhatsApp
   const lastContactMessage = useMemo(() => {

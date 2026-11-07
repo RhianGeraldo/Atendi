@@ -8,6 +8,7 @@ import { dispatchAutomationEvent } from "./automation-engine";
 import { sendMetaCapiEvent } from "./meta-capi";
 import { insertContactOrFindExisting } from "./whatsapp-lid";
 import { handlePollUpdate } from "./whatsapp-poll";
+import { syncContactProfile } from "@/lib/api/chat.functions";
 
 // Called by server.ts - reads body and processes in background, returns 200 immediately
 export async function handleStevoWebhook(request: Request): Promise<Response> {
@@ -1064,6 +1065,13 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
           "id",
         );
         contactId = newContact.id;
+
+        // Auto-sync profile picture and group details
+        try {
+          await syncContactProfile(contactId, instance_id);
+        } catch (err) {
+          console.error("[stevo-webhook] syncContactProfile failed:", err);
+        }
       }
 
       // 3. Find latest conversation for this contact in THIS EXACT INSTANCE
