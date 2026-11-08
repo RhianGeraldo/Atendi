@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendPlatformMessage } from "./message-sender";
+import { scheduleMessage, cancelScheduledMessagesForConversation } from "./scheduled-messages";
 
 /**
  * Normaliza valores monetários para número float (ex: "R$ 1.500,50", "1500,00", 1500 -> 1500.5)
@@ -27,118 +28,174 @@ function parseCurrencyValue(val: any): number {
 }
 
 /**
- * Parser resiliente de datas para PostgreSQL (TIMESTAMPTZ)
- * Aceita ISO, formato brasileiro (DD/MM/YYYY HH:mm), termos relativos ("amanhã", "hoje", "em 2 dias", etc.)
+ * Sanitizador rigoroso para mensagens destinadas ao cliente (DLP).
+ * Garante que nenhuma tag interna, comando em colchetes ou marcação de bastidor
+ * seja enviada para o WhatsApp/canais de atendimento.
+ */
+function sanitizeCustomerFacingText(text: string | null | undefined): string {
+  if (!text) return "";
+  let cleaned = String(text).trim();
+
+  // Remove qualquer assinatura técnica auto-gerada no início
+  const selfSignatureMatch = cleaned.match(/^([A-Za-z0-9 _\-\*]+):\s*([\s\S]*)$/);
+  if (
+    selfSignatureMatch &&
+    !selfSignatureMatch[1].toLowerCase().includes("http") &&
+    !selfSignatureMatch[1].toLowerCase().includes("www")
+  ) {
+    cleaned = selfSignatureMatch[2].trim();
+  }
+
+  // Remove tags conhecidas de ação (com ou sem argumentos, tolerante a espaços)
+  cleaned = cleaned.replace(
+    /\[\s*(?:CRIAR[_\s]?OPORTUNIDADE|ATUALIZAR[_\s]?OPORTUNIDADE|MOVER[_\s]?OPORTUNIDADE|TRANSFERIR[_\s]?AGENTE|TRANSFERIR|ENCERRAR|CRIAR[_\s]?TAREFA|AGENDAR[_\s]?MENSAGEM|OPORTUNIDADE|TAREFA)(?::[\s\S]*?)?\]/gi,
+    "",
+  );
+
+  // Remove quaisquer outras tags residuais de comandos em caixa alta entre colchetes
+  cleaned = cleaned.replace(/\[\s*[A-Z0-9_\-\s]{3,40}(?::[\s\S]*?)?\]/g, "");
+
+  // Normaliza quebras de linha múltiplas residuais
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+
+  return cleaned;
+}
+
+/**
+ * Limpa prompts customizados para garantir que instruções legadas
+ * que ordenavam cuspir tags sejam neutralizadas e convertidas para ferramentas nativas.
+ */
+function cleanPromptDirective(prompt: string | null | undefined): string {
+  if (!prompt) return "";
+  let p = prompt;
+  p = p.replace(
+    /(?:Use|Inclua|utilize)?\s*(?:a|exatamente a)?\s*tag\s*\[[A-Z0-9_\-\s:\|]+\]/gi,
+    "Use a ferramenta nativa correspondente",
+  );
+  p = p.replace(/\[\s*(?:CRIAR_|ATUALIZAR_|MOVER_|TRANSFERIR|ENCERRAR).*?\]/gi, "");
+  return p.trim();
+}
+
+/**
+ * Parser resiliente de datas para PostgreSQL (TIMESTAMPTZ) ancorado no Horário de Brasília (America/Sao_Paulo / UTC-3).
+ * Garante que agendamentos (amanhã às 10h, DD/MM/YYYY, termos relativos) sejam gravados no UTC correto,
+ * independentemente do fuso horário da máquina ou servidor em nuvem (Vercel/Docker em UTC).
  */
 function parseTaskDueDate(rawDate: string | undefined | null): string {
-  const now = new Date();
+  const nowUtc = new Date();
+  const spString = nowUtc.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" });
+  const spNow = new Date(spString);
 
   if (!rawDate || typeof rawDate !== "string" || !rawDate.trim()) {
-    const d = new Date(now);
+    const d = new Date(spNow);
     d.setDate(d.getDate() + 1);
-    d.setHours(10, 0, 0, 0);
-    return d.toISOString();
+    // 10:00 Horário de Brasília = 13:00 UTC
+    return new Date(
+      Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 13, 0, 0, 0),
+    ).toISOString();
   }
 
   const trimmed = rawDate.trim();
 
-  // Se já for ISO 8601 válido
-  const directDate = new Date(trimmed);
-  if (
-    !isNaN(directDate.getTime()) &&
-    trimmed.includes("-") &&
-    (trimmed.includes("T") || trimmed.length === 10)
-  ) {
-    return directDate.toISOString();
+  // Se já for ISO completo com timezone (Z ou +/-)
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) {
+    const direct = new Date(trimmed);
+    if (!isNaN(direct.getTime())) return direct.toISOString();
+  }
+
+  // Formato ISO sem timezone: YYYY-MM-DD ou YYYY-MM-DDTHH:mm ou YYYY-MM-DD HH:mm
+  const isoMatch = trimmed.match(
+    /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
+  );
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+    const hour = isoMatch[4] ? parseInt(isoMatch[4], 10) : 10;
+    const min = isoMatch[5] ? parseInt(isoMatch[5], 10) : 0;
+    // Em Brasília (UTC-3), hora local + 3h = UTC
+    return new Date(Date.UTC(year, month, day, hour + 3, min, 0, 0)).toISOString();
   }
 
   // Formato brasileiro DD/MM/YYYY ou DD/MM/YYYY HH:mm
-  const brMatch = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  const brMatch = trimmed.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
   if (brMatch) {
     const day = parseInt(brMatch[1], 10);
     const month = parseInt(brMatch[2], 10) - 1;
     const year = parseInt(brMatch[3], 10);
     const hour = brMatch[4] ? parseInt(brMatch[4], 10) : 10;
-    const minute = brMatch[5] ? parseInt(brMatch[5], 10) : 0;
-    const parsed = new Date(year, month, day, hour, minute);
-    if (!isNaN(parsed.getTime())) {
-      return parsed.toISOString();
-    }
-  }
-
-  // Formato ISO parcial YYYY-MM-DD HH:mm
-  const isoLikeMatch = trimmed.match(
-    /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/,
-  );
-  if (isoLikeMatch) {
-    const year = parseInt(isoLikeMatch[1], 10);
-    const month = parseInt(isoLikeMatch[2], 10) - 1;
-    const day = parseInt(isoLikeMatch[3], 10);
-    const hour = isoLikeMatch[4] ? parseInt(isoLikeMatch[4], 10) : 10;
-    const minute = isoLikeMatch[5] ? parseInt(isoLikeMatch[5], 10) : 0;
-    const parsed = new Date(year, month, day, hour, minute);
-    if (!isNaN(parsed.getTime())) {
-      return parsed.toISOString();
-    }
+    const min = brMatch[5] ? parseInt(brMatch[5], 10) : 0;
+    return new Date(Date.UTC(year, month, day, hour + 3, min, 0, 0)).toISOString();
   }
 
   // Termos relativos em português
   const lower = trimmed.toLowerCase();
   let targetHour = 10;
   let targetMinute = 0;
-  const timeMatch = lower.match(/(?:às|as|ás|\:)\s*(\d{1,2})(?:[h:](\d{2})?)?/i);
+  const timeMatch = lower.match(/(?:às|as|ás|:)\s*(\d{1,2})(?:[h:](\d{2})?)?/i);
   if (timeMatch) {
     targetHour = parseInt(timeMatch[1], 10);
     if (timeMatch[2]) targetMinute = parseInt(timeMatch[2], 10);
   }
 
   if (lower.includes("hoje")) {
-    const d = new Date(now);
-    d.setHours(targetHour > now.getHours() ? targetHour : now.getHours() + 2, targetMinute, 0, 0);
-    return d.toISOString();
+    const currentSpHour = spNow.getHours();
+    const effectiveHour = targetHour > currentSpHour ? targetHour : currentSpHour + 2;
+    return new Date(
+      Date.UTC(
+        spNow.getFullYear(),
+        spNow.getMonth(),
+        spNow.getDate(),
+        effectiveHour + 3,
+        targetMinute,
+        0,
+        0,
+      ),
+    ).toISOString();
   }
 
   if (lower.includes("amanhã") || lower.includes("amanha")) {
-    const d = new Date(now);
+    const d = new Date(spNow);
     d.setDate(d.getDate() + 1);
-    d.setHours(targetHour, targetMinute, 0, 0);
-    return d.toISOString();
+    return new Date(
+      Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), targetHour + 3, targetMinute, 0, 0),
+    ).toISOString();
   }
 
   const inDaysMatch = lower.match(/(?:daqui a|em)\s+(\d+)\s+dias?/i);
   if (inDaysMatch) {
     const days = parseInt(inDaysMatch[1], 10);
-    const d = new Date(now);
+    const d = new Date(spNow);
     d.setDate(d.getDate() + days);
-    d.setHours(targetHour, targetMinute, 0, 0);
-    return d.toISOString();
+    return new Date(
+      Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), targetHour + 3, targetMinute, 0, 0),
+    ).toISOString();
   }
 
   const inHoursMatch = lower.match(/(?:daqui a|em)\s+(\d+)\s+horas?/i);
   if (inHoursMatch) {
     const hours = parseInt(inHoursMatch[1], 10);
-    const d = new Date(now.getTime() + hours * 60 * 60 * 1000);
-    return d.toISOString();
+    return new Date(Date.now() + hours * 3600 * 1000).toISOString();
   }
 
   const weekDays = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
   for (let i = 0; i < weekDays.length; i++) {
     if (lower.includes(weekDays[i])) {
-      const currentDay = now.getDay();
+      const currentDay = spNow.getDay();
       let diff = i - currentDay;
       if (diff <= 0) diff += 7;
-      const d = new Date(now);
+      const d = new Date(spNow);
       d.setDate(d.getDate() + diff);
-      d.setHours(targetHour, targetMinute, 0, 0);
-      return d.toISOString();
+      return new Date(
+        Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), targetHour + 3, targetMinute, 0, 0),
+      ).toISOString();
     }
   }
 
-  // Fallback seguro: amanhã às 10h
-  const fallback = new Date(now);
-  fallback.setDate(fallback.getDate() + 1);
-  fallback.setHours(10, 0, 0, 0);
-  return fallback.toISOString();
+  // Fallback seguro: amanhã às 10h (Horário de Brasília)
+  const d = new Date(spNow);
+  d.setDate(d.getDate() + 1);
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 13, 0, 0, 0)).toISOString();
 }
 
 /**
@@ -168,7 +225,7 @@ async function resolveStageId(
       .select("id")
       .eq("pipeline_id", pipelineId)
       .ilike("name", `%${cleanName}%`)
-      .order("order_index", { ascending: true })
+      .order("order", { ascending: true })
       .limit(1)
       .maybeSingle();
     if (matchedStage) return matchedStage.id;
@@ -178,7 +235,7 @@ async function resolveStageId(
     .from("pipeline_stages")
     .select("id")
     .eq("pipeline_id", pipelineId)
-    .order("order_index", { ascending: true })
+    .order("order", { ascending: true })
     .limit(1)
     .maybeSingle();
 
@@ -388,16 +445,37 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     if (provider === "groq") baseUrl = "https://api.groq.com/openai/v1/chat/completions";
     else if (provider === "openrouter") baseUrl = "https://openrouter.ai/api/v1/chat/completions";
 
-    // 4. Histórico recente de mensagens (20 mensagens)
+    // 4. Histórico recente de mensagens (35 mensagens para amplitude de contexto)
     const { data: messages } = await supabaseAdmin
       .from("messages")
       .select("content, sender_type, created_at, media_type, transcription")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: false })
-      .limit(20);
+      .limit(35);
 
     if (!messages || messages.length === 0) return;
     messages.reverse();
+
+    // Se o cliente interagiu, reiniciar contadores de follow-up e cadência imediatamente
+    const lastMsgInHistory = messages[messages.length - 1];
+    if (lastMsgInHistory?.sender_type === "contact") {
+      await supabaseAdmin
+        .from("conversations")
+        .update({
+          ai_followup_count: 0,
+          ai_last_followup_at: null,
+          cadence_step: 0,
+          cadence_next_at: null,
+        } as any)
+        .eq("id", conversationId);
+
+      // Cancela mensagens futuras agendadas automaticamente pela IA, pois o cliente já retomou o contato
+      await cancelScheduledMessagesForConversation(
+        conversationId,
+        "Cliente interagiu antes do envio agendado",
+        "agent",
+      );
+    }
 
     // Mesclar variáveis personalizadas (Unidade sobressai à Empresa)
     const compVars =
@@ -478,8 +556,20 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     systemPromptParts.push(`Você é ${agent.name}.`);
 
     // Injeção de Contexto Autoritativo da Conversa Atual
+    const nowUtc = new Date();
+    const spNowStr = nowUtc.toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      weekday: "long",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
     const contextHeader = [
       `=== CONTEXTO DO ATENDIMENTO ATUAL (DADOS AUTORITATIVOS DO SISTEMA) ===`,
+      `DATA E HORA ATUAL: ${spNowStr} (Horário de Brasília - America/Sao_Paulo)`,
       `EMPRESA: ${companyName}`,
       `UNIDADE ATUAL DE ATENDIMENTO: ${unitName}`,
       rawClientName
@@ -509,22 +599,46 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
     systemPromptParts.push(contextHeader);
 
-    if (agent.prompt_personality) systemPromptParts.push(applyVars(agent.prompt_personality));
-    if (agent.prompt_instructions) systemPromptParts.push(applyVars(agent.prompt_instructions));
-    if (agent.prompt_extra_info) systemPromptParts.push(applyVars(agent.prompt_extra_info));
+    // Diretriz Mandatória de Ferramentas Nativas, Tamanho de Mensagem e Especialização
+    systemPromptParts.push(`=== DIRETRIZES DE FERRAMENTAS E COMUNICAÇÃO ===
+1. Você dispõe de ferramentas nativas (tools/functions) para criar/atualizar oportunidades no CRM, agendar tarefas, agendar mensagens futuras ('agendar_mensagem'), transferir o atendimento para equipe humana ou colegas, e encerrar o chamado. Chame SEMPRE a ferramenta correspondente nativamente quando o contexto exigir.
+2. É ESTRITAMENTE PROIBIDO escrever tags textuais como '[CRIAR_OPORTUNIDADE]', '[ATUALIZAR_OPORTUNIDADE]', '[TRANSFERIR]', '[TRANSFERIR_AGENTE]', '[ENCERRAR]', '[CRIAR_TAREFA]', '[AGENDAR_MENSAGEM]' ou qualquer comando em colchetes no texto enviado ao cliente.
+3. O cliente é uma pessoa real no WhatsApp e NUNCA deve ler comandos técnicos de bastidor. Qualquer tag exposta no texto é uma falha grave.
+4. Para ferramentas que interagem com o cliente (como transferir_atendimento, delegar_para_outro_agente_ia ou encerrar_atendimento), preencha o argumento 'aviso' ou 'despedida' com a mensagem calorosa, curta e natural que o cliente lerá.
+5. AÇÕES DO CRM (OPORTUNIDADES E TAREFAS): Quando o cliente demonstrar interesse em um serviço/procedimento, solicitar proposta, orçamento ou concordar em agendar/comprar, NÃO adie para depois: CHAME IMEDIATAMENTE a ferramenta 'criar_oportunidade' (ou 'atualizar_oportunidade' se já houver uma oportunidade aberta) nesta mesma resposta junto com a mensagem natural ao cliente.
+6. RETORNO / AGENDAMENTO DE MENSAGEM: Se o cliente pedir para chamá-lo mais tarde, amanhã, daqui a algumas horas ou em dia específico (ex: 'me chame amanhã às 10h', 'vou ver com meu marido e te respondo à noite'), use a ferramenta 'agendar_mensagem' com o texto a enviar e a data/horário.
+7. TAMANHO DE MENSAGEM NO WHATSAPP (MUITO IMPORTANTE - RESPOSTAS CURTAS):
+- NUNCA envie mensagens longas, prolixas ou 'textões'. NUNCA envie listas longas com dezenas de tópicos ou vários emojis por linha.
+- Cada mensagem deve ter no máximo de 2 a 3 frases/parágrafos curtíssimos (1 a 2 linhas cada).
+- Escreva exatamente como uma pessoa real digita no WhatsApp: direto ao ponto, caloroso, simpático e objetivo.
+- Faça SEMPRE APENAS UMA pergunta direta e simples ao final para que o cliente responda com facilidade.
+8. DIVISÃO CLARA DE RESPONSABILIDADES (CADA IA FAZ APENAS UMA COISA):
+- Cada IA da empresa possui uma especialidade restrita. NUNCA tente abraçar o trabalho de outra IA:
+  * SDR (Triagem): Descobre rapidamente o interesse e intenção. Assim que souber o que o lead quer, passa para a especialista (Vendas ou Agendamento). Não vende nem agenda.
+  * Vendas (Consultora / Closer): Conduz a proposta comercial, valores e fecha a oportunidade no CRM. Assim que o cliente aceitar e for agendar dia/horário, passa para a especialista de Agendamento. Não gerencia a grade de agendamentos.
+  * Agendamento: Escolhe datas, horários e orienta o comparecimento. Não vende tratamentos nem negocia valores; se o cliente pedir novos procedimentos, passa para Vendas.
+- Quando a necessidade for de competência de outro colega, acione IMEDIATAMENTE 'delegar_para_outro_agente_ia'.
+================================================`);
+
+    if (agent.prompt_personality)
+      systemPromptParts.push(cleanPromptDirective(applyVars(agent.prompt_personality)));
+    if (agent.prompt_instructions)
+      systemPromptParts.push(cleanPromptDirective(applyVars(agent.prompt_instructions)));
+    if (agent.prompt_extra_info)
+      systemPromptParts.push(cleanPromptDirective(applyVars(agent.prompt_extra_info)));
 
     // Instruções orientativas (o modelo agora tem ferramentas nativas)
     if (agent.allow_handoff) {
       systemPromptParts.push(
-        applyVars(agent.prompt_handoff) ||
-          `DIRETRIZ DE TRANSFERÊNCIA HUMANA:\nSe você não souber como resolver a solicitação do cliente após tentar ajudar ou se ele solicitar explicitamente atendimento humano, chame a ferramenta 'transferir_atendimento' com o motivo detalhado.`,
+        cleanPromptDirective(applyVars(agent.prompt_handoff)) ||
+          `DIRETRIZ DE TRANSFERÊNCIA HUMANA:\nSe você não souber como resolver a solicitação do cliente após tentar ajudar ou se ele solicitar explicitamente atendimento humano, chame a ferramenta 'transferir_atendimento' informando o 'aviso' para o cliente e o 'motivo' interno.`,
       );
     }
 
     if (agent.allow_resolution) {
       systemPromptParts.push(
-        applyVars(agent.prompt_resolution) ||
-          `DIRETRIZ DE ENCERRAMENTO:\nQuando o cliente tiver suas dúvidas sanadas, confirmar que deu tudo certo ou se despedir cordialmente, chame a ferramenta 'encerrar_atendimento' com o resumo do que foi concluído.`,
+        cleanPromptDirective(applyVars(agent.prompt_resolution)) ||
+          `DIRETRIZ DE ENCERRAMENTO:\nQuando o cliente tiver suas dúvidas sanadas, confirmar que deu tudo certo ou se despedir cordialmente, chame a ferramenta 'encerrar_atendimento' com a 'despedida' para ele e o 'resumo' do atendimento.`,
       );
     }
 
@@ -533,21 +647,21 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         .map((c) => `- ${c.name} (${c.ai_type || "Geral"}): ${c.description || "Especialista"}`)
         .join("\n");
       systemPromptParts.push(
-        `TRABALHO EM EQUIPE (MULTI-AGENTES):\nSe a solicitação for de competência de outro colega especialista, chame a ferramenta 'delegar_para_outro_agente_ia' informando o nome ou ID do colega.\nColegas disponíveis:\n${colleaguesList}`,
+        `TRABALHO EM EQUIPE (MULTI-AGENTES):\nSe a solicitação for de competência de outro colega especialista, chame a ferramenta 'delegar_para_outro_agente_ia' informando o nome ou ID do colega e o 'aviso' anunciando a troca para o cliente.\nColegas disponíveis:\n${colleaguesList}`,
       );
     }
 
     if (agent.allow_tasks) {
       systemPromptParts.push(
-        applyVars(agent.prompt_tasks) ||
-          `CRIAÇÃO DE TAREFAS NO CRM:\nVocê pode agendar tarefas e follow-ups para a equipe usando a ferramenta 'criar_tarefa'. Informe data e hora previstas (ex: 'amanhã às 14:00', '2026-10-10 10:00').`,
+        cleanPromptDirective(applyVars(agent.prompt_tasks)) ||
+          `CRIAÇÃO DE TAREFAS NO CRM:\nVocê pode agendar tarefas e follow-ups para a equipe usando a ferramenta nativa 'criar_tarefa'. Informe título, descrição e data/hora prevista (ex: 'amanhã às 14:00', '2026-10-10 10:00').`,
       );
     }
 
     if (agent.allow_opportunities) {
       systemPromptParts.push(
-        applyVars(agent.prompt_opportunities) ||
-          `OPORTUNIDADES DE VENDAS NO CRM:\nVocê tem acesso direto ao funil de vendas. Quando o cliente demonstrar interesse comercial ou solicitar proposta, chame 'criar_oportunidade'. Para avançar de etapa no funil, chame 'atualizar_oportunidade'.`,
+        cleanPromptDirective(applyVars(agent.prompt_opportunities)) ||
+          `OPORTUNIDADES DE VENDAS NO CRM:\nVocê tem acesso direto ao funil de vendas. Quando o cliente demonstrar interesse comercial ou solicitar orçamento/proposta, chame nativamente a ferramenta 'criar_oportunidade'. Para avançar de etapa no funil, chame 'atualizar_oportunidade'.`,
       );
 
       if (agent.pipeline_id) {
@@ -555,7 +669,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           .from("pipeline_stages")
           .select("id, name")
           .eq("pipeline_id", agent.pipeline_id)
-          .order("order_index");
+          .order("order", { ascending: true });
         if (stages && stages.length > 0) {
           const stagesList = stages.map((s) => `- ${s.name} (ID: ${s.id})`).join("\n");
           systemPromptParts.push(`ETAPAS DO FUNIL DESTE AGENTE:\n${stagesList}`);
@@ -563,16 +677,22 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
         const { data: opps } = await supabaseAdmin
           .from("opportunities")
-          .select("id, title, value, stage_id")
-          .eq("contact_id", conv.contact_id);
+          .select("id, title, value, stage_id, pipeline_stages(name)")
+          .eq("contact_id", conv.contact_id)
+          .eq("status", "open");
         if (opps && opps.length > 0) {
           const oppsList = opps
-            .map(
-              (o) => `- Oportunidade ID: ${o.id} | Título: ${o.title} | Etapa Atual: ${o.stage_id}`,
-            )
+            .map((o: any) => {
+              const stageName = o.pipeline_stages?.name || o.stage_id;
+              return `- Oportunidade ID: ${o.id} | Título: ${o.title} | Etapa Atual: ${stageName}`;
+            })
             .join("\n");
           systemPromptParts.push(
-            `OPORTUNIDADES EXISTENTES DO CLIENTE:\n${oppsList}\nSe o cliente já tiver oportunidade aberta sobre o assunto, utilize 'atualizar_oportunidade' em vez de criar uma nova.`,
+            `OPORTUNIDADE ABERTA DO CLIENTE NO CRM:\n${oppsList}\nComo o cliente já possui oportunidade aberta, utilize 'atualizar_oportunidade' para avançar a etapa no funil conforme a conversa evolui.`,
+          );
+        } else {
+          systemPromptParts.push(
+            `STATUS NO CRM: O cliente ainda NÃO possui oportunidade aberta. Assim que ele demonstrar interesse, pedir valores ou solicitar proposta, chame 'criar_oportunidade' imediatamente.`,
           );
         }
       }
@@ -580,11 +700,21 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
     const systemPrompt = systemPromptParts.join("\n\n");
 
-    let isInactivityClose = false;
+    const isFollowUpTrigger =
+      lastMsgInHistory?.sender_type === "system" &&
+      typeof lastMsgInHistory?.content === "string" &&
+      (lastMsgInHistory.content.includes("SYSTEM_FOLLOW_UP_1") ||
+        lastMsgInHistory.content.includes("SYSTEM_FOLLOW_UP_2") ||
+        lastMsgInHistory.content.includes("SYSTEM_FOLLOW_UP_3"));
+
+    const isInactivityClose =
+      lastMsgInHistory?.sender_type === "system" &&
+      typeof lastMsgInHistory?.content === "string" &&
+      lastMsgInHistory.content.includes("SYSTEM_RESOLVE_INACTIVE");
 
     const formattedMessages = [
       { role: "system", content: systemPrompt },
-      ...messages.map((msg) => {
+      ...messages.map((msg, idx) => {
         let content = msg.content || "";
 
         if (msg.media_type === "audio" && msg.transcription) {
@@ -603,6 +733,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         if (msg.sender_type === "system") {
           role = "user";
           content = `[MENSAGEM INTERNA DO SISTEMA]: ${content}`;
+          const isCurrentTrigger = idx === messages.length - 1;
           if (content.includes("transferido pela IA para o colega")) {
             const defaultHandoffReceive =
               "Um colega de equipe transferiu este cliente para você. Leia o histórico acima para entender o contexto e continue o atendimento a partir de agora de acordo com a sua especialidade. NÃO transfira de volta sem antes tentar ajudar o cliente.";
@@ -611,24 +742,30 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
               : defaultHandoffReceive;
             content += `\n[INSTRUÇÃO CRÍTICA]: ${inst}`;
           }
-          if (content.includes("SYSTEM_FOLLOW_UP_1")) {
-            const defaultFollowup =
-              "[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente está há muito tempo sem responder. Envie UMA mensagem curta, amigável e natural perguntando se ele conseguiu resolver a questão anterior ou se precisa de ajuda. NÃO encerre o atendimento ainda.";
-            content = agent.prompt_followup
-              ? `[INSTRUÇÃO CRÍTICA DE SISTEMA: ACOMPANHAMENTO]\n${applyVars(agent.prompt_followup)}`
-              : defaultFollowup;
-          }
-          if (content.includes("SYSTEM_FOLLOW_UP_2")) {
-            const defaultFollowup2 =
-              "[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente não respondeu ao seu primeiro follow-up. Envie um aviso amigável informando que, se não houver resposta, o atendimento será encerrado em breve. NÃO encerre o atendimento ainda.";
-            content = agent.prompt_followup
-              ? `[INSTRUÇÃO CRÍTICA DE SISTEMA: ACOMPANHAMENTO (2º AVISO)]\n${applyVars(agent.prompt_followup)}`
-              : defaultFollowup2;
-          }
-          if (content.includes("SYSTEM_RESOLVE_INACTIVE")) {
+          if (isCurrentTrigger && content.includes("SYSTEM_FOLLOW_UP_1")) {
             content =
-              "[INSTRUÇÃO CRÍTICA DE SISTEMA]: O cliente ignorou as tentativas de contato. Despeça-se cordialmente agora. O sistema finalizará o atendimento.";
-            isInactivityClose = true;
+              "[INSTRUÇÃO CRÍTICA DE SISTEMA: 1º FOLLOW-UP]\nO cliente está há algum tempo sem responder. Envie UMA mensagem curta (1 ou 2 frases curtas), super amigável e natural perguntando se ele conseguiu ver a mensagem anterior ou se precisa de ajuda. NÃO se despeça e NÃO encerre o chamado.";
+            if (agent.prompt_followup) {
+              content += `\nDIRETRIZ DA EMPRESA:\n${applyVars(agent.prompt_followup)}`;
+            }
+          }
+          if (isCurrentTrigger && content.includes("SYSTEM_FOLLOW_UP_2")) {
+            content =
+              "[INSTRUÇÃO CRÍTICA DE SISTEMA: 2º FOLLOW-UP]\nO cliente não respondeu ao primeiro lembrete. Envie uma mensagem curta e acolhedora retomando o assunto e perguntando se ficou alguma dúvida. NÃO se despeça e NÃO encerre o chamado.";
+            if (agent.prompt_followup) {
+              content += `\nDIRETRIZ DA EMPRESA:\n${applyVars(agent.prompt_followup)}`;
+            }
+          }
+          if (isCurrentTrigger && content.includes("SYSTEM_FOLLOW_UP_3")) {
+            content =
+              "[INSTRUÇÃO CRÍTICA DE SISTEMA: 3º FOLLOW-UP (ÚLTIMO AVISO)]\nEste é o último aviso de acompanhamento. Avise amigavelmente que, se não houver resposta, o atendimento precisará ser finalizado em breve para liberar a fila, mas que ficamos à disposição quando quiser retomar. NÃO encerre o chamado agora, apenas envie o aviso.";
+            if (agent.prompt_followup) {
+              content += `\nDIRETRIZ DA EMPRESA:\n${applyVars(agent.prompt_followup)}`;
+            }
+          }
+          if (isCurrentTrigger && content.includes("SYSTEM_RESOLVE_INACTIVE")) {
+            content =
+              "[INSTRUÇÃO CRÍTICA DE SISTEMA: ENCERRAMENTO POR INATIVIDADE]\nO cliente não respondeu às tentativas de contato. Despeça-se cordialmente agora. O sistema finalizará o atendimento.";
           }
         }
 
@@ -641,7 +778,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       finalModel = aiSettings.active_chatbot_model || "gpt-4o-mini";
     }
 
-    // 6. Construir Declaração Nativa de Tools (JSON Schema)
+    // 6. Construir Declaração Nativa de Tools (JSON Schema - Padrão A Jornada)
     const tools: any[] = [];
 
     if (agent.allow_handoff) {
@@ -650,26 +787,32 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         function: {
           name: "transferir_atendimento",
           description:
-            "Transfere o atendimento para a equipe ou fila humana de atendentes quando o cliente solicita ou o assunto foge do seu escopo.",
+            "Transfere o atendimento para a equipe ou fila humana de atendentes quando o cliente solicita ou o assunto foge do seu escopo. Não deixa o cliente sem resposta.",
           parameters: {
             type: "object",
             properties: {
+              aviso: {
+                type: "string",
+                description:
+                  "Mensagem acolhedora enviada ao cliente no WhatsApp avisando que ele está sendo transferido para a equipe humana. Não prometa tempo exato.",
+              },
               motivo: {
                 type: "string",
-                description: "Motivo claro e detalhado do transbordo para os atendentes.",
+                description:
+                  "Motivo claro e detalhado do transbordo gravado na nota interna para a equipe humana.",
               },
               departamento_nome_ou_id: {
                 type: "string",
                 description: "Nome ou ID do departamento de destino (opcional).",
               },
             },
-            required: ["motivo"],
+            required: ["aviso", "motivo"],
           },
         },
       });
     }
 
-    if (agent.allow_resolution) {
+    if (agent.allow_resolution && !isFollowUpTrigger) {
       tools.push({
         type: "function",
         function: {
@@ -679,12 +822,18 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           parameters: {
             type: "object",
             properties: {
+              despedida: {
+                type: "string",
+                description:
+                  "Mensagem final cordial enviada ao cliente antes de finalizar o atendimento.",
+              },
               resumo: {
                 type: "string",
-                description: "Breve resumo do que foi concluído com sucesso.",
+                description:
+                  "Breve resumo do que foi concluído com sucesso para o histórico da sessão.",
               },
             },
-            required: ["resumo"],
+            required: ["despedida", "resumo"],
           },
         },
       });
@@ -706,9 +855,14 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
                 type: "string",
                 description: "Nome ou ID do agente colega para quem transferir.",
               },
-              motivo: { type: "string", description: "Motivo da delegação para o colega." },
+              aviso: {
+                type: "string",
+                description:
+                  "Mensagem enviada ao cliente anunciando que o colega especialista vai assumir.",
+              },
+              motivo: { type: "string", description: "Motivo da delegação para a nota interna." },
             },
-            required: ["agente_nome_ou_id"],
+            required: ["agente_nome_ou_id", "aviso"],
           },
         },
       });
@@ -719,7 +873,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         type: "function",
         function: {
           name: "criar_tarefa",
-          description: "Agenda uma tarefa de follow-up ou lembrete no CRM para a equipe.",
+          description:
+            "Agenda uma tarefa de follow-up ou lembrete no CRM para a equipe. Ferramenta de bastidor.",
           parameters: {
             type: "object",
             properties: {
@@ -731,7 +886,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
               data_hora: {
                 type: "string",
                 description:
-                  "Data e horário de vencimento (ex: 'amanhã às 14h', '2026-10-15 10:00').",
+                  "Data e horário de vencimento (ex: 'amanhã às 14h', 'em 2 dias', '2026-10-15 10:00').",
               },
             },
             required: ["titulo", "data_hora"],
@@ -740,26 +895,58 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       });
     }
 
+    // Ferramenta nativa para Agendamento de Mensagens Futuras no WhatsApp
+    tools.push({
+      type: "function",
+      function: {
+        name: "agendar_mensagem",
+        description:
+          "Agenda uma mensagem para ser enviada automaticamente ao cliente no WhatsApp em uma data e horário futuros (ex: cliente pediu retorno amanhã às 10h, ou na próxima segunda-feira). Ferramenta de agendamento automático.",
+        parameters: {
+          type: "object",
+          properties: {
+            texto: {
+              type: "string",
+              description:
+                "Texto amigável, curto e natural que será enviado ao cliente no WhatsApp no horário agendado.",
+            },
+            data_hora: {
+              type: "string",
+              description:
+                "Data e horário do envio futuro (ex: 'amanhã às 10:00', 'em 2 dias às 14:00', '2026-11-10 09:30', 'segunda-feira às 11:00').",
+            },
+            motivo: {
+              type: "string",
+              description: "Motivo ou lembrete interno do agendamento (opcional).",
+            },
+          },
+          required: ["texto", "data_hora"],
+        },
+      },
+    });
+
     if (agent.allow_opportunities) {
       tools.push({
         type: "function",
         function: {
           name: "criar_oportunidade",
-          description: "Cria uma oportunidade de venda no funil do CRM para este cliente.",
+          description:
+            "Cria uma oportunidade de venda no funil do CRM para este cliente assim que ele demonstrar interesse, pedir valores ou solicitar proposta comercial. Chame simultaneamente com a sua resposta ao cliente.",
           parameters: {
             type: "object",
             properties: {
               titulo: {
                 type: "string",
-                description: "Título da oportunidade (ex: 'Interesse em Plano Premium').",
+                description: "Título da oportunidade (ex: 'Epilação a Laser - Axilas').",
               },
               valor: {
                 type: "number",
-                description: "Valor financeiro numérico estimado (ex: 1500.00).",
+                description: "Valor financeiro numérico estimado (ex: 500.00).",
               },
               etapa_nome_ou_id: {
                 type: "string",
-                description: "Nome da etapa do funil (ex: 'Qualificação', 'Proposta') ou UUID.",
+                description:
+                  "Nome da etapa do funil (ex: 'Em contato', 'Orçamento Gerado', 'Pré-Avaliação', 'Fechamento') ou UUID da etapa.",
               },
               observacoes: {
                 type: "string",
@@ -775,17 +962,23 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         type: "function",
         function: {
           name: "atualizar_oportunidade",
-          description: "Move uma oportunidade existente do cliente para outra etapa do funil.",
+          description:
+            "Move a oportunidade do cliente para a próxima etapa do funil conforme a conversa avança (ex: de 'Em contato' para 'Orçamento Gerado' ou 'Pré-Avaliação'). Chame simultaneamente com a sua resposta ao cliente.",
           parameters: {
             type: "object",
             properties: {
+              nova_etapa_nome_ou_id: {
+                type: "string",
+                description:
+                  "Nome ou ID da nova etapa no funil (ex: 'Orçamento Gerado', 'Pré-Avaliação', 'Fechamento').",
+              },
               oportunidade_id: {
                 type: "string",
                 description: "ID da oportunidade (opcional se houver apenas uma).",
               },
-              nova_etapa_nome_ou_id: {
+              observacoes: {
                 type: "string",
-                description: "Nome ou ID da nova etapa no funil.",
+                description: "Motivo ou contexto da mudança de etapa (opcional).",
               },
             },
             required: ["nova_etapa_nome_ou_id"],
@@ -836,26 +1029,36 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     const rawAiText = messageObj?.content || "";
     const toolCalls: any[] = messageObj?.tool_calls || [];
 
-    // Limpeza de assinaturas manuais e tags residuais
-    let cleanResponse = rawAiText.trim();
-    const selfSignatureMatch = cleanResponse.match(/^([A-Za-z0-9 _\-\*]+):\s*([\s\S]*)$/);
-    if (selfSignatureMatch && !selfSignatureMatch[1].toLowerCase().includes("http")) {
-      cleanResponse = selfSignatureMatch[2].trim();
-    }
+    // Limpeza de assinaturas manuais e tags residuais (Sanitizador DLP)
+    let cleanResponse = sanitizeCustomerFacingText(rawAiText);
 
     // Flags e acumuladores de ações
     let isHandoff = false;
     let handoffNote = "";
     let handoffDeptInput: string | null = null;
+    let handoffCustomerAviso: string | null = null;
 
     let isResolve = false;
     let resolveNote = "";
+    let resolveFarewell: string | null = null;
 
     let transferAgentInput: string | null = null;
+    let transferAgentAviso: string | null = null;
 
     let crmTaskData: { title: string; description: string; dueDate: string } | null = null;
-    let crmOppCreateData: { title: string; value: number; stage: string | null } | null = null;
-    let crmOppUpdateData: { oppId: string | null; stage: string } | null = null;
+    let crmOppCreateData: {
+      title: string;
+      value: number;
+      stage: string | null;
+      notes?: string | null;
+    } | null = null;
+    let crmOppUpdateData: { oppId: string | null; stage: string; notes?: string | null } | null =
+      null;
+    let scheduledMessageData: {
+      content: string;
+      dueDate: string;
+      reason?: string;
+    } | null = null;
 
     // A. Processar Native Tool Calls
     if (toolCalls && toolCalls.length > 0) {
@@ -880,28 +1083,39 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           handoffNote =
             args.motivo || "Cliente solicitou atendimento humano ou IA realizou transbordo.";
           handoffDeptInput = args.departamento_nome_ou_id || null;
+          if (args.aviso) handoffCustomerAviso = sanitizeCustomerFacingText(args.aviso);
         } else if (fnName === "encerrar_atendimento" && agent.allow_resolution) {
           isResolve = true;
           resolveNote = args.resumo || "Atendimento concluído com sucesso pela IA.";
+          if (args.despedida) resolveFarewell = sanitizeCustomerFacingText(args.despedida);
         } else if (fnName === "delegar_para_outro_agente_ia") {
           transferAgentInput = args.agente_nome_ou_id || null;
+          if (args.aviso) transferAgentAviso = sanitizeCustomerFacingText(args.aviso);
+          if (args.motivo) handoffNote = args.motivo;
         } else if (fnName === "criar_tarefa" && agent.allow_tasks) {
           crmTaskData = {
             title: args.titulo || "Acompanhamento de Atendimento",
             description: args.descricao || "",
             dueDate: args.data_hora || "",
           };
+        } else if (fnName === "agendar_mensagem") {
+          scheduledMessageData = {
+            content: args.texto || "",
+            dueDate: args.data_hora || "",
+            reason: args.motivo || "",
+          };
         } else if (fnName === "criar_oportunidade" && agent.allow_opportunities) {
           crmOppCreateData = {
             title: args.titulo || "Nova Oportunidade",
             value: parseCurrencyValue(args.valor),
-            stage: args.etapa_nome_ou_id || null,
+            stage: args.etapa_nome_ou_id || args.etapa || null,
             notes: args.observacoes ? String(args.observacoes).trim() : null,
           };
         } else if (fnName === "atualizar_oportunidade" && agent.allow_opportunities) {
           crmOppUpdateData = {
             oppId: args.oportunidade_id || null,
-            stage: args.nova_etapa_nome_ou_id || args.etapa_nome_ou_id || "",
+            stage: args.nova_etapa_nome_ou_id || args.etapa_nome_ou_id || args.nova_etapa || "",
+            notes: args.observacoes ? String(args.observacoes).trim() : null,
           };
         }
       }
@@ -915,7 +1129,6 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         handoffNote = handoffMatch[1]
           ? handoffMatch[1].trim()
           : "Cliente solicitou atendimento humano ou IA não soube responder.";
-        cleanResponse = cleanResponse.replace(/\[TRANSFERIR(?::\s*.*?)?\]/gi, "").trim();
       }
     }
 
@@ -923,7 +1136,6 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       const transferAgentMatch = cleanResponse.match(/\[TRANSFERIR_?AGENTE:\s*(.*?)\]/i);
       if (transferAgentMatch) {
         transferAgentInput = transferAgentMatch[1].trim();
-        cleanResponse = cleanResponse.replace(/\[TRANSFERIR_?AGENTE:\s*.*?\]/gi, "").trim();
       }
     }
 
@@ -935,9 +1147,19 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           description: taskMatch[2].trim(),
           dueDate: taskMatch[3].trim(),
         };
-        cleanResponse = cleanResponse
-          .replace(/\[CRIAR_TAREFA:\s*.*?\s*\|\s*.*?\s*\|\s*.*?\]/gi, "")
-          .trim();
+      }
+    }
+
+    if (!scheduledMessageData) {
+      const scheduleMatch = cleanResponse.match(
+        /\[AGENDAR_MENSAGEM:\s*(.*?)\s*\|\s*(.*?)(?:\s*\|\s*(.*?))?\]/i,
+      );
+      if (scheduleMatch) {
+        scheduledMessageData = {
+          content: scheduleMatch[1].trim(),
+          dueDate: scheduleMatch[2].trim(),
+          reason: scheduleMatch[3] ? scheduleMatch[3].trim() : "",
+        };
       }
     }
 
@@ -951,9 +1173,6 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           value: parseCurrencyValue(oppMatch[2]),
           stage: oppMatch[3].trim(),
         };
-        cleanResponse = cleanResponse
-          .replace(/\[CRIAR_OPORTUNIDADE:\s*.*?\s*\|\s*.*?\s*\|\s*.*?\]/gi, "")
-          .trim();
       }
     }
 
@@ -966,9 +1185,6 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           oppId: updateOppMatch3[1].trim(),
           stage: updateOppMatch3[3].trim(),
         };
-        cleanResponse = cleanResponse
-          .replace(/\[ATUALIZAR_OPORTUNIDADE:\s*[^\s\|]+\s*\|\s*[^\s\|]+\s*\|\s*[^\s\|\]]+\]/gi, "")
-          .trim();
       } else {
         const updateOppMatch2 = cleanResponse.match(
           /\[ATUALIZAR_OPORTUNIDADE:\s*([^\s\|]+)\s*\|\s*([^\s\|\]]+)\]/i,
@@ -978,20 +1194,27 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             oppId: updateOppMatch2[1].trim(),
             stage: updateOppMatch2[2].trim(),
           };
-          cleanResponse = cleanResponse
-            .replace(/\[ATUALIZAR_OPORTUNIDADE:\s*[^\s\|]+\s*\|\s*[^\s\|\]]+\]/gi, "")
-            .trim();
         }
       }
     }
 
-    if (!isResolve && agent.allow_resolution && !isHandoff && !transferAgentInput) {
+    if (
+      !isResolve &&
+      agent.allow_resolution &&
+      !isHandoff &&
+      !transferAgentInput &&
+      !isFollowUpTrigger
+    ) {
       const resolveMatch = cleanResponse.match(/\[ENCERRAR(?::\s*(.*?))?\]/i);
       if (resolveMatch) {
         isResolve = true;
         resolveNote = resolveMatch[1] ? resolveMatch[1].trim() : "Atendimento concluído pela IA.";
-        cleanResponse = cleanResponse.replace(/\[ENCERRAR(?::\s*.*?)?\]/gi, "").trim();
       }
+    }
+
+    // Se for trigger de follow-up (1º, 2º ou 3º aviso), NUNCA encerrar o atendimento
+    if (isFollowUpTrigger) {
+      isResolve = false;
     }
 
     // Se for encerramento por inatividade acionado pelo cron, forçar resolução garantida
@@ -1000,7 +1223,341 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       if (!resolveNote) resolveNote = "Encerrado automaticamente por inatividade do cliente.";
     }
 
-    // 8. Enviar mensagem limpa para o cliente via Plataforma
+    // Dicionário de resultados das tools executadas para alimentar Turn 2 se necessário
+    const toolExecutionResults: Record<string, any> = {};
+
+    // 8. Executar Ações de CRM (Tarefas, Criação e Atualização de Oportunidades)
+    // A. Criar Tarefa no CRM
+    if (crmTaskData && conv.contact_id) {
+      const parsedDue = parseTaskDueDate(crmTaskData.dueDate);
+      console.log(`[ai-generator] Creating task: "${crmTaskData.title}" for ${parsedDue}`);
+
+      const { data: newTask, error: taskErr } = await supabaseAdmin
+        .from("tasks")
+        .insert({
+          title: crmTaskData.title,
+          description: crmTaskData.description || null,
+          due_date: parsedDue,
+          contact_id: conv.contact_id,
+          unit_id: effectiveUnitId,
+          status: "pending",
+          priority: "medium",
+          task_type: "follow_up",
+        })
+        .select("id, title")
+        .single();
+
+      if (taskErr) {
+        console.error(`[ai-generator] Failed to create task:`, taskErr);
+        for (const call of toolCalls) {
+          if (call.function?.name === "criar_tarefa") {
+            toolExecutionResults[call.id] = { status: "error", error: taskErr.message };
+          }
+        }
+      } else {
+        await supabaseAdmin.from("messages").insert({
+          conversation_id: conversationId,
+          sender_type: "agent",
+          is_internal: true,
+          content: `📌 Tarefa criada pela IA: ${newTask.title} (Previsão: ${new Date(parsedDue).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})`,
+        });
+        for (const call of toolCalls) {
+          if (call.function?.name === "criar_tarefa") {
+            toolExecutionResults[call.id] = {
+              status: "success",
+              message: `Tarefa '${newTask.title}' criada com sucesso no CRM para ${parsedDue}.`,
+            };
+          }
+        }
+      }
+    }
+
+    // B. Criar Oportunidade no CRM (Prevenção de Duplicidade - Padrão A Jornada)
+    if (crmOppCreateData && conv.contact_id) {
+      const resolvedStage = await resolveStageId(agent.pipeline_id, crmOppCreateData.stage);
+      console.log(
+        `[ai-generator] Processing opportunity for contact ${conv.contact_id}: "${crmOppCreateData.title}" (Value: ${crmOppCreateData.value}, Stage: ${resolvedStage})`,
+      );
+
+      // Prevenção de duplicidade: verificar se já existe oportunidade aberta para este contato
+      const { data: existingOpps } = await supabaseAdmin
+        .from("opportunities")
+        .select("id, title, value, stage_id")
+        .eq("contact_id", conv.contact_id)
+        .eq("status", "open")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (existingOpps && existingOpps.length > 0) {
+        const existingOpp = existingOpps[0];
+        console.log(
+          `[ai-generator] Open opportunity already exists (${existingOpp.id}). Updating instead of creating duplicate.`,
+        );
+
+        const updatePayload: any = {};
+        if (resolvedStage && resolvedStage !== existingOpp.stage_id) {
+          updatePayload.stage_id = resolvedStage;
+        }
+        if (crmOppCreateData.value && crmOppCreateData.value > 0) {
+          updatePayload.value = crmOppCreateData.value;
+        }
+        if (crmOppCreateData.notes) {
+          updatePayload.notes = crmOppCreateData.notes;
+        }
+
+        if (Object.keys(updatePayload).length > 0) {
+          await supabaseAdmin.from("opportunities").update(updatePayload).eq("id", existingOpp.id);
+        }
+
+        await supabaseAdmin.from("messages").insert({
+          conversation_id: conversationId,
+          sender_type: "agent",
+          is_internal: true,
+          content: `🔄 Oportunidade vinculada pela IA: "${existingOpp.title}" mantida/atualizada (Valor: R$ ${(updatePayload.value ?? existingOpp.value ?? 0).toFixed(2)})`,
+        });
+
+        await supabaseAdmin.from("opportunity_history").insert({
+          opportunity_id: existingOpp.id,
+          action_type: "updated",
+          description: `Oportunidade atualizada automaticamente pelo Agente de IA (${agent.name})`,
+        });
+
+        for (const call of toolCalls) {
+          if (call.function?.name === "criar_oportunidade") {
+            toolExecutionResults[call.id] = {
+              status: "success",
+              message: `Oportunidade '${existingOpp.title}' mantida/atualizada no CRM.`,
+            };
+          }
+        }
+      } else {
+        // Criação de nova oportunidade
+        const { data: newOpp, error: oppErr } = await supabaseAdmin
+          .from("opportunities")
+          .insert({
+            title: crmOppCreateData.title,
+            value: crmOppCreateData.value,
+            contact_id: conv.contact_id,
+            unit_id: effectiveUnitId,
+            conversation_id: conversationId,
+            stage_id: resolvedStage,
+            owner_id: conv.assigned_agent_id || null,
+            status: "open",
+            notes: crmOppCreateData.notes || null,
+          })
+          .select("id, title, value")
+          .single();
+
+        if (oppErr) {
+          console.error(`[ai-generator] Failed to create opportunity:`, oppErr);
+          for (const call of toolCalls) {
+            if (call.function?.name === "criar_oportunidade") {
+              toolExecutionResults[call.id] = { status: "error", error: oppErr.message };
+            }
+          }
+        } else {
+          await supabaseAdmin.from("messages").insert({
+            conversation_id: conversationId,
+            sender_type: "agent",
+            is_internal: true,
+            content: `💰 Oportunidade criada pela IA: ${newOpp.title} (Valor: R$ ${newOpp.value.toFixed(2)})`,
+          });
+
+          await supabaseAdmin.from("opportunity_history").insert({
+            opportunity_id: newOpp.id,
+            action_type: "created",
+            description: `Oportunidade criada automaticamente pelo Agente de IA (${agent.name})`,
+          });
+
+          for (const call of toolCalls) {
+            if (call.function?.name === "criar_oportunidade") {
+              toolExecutionResults[call.id] = {
+                status: "success",
+                message: `Oportunidade '${newOpp.title}' criada com sucesso no CRM (Valor: R$ ${newOpp.value.toFixed(2)}).`,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    // C. Atualizar Oportunidade no CRM
+    if (crmOppUpdateData && conv.contact_id) {
+      let targetOppId = crmOppUpdateData.oppId;
+
+      if (!targetOppId) {
+        const { data: existingOpp } = await supabaseAdmin
+          .from("opportunities")
+          .select("id")
+          .eq("contact_id", conv.contact_id)
+          .eq("status", "open")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        targetOppId = existingOpp?.id || null;
+      }
+
+      if (targetOppId) {
+        const resolvedStage = await resolveStageId(agent.pipeline_id, crmOppUpdateData.stage);
+        if (resolvedStage) {
+          await supabaseAdmin
+            .from("opportunities")
+            .update({ stage_id: resolvedStage })
+            .eq("id", targetOppId);
+
+          const { data: stName } = await supabaseAdmin
+            .from("pipeline_stages")
+            .select("name")
+            .eq("id", resolvedStage)
+            .single();
+
+          await supabaseAdmin.from("messages").insert({
+            conversation_id: conversationId,
+            sender_type: "agent",
+            is_internal: true,
+            content: `🔄 Oportunidade atualizada pela IA (Movida para etapa: ${stName?.name || resolvedStage}).`,
+          });
+
+          await supabaseAdmin.from("opportunity_history").insert({
+            opportunity_id: targetOppId,
+            action_type: "stage_changed",
+            description: `Etapa alterada pelo Agente de IA (${agent.name}) para ${stName?.name || resolvedStage}`,
+          });
+
+          for (const call of toolCalls) {
+            if (call.function?.name === "atualizar_oportunidade") {
+              toolExecutionResults[call.id] = {
+                status: "success",
+                message: `Oportunidade movida para a etapa '${stName?.name || resolvedStage}' com sucesso.`,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    // D. Agendar Mensagem Futura
+    if (scheduledMessageData && scheduledMessageData.content && scheduledMessageData.dueDate) {
+      const parsedDue = parseTaskDueDate(scheduledMessageData.dueDate);
+      console.log(
+        `[ai-generator] Scheduling message for contact ${conv.contact_id}: "${scheduledMessageData.content.slice(0, 40)}..." at ${parsedDue}`,
+      );
+      try {
+        const scheduled = await scheduleMessage({
+          companyId: effectiveCompanyId,
+          conversationId,
+          contactId: conv.contact_id,
+          unitId: effectiveUnitId,
+          creatorType: "agent",
+          aiAgentId: agent.id,
+          content: scheduledMessageData.content,
+          scheduledAt: parsedDue,
+          metadata: {
+            reason: scheduledMessageData.reason,
+            agent_name: agent.name,
+          },
+        });
+
+        const formattedDate = new Date(parsedDue).toLocaleString("pt-BR", {
+          timeZone: "America/Sao_Paulo",
+        });
+
+        await supabaseAdmin.from("messages").insert({
+          conversation_id: conversationId,
+          sender_type: "agent",
+          is_internal: true,
+          content: `⏰ Mensagem futura agendada pela IA para ${formattedDate}: "${scheduledMessageData.content}"`,
+        });
+
+        for (const call of toolCalls) {
+          if (call.function?.name === "agendar_mensagem") {
+            toolExecutionResults[call.id] = {
+              status: "success",
+              message: `Mensagem agendada com sucesso para ${formattedDate}. ID: ${scheduled.id}`,
+            };
+          }
+        }
+      } catch (err: any) {
+        console.error(`[ai-generator] Erro ao agendar mensagem:`, err);
+        for (const call of toolCalls) {
+          if (call.function?.name === "agendar_mensagem") {
+            toolExecutionResults[call.id] = { status: "error", error: err.message };
+          }
+        }
+      }
+    }
+
+    // 9. Se o modelo chamou ferramentas de CRM mas não gerou o texto do cliente, executar Turn 2
+    if (
+      toolCalls &&
+      toolCalls.length > 0 &&
+      !isHandoff &&
+      !transferAgentInput &&
+      !isResolve &&
+      (!cleanResponse || cleanResponse.trim().length === 0)
+    ) {
+      console.log(
+        `[ai-generator] LLM called CRM tools without customer text. Executing Turn 2 for response...`,
+      );
+      const followUpMessages = [
+        ...formattedMessages,
+        messageObj,
+        ...toolCalls.map((tc) => ({
+          role: "tool" as const,
+          tool_call_id: tc.id,
+          content: JSON.stringify(
+            toolExecutionResults[tc.id] || {
+              status: "success",
+              message: "Ação de CRM concluída com sucesso.",
+            },
+          ),
+        })),
+      ];
+
+      try {
+        const followUpRes = await fetch(baseUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+            ...(provider === "openrouter" && {
+              "HTTP-Referer": "https://atendi.app",
+              "X-Title": "Atendi CRM",
+            }),
+          },
+          body: JSON.stringify({
+            model: requestBody.model,
+            messages: followUpMessages,
+            temperature: 0.7,
+            max_tokens: agent.max_tokens || 4096,
+          }),
+        });
+
+        if (followUpRes.ok) {
+          const followUpJson = await followUpRes.json();
+          const followUpRaw = followUpJson.choices?.[0]?.message?.content || "";
+          cleanResponse = sanitizeCustomerFacingText(followUpRaw);
+          console.log(`[ai-generator] Turn 2 successfully generated customer response.`);
+        } else {
+          const errBody = await followUpRes.text();
+          console.error(`[ai-generator] Turn 2 API Error (${followUpRes.status}):`, errBody);
+        }
+      } catch (fErr) {
+        console.error(`[ai-generator] Exception during Turn 2:`, fErr);
+      }
+    }
+
+    // Se a ferramenta de transição trouxe um aviso/despedida amigável e o texto principal veio vazio, aproveita o texto da ferramenta
+    if (!cleanResponse) {
+      if (handoffCustomerAviso) cleanResponse = handoffCustomerAviso;
+      else if (transferAgentAviso) cleanResponse = transferAgentAviso;
+      else if (resolveFarewell) cleanResponse = resolveFarewell;
+    }
+
+    // Sanitização final rigorosa: NENHUMA tag ou comando em colchetes chega ao WhatsApp do cliente
+    cleanResponse = sanitizeCustomerFacingText(cleanResponse);
+
+    // 10. Enviar mensagem limpa para o cliente via Plataforma
     if (cleanResponse.length > 0) {
       const finalMessageText = `*${agent.name}*:\n${cleanResponse}`;
       console.log(`[ai-generator] Sending AI response via Platform Sender...`);
@@ -1013,7 +1570,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       console.log(`[ai-generator] AI Response successfully sent to customer.`);
     }
 
-    // 9. Executar Ações de Backend Estruturadas
+    // 11. Executar Ações de Transição de Estado (Lifecycle)
 
     // A. Delegação Multi-Agente
     if (transferAgentInput) {
@@ -1098,126 +1655,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       }
     }
 
-    // B. Criar Tarefa no CRM
-    if (crmTaskData && conv.contact_id) {
-      const parsedDue = parseTaskDueDate(crmTaskData.dueDate);
-      console.log(`[ai-generator] Creating task: "${crmTaskData.title}" for ${parsedDue}`);
-
-      const { data: newTask, error: taskErr } = await supabaseAdmin
-        .from("tasks")
-        .insert({
-          title: crmTaskData.title,
-          description: crmTaskData.description || null,
-          due_date: parsedDue,
-          contact_id: conv.contact_id,
-          unit_id: effectiveUnitId,
-          status: "pending",
-          priority: "medium",
-          task_type: "follow_up",
-        })
-        .select("id, title")
-        .single();
-
-      if (taskErr) {
-        console.error(`[ai-generator] Failed to create task:`, taskErr);
-      } else {
-        await supabaseAdmin.from("messages").insert({
-          conversation_id: conversationId,
-          sender_type: "agent",
-          is_internal: true,
-          content: `📌 Tarefa criada pela IA: ${newTask.title} (Previsão: ${new Date(parsedDue).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })})`,
-        });
-      }
-    }
-
-    // C. Criar Oportunidade no CRM
-    if (crmOppCreateData && conv.contact_id) {
-      const resolvedStage = await resolveStageId(agent.pipeline_id, crmOppCreateData.stage);
-      console.log(
-        `[ai-generator] Creating opportunity: "${crmOppCreateData.title}" (Value: ${crmOppCreateData.value}, Stage: ${resolvedStage})`,
-      );
-
-      const { data: newOpp, error: oppErr } = await supabaseAdmin
-        .from("opportunities")
-        .insert({
-          title: crmOppCreateData.title,
-          value: crmOppCreateData.value,
-          contact_id: conv.contact_id,
-          unit_id: effectiveUnitId,
-          conversation_id: conversationId,
-          stage_id: resolvedStage,
-          owner_id: conv.assigned_agent_id || null,
-          status: "open",
-          notes: crmOppCreateData.notes || null,
-        })
-        .select("id, title, value")
-        .single();
-
-      if (oppErr) {
-        console.error(`[ai-generator] Failed to create opportunity:`, oppErr);
-      } else {
-        await supabaseAdmin.from("messages").insert({
-          conversation_id: conversationId,
-          sender_type: "agent",
-          is_internal: true,
-          content: `💰 Oportunidade criada pela IA: ${newOpp.title} (Valor: R$ ${newOpp.value.toFixed(2)})`,
-        });
-
-        await supabaseAdmin.from("opportunity_history").insert({
-          opportunity_id: newOpp.id,
-          action_type: "created",
-          description: `Oportunidade criada automaticamente pelo Agente de IA (${agent.name})`,
-        });
-      }
-    }
-
-    // D. Atualizar Oportunidade no CRM
-    if (crmOppUpdateData && conv.contact_id) {
-      let targetOppId = crmOppUpdateData.oppId;
-
-      if (!targetOppId) {
-        const { data: existingOpp } = await supabaseAdmin
-          .from("opportunities")
-          .select("id")
-          .eq("contact_id", conv.contact_id)
-          .eq("status", "open")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        targetOppId = existingOpp?.id || null;
-      }
-
-      if (targetOppId) {
-        const resolvedStage = await resolveStageId(agent.pipeline_id, crmOppUpdateData.stage);
-        if (resolvedStage) {
-          await supabaseAdmin
-            .from("opportunities")
-            .update({ stage_id: resolvedStage })
-            .eq("id", targetOppId);
-
-          const { data: stName } = await supabaseAdmin
-            .from("pipeline_stages")
-            .select("name")
-            .eq("id", resolvedStage)
-            .single();
-
-          await supabaseAdmin.from("messages").insert({
-            conversation_id: conversationId,
-            sender_type: "agent",
-            is_internal: true,
-            content: `🔄 Oportunidade atualizada pela IA (Movida para etapa: ${stName?.name || resolvedStage}).`,
-          });
-
-          await supabaseAdmin.from("opportunity_history").insert({
-            opportunity_id: targetOppId,
-            action_type: "stage_changed",
-            description: `Etapa alterada pelo Agente de IA (${agent.name}) para ${stName?.name || resolvedStage}`,
-          });
-        }
-      }
-    }
-
-    // E. Executar Transbordo Humano (Handoff)
+    // B. Executar Transbordo Humano (Handoff)
     if (isHandoff) {
       console.log(`[ai-generator] Executing human handoff for conversation ${conversationId}`);
 
@@ -1311,13 +1749,35 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
       const sessionId = conv.current_session_id;
 
+      // Se foi encerramento por inatividade acionado pelo cron, inicializa a Cadência de Reengajamento (D+1)
+      let cadenceNextAt: string | null = null;
+      let cadenceStep = 0;
+
+      if (isInactivityClose && (agent as any).allow_cadence !== false) {
+        // Disparo D+1 em 24h, ajustado para horário comercial (10h da manhã)
+        const nextDate = new Date();
+        nextDate.setDate(nextDate.getDate() + 1);
+        nextDate.setHours(10, 0, 0, 0);
+        // Se cair no domingo (0), joga para segunda-feira
+        if (nextDate.getDay() === 0) {
+          nextDate.setDate(nextDate.getDate() + 1);
+        }
+        cadenceNextAt = nextDate.toISOString();
+        cadenceStep = 0; // Passo 0 concluído (sessão finalizada); próximo passo é o 1 (D+1)
+        console.log(
+          `[ai-generator] Inactivity closure: Cadence scheduled for D+1 at ${cadenceNextAt}`,
+        );
+      }
+
       await supabaseAdmin
         .from("conversations")
         .update({
           status: "resolved",
           resolved_at: new Date().toISOString(),
           current_session_id: null,
-        })
+          cadence_step: cadenceStep,
+          cadence_next_at: cadenceNextAt,
+        } as any)
         .eq("id", conversationId);
 
       if (sessionId) {

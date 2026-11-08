@@ -1169,6 +1169,8 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         };
         if (!isFromMe) {
           updatePayload.ai_followup_count = 0;
+          updatePayload.cadence_step = 0;
+          updatePayload.cadence_next_at = null;
           updatePayload.unread_count = (conv.unread_count || 0) + 1;
         }
 

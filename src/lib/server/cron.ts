@@ -39,8 +39,19 @@ export async function handleCronFollowUps(request: Request): Promise<Response> {
   return runCronFollowUps();
 }
 
+let isCronFollowUpsRunning = false;
+
 /** O trabalho do cron, sem autenticação: chamado pela rota acima e pelo intervalo do server.ts. */
 export async function runCronFollowUps(): Promise<Response> {
+  if (isCronFollowUpsRunning) {
+    console.log("[cron] Follow-up scan already in progress. Skipping concurrent run.");
+    return new Response(JSON.stringify({ status: "skipped", reason: "already_running" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  isCronFollowUpsRunning = true;
+
   try {
     // Auto-expire calls stuck in ACTIVE or RINGING for more than 5 minutes
     try {
@@ -84,6 +95,22 @@ export async function runCronFollowUps(): Promise<Response> {
       await runTodooAutoSend();
     } catch (autoEx) {
       console.error("[cron] Exception during Todoo auto send:", autoEx);
+    }
+
+    // Processamento de Mensagens Agendadas (Usuários Humanos e IA)
+    try {
+      const { processScheduledMessages } = await import("./scheduled-messages");
+      await processScheduledMessages();
+    } catch (schedEx) {
+      console.error("[cron] Exception during processScheduledMessages:", schedEx);
+    }
+
+    // Processamento da Cadência de Reengajamento a Longo Prazo (D+1, D+3, D+7, D+15, D+30)
+    try {
+      const { processCadenceQueue } = await import("./cadence");
+      await processCadenceQueue();
+    } catch (cadenceEx) {
+      console.error("[cron] Exception during processCadenceQueue:", cadenceEx);
     }
 
     console.log("[cron] Starting follow-up scan...");
@@ -159,33 +186,52 @@ export async function runCronFollowUps(): Promise<Response> {
       const timeSinceClientMsg = now - baselineTime;
 
       if (timeSinceClientMsg >= timeoutMs) {
-        const currentCount = conv.ai_followup_count || 0;
+        const lastFollowupAt = (conv as any).ai_last_followup_at
+          ? new Date((conv as any).ai_last_followup_at).getTime()
+          : null;
+        const lastContactAt = lastContactMsg ? new Date(lastContactMsg.created_at).getTime() : 0;
+
+        // Se o cliente respondeu APÓS o último follow-up enviado, o contador de follow-up DEVE ser zerado!
+        let currentCount = conv.ai_followup_count || 0;
+        if (lastFollowupAt && lastContactAt > lastFollowupAt) {
+          currentCount = 0;
+          await supabaseAdmin
+            .from("conversations")
+            .update({ ai_followup_count: 0, ai_last_followup_at: null } as any)
+            .eq("id", conv.id);
+        }
 
         // ✅ FIX 2: Also enforce interval between follow-up attempts.
         // After sending follow-up 1, the next cron run (1 min later) must NOT immediately
         // fire follow-up 2 — it should wait another full interval since the last follow-up sent.
-        const lastFollowupAt = (conv as any).ai_last_followup_at
-          ? new Date((conv as any).ai_last_followup_at).getTime()
-          : null;
-
-        // If a follow-up was already sent, require another full interval before the next one
-        if (lastFollowupAt && now - lastFollowupAt < timeoutMs) {
+        if (lastFollowupAt && now - lastFollowupAt < timeoutMs && currentCount > 0) {
           console.log(
             `[cron] Skipping conv ${conv.id} — waiting for next interval (${Math.round((timeoutMs - (now - lastFollowupAt)) / 60000)}min remaining)`,
           );
           continue;
         }
 
+        // Prevenção estrita contra duplicidade de disparos de sistema concorrentes
+        const { data: recentSystemMsg } = await supabaseAdmin
+          .from("messages")
+          .select("id")
+          .eq("conversation_id", conv.id)
+          .eq("sender_type", "system")
+          .gte("created_at", new Date(now - 3 * 60 * 1000).toISOString())
+          .ilike("content", "%SYSTEM_%")
+          .limit(1);
+
+        if (recentSystemMsg && recentSystemMsg.length > 0) {
+          console.log(
+            `[cron] System message already dispatched recently for conv ${conv.id}. Skipping duplicate.`,
+          );
+          continue;
+        }
+
         let systemInstruction = null;
 
-        if (currentCount === 0) {
-          systemInstruction = "SYSTEM_FOLLOW_UP_1";
-          await supabaseAdmin
-            .from("conversations")
-            .update({ ai_followup_count: 1, ai_last_followup_at: new Date().toISOString() } as any)
-            .eq("id", conv.id);
-        } else if (currentCount > 0 && currentCount < maxAttempts) {
-          systemInstruction = "SYSTEM_FOLLOW_UP_2";
+        if (currentCount >= maxAttempts) {
+          systemInstruction = "SYSTEM_RESOLVE_INACTIVE";
           await supabaseAdmin
             .from("conversations")
             .update({
@@ -193,12 +239,27 @@ export async function runCronFollowUps(): Promise<Response> {
               ai_last_followup_at: new Date().toISOString(),
             } as any)
             .eq("id", conv.id);
-        } else if (currentCount >= maxAttempts) {
-          systemInstruction = "SYSTEM_RESOLVE_INACTIVE";
+        } else if (currentCount === 0) {
+          systemInstruction = "SYSTEM_FOLLOW_UP_1";
+          await supabaseAdmin
+            .from("conversations")
+            .update({ ai_followup_count: 1, ai_last_followup_at: new Date().toISOString() } as any)
+            .eq("id", conv.id);
+        } else if (currentCount === 1) {
+          systemInstruction = "SYSTEM_FOLLOW_UP_2";
           await supabaseAdmin
             .from("conversations")
             .update({
-              ai_followup_count: currentCount + 1,
+              ai_followup_count: 2,
+              ai_last_followup_at: new Date().toISOString(),
+            } as any)
+            .eq("id", conv.id);
+        } else if (currentCount === 2) {
+          systemInstruction = "SYSTEM_FOLLOW_UP_3";
+          await supabaseAdmin
+            .from("conversations")
+            .update({
+              ai_followup_count: 3,
               ai_last_followup_at: new Date().toISOString(),
             } as any)
             .eq("id", conv.id);
@@ -238,6 +299,8 @@ export async function runCronFollowUps(): Promise<Response> {
   } catch (err) {
     console.error("[cron] Fatal error:", err);
     return new Response(JSON.stringify({ error: "Internal error" }), { status: 500 });
+  } finally {
+    isCronFollowUpsRunning = false;
   }
 }
 
@@ -259,7 +322,9 @@ export async function handleCronTodooCadence(): Promise<void> {
     return;
   }
   if (data && (data.recycled > 0 || data.breached > 0)) {
-    console.log(`[cron] Todoo cadence: ${data.recycled} reciclados, ${data.breached} atrasados (${data.companies} empresas)`);
+    console.log(
+      `[cron] Todoo cadence: ${data.recycled} reciclados, ${data.breached} atrasados (${data.companies} empresas)`,
+    );
   }
 }
 

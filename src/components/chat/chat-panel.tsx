@@ -32,6 +32,9 @@ import {
   ChevronRight,
   Zap,
   Play,
+  CalendarClock,
+  MessageSquare,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
@@ -53,7 +56,9 @@ import {
   salesCoachSuggestAction,
   resolveConversationAction,
   assignConversationAction,
+  listScheduledMessagesAction,
 } from "@/lib/api/chat.functions";
+import { ScheduledMessagesDialog } from "./scheduled-messages-dialog";
 
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
@@ -176,7 +181,38 @@ export function ChatPanel({
   const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
   const [isCoaching, setIsCoaching] = useState(false);
   const [isPlaybookSheetOpen, setIsPlaybookSheetOpen] = useState(false);
+  const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [editingMessage, setEditingMessage] = useState<MessageRow | null>(null);
+
+  // Consulta de mensagens agendadas para esta conversa
+  const { data: scheduledList = [] } = useQuery({
+    queryKey: ["scheduled-messages", conv.id],
+    queryFn: async () => {
+      const res = await listScheduledMessagesAction({ data: { conversationId: conv.id } });
+      return res.list || [];
+    },
+    refetchInterval: 10000,
+  });
+
+  const pendingScheduled = (
+    scheduledList as Array<{
+      id: string;
+      status: string;
+      scheduled_at: string;
+      content: string;
+      creator_type: string;
+    }>
+  ).filter((m) => m.status === "pending");
+  const pendingScheduledCount = pendingScheduled.length;
+  const firstScheduled = pendingScheduled[0];
+  const firstScheduledText = firstScheduled
+    ? new Date(firstScheduled.scheduled_at).toLocaleString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const isInitialLoadRef = useRef(true);
@@ -2141,6 +2177,182 @@ export function ChatPanel({
             </div>
           )}
 
+          {pendingScheduledCount > 0 && (
+            <div
+              onClick={() => setIsScheduleDialogOpen(true)}
+              className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-xs text-primary cursor-pointer hover:bg-primary/15 transition-colors"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <CalendarClock className="h-4 w-4 shrink-0 text-primary animate-pulse" />
+                <span className="font-medium truncate">
+                  {pendingScheduledCount === 1
+                    ? `1 mensagem agendada para ${firstScheduledText}`
+                    : `${pendingScheduledCount} mensagens agendadas para esta conversa`}
+                </span>
+              </div>
+              <span className="text-[11px] underline font-semibold shrink-0">Ver / Cancelar</span>
+            </div>
+          )}
+
+          {/* Micro-toolbar superior: Modo (Mensagem vs Nota Interna) e Ferramentas (Playbook, Agendar, Coach, IA) */}
+          {!isRecording && (
+            <div className="flex items-center justify-between gap-2 px-1 text-xs select-none">
+              {/* Seletor de Modo: Mensagem vs Nota Interna */}
+              <div className="flex items-center bg-muted/60 p-0.5 rounded-lg border border-border/50 text-[11px] font-medium shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isAdminNoteMode) setIsInternalNote(false);
+                  }}
+                  disabled={isAdminNoteMode}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all cursor-pointer",
+                    !isInternalNote && !isAdminNoteMode
+                      ? "bg-background text-foreground shadow-2xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground",
+                    isAdminNoteMode && "opacity-50 cursor-not-allowed",
+                  )}
+                  title="Mensagem pública enviada ao cliente"
+                >
+                  <MessageSquare className="h-3.5 w-3.5 text-primary" />
+                  <span>Mensagem</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isAdminNoteMode) setIsInternalNote(true);
+                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-all cursor-pointer",
+                    isInternalNote || isAdminNoteMode
+                      ? "bg-amber-500 text-amber-950 font-semibold shadow-2xs"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  title="Nota interna visível apenas para a equipe"
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                  <span>Nota Interna</span>
+                </button>
+              </div>
+
+              {/* Ferramentas de Apoio & Produtividade */}
+              <div className="flex items-center gap-1.5 shrink-0 overflow-x-auto no-scrollbar">
+                {/* Corrigir com IA (visível quando há texto) */}
+                {text.trim().length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => fixTextMutation.mutate(text)}
+                    disabled={fixTextMutation.isPending}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-sky-600 dark:text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 transition-colors cursor-pointer"
+                    title="Corrigir e aprimorar texto com IA"
+                  >
+                    {fixTextMutation.isPending ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
+                    <span className="hidden sm:inline">Melhorar</span>
+                  </button>
+                )}
+
+                {/* Sales Coach */}
+                {showCoach && (
+                  <button
+                    type="button"
+                    disabled={isCoaching}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (isCoaching) return;
+                      setIsCoaching(true);
+                      try {
+                        toast.loading("Sales Coach analisando a conversa...", {
+                          id: "coach",
+                        });
+                        await salesCoachAction({ data: { conversationId: conv.id } });
+                        const res = await salesCoachSuggestAction({
+                          data: { conversationId: conv.id },
+                        });
+                        if (res?.success && res.text) {
+                          await send.mutateAsync({
+                            content: `🤖 **Guia Tático do Coach**\n\n${res.text}`,
+                            isInternal: true,
+                          });
+                          toast.success("Guia Tático adicionado às notas internas!", {
+                            id: "coach",
+                          });
+                        } else {
+                          toast.dismiss("coach");
+                        }
+                      } catch (err: any) {
+                        toast.error(err.message || "Falha ao gerar análise", { id: "coach" });
+                      } finally {
+                        setIsCoaching(false);
+                      }
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                    title="Sales Coach (Analisar com IA)"
+                  >
+                    {isCoaching ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Bot className="h-3 w-3" />
+                    )}
+                    <span className="hidden md:inline">Coach</span>
+                  </button>
+                )}
+
+                {/* Playbook Comercial */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsPlaybookSheetOpen(true);
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition-colors cursor-pointer"
+                  title="Playbook Comercial (Procedimentos e Scripts)"
+                >
+                  <BookOpen className="h-3 w-3" />
+                  <span className="hidden sm:inline">Playbook</span>
+                </button>
+
+                {/* Agendar Mensagem */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsScheduleDialogOpen(true);
+                  }}
+                  className={cn(
+                    "flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors cursor-pointer relative",
+                    pendingScheduledCount > 0
+                      ? "text-primary bg-primary/15 hover:bg-primary/25 border-primary/30 font-semibold"
+                      : "text-muted-foreground hover:text-foreground bg-muted/40 hover:bg-muted/80 border-border/50",
+                  )}
+                  title="Agendar Mensagem no WhatsApp"
+                >
+                  <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                  <span className="hidden sm:inline">Agendar</span>
+                  {pendingScheduledCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-primary text-primary-foreground text-[10px] font-bold">
+                      {pendingScheduledCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <PlaybookSheet
+            isOpen={isPlaybookSheetOpen}
+            onClose={() => setIsPlaybookSheetOpen(false)}
+            companyId={activeCompanyId || ""}
+            onInsertText={(content) => {
+              setText((prev) => prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + content);
+              setTimeout(() => document.getElementById("chat-input")?.focus(), 100);
+            }}
+          />
+
           <div className="flex items-end gap-2">
             {!isRecording ? (
               <>
@@ -2158,9 +2370,9 @@ export function ChatPanel({
                       id="chat-composer-container"
                       onPaste={handlePaste}
                       className={cn(
-                        "flex-1 flex items-end bg-muted/50 rounded-3xl border border-transparent shadow-sm px-1 py-1 focus-within:border-border transition-colors",
+                        "flex-1 flex items-end bg-muted/50 rounded-2xl sm:rounded-3xl border border-transparent shadow-2xs px-1.5 py-1 focus-within:border-border/80 focus-within:bg-background transition-all",
                         isInternalNote &&
-                          "bg-amber-100/50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50",
+                          "bg-amber-100/60 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800/60 focus-within:border-amber-400 dark:focus-within:border-amber-700",
                       )}
                     >
                       {/* Left Side: Emoji & Figurinhas */}
@@ -2170,7 +2382,7 @@ export function ChatPanel({
                             className="rounded-full p-2.5 text-muted-foreground hover:text-foreground mb-0.5 shrink-0 transition-colors"
                             title="Emojis e Figurinhas"
                           >
-                            <Smile className="h-6 w-6" />
+                            <Smile className="h-5 w-5" />
                           </button>
                         </PopoverTrigger>
                         <PopoverContent
@@ -2198,76 +2410,6 @@ export function ChatPanel({
                           />
                         </PopoverContent>
                       </Popover>
-
-                      {/* Left Side: Sales Coach */}
-                      {showCoach && (
-                        <button
-                          className="rounded-full p-2.5 text-amber-500 hover:text-amber-600 mb-0.5 shrink-0 transition-colors bg-amber-500/10 hover:bg-amber-500/20"
-                          title="Sales Coach (Analisar com IA)"
-                          disabled={isCoaching}
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (isCoaching) return;
-                            setIsCoaching(true);
-                            try {
-                              toast.loading("Sales Coach analisando a conversa...", {
-                                id: "coach",
-                              });
-                              await salesCoachAction({ data: { conversationId: conv.id } });
-                              const res = await salesCoachSuggestAction({
-                                data: { conversationId: conv.id },
-                              });
-                              if (res?.success && res.text) {
-                                await send.mutateAsync({
-                                  content: `🤖 **Guia Tático do Coach**\n\n${res.text}`,
-                                  isInternal: true,
-                                });
-                                toast.success("Guia Tático adicionado às notas internas!", {
-                                  id: "coach",
-                                });
-                              } else {
-                                toast.dismiss("coach");
-                              }
-                            } catch (err: any) {
-                              toast.error(err.message || "Falha ao gerar análise", { id: "coach" });
-                            } finally {
-                              setIsCoaching(false);
-                            }
-                          }}
-                        >
-                          {isCoaching ? (
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                          ) : (
-                            <Bot className="h-5 w-5" />
-                          )}
-                        </button>
-                      )}
-
-                      {/* Left Side: Playbook */}
-                      <button
-                        type="button"
-                        className="rounded-full p-2.5 text-emerald-600 hover:text-emerald-700 mb-0.5 shrink-0 transition-colors bg-emerald-500/10 hover:bg-emerald-500/20"
-                        title="Playbook Comercial (Procedimentos e Scripts)"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsPlaybookSheetOpen(true);
-                        }}
-                      >
-                        <BookOpen className="h-5 w-5" />
-                      </button>
-
-                      <PlaybookSheet
-                        isOpen={isPlaybookSheetOpen}
-                        onClose={() => setIsPlaybookSheetOpen(false)}
-                        companyId={activeCompanyId || ""}
-                        onInsertText={(content) => {
-                          setText(
-                            (prev) =>
-                              prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + content,
-                          );
-                          setTimeout(() => document.getElementById("chat-input")?.focus(), 100);
-                        }}
-                      />
 
                       {/* Text Input */}
                       <TextareaAutosize
@@ -2323,15 +2465,15 @@ export function ChatPanel({
                           isAdminNoteMode
                             ? "Adicionar nota interna como administrador..."
                             : isInternalNote
-                              ? "Adicionar nota interna..."
-                              : "Mensagem"
+                              ? "Adicionar nota interna (visível apenas para a equipe)..."
+                              : "Mensagem (ou digite / para atalhos)..."
                         }
                         minRows={1}
                         maxRows={6}
                         className={cn(
-                          "flex-1 w-full bg-transparent px-1 py-2.5 pb-2.5 text-[15px] placeholder:text-muted-foreground focus-visible:outline-none resize-none leading-relaxed",
+                          "flex-1 w-full bg-transparent px-2 py-2.5 pb-2.5 text-[15px] placeholder:text-muted-foreground focus-visible:outline-none resize-none leading-relaxed",
                           isInternalNote &&
-                            "placeholder:text-amber-700/50 dark:placeholder:text-amber-400/50",
+                            "placeholder:text-amber-700/60 dark:placeholder:text-amber-400/60 text-amber-950 dark:text-amber-100",
                         )}
                       />
 
@@ -2379,7 +2521,7 @@ export function ChatPanel({
                             }}
                           >
                             <MessageSquarePlus className="mr-2 h-4 w-4 text-violet-500" />
-                            Mensagens Rápidas
+                            Mensagens Rápidas (/)
                           </DropdownMenuItem>
 
                           {conv.channel === "whatsapp" && !isAdminNoteMode && (
@@ -2403,8 +2545,8 @@ export function ChatPanel({
                             {isAdminNoteMode
                               ? "Nota Interna (Obrigatória)"
                               : isInternalNote
-                                ? "Desativar Nota Interna"
-                                : "Nota Interna"}
+                                ? "Mudar para Mensagem"
+                                : "Mudar para Nota Interna"}
                           </DropdownMenuItem>
 
                           <DropdownMenuItem
@@ -2759,6 +2901,16 @@ export function ChatPanel({
           isSending={send.isPending}
         />
       )}
+
+      <ScheduledMessagesDialog
+        open={isScheduleDialogOpen}
+        onOpenChange={setIsScheduleDialogOpen}
+        conversationId={conv.id}
+        initialText={text}
+        onScheduled={() => {
+          setText("");
+        }}
+      />
     </div>
   );
 }

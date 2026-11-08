@@ -194,6 +194,7 @@ export function SystemMessageBubble({ m }: { m: MessageRow }) {
   const SYSTEM_LABELS: Record<string, string> = {
     SYSTEM_FOLLOW_UP_1: "🤖 IA enviou follow-up automático (1º aviso)",
     SYSTEM_FOLLOW_UP_2: "🤖 IA enviou follow-up automático (2º aviso)",
+    SYSTEM_FOLLOW_UP_3: "🤖 IA enviou follow-up automático (3º aviso final)",
     SYSTEM_RESOLVE_INACTIVE: "🤖 IA encerrou por inatividade do cliente",
   };
   const rawContent = m.content || "";

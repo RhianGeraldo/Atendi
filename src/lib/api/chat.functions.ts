@@ -82,9 +82,9 @@ async function resolveWhatsAppChatJid({
     Boolean(remoteId && remoteId.includes("@g.us")) ||
     Boolean(
       rawPhone &&
-        (rawPhone.includes("@g.us") ||
-          rawPhone.startsWith("120363") ||
-          (rawPhone.includes("-") && rawPhone.length > 18)),
+      (rawPhone.includes("@g.us") ||
+        rawPhone.startsWith("120363") ||
+        (rawPhone.includes("-") && rawPhone.length > 18)),
     );
 
   if (isGroup) {
@@ -191,7 +191,10 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     z.object({
       conversationId: z.string().uuid(),
       text: z.string().optional(),
-      mediaType: z.enum(["text", "image", "video", "audio", "document", "sticker"]).optional().default("text"),
+      mediaType: z
+        .enum(["text", "image", "video", "audio", "document", "sticker"])
+        .optional()
+        .default("text"),
       mediaBase64: z.string().optional(),
       quotedMessageId: z.string().optional(),
       quotedParticipant: z.string().optional(),
@@ -245,37 +248,27 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     }
 
     const userProfile = profileRes.data;
-    const isAdmin =
-      userProfile?.role === "admin_company" ||
-      userProfile?.role === "super_admin";
+    const isAdmin = userProfile?.role === "admin_company" || userProfile?.role === "super_admin";
 
     const isGroupConv =
       conv.channel === "whatsapp_group" ||
       Boolean(conv.remote_id && conv.remote_id.includes("@g.us")) ||
       Boolean(
         conv.contacts?.phone &&
-          (conv.contacts.phone.startsWith("120363") ||
-            conv.contacts.phone.includes("@g.us") ||
-            (conv.contacts.phone.includes("-") && conv.contacts.phone.length > 18)),
+        (conv.contacts.phone.startsWith("120363") ||
+          conv.contacts.phone.includes("@g.us") ||
+          (conv.contacts.phone.includes("-") && conv.contacts.phone.length > 18)),
       );
 
     if (!data.isInternal && !isGroupConv) {
-      if (
-        conv.status === "active" &&
-        conv.assigned_agent_id &&
-        conv.assigned_agent_id !== userId
-      ) {
+      if (conv.status === "active" && conv.assigned_agent_id && conv.assigned_agent_id !== userId) {
         throw new Error(
           "Esta conversa está em atendimento por outro atendente. Assuma o atendimento antes de enviar mensagens.",
         );
       }
     } else {
       // Se for nota interna em conversa já atribuída a outro atendente, apenas administradores ou o próprio atendente podem registrar
-      if (
-        conv.assigned_agent_id &&
-        conv.assigned_agent_id !== userId &&
-        !isAdmin
-      ) {
+      if (conv.assigned_agent_id && conv.assigned_agent_id !== userId && !isAdmin) {
         throw new Error(
           "Apenas administradores ou o atendente responsável podem adicionar notas internas nesta conversa.",
         );
@@ -577,7 +570,10 @@ export const sendMessageAction = createServerFn({ method: "POST" })
             igsid: phone,
           });
           if (!retomada.ok) {
-            console.error("[chat.functions] Instagram: falha ao retomar a conversa:", retomada.erro);
+            console.error(
+              "[chat.functions] Instagram: falha ao retomar a conversa:",
+              retomada.erro,
+            );
             throw new Error(MENSAGEM_SEM_DONO_DA_CONVERSA);
           }
           igRes = await fetch(endpoint, {
@@ -830,7 +826,10 @@ export const sendMessageAction = createServerFn({ method: "POST" })
 
     // Fallback: se o banco ainda não tiver o enum 'sticker' aplicado na migration, grava como image com flag is_sticker
     if (msgRes.error && insertPayload.media_type === "sticker") {
-      console.warn("Retrying message insert as image with is_sticker metadata fallback...", msgRes.error);
+      console.warn(
+        "Retrying message insert as image with is_sticker metadata fallback...",
+        msgRes.error,
+      );
       insertPayload.media_type = "image";
       insertPayload.metadata = { ...(insertPayload.metadata || {}), is_sticker: true };
       if (!insertPayload.content) insertPayload.content = "🖼️ Figurinha";
@@ -1718,8 +1717,16 @@ export const transferConversationAction = createServerFn({ method: "POST" })
       });
     } else {
       const [{ data: targetDept }, { data: convScope }] = await Promise.all([
-        supabaseAdmin.from("departments").select("company_id").eq("id", data.targetId).maybeSingle(),
-        supabaseAdmin.from("conversations").select("company_id").eq("id", data.conversationId).maybeSingle(),
+        supabaseAdmin
+          .from("departments")
+          .select("company_id")
+          .eq("id", data.targetId)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("conversations")
+          .select("company_id")
+          .eq("id", data.conversationId)
+          .maybeSingle(),
       ]);
       if (!targetDept || targetDept.company_id !== (convScope as any)?.company_id) {
         throw new Error("Departamento de destino inválido.");
@@ -2096,8 +2103,12 @@ export async function syncContactProfile(contactId: string, whatsappInstanceId?:
       cleanPhone.startsWith("120363") ||
       (cleanPhone.includes("-") && cleanPhone.length > 14);
     const jid = isGroupPhone
-      ? (contact.phone.includes("@g.us") ? contact.phone : `${cleanPhone}@g.us`)
-      : (contact.phone.includes("@") ? contact.phone : `${cleanPhone}@s.whatsapp.net`);
+      ? contact.phone.includes("@g.us")
+        ? contact.phone
+        : `${cleanPhone}@g.us`
+      : contact.phone.includes("@")
+        ? contact.phone
+        : `${cleanPhone}@s.whatsapp.net`;
 
     if (isGroupPhone) {
       try {
@@ -3507,7 +3518,8 @@ export const getWhatsAppGroupDetailsAction = createServerFn({ method: "POST" })
     // 1. Fetch conversation and contact
     const { data: conv, error: convError } = await supabaseAdmin
       .from("conversations")
-      .select(`
+      .select(
+        `
         id,
         company_id,
         unit_id,
@@ -3521,7 +3533,8 @@ export const getWhatsAppGroupDetailsAction = createServerFn({ method: "POST" })
           phone,
           profile_picture_url
         )
-      `)
+      `,
+      )
       .eq("id", data.conversationId)
       .single();
 
@@ -3585,7 +3598,10 @@ export const getWhatsAppGroupDetailsAction = createServerFn({ method: "POST" })
         rawGroupData = res?.data || res;
       }
     } catch (apiErr: any) {
-      console.error("[getWhatsAppGroupDetailsAction] Falha ao consultar info do grupo na API:", apiErr);
+      console.error(
+        "[getWhatsAppGroupDetailsAction] Falha ao consultar info do grupo na API:",
+        apiErr,
+      );
       throw new Error(apiErr.message || "Erro ao consultar informações do grupo no WhatsApp.");
     }
 
@@ -3596,11 +3612,7 @@ export const getWhatsAppGroupDetailsAction = createServerFn({ method: "POST" })
       rawGroupData?.subject ||
       conv.contacts?.name ||
       "Grupo do WhatsApp";
-    const groupTopic =
-      rawGroupData?.Topic ||
-      rawGroupData?.topic ||
-      rawGroupData?.desc ||
-      "";
+    const groupTopic = rawGroupData?.Topic || rawGroupData?.topic || rawGroupData?.desc || "";
     const ownerPn = rawGroupData?.OwnerPN || rawGroupData?.owner || "";
     const ownerJid = rawGroupData?.OwnerJID || rawGroupData?.ownerJid || "";
     const isAnnounce = Boolean(rawGroupData?.IsAnnounce || rawGroupData?.announce);
@@ -3699,7 +3711,10 @@ export const getWhatsAppGroupDetailsAction = createServerFn({ method: "POST" })
           }
         }
       } catch (lidErr) {
-        console.warn("[getWhatsAppGroupDetailsAction] Falha ao consultar whatsapp_lid_map:", lidErr);
+        console.warn(
+          "[getWhatsAppGroupDetailsAction] Falha ao consultar whatsapp_lid_map:",
+          lidErr,
+        );
       }
     }
 
@@ -3712,7 +3727,12 @@ export const getWhatsAppGroupDetailsAction = createServerFn({ method: "POST" })
     }
 
     const allSearchVariants = Array.from(phoneVariantToClean.keys());
-    let dbContacts: { id: string; name: string; phone: string; profile_picture_url: string | null }[] = [];
+    let dbContacts: {
+      id: string;
+      name: string;
+      phone: string;
+      profile_picture_url: string | null;
+    }[] = [];
 
     if (allSearchVariants.length > 0 && conv.company_id) {
       const { data: contacts } = await supabaseAdmin
@@ -3792,11 +3812,19 @@ export const getWhatsAppGroupDetailsAction = createServerFn({ method: "POST" })
     let groupAvatarUrl = conv.contacts?.profile_picture_url || null;
     try {
       if (canal.provedor === "stevo") {
-        const resAv = await getStevoAvatar({ host: canal.host, token: canal.token, number: groupJid });
+        const resAv = await getStevoAvatar({
+          host: canal.host,
+          token: canal.token,
+          number: groupJid,
+        });
         const found = resAv?.data?.url || resAv?.url || resAv?.profilePictureUrl;
         if (found) groupAvatarUrl = found;
       } else {
-        const resAv = await getEvogoAvatar({ host: canal.host, token: canal.token, number: groupJid });
+        const resAv = await getEvogoAvatar({
+          host: canal.host,
+          token: canal.token,
+          number: groupJid,
+        });
         const found = resAv?.data?.url || resAv?.url || resAv?.profilePictureUrl;
         if (found) groupAvatarUrl = found;
       }
@@ -3806,7 +3834,12 @@ export const getWhatsAppGroupDetailsAction = createServerFn({ method: "POST" })
 
     if (conv.contact_id) {
       const contactUpdates: any = {};
-      if (groupName && groupName !== "Grupo do WhatsApp" && groupName !== "Desconhecido" && conv.contacts?.name !== groupName) {
+      if (
+        groupName &&
+        groupName !== "Grupo do WhatsApp" &&
+        groupName !== "Desconhecido" &&
+        conv.contacts?.name !== groupName
+      ) {
         contactUpdates.name = groupName;
       }
       if (groupAvatarUrl && conv.contacts?.profile_picture_url !== groupAvatarUrl) {
@@ -3842,10 +3875,12 @@ export const updateWhatsAppGroupNameAction = createServerFn({ method: "POST" })
     const { userId } = context;
     const { data: conv, error: convError } = await supabaseAdmin
       .from("conversations")
-      .select(`
+      .select(
+        `
         id, company_id, unit_id, channel, whatsapp_instance_id, contact_id, remote_id,
         contacts ( id, name, phone )
-      `)
+      `,
+      )
       .eq("id", data.conversationId)
       .single();
 
@@ -3884,9 +3919,19 @@ export const updateWhatsAppGroupNameAction = createServerFn({ method: "POST" })
     }
 
     if (canal.provedor === "stevo") {
-      await updateStevoGroupName({ host: canal.host, token: canal.token, groupJid, name: data.name });
+      await updateStevoGroupName({
+        host: canal.host,
+        token: canal.token,
+        groupJid,
+        name: data.name,
+      });
     } else {
-      await updateEvogoGroupName({ host: canal.host, token: canal.token, groupJid, name: data.name });
+      await updateEvogoGroupName({
+        host: canal.host,
+        token: canal.token,
+        groupJid,
+        name: data.name,
+      });
     }
 
     if (conv.contact_id) {
@@ -3908,10 +3953,12 @@ export const updateWhatsAppGroupDescriptionAction = createServerFn({ method: "PO
     const { userId } = context;
     const { data: conv, error: convError } = await supabaseAdmin
       .from("conversations")
-      .select(`
+      .select(
+        `
         id, company_id, unit_id, channel, whatsapp_instance_id, contact_id, remote_id,
         contacts ( id, name, phone )
-      `)
+      `,
+      )
       .eq("id", data.conversationId)
       .single();
 
@@ -3950,9 +3997,19 @@ export const updateWhatsAppGroupDescriptionAction = createServerFn({ method: "PO
     }
 
     if (canal.provedor === "stevo") {
-      await updateStevoGroupDescription({ host: canal.host, token: canal.token, groupJid, description: data.description });
+      await updateStevoGroupDescription({
+        host: canal.host,
+        token: canal.token,
+        groupJid,
+        description: data.description,
+      });
     } else {
-      await updateEvogoGroupDescription({ host: canal.host, token: canal.token, groupJid, description: data.description });
+      await updateEvogoGroupDescription({
+        host: canal.host,
+        token: canal.token,
+        groupJid,
+        description: data.description,
+      });
     }
 
     return { success: true, description: data.description };
@@ -3969,10 +4026,12 @@ export const syncWhatsAppGroupPhotoAction = createServerFn({ method: "POST" })
     const { userId } = context;
     const { data: conv, error: convError } = await supabaseAdmin
       .from("conversations")
-      .select(`
+      .select(
+        `
         id, company_id, unit_id, channel, whatsapp_instance_id, contact_id, remote_id,
         contacts ( id, name, phone, profile_picture_url )
-      `)
+      `,
+      )
       .eq("id", data.conversationId)
       .single();
 
@@ -4013,10 +4072,18 @@ export const syncWhatsAppGroupPhotoAction = createServerFn({ method: "POST" })
     let liveAvatarUrl: string | null = null;
     try {
       if (canal.provedor === "stevo") {
-        const resAv = await getStevoAvatar({ host: canal.host, token: canal.token, number: groupJid });
+        const resAv = await getStevoAvatar({
+          host: canal.host,
+          token: canal.token,
+          number: groupJid,
+        });
         liveAvatarUrl = resAv?.data?.url || resAv?.url || resAv?.profilePictureUrl || null;
       } else {
-        const resAv = await getEvogoAvatar({ host: canal.host, token: canal.token, number: groupJid });
+        const resAv = await getEvogoAvatar({
+          host: canal.host,
+          token: canal.token,
+          number: groupJid,
+        });
         liveAvatarUrl = resAv?.data?.url || resAv?.url || resAv?.profilePictureUrl || null;
       }
     } catch (e: any) {
@@ -4030,11 +4097,15 @@ export const syncWhatsAppGroupPhotoAction = createServerFn({ method: "POST" })
     let permanentUrl = liveAvatarUrl;
     if (conv.contact_id) {
       try {
-        permanentUrl = (await persistirAvatarContatoNoStorage(conv.contact_id, liveAvatarUrl)) || liveAvatarUrl;
+        permanentUrl =
+          (await persistirAvatarContatoNoStorage(conv.contact_id, liveAvatarUrl)) || liveAvatarUrl;
       } catch {
         // fallback
       }
-      await supabaseAdmin.from("contacts").update({ profile_picture_url: permanentUrl }).eq("id", conv.contact_id);
+      await supabaseAdmin
+        .from("contacts")
+        .update({ profile_picture_url: permanentUrl })
+        .eq("id", conv.contact_id);
     }
 
     return { success: true, avatarUrl: permanentUrl };
@@ -4050,9 +4121,7 @@ export const syncMissingWhatsAppGroupsAction = createServerFn({ method: "POST" }
   .handler(async ({ data, context }) => {
     const { userId } = context;
 
-    let convsQuery = supabaseAdmin
-      .from("conversations")
-      .select(`
+    let convsQuery = supabaseAdmin.from("conversations").select(`
         id, company_id, unit_id, channel, whatsapp_instance_id, contact_id, remote_id,
         contacts ( id, name, phone, profile_picture_url )
       `);
@@ -4096,8 +4165,7 @@ export const syncMissingWhatsAppGroupsAction = createServerFn({ method: "POST" }
         contact.name !== "Grupo do WhatsApp" &&
         !contact.name.startsWith("120363");
       const hasPermanentPic =
-        contact.profile_picture_url &&
-        contact.profile_picture_url.includes("supabase.co/storage");
+        contact.profile_picture_url && contact.profile_picture_url.includes("supabase.co/storage");
 
       if (hasValidName && hasPermanentPic) continue;
 
@@ -4114,4 +4182,97 @@ export const syncMissingWhatsAppGroupsAction = createServerFn({ method: "POST" }
     return { success: true, updatedCount };
   });
 
+export const scheduleChatMessageAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      conversationId: z.string().uuid(),
+      text: z.string().min(1),
+      scheduledAt: z.string(), // ISO string
+      mediaType: z.enum(["image", "video", "audio", "document"]).optional(),
+      mediaBase64: z.string().optional(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+    await assertConversationAccess(userId, data.conversationId);
 
+    const { scheduleMessage } = await import("@/lib/server/scheduled-messages");
+
+    let mediaUrlToSend: string | null = null;
+    if (data.mediaBase64 && data.mediaType) {
+      if (data.mediaBase64.startsWith("data:")) {
+        const match = data.mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+        if (match) {
+          const mimeType = match[1];
+          const base64Data = match[2];
+          const buffer = Buffer.from(base64Data, "base64");
+          const ext = mimeType.split("/")[1] || "bin";
+          const fileName = `${data.conversationId}/${Date.now()}.${ext}`;
+
+          const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+            .from("media")
+            .upload(fileName, buffer, {
+              contentType: mimeType,
+              upsert: false,
+              cacheControl: "31536000, must-revalidate",
+            });
+
+          if (!uploadError && uploadData) {
+            const { data: publicUrlData } = supabaseAdmin.storage
+              .from("media")
+              .getPublicUrl(uploadData.path);
+            mediaUrlToSend = publicUrlData.publicUrl;
+          }
+        }
+      } else if (data.mediaBase64.startsWith("http")) {
+        mediaUrlToSend = data.mediaBase64;
+      }
+    }
+
+    const scheduled = await scheduleMessage({
+      companyId: "", // Será resolvido automaticamente pela conversa
+      conversationId: data.conversationId,
+      creatorType: "user",
+      userId,
+      content: data.text,
+      mediaType: data.mediaType || null,
+      mediaUrl: mediaUrlToSend,
+      scheduledAt: data.scheduledAt,
+    });
+
+    return { success: true, scheduled };
+  });
+
+export const listScheduledMessagesAction = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      conversationId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const { userId } = context;
+    await assertConversationAccess(userId, data.conversationId);
+
+    const { listPendingScheduledMessages } = await import("@/lib/server/scheduled-messages");
+    const list = await listPendingScheduledMessages(data.conversationId);
+    return { success: true, list };
+  });
+
+export const cancelScheduledMessageAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      scheduledId: z.string().uuid(),
+      reason: z.string().optional(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    const { cancelScheduledMessageById } = await import("@/lib/server/scheduled-messages");
+    const result = await cancelScheduledMessageById(
+      data.scheduledId,
+      data.reason || "Cancelado pelo usuário",
+    );
+    return { success: true, result };
+  });

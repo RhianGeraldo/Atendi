@@ -1,5 +1,9 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { erroDeDonoDaConversa, pegarConversaDeVolta, MENSAGEM_SEM_DONO_DA_CONVERSA } from "./instagram-thread";
+import {
+  erroDeDonoDaConversa,
+  pegarConversaDeVolta,
+  MENSAGEM_SEM_DONO_DA_CONVERSA,
+} from "./instagram-thread";
 import { sendEvogoText, sendEvogoMedia, sendEvogoLink } from "../evogo";
 import { sendStevoText, sendStevoMedia, sendStevoLink } from "../stevo";
 import { abrirCanal, destinatarioDe } from "../canais/motor";
@@ -12,9 +16,9 @@ import { garantirConexaoWhatsApp, explicarFalhaDeEnvio } from "./whatsapp-conexa
 export async function sendPlatformMessage({
   conversationId,
   text,
-  mediaType = 'text',
+  mediaType = "text",
   mediaBase64,
-  senderType = 'agent',
+  senderType = "agent",
   senderId = null,
   aiAgentId = null,
   keepStatus = false,
@@ -24,7 +28,7 @@ export async function sendPlatformMessage({
   text?: string;
   mediaType?: string;
   mediaBase64?: string;
-  senderType?: 'agent' | 'contact';
+  senderType?: "agent" | "contact";
   senderId?: string | null;
   aiAgentId?: string | null;
   /** Não mexe no status da conversa (envio automático do Todoo: resolvida continua resolvida) */
@@ -34,7 +38,9 @@ export async function sendPlatformMessage({
 }) {
   const { data: conv, error: convErr } = await supabaseAdmin
     .from("conversations")
-    .select("status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid, instagram_id, messenger_id)")
+    .select(
+      "status, channel, whatsapp_instance_id, unit_id, contact_id, remote_id, contacts(phone, whatsapp_lid, instagram_id, messenger_id)",
+    )
     .eq("id", conversationId)
     .single();
 
@@ -69,62 +75,67 @@ export async function sendPlatformMessage({
 
   // Se a mídia for enviada em base64 (data:...), faz o upload para o Supabase Storage
   // garantindo uma URL pública acessível para todos os provedores (Meta Cloud API, EvoGo, Stevo, etc.)
-  if (mediaBase64 && mediaType !== 'text' && mediaBase64.startsWith('data:')) {
+  if (mediaBase64 && mediaType !== "text" && mediaBase64.startsWith("data:")) {
     try {
       const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
       if (match) {
         const mimeType = match[1];
         const base64Data = match[2];
-        const buffer = Buffer.from(base64Data, 'base64');
-        const ext = mimeType.split('/')[1] || 'bin';
+        const buffer = Buffer.from(base64Data, "base64");
+        const ext = mimeType.split("/")[1] || "bin";
         const fileName = `${conversationId}/${Date.now()}.${ext}`;
 
-        const { data: uploadData, error: uploadError } = await supabaseAdmin
-          .storage
-          .from('media')
-          .upload(fileName, buffer, { contentType: mimeType, upsert: false, cacheControl: '31536000, must-revalidate' });
+        const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+          .from("media")
+          .upload(fileName, buffer, {
+            contentType: mimeType,
+            upsert: false,
+            cacheControl: "31536000, must-revalidate",
+          });
 
         if (!uploadError && uploadData) {
-          const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
+          const { data: publicUrlData } = supabaseAdmin.storage
+            .from("media")
+            .getPublicUrl(uploadData.path);
           mediaUrlToSend = publicUrlData.publicUrl;
         }
       }
     } catch (e) {
-      console.error('[message-sender] Failed to parse or upload base64 to Supabase', e);
+      console.error("[message-sender] Failed to parse or upload base64 to Supabase", e);
     }
   }
 
-  if (provider === 'zernio') {
-    const { enviarMensagemZernio } = await import('../canais/zernio/adaptador');
+  if (provider === "zernio") {
+    const { enviarMensagemZernio } = await import("../canais/zernio/adaptador");
 
     let mediaBuffer: Buffer | undefined;
     let mimeType: string | undefined;
     let fileName: string | undefined;
 
-    if (mediaBase64 && mediaType !== 'text') {
-      if (mediaBase64.startsWith('data:')) {
+    if (mediaBase64 && mediaType !== "text") {
+      if (mediaBase64.startsWith("data:")) {
         const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
         if (match) {
           mimeType = match[1];
-          mediaBuffer = Buffer.from(match[2], 'base64');
-          const ext = mimeType.split('/')[1] || 'bin';
+          mediaBuffer = Buffer.from(match[2], "base64");
+          const ext = mimeType.split("/")[1] || "bin";
           fileName = `${conversationId}_${Date.now()}.${ext}`;
         }
       }
     }
 
     const { data: convThread } = await supabaseAdmin
-      .from('conversations')
-      .select('provider_thread_id')
-      .eq('id', conversationId)
+      .from("conversations")
+      .select("provider_thread_id")
+      .eq("id", conversationId)
       .single();
 
     const resZernio = await enviarMensagemZernio({
       canal,
       destinatario: destino,
       threadId: convThread?.provider_thread_id || null,
-      texto: text || '',
-      mediaType: (mediaType as any) || 'text',
+      texto: text || "",
+      mediaType: (mediaType as any) || "text",
       mediaBuffer,
       fileName,
       mimeType,
@@ -134,21 +145,21 @@ export async function sendPlatformMessage({
 
     if (resZernio.threadId && resZernio.threadId !== convThread?.provider_thread_id) {
       await supabaseAdmin
-        .from('conversations')
+        .from("conversations")
         .update({ provider_thread_id: resZernio.threadId })
-        .eq('id', conversationId);
+        .eq("id", conversationId);
     }
-  } else if (canal.rede === 'whatsapp') {
+  } else if (canal.rede === "whatsapp") {
     let evogoResponse;
 
-    if (provider === 'oficial') {
-      const { sendCloudApiMessage } = await import('./whatsapp-cloud-api');
+    if (provider === "oficial") {
+      const { sendCloudApiMessage } = await import("./whatsapp-cloud-api");
       const msgId = await sendCloudApiMessage(
         resolvedInstanceId!,
         phone,
-        text || '',
+        text || "",
         mediaType,
-        mediaUrlToSend
+        mediaUrlToSend,
       );
       remoteMsgId = msgId;
       participantJid = null;
@@ -161,168 +172,217 @@ export async function sendPlatformMessage({
       // Aparelho desconectado vira aviso claro, não timeout.
       await garantirConexaoWhatsApp(canal);
       try {
+        if (mediaBase64 && mediaType !== "text") {
+          // Upload to Supabase se for base64 e não tiver link de storage (Evogo não gosta de mt URL, mas a logica tava com base64 e storage misto)
+          // A lógica de upload fica idêntica para o evogo e ja tava aqui, ela sobe pro supabase e pega publicUrl
+          try {
+            if (mediaBase64.startsWith("data:")) {
+              const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+              if (match) {
+                const mimeType = match[1];
+                const base64Data = match[2];
+                const buffer = Buffer.from(base64Data, "base64");
+                const ext = mimeType.split("/")[1] || "bin";
+                const fileName = `${conversationId}/${Date.now()}.${ext}`;
 
-      if (mediaBase64 && mediaType !== 'text') {
-        // Upload to Supabase se for base64 e não tiver link de storage (Evogo não gosta de mt URL, mas a logica tava com base64 e storage misto)
-        // A lógica de upload fica idêntica para o evogo e ja tava aqui, ela sobe pro supabase e pega publicUrl
-        try {
-          if (mediaBase64.startsWith('data:')) {
-            const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-            if (match) {
-              const mimeType = match[1];
-              const base64Data = match[2];
-              const buffer = Buffer.from(base64Data, 'base64');
-              const ext = mimeType.split('/')[1] || 'bin';
-              const fileName = `${conversationId}/${Date.now()}.${ext}`;
-              
-              const { data: uploadData, error: uploadError } = await supabaseAdmin
-                .storage
-                .from('media')
-                .upload(fileName, buffer, { contentType: mimeType, upsert: false, cacheControl: '31536000, must-revalidate' });
-                
-              if (!uploadError && uploadData) {
-                const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
-                mediaUrlToSend = publicUrlData.publicUrl;
+                const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+                  .from("media")
+                  .upload(fileName, buffer, {
+                    contentType: mimeType,
+                    upsert: false,
+                    cacheControl: "31536000, must-revalidate",
+                  });
+
+                if (!uploadError && uploadData) {
+                  const { data: publicUrlData } = supabaseAdmin.storage
+                    .from("media")
+                    .getPublicUrl(uploadData.path);
+                  mediaUrlToSend = publicUrlData.publicUrl;
+                }
               }
             }
+          } catch (e) {
+            console.error("Failed to parse or upload base64 to Supabase", e);
           }
-        } catch (e) {
-          console.error('Failed to parse or upload base64 to Supabase', e);
-        }
 
-        if (provider === 'stevo') {
-          evogoResponse = await sendStevoMedia({
-            host, token, instanceName, number: phone,
-            base64: mediaUrlToSend!, mediatype: mediaType as any, caption: text,
-          });
-        } else {
-          evogoResponse = await sendEvogoMedia({
-            host, token, instanceName, number: phone,
-            base64: mediaUrlToSend!, mediatype: mediaType as any, caption: text,
-          });
-        }
-      } else {
-      const messageText = text || '';
-      // Regex to detect if there's any URL in the text, avoiding trailing punctuation or markdown chars like *, ), ], }
-      const hasUrl = /(https?:\/\/[^\s*()\[\]{}]+)/g.test(messageText);
-
-      if (hasUrl) {
-        try {
-          if (provider === 'stevo') {
-            evogoResponse = await sendStevoLink({
-              host, token, instanceName, number: phone, text: messageText,
+          if (provider === "stevo") {
+            evogoResponse = await sendStevoMedia({
+              host,
+              token,
+              instanceName,
+              number: phone,
+              base64: mediaUrlToSend!,
+              mediatype: mediaType as any,
+              caption: text,
             });
           } else {
-            evogoResponse = await sendEvogoLink({
-              host, token, instanceName, number: phone, text: messageText,
+            evogoResponse = await sendEvogoMedia({
+              host,
+              token,
+              instanceName,
+              number: phone,
+              base64: mediaUrlToSend!,
+              mediatype: mediaType as any,
+              caption: text,
             });
           }
-        } catch (linkErr: any) {
-          // Timeout é o aparelho desconectado, não a URL: tentar como texto só dobraria a espera.
-          if (linkErr?.name === 'TimeoutError' || linkErr?.name === 'AbortError') throw linkErr;
-          console.warn('[message-sender] sendLink failed (possibly invalid URL format), falling back to text:', linkErr);
-          if (provider === 'stevo') {
-            evogoResponse = await sendStevoText({
-              host, token, instanceName, number: phone, text: messageText,
-            });
-          } else {
-            evogoResponse = await sendEvogoText({
-              host, token, instanceName, number: phone, text: messageText,
-            });
-          }
-        }
-      } else {
-        if (provider === 'stevo') {
-          evogoResponse = await sendStevoText({
-            host, token, instanceName, number: phone, text: messageText,
-          });
         } else {
-          evogoResponse = await sendEvogoText({
-            host, token, instanceName, number: phone, text: messageText,
-          });
+          const messageText = text || "";
+          // Regex to detect if there's any URL in the text, avoiding trailing punctuation or markdown chars like *, ), ], }
+          const hasUrl = /(https?:\/\/[^\s*()\[\]{}]+)/g.test(messageText);
+
+          if (hasUrl) {
+            try {
+              if (provider === "stevo") {
+                evogoResponse = await sendStevoLink({
+                  host,
+                  token,
+                  instanceName,
+                  number: phone,
+                  text: messageText,
+                });
+              } else {
+                evogoResponse = await sendEvogoLink({
+                  host,
+                  token,
+                  instanceName,
+                  number: phone,
+                  text: messageText,
+                });
+              }
+            } catch (linkErr: any) {
+              // Timeout é o aparelho desconectado, não a URL: tentar como texto só dobraria a espera.
+              if (linkErr?.name === "TimeoutError" || linkErr?.name === "AbortError") throw linkErr;
+              console.warn(
+                "[message-sender] sendLink failed (possibly invalid URL format), falling back to text:",
+                linkErr,
+              );
+              if (provider === "stevo") {
+                evogoResponse = await sendStevoText({
+                  host,
+                  token,
+                  instanceName,
+                  number: phone,
+                  text: messageText,
+                });
+              } else {
+                evogoResponse = await sendEvogoText({
+                  host,
+                  token,
+                  instanceName,
+                  number: phone,
+                  text: messageText,
+                });
+              }
+            }
+          } else {
+            if (provider === "stevo") {
+              evogoResponse = await sendStevoText({
+                host,
+                token,
+                instanceName,
+                number: phone,
+                text: messageText,
+              });
+            } else {
+              evogoResponse = await sendEvogoText({
+                host,
+                token,
+                instanceName,
+                number: phone,
+                text: messageText,
+              });
+            }
+          }
         }
-      }
-    }
       } catch (envioErr) {
         throw await explicarFalhaDeEnvio(canal, envioErr);
       }
-    remoteMsgId = evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
-    participantJid = evogoResponse?.data?.Info?.Sender || null;
-  }
-    
-  } else if (canal.rede === 'instagram') {
+      remoteMsgId =
+        evogoResponse?.data?.Info?.ID || evogoResponse?.key?.id || evogoResponse?.id || null;
+      participantJid = evogoResponse?.data?.Info?.Sender || null;
+    }
+  } else if (canal.rede === "instagram") {
     // As credenciais já vieram com o canal: a consulta que estava aqui repetia
     // a que `abrirCanal` acabou de fazer.
     if (!canal.contaId || !canal.contaToken) {
       throw new Error("Instagram Account ID or Token missing");
     }
-    const instance = { oficial_phone_number_id: canal.contaId, oficial_access_token: canal.contaToken };
+    const instance = {
+      oficial_phone_number_id: canal.contaId,
+      oficial_access_token: canal.contaToken,
+    };
 
     const igsid = destino.identificador;
 
     const payload: any = {
       recipient: { id: igsid },
-      message: {}
+      message: {},
     };
 
-    if (mediaBase64 && mediaType !== 'text') {
-       // Upload to Supabase to get a public URL for Meta
-        try {
-          if (mediaBase64.startsWith('data:')) {
-            const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-            if (match) {
-              const mimeType = match[1];
-              const base64Data = match[2];
-              const buffer = Buffer.from(base64Data, 'base64');
-              const ext = mimeType.split('/')[1] || 'bin';
-              const fileName = `ig_${conversationId}/${Date.now()}.${ext}`;
-              
-              const { data: uploadData, error: uploadError } = await supabaseAdmin
-                .storage
-                .from('media')
-                .upload(fileName, buffer, { contentType: mimeType, upsert: false, cacheControl: '31536000, must-revalidate' });
-                
-              if (!uploadError && uploadData) {
-                const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
-                mediaUrlToSend = publicUrlData.publicUrl;
-              }
+    if (mediaBase64 && mediaType !== "text") {
+      // Upload to Supabase to get a public URL for Meta
+      try {
+        if (mediaBase64.startsWith("data:")) {
+          const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+          if (match) {
+            const mimeType = match[1];
+            const base64Data = match[2];
+            const buffer = Buffer.from(base64Data, "base64");
+            const ext = mimeType.split("/")[1] || "bin";
+            const fileName = `ig_${conversationId}/${Date.now()}.${ext}`;
+
+            const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+              .from("media")
+              .upload(fileName, buffer, {
+                contentType: mimeType,
+                upsert: false,
+                cacheControl: "31536000, must-revalidate",
+              });
+
+            if (!uploadError && uploadData) {
+              const { data: publicUrlData } = supabaseAdmin.storage
+                .from("media")
+                .getPublicUrl(uploadData.path);
+              mediaUrlToSend = publicUrlData.publicUrl;
             }
           }
-        } catch (e) {
-          console.error('Failed to parse or upload base64 to Supabase', e);
         }
+      } catch (e) {
+        console.error("Failed to parse or upload base64 to Supabase", e);
+      }
 
-        if (mediaUrlToSend) {
-          let igMediaType = 'image';
-          if (mediaType === 'video') igMediaType = 'video';
-          else if (mediaType === 'audio') igMediaType = 'audio';
-          else if (mediaType === 'document') igMediaType = 'file';
+      if (mediaUrlToSend) {
+        let igMediaType = "image";
+        if (mediaType === "video") igMediaType = "video";
+        else if (mediaType === "audio") igMediaType = "audio";
+        else if (mediaType === "document") igMediaType = "file";
 
-          payload.message = {
-            attachment: {
-              type: igMediaType,
-              payload: {
-                url: mediaUrlToSend,
-                is_reusable: false
-              }
-            }
-          };
-        } else {
-          payload.message = { text: text || '' };
-        }
+        payload.message = {
+          attachment: {
+            type: igMediaType,
+            payload: {
+              url: mediaUrlToSend,
+              is_reusable: false,
+            },
+          },
+        };
+      } else {
+        payload.message = { text: text || "" };
+      }
     } else {
-      payload.message = { text: text || '' };
+      payload.message = { text: text || "" };
     }
 
-    const isDirectToken = instance.oficial_access_token.startsWith('IGA');
-    const endpoint = isDirectToken 
+    const isDirectToken = instance.oficial_access_token.startsWith("IGA");
+    const endpoint = isDirectToken
       ? `https://graph.instagram.com/v20.0/${instance.oficial_phone_number_id}/messages?access_token=${instance.oficial_access_token}`
       : `https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`;
 
     let response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
 
     let result = await response.json();
@@ -331,18 +391,21 @@ export async function sendPlatformMessage({
     // pede de volta e reenvia uma vez.
     if (!response.ok && !isDirectToken && erroDeDonoDaConversa(result)) {
       const retomada = await pegarConversaDeVolta({
-        pageId: canal.contaPaiId || 'me',
+        pageId: canal.contaPaiId || "me",
         token: instance.oficial_access_token,
         igsid,
       });
       if (!retomada.ok) {
-        console.error("[sendPlatformMessage] Instagram: falha ao retomar a conversa:", retomada.erro);
+        console.error(
+          "[sendPlatformMessage] Instagram: falha ao retomar a conversa:",
+          retomada.erro,
+        );
         throw new Error(MENSAGEM_SEM_DONO_DA_CONVERSA);
       }
       response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
       result = await response.json();
     }
@@ -350,84 +413,94 @@ export async function sendPlatformMessage({
     if (!response.ok) {
       console.error("[sendPlatformMessage] Instagram sending error:", result);
       if (erroDeDonoDaConversa(result)) throw new Error(MENSAGEM_SEM_DONO_DA_CONVERSA);
-      throw new Error(`Graph API Error: ${result.error?.message || 'Unknown error'}`);
+      throw new Error(`Graph API Error: ${result.error?.message || "Unknown error"}`);
     }
 
     remoteMsgId = result.message_id || null;
     participantJid = instance.oficial_phone_number_id;
-
-  } else if (canal.rede === 'messenger') {
+  } else if (canal.rede === "messenger") {
     if (!canal.contaId || !canal.contaToken) {
       throw new Error("Facebook Page ID or Token missing");
     }
-    const instance = { oficial_phone_number_id: canal.contaId, oficial_access_token: canal.contaToken };
+    const instance = {
+      oficial_phone_number_id: canal.contaId,
+      oficial_access_token: canal.contaToken,
+    };
 
     const psid = destino.identificador;
 
     const payload: any = {
       recipient: { id: psid },
-      message: {}
+      message: {},
     };
 
-    if (mediaBase64 && mediaType !== 'text') {
-       // Upload to Supabase to get a public URL for Meta
-        try {
-          if (mediaBase64.startsWith('data:')) {
-            const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-            if (match) {
-              const mimeType = match[1];
-              const base64Data = match[2];
-              const buffer = Buffer.from(base64Data, 'base64');
-              const ext = mimeType.split('/')[1] || 'bin';
-              const fileName = `fb_${conversationId}/${Date.now()}.${ext}`;
-              
-              const { data: uploadData, error: uploadError } = await supabaseAdmin
-                .storage
-                .from('media')
-                .upload(fileName, buffer, { contentType: mimeType, upsert: false, cacheControl: '31536000, must-revalidate' });
-                
-              if (!uploadError && uploadData) {
-                const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(uploadData.path);
-                mediaUrlToSend = publicUrlData.publicUrl;
-              }
+    if (mediaBase64 && mediaType !== "text") {
+      // Upload to Supabase to get a public URL for Meta
+      try {
+        if (mediaBase64.startsWith("data:")) {
+          const match = mediaBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+          if (match) {
+            const mimeType = match[1];
+            const base64Data = match[2];
+            const buffer = Buffer.from(base64Data, "base64");
+            const ext = mimeType.split("/")[1] || "bin";
+            const fileName = `fb_${conversationId}/${Date.now()}.${ext}`;
+
+            const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+              .from("media")
+              .upload(fileName, buffer, {
+                contentType: mimeType,
+                upsert: false,
+                cacheControl: "31536000, must-revalidate",
+              });
+
+            if (!uploadError && uploadData) {
+              const { data: publicUrlData } = supabaseAdmin.storage
+                .from("media")
+                .getPublicUrl(uploadData.path);
+              mediaUrlToSend = publicUrlData.publicUrl;
             }
           }
-        } catch (e) {
-          console.error('Failed to parse or upload base64 to Supabase', e);
         }
+      } catch (e) {
+        console.error("Failed to parse or upload base64 to Supabase", e);
+      }
 
-        if (mediaUrlToSend) {
-          let fbMediaType = 'image';
-          if (mediaType === 'video') fbMediaType = 'video';
-          else if (mediaType === 'audio') fbMediaType = 'audio';
-          else if (mediaType === 'document') fbMediaType = 'file';
+      if (mediaUrlToSend) {
+        let fbMediaType = "image";
+        if (mediaType === "video") fbMediaType = "video";
+        else if (mediaType === "audio") fbMediaType = "audio";
+        else if (mediaType === "document") fbMediaType = "file";
 
-          payload.message = {
-            attachment: {
-              type: fbMediaType,
-              payload: {
-                url: mediaUrlToSend,
-                is_reusable: false
-              }
-            }
-          };
-        } else {
-          payload.message = { text: text || '' };
-        }
+        payload.message = {
+          attachment: {
+            type: fbMediaType,
+            payload: {
+              url: mediaUrlToSend,
+              is_reusable: false,
+            },
+          },
+        };
+      } else {
+        payload.message = { text: text || "" };
+      }
     } else {
-      payload.message = { text: text || '' };
+      payload.message = { text: text || "" };
     }
 
-    const response = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const response = await fetch(
+      `https://graph.facebook.com/v20.0/me/messages?access_token=${instance.oficial_access_token}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
 
     const result = await response.json();
     if (!response.ok) {
       console.error("[sendPlatformMessage] Messenger sending error:", result);
-      throw new Error(`Graph API Error: ${result.error?.message || 'Unknown error'}`);
+      throw new Error(`Graph API Error: ${result.error?.message || "Unknown error"}`);
     }
 
     remoteMsgId = result.message_id || null;
@@ -435,7 +508,7 @@ export async function sendPlatformMessage({
   }
 
   // Save to DB
-  const { data: msg, error: dbErr } = await supabaseAdmin
+  let { data: msg, error: dbErr } = await supabaseAdmin
     .from("messages")
     .insert({
       conversation_id: conversationId,
@@ -448,11 +521,43 @@ export async function sendPlatformMessage({
       participant_jid: participantJid,
       metadata:
         aiAgentId || metadata
-          ? { ...(metadata || {}), ...(aiAgentId ? { ai_generated: true, ai_agent_id: aiAgentId } : {}) }
-          : undefined
+          ? {
+              ...(metadata || {}),
+              ...(aiAgentId ? { ai_generated: true, ai_agent_id: aiAgentId } : {}),
+            }
+          : undefined,
     })
     .select()
     .single();
+
+  if (dbErr && (dbErr as any).code === "23505" && remoteMsgId) {
+    console.log(
+      `[sendPlatformMessage] Message with remote_msg_id (${remoteMsgId}) was already recorded by webhook. Updating metadata instead of duplicating.`,
+    );
+    const { data: existingMsg } = await supabaseAdmin
+      .from("messages")
+      .select("*")
+      .eq("remote_msg_id", remoteMsgId)
+      .maybeSingle();
+
+    if (existingMsg) {
+      msg = existingMsg;
+      dbErr = null;
+      if (aiAgentId || metadata) {
+        const mergedMeta = {
+          ...(typeof existingMsg.metadata === "object" && existingMsg.metadata !== null
+            ? existingMsg.metadata
+            : {}),
+          ...(metadata || {}),
+          ...(aiAgentId ? { ai_generated: true, ai_agent_id: aiAgentId } : {}),
+        };
+        await supabaseAdmin
+          .from("messages")
+          .update({ metadata: mergedMeta })
+          .eq("id", existingMsg.id);
+      }
+    }
+  }
 
   if (dbErr) {
     console.error("[sendPlatformMessage] Failed to save message to DB:", dbErr);
@@ -460,21 +565,18 @@ export async function sendPlatformMessage({
 
   // Update conversation status
   const convUpdate: any = { last_message_at: new Date().toISOString() };
-  if (!keepStatus && conv.status === 'resolved') {
-    convUpdate.status = 'active';
+  if (!keepStatus && conv.status === "resolved") {
+    convUpdate.status = "active";
     convUpdate.resolved_at = null;
-  } else if (!keepStatus && conv.status === 'waiting') {
-    convUpdate.status = 'active';
+  } else if (!keepStatus && conv.status === "waiting") {
+    convUpdate.status = "active";
   }
-  
+
   if (senderId) {
     convUpdate.assigned_agent_id = senderId;
   }
 
-  await supabaseAdmin
-    .from("conversations")
-    .update(convUpdate)
-    .eq("id", conversationId);
+  await supabaseAdmin.from("conversations").update(convUpdate).eq("id", conversationId);
 
   return msg;
 }
