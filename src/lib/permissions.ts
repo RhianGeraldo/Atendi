@@ -73,20 +73,21 @@ export function canAccessMenu(menuKey: string, profile: Profile | null): boolean
 export const TODOO_TAB_PERMISSIONS: MenuItemPermission[] = [
   { key: "todoo:my_day", label: "Meu Dia", description: "Tarefas comerciais do dia da consultora" },
   { key: "todoo:queue", label: "Quadro Comercial", description: "Cadência de prospecção dos contatos" },
+  { key: "todoo:dreams", label: "Quadro dos Sonhos", description: "Metas pessoais e sonhos das consultoras" },
   { key: "todoo:team", label: "Painel da Equipe", description: "Andamento do dia de cada pessoa" },
   { key: "todoo:campaigns", label: "Ações Comerciais", description: "Criar e editar ações comerciais" },
   { key: "todoo:gincana", label: "Gincana & Ranking", description: "Pontuação e ranking da equipe" },
   { key: "todoo:metrics", label: "Indicadores", description: "Funil da cadência e indicadores" },
 ];
 
-export type TodooTab = "my_day" | "queue" | "team" | "campaigns" | "gincana" | "metrics";
+export type TodooTab = "my_day" | "queue" | "team" | "campaigns" | "gincana" | "metrics" | "dreams";
 
 /** Abas padrão por nível, para cargos que ainda não escolheram as abas do Todoo. */
 export const DEFAULT_TODOO_TABS: Record<string, string[]> = {
   super_admin: TODOO_TAB_PERMISSIONS.map((t) => t.key),
   admin_company: TODOO_TAB_PERMISSIONS.map((t) => t.key),
   manager: TODOO_TAB_PERMISSIONS.map((t) => t.key),
-  agent: ["todoo:my_day", "todoo:queue"],
+  agent: ["todoo:my_day", "todoo:queue", "todoo:dreams"],
 };
 
 // Só abas que ainda existem: "todoo:referrals" (Cadastros & Metas, removida) pode continuar
@@ -105,6 +106,15 @@ export function getTodooTabs(profile: Profile | null): TodooTab[] {
       : [];
   let tabs = roleMenus.filter(isTodooTabKey);
   if (tabs.length === 0) tabs = DEFAULT_TODOO_TABS[profile.role] || DEFAULT_TODOO_TABS.agent;
+
+  // Se o cargo existente já tinha Meu Dia ou Quadro Comercial, mas foi criado antes da
+  // aba Quadro dos Sonhos existir, concede o acesso automaticamente para não quebrar a equipe.
+  if (
+    (tabs.includes("todoo:my_day" as any) || tabs.includes("todoo:queue" as any)) &&
+    !tabs.includes("todoo:dreams" as any)
+  ) {
+    tabs = [...tabs, "todoo:dreams"];
+  }
 
   // + abas extras do perfil individual
   const extras = (Array.isArray(profile.allowed_menus) ? profile.allowed_menus : []).filter(isTodooTabKey);

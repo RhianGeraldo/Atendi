@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { CalendarCheck, Flame, ListTodo, Trophy, BarChart3, Users } from "lucide-react";
+import { CalendarCheck, Flame, ListTodo, Trophy, BarChart3, Users, Sparkles } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 import { TodooDailyQueue } from "@/components/todoo/todoo-daily-queue";
@@ -12,6 +12,7 @@ import { getTodooTabs, type TodooTab } from "@/lib/permissions";
 import { TodooCampaignsList } from "@/components/todoo/todoo-campaigns-list";
 import { TodooGincana } from "@/components/todoo/todoo-gincana";
 import { TodooMetrics } from "@/components/todoo/todoo-metrics";
+import { TodooDreamBoard } from "@/components/todoo/todoo-dream-board";
 import { TodooCreateCampaignDialog } from "@/components/todoo/todoo-create-campaign-dialog";
 import { TodooCreateReferralDialog } from "@/components/todoo/todoo-create-referral-dialog";
 
@@ -24,6 +25,7 @@ export const Route = createFileRoute("/_authenticated/todoo")({
 const TABS: { value: string; perm: TodooTab; label: string; icon: typeof Flame; group: "operation" | "management" }[] = [
   { value: "my-day", perm: "my_day", label: "Meu Dia", icon: CalendarCheck, group: "operation" },
   { value: "queue", perm: "queue", label: "Quadro Comercial", icon: Flame, group: "operation" },
+  { value: "dreams", perm: "dreams", label: "Quadro dos Sonhos", icon: Sparkles, group: "operation" },
   { value: "team", perm: "team", label: "Painel da Equipe", icon: Users, group: "management" },
   { value: "campaigns", perm: "campaigns", label: "Ações Comerciais", icon: ListTodo, group: "management" },
   { value: "gincana", perm: "gincana", label: "Gincana & Ranking", icon: Trophy, group: "management" },
@@ -93,8 +95,12 @@ function TodooPage() {
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 w-full">
               {activeTab === "my-day" && can("my_day") && (
-                <TodooMyDay onCreateContactsClick={() => setCreateReferralOpen(true)} />
+                <TodooMyDay
+                  onCreateContactsClick={() => setCreateReferralOpen(true)}
+                  onNavigateToDreams={() => setActiveTab("dreams")}
+                />
               )}
+              {activeTab === "dreams" && can("dreams") && <TodooDreamBoard />}
               {activeTab === "team" && can("team") && <TodooTeamPanel />}
               {activeTab === "campaigns" && can("campaigns") && (
                 <TodooCampaignsList onCreateClick={() => setCreateDialogOpen(true)} />

@@ -185,3 +185,47 @@ export interface TodooGoal {
   current_conversions?: number;
   current_revenue?: number;
 }
+
+export type TodooDreamCategory =
+  | 'acessorio'
+  | 'eletronico'
+  | 'viagem'
+  | 'experiencia'
+  | 'familia'
+  | 'curso'
+  | 'casa'
+  | 'outro';
+
+export type TodooDreamStatus = 'in_progress' | 'completed' | 'archived';
+
+export interface TodooDream {
+  id: string;
+  company_id: string;
+  unit_id: string | null;
+  user_id: string;
+  title: string;
+  target_value: number;
+  commission_rate: number;
+  category: TodooDreamCategory;
+  image_url: string | null;
+  notes: string | null;
+  status: TodooDreamStatus;
+  is_featured?: boolean;
+  started_at: string;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+
+  // Calculados
+  won_revenue?: number;
+  accumulated_commission?: number;
+  progress_pct?: number;
+  remaining_revenue?: number;
+  target_revenue_needed?: number;
+  user?: {
+    id: string;
+    name: string;
+    avatar_url?: string | null;
+  } | null;
+}
+

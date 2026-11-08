@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils";
 import { fetchAllPages } from "@/lib/fetch-all-pages";
 import { TodooReferrerLink } from "./todoo-referrer-link";
 import { TodooSendMessageDialog } from "./todoo-send-message-dialog";
+import { TodooDreamWidget } from "./todoo-dream-widget";
 import { useTodooAutoPending } from "./todoo-auto";
 import {
   nextTodooStage,
@@ -60,6 +61,7 @@ interface Props {
   /** Dentro de outro painel: sem cabeçalho próprio */
   embedded?: boolean;
   onCreateContactsClick?: () => void;
+  onNavigateToDreams?: () => void;
 }
 
 // Lead em conversa (cadência pausada) sem nenhuma interação há este tempo vira follow-up
@@ -343,7 +345,12 @@ export function useTodooDayData() {
   return { data, isLoading, isFetching, refetch, buildPlan, bounds, stages, statuses };
 }
 
-export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
+export function TodooMyDay({
+  userId,
+  embedded,
+  onCreateContactsClick,
+  onNavigateToDreams,
+}: Props) {
   const { profile } = useAuth();
   const queryClient = useQueryClient();
 
@@ -493,6 +500,10 @@ export function TodooMyDay({ userId, embedded, onCreateContactsClick }: Props) {
         </div>
       ) : plan ? (
         <>
+          {!embedded && !viewingOther && (
+            <TodooDreamWidget onNavigateToDreams={onNavigateToDreams} />
+          )}
+
           <div
             className={cn(
               "grid grid-cols-1 gap-4",
