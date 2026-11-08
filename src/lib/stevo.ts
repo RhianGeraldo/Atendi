@@ -48,14 +48,14 @@ export async function sendStevoText({
   isRetryVariant = false,
 }: SendMessageParams & { quoted?: QuotedParams }) {
   // Normalize host URL
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/text`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       number,
@@ -69,7 +69,7 @@ export async function sendStevoText({
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo API Error:', errorText);
+    console.error("Stevo API Error:", errorText);
 
     if (
       !isRetryVariant &&
@@ -111,14 +111,14 @@ export async function sendStevoLink({
   isRetryVariant = false,
 }: SendMessageParams & { quoted?: QuotedParams }) {
   // Normalize host URL
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/link`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       number,
@@ -132,7 +132,7 @@ export async function sendStevoLink({
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo API Error (link):', errorText);
+    console.error("Stevo API Error (link):", errorText);
 
     if (
       !isRetryVariant &&
@@ -169,7 +169,7 @@ type SendMediaParams = {
   instanceName: string;
   number: string;
   base64: string;
-  mediatype: 'image' | 'video' | 'audio' | 'document';
+  mediatype: "image" | "video" | "audio" | "document";
   caption?: string;
   delay?: number;
   isRetryVariant?: boolean;
@@ -182,16 +182,16 @@ export async function sendStevoMedia({
   number,
   base64,
   mediatype,
-  caption = '',
+  caption = "",
   delay = 0,
   quoted,
   isRetryVariant = false,
 }: SendMediaParams & { quoted?: QuotedParams }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/media`;
 
   // Stevo expects raw base64 WITHOUT the data:...;base64, prefix
-  const rawBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
+  const rawBase64 = base64.includes(",") ? base64.split(",")[1] : base64;
 
   const body: any = {
     number,
@@ -202,34 +202,34 @@ export async function sendStevoMedia({
     ...(quoted && { quoted }),
   };
 
-  if (mediatype === 'image') {
-    // NEVER pass filename for images, as Evolution API uses it to force 
+  if (mediatype === "image") {
+    // NEVER pass filename for images, as Evolution API uses it to force
     // the media to be sent as a Document (which causes the gray box).
-    body.mimetype = 'image/jpeg';
-  } else if (mediatype === 'document') {
-    let mime = 'application/pdf';
-    if (base64.startsWith('data:')) {
-      mime = base64.split(';')[0].split(':')[1];
+    body.mimetype = "image/jpeg";
+  } else if (mediatype === "document") {
+    let mime = "application/pdf";
+    if (base64.startsWith("data:")) {
+      mime = base64.split(";")[0].split(":")[1];
     }
-    const ext = mime.split('/')[1] || 'pdf';
+    const ext = mime.split("/")[1] || "pdf";
     body.filename = `document.${ext}`;
     body.fileName = `document.${ext}`;
     body.mimetype = mime;
-  } else if (mediatype === 'audio') {
-    body.filename = 'audio.ogg';
-    body.fileName = 'audio.ogg';
-    body.mimetype = 'audio/ogg';
-  } else if (mediatype === 'video') {
-    body.filename = 'video.mp4';
-    body.fileName = 'video.mp4';
-    body.mimetype = 'video/mp4';
+  } else if (mediatype === "audio") {
+    body.filename = "audio.ogg";
+    body.fileName = "audio.ogg";
+    body.mimetype = "audio/ogg";
+  } else if (mediatype === "video") {
+    body.filename = "video.mp4";
+    body.fileName = "video.mp4";
+    body.mimetype = "video/mp4";
   }
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
     // Aparelho desconectado faz o provedor segurar a requisição sem responder.
@@ -238,7 +238,7 @@ export async function sendStevoMedia({
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo Media API Error:', errorText);
+    console.error("Stevo Media API Error:", errorText);
 
     if (
       !isRetryVariant &&
@@ -271,6 +271,82 @@ export async function sendStevoMedia({
   return response.json();
 }
 
+type SendStickerParams = {
+  host: string;
+  token: string;
+  instanceName?: string;
+  number: string;
+  sticker: string;
+  delay?: number;
+  isRetryVariant?: boolean;
+};
+
+export async function sendStevoSticker({
+  host,
+  token,
+  instanceName,
+  number,
+  sticker,
+  delay = 0,
+  quoted,
+  isRetryVariant = false,
+}: SendStickerParams & { quoted?: QuotedParams }) {
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/send/sticker`;
+
+  const stickerData =
+    sticker.startsWith("data:") && sticker.includes(",") ? sticker.split(",")[1] : sticker;
+
+  const body: any = {
+    number,
+    sticker: stickerData,
+    ...(delay > 0 ? { delay } : {}),
+    ...(quoted && { quoted }),
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      apikey: token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(50000),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Stevo Sticker API Error:", errorText);
+
+    if (
+      !isRetryVariant &&
+      (errorText.toLowerCase().includes("not registered on whatsapp") ||
+        errorText.toLowerCase().includes("not registered"))
+    ) {
+      const altNumber = getAlternativePhoneVariant(number);
+      if (altNumber) {
+        console.warn(
+          `[sendStevoSticker] Número ${number} não está registrado no WhatsApp. Tentando variante de 9º dígito: ${altNumber}...`,
+        );
+        return await sendStevoSticker({
+          host,
+          token,
+          instanceName,
+          number: altNumber,
+          sticker,
+          delay,
+          quoted,
+          isRetryVariant: true,
+        });
+      }
+    }
+
+    throw new Error(parseStevoError(response.status, response.statusText, errorText));
+  }
+
+  return response.json();
+}
+
 type SendReactionParams = {
   host: string;
   token: string;
@@ -290,11 +366,11 @@ export async function sendStevoReaction({
   fromMe,
   participant,
 }: SendReactionParams) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/message/react`;
 
   const body: any = {
-    number: number.includes('@') ? number : `${number}@s.whatsapp.net`,
+    number: number.includes("@") ? number : `${number}@s.whatsapp.net`,
     id: remoteMsgId,
     reaction: emoji,
     ...(fromMe !== undefined ? { fromMe } : {}),
@@ -302,17 +378,17 @@ export async function sendStevoReaction({
   };
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo Reaction API Error:', errorText);
+    console.error("Stevo Reaction API Error:", errorText);
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -334,27 +410,27 @@ export async function editStevoMessage({
   remoteMsgId,
   message,
 }: EditMessageParams) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/message/edit`;
 
   const body = {
-    chat: number.includes('@') ? number : `${number}@s.whatsapp.net`,
+    chat: number.includes("@") ? number : `${number}@s.whatsapp.net`,
     messageId: remoteMsgId,
     message: message,
   };
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo Edit API Error:', errorText);
+    console.error("Stevo Edit API Error:", errorText);
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -374,26 +450,26 @@ export async function deleteStevoMessage({
   number,
   remoteMsgId,
 }: DeleteMessageParams) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/message/delete`;
 
   const body = {
-    chat: number.includes('@') ? number : `${number}@s.whatsapp.net`,
+    chat: number.includes("@") ? number : `${number}@s.whatsapp.net`,
     messageId: remoteMsgId,
   };
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo Delete API Error:', errorText);
+    console.error("Stevo Delete API Error:", errorText);
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -407,21 +483,21 @@ export type CheckUserParams = {
 };
 
 export async function checkStevoUser({ host, token, numbers }: CheckUserParams) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/user/check`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ number: numbers }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo Check User API Error:', errorText);
+    console.error("Stevo Check User API Error:", errorText);
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -437,21 +513,21 @@ export async function getStevoGroupInfo({
   token: string;
   groupJid: string;
 }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/group/info`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ groupJid }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo Get Group Info Error:', errorText);
+    console.error("Stevo Get Group Info Error:", errorText);
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -469,21 +545,21 @@ export async function updateStevoGroupName({
   groupJid: string;
   name: string;
 }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/group/name`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ groupJid, name }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo Update Group Name Error:', errorText);
+    console.error("Stevo Update Group Name Error:", errorText);
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -501,21 +577,21 @@ export async function updateStevoGroupDescription({
   groupJid: string;
   description: string;
 }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/group/description`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ groupJid, description }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo Update Group Description Error:', errorText);
+    console.error("Stevo Update Group Description Error:", errorText);
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -533,21 +609,21 @@ export async function updateStevoGroupPhoto({
   groupJid: string;
   image: string;
 }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/group/photo`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ groupJid, image }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo Update Group Photo Error:', errorText);
+    console.error("Stevo Update Group Photo Error:", errorText);
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 
@@ -563,21 +639,21 @@ export async function getStevoAvatar({
   token: string;
   number: string;
 }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/user/avatar`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ number, preview: false }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('Stevo Get Avatar Error:', errorText);
+    console.error("Stevo Get Avatar Error:", errorText);
     throw new Error(parseStevoError(response.status, response.statusText, errorText));
   }
 

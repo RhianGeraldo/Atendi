@@ -18,12 +18,28 @@ import {
   ShoppingBag,
   ExternalLink,
   Users,
+  BookmarkPlus,
 } from "lucide-react";
 import { cn, getPhoneVariants } from "@/lib/utils";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useAuth } from "@/lib/auth-context";
+import { useActiveCompany } from "@/lib/active-company-context";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { createCompanyStickerAction } from "@/lib/api/stickers.functions";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -220,16 +236,42 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const [showMobileActions, setShowMobileActions] = useState(false);
   const [showPollVotes, setShowPollVotes] = useState(false);
+  const [isSaveStickerModalOpen, setIsSaveStickerModalOpen] = useState(false);
+  const [saveStickerName, setSaveStickerName] = useState("");
 
-  if (m.sender_type === "system") {
-    return <SystemMessageBubble m={m} />;
-  }
+  const { profile } = useAuth();
+  const { activeCompanyId } = useActiveCompany();
+  const qc = useQueryClient();
+  const isSuperAdmin = profile?.role === "super_admin";
+  const effectiveCompanyId = activeCompanyId || profile?.company_id;
 
-  const mine = m.sender_type === "agent";
-  const isInternal = m.is_internal;
-
-  let senderName = null;
-  let displayContent = m.content || "";
+  const saveStickerMutation = useMutation({
+    mutationFn: async () => {
+      if (!effectiveCompanyId || !m.media_url) {
+        throw new Error("Mídia da figurinha não encontrada.");
+      }
+      return await createCompanyStickerAction({
+        data: {
+          companyId: effectiveCompanyId,
+          name: saveStickerName.trim() || "Figurinha",
+          imageBase64: m.media_url,
+        },
+      });
+    },
+    onSuccess: () => {
+      if (effectiveCompanyId) {
+        qc.invalidateQueries({ queryKey: ["company-stickers", effectiveCompanyId] });
+      }
+      toast.success("Figurinha salva na biblioteca da empresa com sucesso!");
+      setIsSaveStickerModalOpen(false);
+      setSaveStickerName("");
+    },
+    onError: (err: unknown) => {
+      toast.error("Erro ao salvar figurinha", {
+        description: err instanceof Error ? err.message : "Tente novamente mais tarde.",
+      });
+    },
+  });
 
   const participantPhone = React.useMemo(() => {
     if (!isGroup || m.sender_type !== "contact" || !m.participant_jid) return null;
@@ -246,6 +288,16 @@ export function MessageBubble({
     const variants = getPhoneVariants(raw);
     return variants.some((v) => knownContactPhones.has(v));
   }, [participantPhone, knownContactPhones]);
+
+  if (m.sender_type === "system") {
+    return <SystemMessageBubble m={m} />;
+  }
+
+  const mine = m.sender_type === "agent";
+  const isInternal = m.is_internal;
+
+  let senderName = null;
+  let displayContent = m.content || "";
 
   if (isGroup && m.sender_type === "contact") {
     const match = displayContent.match(/^(.+?):\n([\s\S]*)$/);
@@ -270,6 +322,13 @@ export function MessageBubble({
       }
     }
   }
+
+  const isSticker =
+    m.media_type === "sticker" ||
+    (m.media_type === "image" &&
+      (m.metadata?.is_sticker ||
+        displayContent === "🖼️ Figurinha" ||
+        displayContent?.startsWith("🖼️ Figurinha:")));
 
   const adReply = m.metadata?.externalAdReply;
 
@@ -418,6 +477,18 @@ export function MessageBubble({
                 ))}
               </PopoverContent>
             </Popover>
+            {isSticker && m.media_url && isSuperAdmin && (
+              <button
+                onClick={() => {
+                  setSaveStickerName("");
+                  setIsSaveStickerModalOpen(true);
+                }}
+                className="hover:text-primary hover:bg-accent p-1.5 rounded-full transition-colors text-primary"
+                title="Salvar como figurinha da empresa (Super Admin)"
+              >
+                <BookmarkPlus className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         )}
 
@@ -517,27 +588,50 @@ export function MessageBubble({
             );
           })()}
 
-        {m.media_type === "image" && m.media_url ? (
+        {(m.media_type === "image" || m.media_type === "sticker" || isSticker) && m.media_url ? (
           <div className="mb-2">
             <Dialog>
               <DialogTrigger asChild>
                 <img
                   src={m.media_url}
-                  alt={displayContent || "Imagem recebida"}
+                  alt={displayContent || "Imagem / Figurinha"}
                   className="max-w-[200px] cursor-pointer rounded-lg hover:opacity-90 transition-opacity"
                 />
               </DialogTrigger>
               <DialogContent className="max-w-3xl p-6 flex flex-col items-center justify-center">
+                <DialogTitle className="sr-only">Visualizar Imagem</DialogTitle>
+                <DialogDescription className="sr-only">
+                  Visualização ampliada da imagem ou figurinha
+                </DialogDescription>
                 <img
                   src={m.media_url}
-                  alt={displayContent || "Imagem recebida"}
+                  alt={displayContent || "Imagem / Figurinha"}
                   className="max-h-[75vh] w-auto rounded-md object-contain shadow-sm"
                 />
               </DialogContent>
             </Dialog>
+            {isSticker && isSuperAdmin && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSaveStickerName("");
+                  setIsSaveStickerModalOpen(true);
+                }}
+                className={cn(
+                  "mt-1.5 flex items-center gap-1 text-[11px] font-semibold transition-opacity hover:opacity-100 cursor-pointer w-fit",
+                  mine ? "text-primary-foreground/90 opacity-80" : "text-primary opacity-90",
+                )}
+                title="Salvar esta figurinha no catálogo da empresa"
+              >
+                <BookmarkPlus className="h-3.5 w-3.5" />
+                <span>Salvar figurinha</span>
+              </button>
+            )}
             {displayContent &&
               displayContent !== "📷 Imagem" &&
-              displayContent !== "🖼️ Figurinha" && (
+              displayContent !== "🖼️ Figurinha" &&
+              !displayContent.startsWith("🖼️ Figurinha:") && (
                 <div className="mt-2">
                   <FormattedText text={displayContent} mine={mine} />
                 </div>
@@ -1139,7 +1233,11 @@ export function MessageBubble({
           )}
         >
           {m.is_edited && <span className="italic">Editado</span>}
-          <span>{m.created_at && !isNaN(new Date(m.created_at).getTime()) ? format(new Date(m.created_at), "HH:mm") : "—"}</span>
+          <span>
+            {m.created_at && !isNaN(new Date(m.created_at).getTime())
+              ? format(new Date(m.created_at), "HH:mm")
+              : "—"}
+          </span>
         </div>
 
         {m.reactions && Object.keys(m.reactions).length > 0 && (
@@ -1162,6 +1260,83 @@ export function MessageBubble({
           </div>
         )}
       </div>
+
+      {/* Modal para Super Admin salvar figurinha recebida na biblioteca da empresa */}
+      {isSticker && isSuperAdmin && (
+        <Dialog open={isSaveStickerModalOpen} onOpenChange={setIsSaveStickerModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <BookmarkPlus className="h-5 w-5 text-primary" />
+                Salvar Figurinha na Biblioteca
+              </DialogTitle>
+              <DialogDescription>
+                Adicione esta figurinha ao catálogo da empresa para que todos os atendentes possam
+                utilizá-la nos atendimentos.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="flex justify-center p-3 rounded-lg bg-muted/30 border border-border/50">
+                <img
+                  src={m.media_url || ""}
+                  alt="Sticker Preview"
+                  className="w-24 h-24 object-contain drop-shadow-sm"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="save-sticker-name" className="text-xs font-medium">
+                  Nome / Tag da Figurinha (Opcional)
+                </Label>
+                <Input
+                  id="save-sticker-name"
+                  placeholder="Opcional (Ex: Obrigado, Boleto, Parabéns...)"
+                  value={saveStickerName}
+                  onChange={(e) => setSaveStickerName(e.target.value)}
+                  autoFocus
+                  disabled={saveStickerMutation.isPending}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      saveStickerMutation.mutate();
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsSaveStickerModalOpen(false)}
+                disabled={saveStickerMutation.isPending}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => saveStickerMutation.mutate()}
+                disabled={saveStickerMutation.isPending}
+                className="gap-1.5"
+              >
+                {saveStickerMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <BookmarkPlus className="h-4 w-4" />
+                    Salvar Figurinha
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

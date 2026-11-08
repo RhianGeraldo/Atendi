@@ -37,7 +37,7 @@ import { toast } from "sonner";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
 import TextareaAutosize from "react-textarea-autosize";
-import EmojiPicker from "emoji-picker-react";
+import { StickersPicker } from "./stickers-picker";
 import { markMessageAsSentByMe } from "@/lib/hooks/use-global-notifications";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -172,6 +172,7 @@ export function ChatPanel({
     base64: string;
     type: string;
   } | null>(null);
+  const [isEmojiPopoverOpen, setIsEmojiPopoverOpen] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
   const [isCoaching, setIsCoaching] = useState(false);
   const [isPlaybookSheetOpen, setIsPlaybookSheetOpen] = useState(false);
@@ -671,7 +672,7 @@ export function ChatPanel({
     mutationFn: async (payload: {
       content: string;
       isInternal?: boolean;
-      mediaType?: "text" | "image" | "video" | "audio" | "document" | "template";
+      mediaType?: "text" | "image" | "video" | "audio" | "document" | "template" | "sticker";
       mediaBase64?: string;
       quotedMessageId?: string;
       quotedParticipant?: string;
@@ -1333,7 +1334,12 @@ export function ChatPanel({
     if (!messages || messages.length === 0) return [];
     const phones = new Set<string>();
     for (const m of messages) {
-      if (isGroup && m.sender_type === "contact" && m.participant_jid && !m.participant_jid.includes("@g.us")) {
+      if (
+        isGroup &&
+        m.sender_type === "contact" &&
+        m.participant_jid &&
+        !m.participant_jid.includes("@g.us")
+      ) {
         const match = m.participant_jid.match(/^(\d+)[:@]/);
         if (match && match[1].length >= 10) {
           phones.add(match[1]);
@@ -2157,12 +2163,12 @@ export function ChatPanel({
                           "bg-amber-100/50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800/50",
                       )}
                     >
-                      {/* Left Side: Emoji */}
-                      <Popover>
+                      {/* Left Side: Emoji & Figurinhas */}
+                      <Popover open={isEmojiPopoverOpen} onOpenChange={setIsEmojiPopoverOpen}>
                         <PopoverTrigger asChild>
                           <button
                             className="rounded-full p-2.5 text-muted-foreground hover:text-foreground mb-0.5 shrink-0 transition-colors"
-                            title="Emoji"
+                            title="Emojis e Figurinhas"
                           >
                             <Smile className="h-6 w-6" />
                           </button>
@@ -2170,10 +2176,26 @@ export function ChatPanel({
                         <PopoverContent
                           side="top"
                           align="start"
-                          className="p-0 border-none w-auto shadow-xl"
+                          className="p-0 border-none w-auto shadow-xl bg-transparent"
                           sideOffset={10}
                         >
-                          <EmojiPicker onEmojiClick={(e) => setText((prev) => prev + e.emoji)} />
+                          <StickersPicker
+                            companyId={targetCompanyId || ""}
+                            onEmojiClick={(e) => setText((prev) => prev + e.emoji)}
+                            onSelectSticker={(stickerUrl, stickerName) => {
+                              send.mutate({
+                                content:
+                                  stickerName && stickerName !== "Figurinha"
+                                    ? `🖼️ Figurinha: ${stickerName}`
+                                    : "🖼️ Figurinha",
+                                mediaType: "sticker",
+                                mediaBase64: stickerUrl,
+                                isInternal: false,
+                              });
+                              setIsEmojiPopoverOpen(false);
+                            }}
+                            isSendingSticker={send.isPending}
+                          />
                         </PopoverContent>
                       </Popover>
 

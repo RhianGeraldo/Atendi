@@ -34,17 +34,17 @@ export async function sendEvogoText({
   quoted,
 }: SendMessageParams & { quoted?: QuotedParams }) {
   // Normalize host URL
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/text`;
 
   let lastError: any = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'apikey': token,
-          'Content-Type': 'application/json',
+          apikey: token,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           number,
@@ -57,7 +57,7 @@ export async function sendEvogoText({
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('EvoGo API Error:', errorText);
+        console.error("EvoGo API Error:", errorText);
         throw new Error(parseEvogoError(response.status, response.statusText, errorText));
       }
 
@@ -89,14 +89,14 @@ export async function sendEvogoLink({
   quoted,
 }: SendMessageParams & { quoted?: QuotedParams }) {
   // Normalize host URL
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/link`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       number,
@@ -110,7 +110,7 @@ export async function sendEvogoLink({
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo API Error (link):', errorText);
+    console.error("EvoGo API Error (link):", errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
@@ -123,7 +123,7 @@ type SendMediaParams = {
   instanceName: string;
   number: string;
   base64: string;
-  mediatype: 'image' | 'video' | 'audio' | 'document';
+  mediatype: "image" | "video" | "audio" | "document";
   caption?: string;
   delay?: number;
 };
@@ -135,15 +135,15 @@ export async function sendEvogoMedia({
   number,
   base64,
   mediatype,
-  caption = '',
+  caption = "",
   delay = 0,
   quoted,
 }: SendMediaParams & { quoted?: QuotedParams }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/send/media`;
 
   // EvoGo expects raw base64 WITHOUT the data:...;base64, prefix
-  const rawBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
+  const rawBase64 = base64.includes(",") ? base64.split(",")[1] : base64;
 
   const body: any = {
     number,
@@ -154,34 +154,34 @@ export async function sendEvogoMedia({
     ...(quoted && { quoted }),
   };
 
-  if (mediatype === 'image') {
-    // NEVER pass filename for images, as Evolution API uses it to force 
+  if (mediatype === "image") {
+    // NEVER pass filename for images, as Evolution API uses it to force
     // the media to be sent as a Document (which causes the gray box).
-    body.mimetype = 'image/jpeg';
-  } else if (mediatype === 'document') {
-    let mime = 'application/pdf';
-    if (base64.startsWith('data:')) {
-      mime = base64.split(';')[0].split(':')[1];
+    body.mimetype = "image/jpeg";
+  } else if (mediatype === "document") {
+    let mime = "application/pdf";
+    if (base64.startsWith("data:")) {
+      mime = base64.split(";")[0].split(":")[1];
     }
-    const ext = mime.split('/')[1] || 'pdf';
+    const ext = mime.split("/")[1] || "pdf";
     body.filename = `document.${ext}`;
     body.fileName = `document.${ext}`;
     body.mimetype = mime;
-  } else if (mediatype === 'audio') {
-    body.filename = 'audio.ogg';
-    body.fileName = 'audio.ogg';
-    body.mimetype = 'audio/ogg';
-  } else if (mediatype === 'video') {
-    body.filename = 'video.mp4';
-    body.fileName = 'video.mp4';
-    body.mimetype = 'video/mp4';
+  } else if (mediatype === "audio") {
+    body.filename = "audio.ogg";
+    body.fileName = "audio.ogg";
+    body.mimetype = "audio/ogg";
+  } else if (mediatype === "video") {
+    body.filename = "video.mp4";
+    body.fileName = "video.mp4";
+    body.mimetype = "video/mp4";
   }
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
     // Aparelho desconectado faz o provedor segurar a requisição sem responder.
@@ -190,7 +190,57 @@ export async function sendEvogoMedia({
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo Media API Error:', errorText);
+    console.error("EvoGo Media API Error:", errorText);
+    throw new Error(parseEvogoError(response.status, response.statusText, errorText));
+  }
+
+  return response.json();
+}
+
+type SendStickerParams = {
+  host: string;
+  token: string;
+  instanceName?: string;
+  number: string;
+  sticker: string;
+  delay?: number;
+};
+
+export async function sendEvogoSticker({
+  host,
+  token,
+  number,
+  sticker,
+  delay = 0,
+  quoted,
+}: SendStickerParams & { quoted?: QuotedParams }) {
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
+  const url = `${baseUrl}/send/sticker`;
+
+  // Se for base64, remove o prefixo data:... se houver
+  const stickerData =
+    sticker.startsWith("data:") && sticker.includes(",") ? sticker.split(",")[1] : sticker;
+
+  const body: any = {
+    number,
+    sticker: stickerData,
+    ...(delay > 0 ? { delay } : {}),
+    ...(quoted && { quoted }),
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      apikey: token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(50000),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("EvoGo Sticker API Error:", errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
@@ -216,11 +266,11 @@ export async function sendEvogoReaction({
   fromMe,
   participant,
 }: SendReactionParams) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/message/react`;
 
   const body: any = {
-    number: number.includes('@') ? number : `${number}@s.whatsapp.net`,
+    number: number.includes("@") ? number : `${number}@s.whatsapp.net`,
     id: remoteMsgId,
     reaction: emoji,
     ...(fromMe !== undefined ? { fromMe } : {}),
@@ -228,17 +278,17 @@ export async function sendEvogoReaction({
   };
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo Reaction API Error:', errorText);
+    console.error("EvoGo Reaction API Error:", errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
@@ -260,27 +310,27 @@ export async function editEvogoMessage({
   remoteMsgId,
   message,
 }: EditMessageParams) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/message/edit`;
 
   const body = {
-    chat: number.includes('@') ? number : `${number}@s.whatsapp.net`,
+    chat: number.includes("@") ? number : `${number}@s.whatsapp.net`,
     messageId: remoteMsgId,
     message: message,
   };
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo Edit API Error:', errorText);
+    console.error("EvoGo Edit API Error:", errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
@@ -300,26 +350,26 @@ export async function deleteEvogoMessage({
   number,
   remoteMsgId,
 }: DeleteMessageParams) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/message/delete`;
 
   const body = {
-    chat: number.includes('@') ? number : `${number}@s.whatsapp.net`,
+    chat: number.includes("@") ? number : `${number}@s.whatsapp.net`,
     messageId: remoteMsgId,
   };
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo Delete API Error:', errorText);
+    console.error("EvoGo Delete API Error:", errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
@@ -333,14 +383,14 @@ export type CheckUserParams = {
 };
 
 export async function checkEvogoUser({ host, token, numbers }: CheckUserParams) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/user/check`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ number: numbers }),
   });
@@ -357,21 +407,21 @@ export async function getEvogoGroupInfo({
   token: string;
   groupJid: string;
 }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/group/info`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ groupJid }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo Get Group Info Error:', errorText);
+    console.error("EvoGo Get Group Info Error:", errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
@@ -389,21 +439,21 @@ export async function updateEvogoGroupName({
   groupJid: string;
   name: string;
 }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/group/name`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ groupJid, name }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo Update Group Name Error:', errorText);
+    console.error("EvoGo Update Group Name Error:", errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
@@ -421,21 +471,21 @@ export async function updateEvogoGroupDescription({
   groupJid: string;
   description: string;
 }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/group/description`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ groupJid, description }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo Update Group Description Error:', errorText);
+    console.error("EvoGo Update Group Description Error:", errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
@@ -453,21 +503,21 @@ export async function updateEvogoGroupPhoto({
   groupJid: string;
   image: string;
 }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/group/photo`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ groupJid, image }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo Update Group Photo Error:', errorText);
+    console.error("EvoGo Update Group Photo Error:", errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 
@@ -483,21 +533,21 @@ export async function getEvogoAvatar({
   token: string;
   number: string;
 }) {
-  const baseUrl = host.endsWith('/') ? host.slice(0, -1) : host;
+  const baseUrl = host.endsWith("/") ? host.slice(0, -1) : host;
   const url = `${baseUrl}/user/avatar`;
 
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'apikey': token,
-      'Content-Type': 'application/json',
+      apikey: token,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ number, preview: false }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('EvoGo Get Avatar Error:', errorText);
+    console.error("EvoGo Get Avatar Error:", errorText);
     throw new Error(parseEvogoError(response.status, response.statusText, errorText));
   }
 

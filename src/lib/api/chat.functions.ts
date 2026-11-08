@@ -191,7 +191,7 @@ export const sendMessageAction = createServerFn({ method: "POST" })
     z.object({
       conversationId: z.string().uuid(),
       text: z.string().optional(),
-      mediaType: z.enum(["text", "image", "video", "audio", "document"]).optional().default("text"),
+      mediaType: z.enum(["text", "image", "video", "audio", "document", "sticker"]).optional().default("text"),
       mediaBase64: z.string().optional(),
       quotedMessageId: z.string().optional(),
       quotedParticipant: z.string().optional(),
@@ -683,7 +683,22 @@ export const sendMessageAction = createServerFn({ method: "POST" })
         await garantirConexaoWhatsApp(canal!);
         try {
           if (provider === "stevo") {
-            if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
+            if (data.mediaType === "sticker") {
+              const { sendStevoSticker } = await import("@/lib/stevo");
+              const { prepareStickerUrlForEvoGo } = await import("@/lib/server/sticker-helper");
+              const preparedStickerUrl = await prepareStickerUrlForEvoGo(
+                mediaUrlToSend || data.mediaBase64!,
+                targetConversationId,
+              );
+              evogoResponse = await sendStevoSticker({
+                host: host!,
+                token: token!,
+                instanceName: instanceName!,
+                number: phoneToSend,
+                sticker: preparedStickerUrl,
+                quoted,
+              });
+            } else if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
               evogoResponse = await sendStevoMedia({
                 host: host!,
                 token: token!,
@@ -714,7 +729,22 @@ export const sendMessageAction = createServerFn({ method: "POST" })
               });
             }
           } else {
-            if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
+            if (data.mediaType === "sticker") {
+              const { sendEvogoSticker } = await import("@/lib/evogo");
+              const { prepareStickerUrlForEvoGo } = await import("@/lib/server/sticker-helper");
+              const preparedStickerUrl = await prepareStickerUrlForEvoGo(
+                mediaUrlToSend || data.mediaBase64!,
+                targetConversationId,
+              );
+              evogoResponse = await sendEvogoSticker({
+                host: host!,
+                token: token!,
+                instanceName: instanceName!,
+                number: phoneToSend,
+                sticker: preparedStickerUrl,
+                quoted,
+              });
+            } else if (data.mediaBase64 && data.mediaType && data.mediaType !== "text") {
               evogoResponse = await sendEvogoMedia({
                 host: host!,
                 token: token!,
@@ -793,10 +823,19 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       }
     }
 
-    const [msgRes] = await Promise.all([
+    let [msgRes] = await Promise.all([
       supabase.from("messages").insert(insertPayload).select().single(),
       supabaseAdmin.from("conversations").update(convUpdate).eq("id", targetConversationId),
     ]);
+
+    // Fallback: se o banco ainda não tiver o enum 'sticker' aplicado na migration, grava como image com flag is_sticker
+    if (msgRes.error && insertPayload.media_type === "sticker") {
+      console.warn("Retrying message insert as image with is_sticker metadata fallback...", msgRes.error);
+      insertPayload.media_type = "image";
+      insertPayload.metadata = { ...(insertPayload.metadata || {}), is_sticker: true };
+      if (!insertPayload.content) insertPayload.content = "🖼️ Figurinha";
+      msgRes = await supabase.from("messages").insert(insertPayload).select().single();
+    }
 
     if (msgRes.error) {
       console.error("Failed to save message in DB:", msgRes.error);

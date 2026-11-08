@@ -11,11 +11,11 @@ export interface ConvRow {
   tags: string[];
   unread_count?: number;
   last_message_preview?: string | null;
-  contact: { 
-    id: string; 
-    name: string; 
-    phone: string | null; 
-    email: string | null; 
+  contact: {
+    id: string;
+    name: string;
+    phone: string | null;
+    email: string | null;
     tags: string[];
     avatar_url?: string | null;
     instagram_username?: string | null;
@@ -38,7 +38,12 @@ export interface ConvRow {
   whatsapp_instance_id: string | null;
   unit?: { name: string; color?: string | null; custom_variables?: any } | null;
   whatsapp_instance?: { name: string } | null;
-  last_message?: { sender_type: string; created_at: string; is_internal?: boolean; waiting_since?: string }[];
+  last_message?: {
+    sender_type: string;
+    created_at: string;
+    is_internal?: boolean;
+    waiting_since?: string;
+  }[];
 }
 
 export interface MessageRow {
@@ -47,7 +52,7 @@ export interface MessageRow {
   sender_type: "agent" | "contact" | "system";
   is_internal?: boolean;
   content: string | null;
-  media_type: "text" | "image" | "audio" | "video" | "document";
+  media_type: "text" | "image" | "audio" | "video" | "document" | "sticker";
   media_url?: string | null;
   created_at: string;
   quoted_content?: string | null;
@@ -66,10 +71,15 @@ export interface MessageRow {
 
 import { supabase } from "@/integrations/supabase/client";
 
-export const fetchConversationMessages = async (convId: string, limitCount = 50): Promise<MessageRow[]> => {
+export const fetchConversationMessages = async (
+  convId: string,
+  limitCount = 50,
+): Promise<MessageRow[]> => {
   const { data, error } = await supabase
     .from("messages")
-    .select("id, conversation_id, sender_type, sender_id, participant_jid, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata")
+    .select(
+      "id, conversation_id, sender_type, sender_id, participant_jid, is_internal, content, media_type, media_url, created_at, quoted_content, quoted_message_id, is_edited, is_deleted, reactions, remote_msg_id, transcription, profiles(name), metadata",
+    )
     .eq("conversation_id", convId)
     .order("created_at", { ascending: false })
     .limit(limitCount);
@@ -78,11 +88,13 @@ export const fetchConversationMessages = async (convId: string, limitCount = 50)
   return ((data ?? []) as MessageRow[]).reverse();
 };
 
-export function isGroupConversation(c?: {
-  channel?: string | null;
-  remote_id?: string | null;
-  contact?: { phone?: string | null; whatsapp_lid?: string | null } | null;
-} | null): boolean {
+export function isGroupConversation(
+  c?: {
+    channel?: string | null;
+    remote_id?: string | null;
+    contact?: { phone?: string | null; whatsapp_lid?: string | null } | null;
+  } | null,
+): boolean {
   if (!c) return false;
   if (c.channel === "whatsapp_group") return true;
   if (c.remote_id && c.remote_id.includes("@g.us")) return true;
@@ -94,4 +106,3 @@ export function isGroupConversation(c?: {
     (phone.includes("-") && phone.length > 18)
   );
 }
-

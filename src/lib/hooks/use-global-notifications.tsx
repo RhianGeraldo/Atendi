@@ -89,7 +89,7 @@ function triggerBrowserNotification({
 
 /**
  * Hook Centralizado de Notificações Globais Personalizadas por Usuário
- * 
+ *
  * Regras Estritas:
  * 1. Mensagens de Clientes:
  *    - Se estiver no "Aguardando" (status = waiting ou sem atendente atribuído): notifica todos os operadores da unidade/empresa.
@@ -117,14 +117,15 @@ export function useGlobalNotifications() {
   sessionRef.current = session;
 
   // Título original da aba e contador de mensagens não lidas em segundo plano
-  const originalTitleRef = useRef<string>(typeof document !== "undefined" ? document.title : "Atendi");
+  const originalTitleRef = useRef<string>(
+    typeof document !== "undefined" ? document.title : "Atendi",
+  );
   const unreadBackgroundCountRef = useRef<number>(0);
 
   // Unidades permitidas do usuário (se não for admin global)
   const allowedUnitsRef = useRef<Set<string>>(new Set());
   const isSuperOrAdminCompany =
-    profile?.role === "super_admin" ||
-    profile?.role === "admin_company";
+    profile?.role === "super_admin" || profile?.role === "admin_company";
   // Acesso à Matriz/Rede: conversas sem unidade (unit_id nulo)
   const hasRedeAccess = isSuperOrAdminCompany || Boolean(profile?.has_matriz_access);
 
@@ -242,7 +243,8 @@ export function useGlobalNotifications() {
           if (
             currentUserId &&
             newMsg.sender_id &&
-            String(newMsg.sender_id).trim().toLowerCase() === String(currentUserId).trim().toLowerCase()
+            String(newMsg.sender_id).trim().toLowerCase() ===
+              String(currentUserId).trim().toLowerCase()
           ) {
             return;
           }
@@ -269,7 +271,9 @@ export function useGlobalNotifications() {
           try {
             const { data } = await supabase
               .from("conversations")
-              .select("id, unit_id, channel, status, assigned_agent_id, contact:contacts(id, company_id, name, phone, profile_picture_url)")
+              .select(
+                "id, unit_id, channel, status, assigned_agent_id, contact:contacts(id, company_id, name, phone, profile_picture_url)",
+              )
               .eq("id", convId)
               .single();
             convDetail = data as any;
@@ -280,7 +284,11 @@ export function useGlobalNotifications() {
           if (!convDetail || !convDetail.contact) return;
 
           // Valida tenant da empresa
-          if (convDetail.contact.company_id && userCompanyId && convDetail.contact.company_id !== userCompanyId) {
+          if (
+            convDetail.contact.company_id &&
+            userCompanyId &&
+            convDetail.contact.company_id !== userCompanyId
+          ) {
             return;
           }
 
@@ -294,7 +302,8 @@ export function useGlobalNotifications() {
             // Conversa atribuída a um atendente específico
             const isAssignedToMe =
               Boolean(currentUserId) &&
-              String(assignedId).trim().toLowerCase() === String(currentUserId).trim().toLowerCase();
+              String(assignedId).trim().toLowerCase() ===
+                String(currentUserId).trim().toLowerCase();
 
             if (!isAssignedToMe) {
               // Pertence a outro atendente -> NÃO notifica
@@ -314,6 +323,7 @@ export function useGlobalNotifications() {
           const contactName = convDetail.contact.name || convDetail.contact.phone || "Cliente";
           let previewText = newMsg.content || "";
           if (newMsg.media_type === "image") previewText = "📷 Foto";
+          else if (newMsg.media_type === "sticker") previewText = "🖼️ Figurinha";
           else if (newMsg.media_type === "video") previewText = "🎥 Vídeo";
           else if (newMsg.media_type === "audio") previewText = "🎵 Áudio";
           else if (newMsg.media_type === "document") previewText = "📄 Documento";
@@ -371,7 +381,7 @@ export function useGlobalNotifications() {
               },
             });
           }
-        }
+        },
       )
       // 2. Mensagens da Equipe (tabela 'internal_messages')
       .on(
@@ -389,7 +399,8 @@ export function useGlobalNotifications() {
           if (
             currentUserId &&
             newMsg.sender_id &&
-            String(newMsg.sender_id).trim().toLowerCase() === String(currentUserId).trim().toLowerCase()
+            String(newMsg.sender_id).trim().toLowerCase() ===
+              String(currentUserId).trim().toLowerCase()
           ) {
             return;
           }
@@ -422,7 +433,12 @@ export function useGlobalNotifications() {
           }
 
           // Valida tenant
-          if (channelData && channelData.companyId && userCompanyId && channelData.companyId !== userCompanyId) {
+          if (
+            channelData &&
+            channelData.companyId &&
+            userCompanyId &&
+            channelData.companyId !== userCompanyId
+          ) {
             return;
           }
 
@@ -447,7 +463,9 @@ export function useGlobalNotifications() {
                 const isEligible =
                   isSuperOrAdminCompany ||
                   channelData?.scope === "company" ||
-                  (channelData?.scope === "unit" && channelData.unitId && allowedUnitsRef.current.has(channelData.unitId));
+                  (channelData?.scope === "unit" &&
+                    channelData.unitId &&
+                    allowedUnitsRef.current.has(channelData.unitId));
 
                 // Não guarda resultado negativo: as unidades permitidas carregam de forma assíncrona
                 // e o usuário pode ser adicionado ao grupo depois, então revalida na próxima mensagem
@@ -500,6 +518,7 @@ export function useGlobalNotifications() {
           const senderName = senderData?.name || "Colega de equipe";
           let previewText = newMsg.content || "";
           if (newMsg.media_type === "image") previewText = "📷 Foto";
+          else if (newMsg.media_type === "sticker") previewText = "🖼️ Figurinha";
           else if (newMsg.media_type === "audio") previewText = "🎵 Áudio";
           else if (newMsg.media_type === "document") previewText = "📄 Documento";
 
@@ -542,7 +561,11 @@ export function useGlobalNotifications() {
           });
 
           // 4. Toast in-app se estiver em outra página, outro modo ou outro canal
-          if (currentPath !== "/conversations" || currentSearch?.mode !== "team" || currentSearch?.channelId !== channelId) {
+          if (
+            currentPath !== "/conversations" ||
+            currentSearch?.mode !== "team" ||
+            currentSearch?.channelId !== channelId
+          ) {
             const isDirect = channelData?.type === "direct";
             const basePreview = previewText || "Nova mensagem da equipe";
             showStackedMessageToast({
@@ -561,12 +584,17 @@ export function useGlobalNotifications() {
               },
             });
           }
-        }
+        },
       )
       // 3. Transferências de atendimento para o usuário (tabela 'notifications', type 'transfer_<canal>')
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${profile.id}`,
+        },
         async (payload) => {
           const notif = payload.new as any;
           if (!notif || !String(notif.type || "").startsWith("transfer_")) return;
@@ -576,7 +604,11 @@ export function useGlobalNotifications() {
 
           let convDetail: {
             channel: string | null;
-            contact: { name: string | null; phone: string | null; profile_picture_url: string | null } | null;
+            contact: {
+              name: string | null;
+              phone: string | null;
+              profile_picture_url: string | null;
+            } | null;
           } | null = null;
           if (convId) {
             try {
@@ -592,11 +624,15 @@ export function useGlobalNotifications() {
           }
 
           const contactName = convDetail?.contact?.name || convDetail?.contact?.phone || "Cliente";
-          const channelKey = convDetail?.channel || String(notif.type).replace("transfer_", "") || "whatsapp";
+          const channelKey =
+            convDetail?.channel || String(notif.type).replace("transfer_", "") || "whatsapp";
           const previewText = notif.message || "Um atendimento foi transferido para você";
 
           const openConversation = () => {
-            void supabase.from("notifications" as any).update({ is_read: true }).eq("id", notif.id);
+            void supabase
+              .from("notifications" as any)
+              .update({ is_read: true })
+              .eq("id", notif.id);
             if (convId) {
               navigate({ to: "/conversations", search: { mode: "clients", c: convId } as any });
             }
@@ -635,7 +671,7 @@ export function useGlobalNotifications() {
             previewText,
             onOpen: openConversation,
           });
-        }
+        },
       )
       // 4. Atualizações de Membros e Silenciamento da Equipe (tabela 'internal_channel_members')
       .on(
@@ -653,7 +689,7 @@ export function useGlobalNotifications() {
               isMuted: Boolean(row.is_muted),
             });
           }
-        }
+        },
       )
       .subscribe();
 
