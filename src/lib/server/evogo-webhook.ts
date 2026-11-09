@@ -981,11 +981,13 @@ export async function processEvogoWebhookBody(
         department_id: instanceDepartmentId,
       } = instance;
 
+      const isGroup = remoteJid.includes("@g.us");
+
       // Prevenção precoce de eco: se a mensagem já foi gravada no banco pelo sistema (sendMessageAction)
       // para um contato direto (não-grupo), evita duplicatas/conversas fantasmas.
       // Em grupos (onde múltiplas instâncias da mesma empresa podem estar presentes), cada instância
       // precisa registrar sua cópia da mensagem em sua respectiva conversa.
-      if (remoteMsgId && !isGroupMsg) {
+      if (remoteMsgId && !isGroup) {
         const { data: existingMsg } = await supabaseAdmin
           .from("messages")
           .select("id, conversation_id, conversations(id, contact_id, company_id, whatsapp_instance_id, contacts(id, phone, whatsapp_lid))")
@@ -1075,7 +1077,6 @@ export async function processEvogoWebhookBody(
         textContent = "[Mídia/Mensagem não suportada]";
       }
 
-      const isGroup = remoteJid.includes("@g.us");
       if (isGroup && !isFromMe && textContent) {
         const senderDisplayName =
           (pushName && pushName !== "Desconhecido" ? pushName : null) ||
