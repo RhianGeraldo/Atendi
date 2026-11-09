@@ -126,20 +126,21 @@ export async function handlePollUpdate(
     return;
   }
 
-  // 1. Busca a mensagem da enquete original no banco
-  const { data: origMsg, error: fetchErr } = await supabaseAdmin
+  // 1. Busca as mensagens da enquete original no banco (suporta múltiplas instâncias no mesmo grupo)
+  const { data: origMsgs, error: fetchErr } = await supabaseAdmin
     .from("messages")
     .select("id, conversation_id, participant_jid, metadata")
-    .eq("remote_msg_id", origPollId)
-    .single();
+    .or(`remote_msg_id.eq.${origPollId},remote_msg_id.like.${origPollId}_%`);
 
-  if (fetchErr || !origMsg) {
+  if (fetchErr || !origMsgs || origMsgs.length === 0) {
     console.log(
       `[${providerLabel}] Enquete original não encontrada no banco (remote_msg_id=${origPollId}).`,
     );
     return;
   }
 
+  // Usa a primeira mensagem que tiver opções configuradas
+  const origMsg = origMsgs.find((m) => m.metadata?.poll?.options?.length > 0) || origMsgs[0];
   const currentMetadata = origMsg.metadata || {};
   const currentPoll = currentMetadata.poll || {};
   const options: string[] = currentPoll.options || [];
@@ -246,21 +247,27 @@ export async function handlePollUpdate(
     votes: currentVotes,
   };
 
-  const { error: updateErr } = await supabaseAdmin
-    .from("messages")
-    .update({
-      metadata: {
-        ...currentMetadata,
-        poll: updatedPoll,
-      },
-    })
-    .eq("id", origMsg.id);
+  for (const targetMsg of origMsgs) {
+    const meta = targetMsg.metadata || {};
+    const { error: updateErr } = await supabaseAdmin
+      .from("messages")
+      .update({
+        metadata: {
+          ...meta,
+          poll: updatedPoll,
+        },
+      })
+      .eq("id", targetMsg.id);
 
-  if (updateErr) {
-    console.error(`[${providerLabel}] Erro ao atualizar votos da enquete ${origMsg.id}:`, updateErr);
-  } else {
-    console.log(
-      `[${providerLabel}] Voto de ${voterName} (${voterKey}) registrado com sucesso na enquete ${origMsg.id}.`,
-    );
+    if (updateErr) {
+      console.error(
+        `[${providerLabel}] Erro ao atualizar votos da enquete ${targetMsg.id}:`,
+        updateErr,
+      );
+    } else {
+      console.log(
+        `[${providerLabel}] Voto de ${voterName} (${voterKey}) registrado com sucesso na enquete ${targetMsg.id}.`,
+      );
+    }
   }
 }
