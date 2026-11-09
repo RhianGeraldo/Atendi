@@ -87,10 +87,67 @@ export async function promoteProvisionalContact(
       .limit(1);
     if (rErr) throw rErr;
     if (realContacts && realContacts.length > 0) {
-      console.warn(
-        `[whatsapp-lid] Contato provisório ${target.id} (LID ${lid}) duplica ${realContacts[0].id} (${phone}); precisa mesclar.`,
+      const realId = realContacts[0].id;
+      console.log(
+        `[whatsapp-lid] Contato provisório ${target.id} (LID ${lid}) duplica contato real ${realId} (${phone}); vinculando e mesclando.`,
       );
-      return false;
+
+      // Vincula o LID no contato real
+      await supabaseAdmin
+        .from("contacts")
+        .update({ whatsapp_lid: lid })
+        .eq("id", realId);
+
+      // Marca o contato provisório como mesclado para não aparecer nas listas
+      await supabaseAdmin
+        .from("contacts")
+        .update({ merged_into_id: realId })
+        .eq("id", target.id);
+
+      // Limpa ou migra conversas do contato provisório para não poluir o painel nem perder mensagens
+      const { data: provConvs } = await supabaseAdmin
+        .from("conversations")
+        .select("id, whatsapp_instance_id")
+        .eq("contact_id", target.id);
+
+      for (const pc of provConvs || []) {
+        // Busca a conversa real nesta mesma instância (ou a mais recente do contato real)
+        const { data: realConv } = await supabaseAdmin
+          .from("conversations")
+          .select("id")
+          .eq("contact_id", realId)
+          .eq("whatsapp_instance_id", pc.whatsapp_instance_id)
+          .order("started_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (realConv && realConv.id !== pc.id) {
+          // Migra todas as mensagens da conversa provisória para a conversa real
+          await supabaseAdmin
+            .from("messages")
+            .update({ conversation_id: realConv.id })
+            .eq("conversation_id", pc.id);
+        }
+
+        // Quebra referência circular de chave estrangeira
+        await supabaseAdmin
+          .from("conversations")
+          .update({ current_session_id: null })
+          .eq("id", pc.id);
+
+        const { data: sessList } = await supabaseAdmin
+          .from("conversation_sessions")
+          .select("id")
+          .eq("conversation_id", pc.id);
+        const sIds = (sessList || []).map((s) => s.id);
+        if (sIds.length > 0) {
+          await supabaseAdmin.from("session_events").delete().in("session_id", sIds);
+        }
+        await supabaseAdmin.from("conversation_sessions").delete().eq("conversation_id", pc.id);
+        await supabaseAdmin.from("conversations").delete().eq("id", pc.id);
+        console.log(`[whatsapp-lid] Conversa fantasma ${pc.id} removida e mesclada na real ${realConv?.id || "sem-conversa"}.`);
+      }
+      return true;
     }
 
     const updates: { phone: string; whatsapp_lid: string; name?: string } = {

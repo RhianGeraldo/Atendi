@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -13,18 +13,22 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import {
   CalendarClock,
+  Calendar as CalendarIcon,
   Clock,
   Send,
   Trash2,
-  AlertCircle,
   Bot,
   User,
-  CheckCircle2,
-  Sparkles,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+import { format, isBefore, startOfToday } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   scheduleChatMessageAction,
@@ -49,36 +53,41 @@ export function ScheduledMessagesDialog({
 }: ScheduledMessagesDialogProps) {
   const qc = useQueryClient();
   const [content, setContent] = useState(initialText);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [selectedTime, setSelectedTime] = useState<string>("10:00");
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [showPendingList, setShowPendingList] = useState(false);
 
-  // Helper para obter o momento atual no fuso de Brasília (UTC-3)
-  const getBrasiliaNow = () => {
+  // Helper para obter data e hora padrão baseada no fuso de Brasília
+  const resetScheduleToDefault = React.useCallback(() => {
     const nowUtc = new Date();
     const spString = nowUtc.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" });
-    return new Date(spString);
-  };
+    const spDate = new Date(spString);
 
-  // Data/hora padrão: amanhã às 10:00 (Horário de Brasília)
-  const getDefaultDateTime = React.useCallback(() => {
-    const d = getBrasiliaNow();
-    d.setDate(d.getDate() + 1);
-    d.setHours(10, 0, 0, 0);
-    // Formato local YYYY-MM-DDTHH:mm para input type="datetime-local"
+    if (spDate.getHours() >= 18) {
+      spDate.setDate(spDate.getDate() + 1);
+      spDate.setHours(9, 0, 0, 0);
+    } else {
+      spDate.setHours(spDate.getHours() + 1, 0, 0, 0);
+    }
+
     const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    setSelectedDate(spDate);
+    setSelectedTime(`${pad(spDate.getHours())}:${pad(spDate.getMinutes())}`);
   }, []);
 
-  const [scheduledAtLocal, setScheduledAtLocal] = useState<string>(getDefaultDateTime);
-
-  // Atualizar quando abrir se initialText mudou
-  React.useEffect(() => {
+  // Ao abrir o diálogo, atualiza com initialText e reseta para o default
+  useEffect(() => {
     if (open) {
-      if (initialText) setContent(initialText);
-      setScheduledAtLocal(getDefaultDateTime());
+      if (initialText) {
+        setContent(initialText);
+      }
+      resetScheduleToDefault();
     }
-  }, [open, initialText, getDefaultDateTime]);
+  }, [open, initialText, resetScheduleToDefault]);
 
   // Query das mensagens agendadas desta conversa
-  const { data: scheduledData, isLoading: isLoadingList } = useQuery({
+  const { data: scheduledData } = useQuery({
     queryKey: ["scheduled-messages", conversationId],
     queryFn: async () => {
       const res = await listScheduledMessagesAction({ data: { conversationId } });
@@ -96,16 +105,22 @@ export function ScheduledMessagesDialog({
       if (!content.trim()) {
         throw new Error("Digite o texto da mensagem.");
       }
+      if (!selectedDate) {
+        throw new Error("Selecione a data de envio.");
+      }
+      if (!selectedTime) {
+        throw new Error("Informe o horário de envio.");
+      }
 
-      // Garante parsing explícito no Horário de Brasília (-03:00) para evitar desvio de fuso
-      const isoWithTz =
-        scheduledAtLocal.includes("Z") ||
-        scheduledAtLocal.includes("+") ||
-        scheduledAtLocal.includes("-03:00")
-          ? scheduledAtLocal
-          : `${scheduledAtLocal}:00-03:00`;
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const year = selectedDate.getFullYear();
+      const month = pad(selectedDate.getMonth() + 1);
+      const day = pad(selectedDate.getDate());
 
-      const targetDate = new Date(isoWithTz);
+      // Monta ISO string explícita em horário de Brasília (UTC-3)
+      const targetIso = `${year}-${month}-${day}T${selectedTime}:00-03:00`;
+      const targetDate = new Date(targetIso);
+
       if (Number.isNaN(targetDate.getTime())) {
         throw new Error("Data e horário inválidos.");
       }
@@ -127,6 +142,7 @@ export function ScheduledMessagesDialog({
       qc.invalidateQueries({ queryKey: ["scheduled-messages", conversationId] });
       qc.invalidateQueries({ queryKey: ["has-scheduled-messages", conversationId] });
       if (onScheduled) onScheduled();
+      onOpenChange(false);
     },
     onError: (err: any) => {
       toast.error(err?.message || "Erro ao agendar mensagem.");
@@ -150,250 +166,197 @@ export function ScheduledMessagesDialog({
     },
   });
 
-  // Atalhos rápidos de data/horário (baseados no Horário de Brasília)
-  const applyPreset = (preset: "today_18" | "tomorrow_10" | "in_2_days" | "next_monday") => {
-    const d = getBrasiliaNow();
-    const pad = (n: number) => String(n).padStart(2, "0");
-
-    if (preset === "today_18") {
-      d.setHours(18, 0, 0, 0);
-      if (d.getTime() < getBrasiliaNow().getTime()) {
-        d.setDate(d.getDate() + 1);
-      }
-    } else if (preset === "tomorrow_10") {
-      d.setDate(d.getDate() + 1);
-      d.setHours(10, 0, 0, 0);
-    } else if (preset === "in_2_days") {
-      d.setDate(d.getDate() + 2);
-      d.setHours(10, 0, 0, 0);
-    } else if (preset === "next_monday") {
-      const daysUntilMonday = (1 + 7 - d.getDay()) % 7 || 7;
-      d.setDate(d.getDate() + daysUntilMonday);
-      d.setHours(10, 0, 0, 0);
-    }
-
-    setScheduledAtLocal(
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
-    );
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-6 overflow-hidden">
-        <DialogHeader className="pb-3 border-b">
-          <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+      <DialogContent className="sm:max-w-md p-6 gap-5">
+        <DialogHeader className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
               <CalendarClock className="h-5 w-5" />
             </div>
             <div>
-              <DialogTitle className="text-lg font-semibold">Agendamento de Mensagens</DialogTitle>
+              <DialogTitle className="text-base font-semibold">Agendar Mensagem</DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Programe mensagens para envio automático no WhatsApp ou gerencie envios futuros.
+                Envio automático via WhatsApp na data e hora selecionadas.
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto space-y-6 pt-4 pr-1">
-          {/* Seção de Novo Agendamento */}
-          <div className="space-y-4 bg-muted/30 p-4 rounded-xl border">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm font-semibold flex items-center gap-1.5">
-                <Clock className="h-4 w-4 text-primary" />
-                Nova Mensagem Agendada
-              </Label>
-              <span className="text-xs text-muted-foreground">Envio automático via WhatsApp</span>
-            </div>
-
-            {/* Presets Rápidos */}
-            <div className="flex flex-wrap gap-1.5">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs rounded-full"
-                onClick={() => applyPreset("today_18")}
-              >
-                Hoje às 18:00
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs rounded-full"
-                onClick={() => applyPreset("tomorrow_10")}
-              >
-                Amanhã às 10:00
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs rounded-full"
-                onClick={() => applyPreset("in_2_days")}
-              >
-                Em 2 dias às 10:00
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs rounded-full"
-                onClick={() => applyPreset("next_monday")}
-              >
-                Segunda-feira às 10:00
-              </Button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-              <div className="sm:col-span-3 space-y-1.5">
-                <Label
-                  htmlFor="scheduled-datetime"
-                  className="text-xs text-muted-foreground flex items-center justify-between"
-                >
-                  <span>Data e Horário de Envio</span>
-                  <span className="text-[10px] text-primary/80 font-medium">
-                    Horário de Brasília (BRT / UTC-3)
-                  </span>
-                </Label>
-                <Input
-                  id="scheduled-datetime"
-                  type="datetime-local"
-                  value={scheduledAtLocal}
-                  onChange={(e) => setScheduledAtLocal(e.target.value)}
-                  className="bg-background text-sm"
-                />
-              </div>
-
-              <div className="sm:col-span-3 space-y-1.5">
-                <Label htmlFor="scheduled-content" className="text-xs text-muted-foreground">
-                  Texto da Mensagem
-                </Label>
-                <Textarea
-                  id="scheduled-content"
-                  placeholder="Escreva a mensagem que será enviada no dia e horário agendados..."
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  rows={3}
-                  className="bg-background resize-none text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-1">
-              <Button
-                type="button"
-                onClick={() => scheduleMutation.mutate()}
-                disabled={!content.trim() || scheduleMutation.isPending}
-                size="sm"
-                className="gap-2"
-              >
-                <Send className="h-4 w-4" />
-                {scheduleMutation.isPending ? "Agendando..." : "Confirmar Agendamento"}
-              </Button>
-            </div>
+        <div className="space-y-4">
+          {/* Mensagem */}
+          <div className="space-y-1.5">
+            <Label htmlFor="scheduled-message-text" className="text-xs font-semibold">
+              Mensagem
+            </Label>
+            <Textarea
+              id="scheduled-message-text"
+              placeholder="Digite a mensagem a ser enviada..."
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={4}
+              className="resize-none text-sm bg-background"
+            />
           </div>
 
-          {/* Seção de Mensagens Pendentes nesta Conversa */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold flex items-center gap-1.5">
-                <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                Mensagens Agendadas ({pendingList.length})
-              </h4>
-              {pendingList.length > 0 && (
-                <span className="text-xs text-amber-600 font-medium">
-                  {pendingList.length} envio(s) pendente(s)
-                </span>
-              )}
-            </div>
+          {/* Data e Horário */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">
+              Data e Horário do Envio
+            </Label>
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+              <div className="sm:col-span-3">
+                <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal text-xs sm:text-sm h-10 bg-background",
+                        !selectedDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4 text-primary shrink-0" />
+                      {selectedDate ? (
+                        format(selectedDate, "dd 'de' MMMM, yyyy", { locale: ptBR })
+                      ) : (
+                        <span>Selecione a data</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 z-[60]" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={(date) => {
+                        if (date) {
+                          setSelectedDate(date);
+                          setIsCalendarOpen(false);
+                        }
+                      }}
+                      disabled={(date) => isBefore(date, startOfToday())}
+                      locale={ptBR}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
 
-            {isLoadingList ? (
-              <div className="p-6 text-center text-xs text-muted-foreground">
-                Carregando mensagens agendadas...
+              <div className="sm:col-span-2">
+                <div className="relative flex items-center">
+                  <Clock className="absolute left-3 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    type="time"
+                    value={selectedTime}
+                    onChange={(e) => setSelectedTime(e.target.value)}
+                    className="h-10 pl-9 text-sm bg-background"
+                  />
+                </div>
               </div>
-            ) : pendingList.length === 0 ? (
-              <div className="p-8 text-center border rounded-xl border-dashed bg-muted/10 space-y-1">
-                <CheckCircle2 className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
-                <p className="text-xs font-medium text-foreground">
-                  Nenhuma mensagem agendada no momento
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  Quando você ou a IA agendarem envios futuros, eles aparecerão listados aqui.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Horário de Brasília (UTC-3)
+            </p>
+          </div>
+        </div>
+
+        {/* Rodapé de Ações */}
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+            disabled={scheduleMutation.isPending}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => scheduleMutation.mutate()}
+            disabled={!content.trim() || !selectedDate || !selectedTime || scheduleMutation.isPending}
+            className="gap-2"
+          >
+            <Send className="h-4 w-4" />
+            {scheduleMutation.isPending ? "Agendando..." : "Agendar Mensagem"}
+          </Button>
+        </div>
+
+        {/* Mensagens Agendadas Existentes (Colapsável sutil para não poluir o layout) */}
+        {pendingList.length > 0 && (
+          <div className="pt-3 border-t">
+            <button
+              type="button"
+              onClick={() => setShowPendingList((prev) => !prev)}
+              className="flex items-center justify-between w-full text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5 font-medium">
+                <CalendarClock className="h-3.5 w-3.5 text-primary" />
+                {pendingList.length === 1
+                  ? "1 mensagem agendada nesta conversa"
+                  : `${pendingList.length} mensagens agendadas nesta conversa`}
+              </span>
+              <span className="text-[11px] font-semibold text-primary flex items-center gap-0.5">
+                {showPendingList ? "Ocultar" : "Ver / Cancelar"}
+                {showPendingList ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              </span>
+            </button>
+
+            {showPendingList && (
+              <div className="mt-3 space-y-2 max-h-48 overflow-y-auto pr-1">
                 {pendingList.map((item: any) => {
                   const isAgent = item.creator_type === "agent" || item.creator_type === "system";
                   const scheduledDate = new Date(item.scheduled_at);
-                  const isPast = scheduledDate.getTime() <= Date.now();
 
                   return (
                     <div
                       key={item.id}
-                      className="p-3.5 rounded-xl border bg-card flex items-start justify-between gap-3 shadow-xs hover:border-primary/30 transition-all"
+                      className="p-2.5 rounded-lg border bg-muted/30 flex items-start justify-between gap-2 text-xs"
                     >
-                      <div className="space-y-1.5 flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
                           <Badge
                             variant={isAgent ? "secondary" : "outline"}
-                            className="text-[10px] h-5 gap-1 font-medium"
+                            className="text-[9px] h-4 gap-0.5 font-normal px-1"
                           >
                             {isAgent ? (
                               <>
-                                <Bot className="h-3 w-3 text-purple-600" />
-                                IA Especialista
+                                <Bot className="h-2.5 w-2.5 text-purple-600" />
+                                IA
                               </>
                             ) : (
                               <>
-                                <User className="h-3 w-3 text-blue-600" />
+                                <User className="h-2.5 w-2.5 text-blue-600" />
                                 Atendente
                               </>
                             )}
                           </Badge>
-
-                          <span className="text-xs font-semibold text-foreground flex items-center gap-1">
-                            <Clock className="h-3 w-3 text-primary" />
+                          <span className="text-[11px] font-medium text-foreground">
                             {scheduledDate.toLocaleString("pt-BR", {
                               timeZone: "America/Sao_Paulo",
                               day: "2-digit",
                               month: "2-digit",
-                              year: "numeric",
                               hour: "2-digit",
                               minute: "2-digit",
                             })}
                           </span>
-
-                          {isPast && (
-                            <Badge variant="destructive" className="text-[10px] h-5">
-                              Disparando agora...
-                            </Badge>
-                          )}
                         </div>
-
-                        <p className="text-xs text-foreground/90 whitespace-pre-wrap line-clamp-3 bg-muted/40 p-2 rounded-md">
+                        <p className="text-[11px] text-muted-foreground line-clamp-2">
                           "{item.content}"
                         </p>
-
-                        {item.metadata?.reason && (
-                          <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                            <Sparkles className="h-3 w-3 text-amber-500" />
-                            Motivo: {item.metadata.reason}
-                          </p>
-                        )}
                       </div>
 
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-destructive hover:bg-destructive/10 shrink-0"
+                        className="h-7 w-7 text-destructive hover:bg-destructive/10 shrink-0"
                         title="Cancelar envio"
                         disabled={cancelMutation.isPending}
                         onClick={() => cancelMutation.mutate(item.id)}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
                   );
@@ -401,7 +364,7 @@ export function ScheduledMessagesDialog({
               </div>
             )}
           </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );

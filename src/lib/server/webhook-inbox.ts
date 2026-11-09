@@ -1,19 +1,31 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { chatQueue } from "./chat-queue";
 
 /**
- * Caixa de entrada de webhooks (tabela webhook_inbox).
+ * Caixa de entrada de webhooks (tabela webhook_inbox) com fila serial por chat
+ * (inspirada na arquitetura do Chatwoot).
  *
- * O payload é gravado antes do processamento. Se o processamento falhar
- * (timeout, lock, erro de banco), ele fica salvo e é reprocessado depois com
- * backoff — a mensagem atrasa, mas não se perde.
- *
- * A drenagem da fila acontece "de carona" nos próprios webhooks (chegam vários
- * por minuto) e também pela rota /api/cron/webhook-inbox.
+ * 1. O payload é gravado na tabela antes de rodar.
+ * 2. Deduplicação instantânea via externalId (dropa retries de rede em 0ms).
+ * 3. O processamento é serializado por chave de chat (chatKey): mensagens da
+ *    mesma conversa nunca rodam simultaneamente, garantindo ordem estrita (FIFO)
+ *    e eliminando condições de corrida entre eco e cliente.
+ * 4. Chats de clientes diferentes continuam rodando em paralelo sem bloqueio.
+ * 5. Se o processamento falhar, o item fica salvo e é reprocessado com backoff.
  */
 
 export interface InboxProcessOptions {
   /** true quando é um reprocessamento (o evento original falhou) */
   isRetry: boolean;
+}
+
+export interface InboxMeta {
+  event?: string | null;
+  instanceName?: string | null;
+  externalId?: string | null;
+  chatKey?: string | null;
+  /** Mantém o payload após o sucesso (para diagnóstico; some na limpeza de 3 dias) */
+  keepPayload?: boolean;
 }
 
 type Processor = (payload: any, opts: InboxProcessOptions) => Promise<void>;
@@ -58,22 +70,22 @@ async function markError(id: string, attempts: number, err: unknown) {
 }
 
 /**
- * Grava o payload e processa. Nunca lança: falhas ficam registradas para
- * reprocessamento. Se nem a gravação na caixa for possível, processa direto
- * (comportamento anterior) e relança o erro do processamento.
+ * Grava o payload na caixa de entrada e processa de forma serializada por chat.
+ * Nunca lança para fora: falhas ficam salvas para reprocessamento.
  */
 export async function processWithInbox(
   provider: string,
   payload: any,
-  meta: {
-    event?: string | null;
-    instanceName?: string | null;
-    externalId?: string | null;
-    /** Mantém o payload após o sucesso (para diagnóstico; some na limpeza de 3 dias) */
-    keepPayload?: boolean;
-  },
+  meta: InboxMeta,
   processor: Processor,
 ): Promise<void> {
+  // 1. Deduplicação precoce em memória com escopo por instância (dropa retries idênticos na mesma instância)
+  const dedupKey = meta.externalId ? `${meta.instanceName || "inst"}:${meta.externalId}` : null;
+  if (dedupKey && chatQueue.checkAndStart(dedupKey)) {
+    console.log(`[webhook-inbox] Mensagem ${meta.externalId} duplicada ou já em andamento em ${meta.instanceName}. Descartando.`);
+    return;
+  }
+
   let inboxId: string | null = null;
   try {
     const { data, error } = await (supabaseAdmin.from("webhook_inbox" as any) as any)
@@ -95,18 +107,25 @@ export async function processWithInbox(
     console.error("[webhook-inbox] Não foi possível gravar na caixa de entrada:", errorText(err));
   }
 
-  if (!inboxId) {
-    await processor(payload, { isRetry: false });
-    return;
-  }
+  const queueKey = meta.chatKey || meta.instanceName || "global";
 
-  try {
-    await processor(payload, { isRetry: false });
-    await markDone(inboxId, meta.keepPayload);
-  } catch (err) {
-    console.error(`[webhook-inbox] Falha ao processar ${provider} (${inboxId}), será reprocessado:`, errorText(err));
-    await markError(inboxId, 1, err);
-  }
+  const runTask = async () => {
+    try {
+      await processor(payload, { isRetry: false });
+      if (inboxId) await markDone(inboxId, meta.keepPayload);
+      if (dedupKey) chatQueue.markSuccess(dedupKey);
+    } catch (err) {
+      if (dedupKey) chatQueue.markFailed(dedupKey);
+      console.error(
+        `[webhook-inbox] Falha ao processar ${provider} (${inboxId}), será reprocessado:`,
+        errorText(err),
+      );
+      if (inboxId) await markError(inboxId, 1, err);
+    }
+  };
+
+  // Enfileira na fila serializada do chat
+  await chatQueue.enqueue(queueKey, runTask);
 }
 
 /** Reprocessa itens vencidos da fila. Retorna quantos foram processados com sucesso. */
@@ -124,14 +143,17 @@ export async function drainInbox(provider: string, processor: Processor, limit =
         await markDone(item.id);
         continue;
       }
-      try {
-        await processor(item.payload, { isRetry: true });
-        await markDone(item.id);
-        ok++;
-        console.log(`[webhook-inbox] Reprocessado com sucesso: ${item.id} (tentativa ${item.attempts})`);
-      } catch (err) {
-        await markError(item.id, item.attempts, err);
-      }
+      const queueKey = item.instance_name || "global";
+      await chatQueue.enqueue(queueKey, async () => {
+        try {
+          await processor(item.payload, { isRetry: true });
+          await markDone(item.id);
+          ok++;
+          console.log(`[webhook-inbox] Reprocessado com sucesso: ${item.id} (tentativa ${item.attempts})`);
+        } catch (err) {
+          await markError(item.id, item.attempts, err);
+        }
+      });
     }
 
     // Limpeza ocasional de itens concluídos antigos

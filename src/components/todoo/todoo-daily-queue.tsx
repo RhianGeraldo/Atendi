@@ -102,8 +102,6 @@ interface Props {
   onCreateContactsClick?: () => void;
 }
 
-// Leads fechados (venda / sem sucesso) aparecem no quadro por este período
-const CLOSED_LEADS_DAYS = 30;
 // Cards por página em cada coluna ("Carregar mais" busca a próxima)
 const BOARD_PAGE_SIZE = 20;
 
@@ -117,6 +115,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   // Filtros
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>("all");
   const [selectedConsultantId, setSelectedConsultantId] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<"open" | "won" | "lost" | "all">("open");
   const [searchTerm, setSearchTerm] = useState("");
 
 
@@ -209,7 +208,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   const [stageLimits, setStageLimits] = useState<Record<string, number>>({});
   useEffect(() => {
     setStageLimits({});
-  }, [selectedCampaignId, selectedConsultantId, debouncedSearch, selectedUnitId]);
+  }, [selectedCampaignId, selectedConsultantId, statusFilter, debouncedSearch, selectedUnitId]);
 
   // Card arrastado para outra etapa, até a coluna de destino recarregar do banco
   const [movedLeads, setMovedLeads] = useState<Record<string, string>>({});
@@ -219,12 +218,15 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     query = query
       .eq("company_id", activeCompanyId)
       // Ação pausada ou concluída sai da fila até ser retomada
-      .eq("campaign.status", "active")
-      .or(
-        `status.not.in.(won,lost),updated_at.gte.${new Date(
-          Date.now() - CLOSED_LEADS_DAYS * 24 * 60 * 60 * 1000,
-        ).toISOString()}`,
-      );
+      .eq("campaign.status", "active");
+
+    if (statusFilter === "open") {
+      query = query.not("status", "in", '("won","lost")');
+    } else if (statusFilter === "won") {
+      query = query.eq("status", "won");
+    } else if (statusFilter === "lost") {
+      query = query.eq("status", "lost");
+    }
 
     // Se for consultor normal, apenas os seus leads
     if (!isManagerOrAdmin) query = query.eq("assigned_user_id", profile?.id);
@@ -264,6 +266,7 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     selectedUnitId,
     selectedCampaignId,
     selectedConsultantId,
+    statusFilter,
     debouncedSearch,
   ];
 
@@ -386,20 +389,37 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
     }),
   });
 
-  // Faturado de cada coluna (vendas dos últimos 30 dias que estão no quadro)
+  // Faturado de cada coluna (vendas no quadro)
   const { data: revenueByStage = {} } = useQuery({
-    queryKey: [...boardKey, "revenue"],
+    queryKey: [
+      "todoo-leads-revenue",
+      activeCompanyId,
+      profile?.id,
+      selectedUnitId,
+      selectedCampaignId,
+      selectedConsultantId,
+    ],
     enabled: !!activeCompanyId && !!profile?.id && stages.length > 0,
     queryFn: async () => {
-      const { data, error } = await fetchAllPages(() =>
-        applyBoardFilters(
-          (supabase.from("todoo_leads") as any)
-            .select("id, stage_id, outcome_value, campaign:todoo_campaigns!inner(status)")
-            .eq("status", "won")
-            .order("created_at", { ascending: true })
-            .order("id", { ascending: true }),
-        ),
-      );
+      const { data, error } = await fetchAllPages(() => {
+        let q = (supabase.from("todoo_leads") as any)
+          .select("id, stage_id, outcome_value, campaign:todoo_campaigns!inner(status)")
+          .eq("company_id", activeCompanyId)
+          .eq("campaign.status", "active")
+          .eq("status", "won")
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true });
+
+        if (!isManagerOrAdmin) q = q.eq("assigned_user_id", profile?.id);
+        if (selectedUnitId && selectedUnitId !== "all") {
+          q = isManagerOrAdmin
+            ? q.eq("unit_id", selectedUnitId)
+            : q.or(`unit_id.eq.${selectedUnitId},unit_id.is.null`);
+        }
+        if (selectedCampaignId !== "all") q = q.eq("campaign_id", selectedCampaignId);
+        if (selectedConsultantId !== "all") q = q.eq("assigned_user_id", selectedConsultantId);
+        return q;
+      });
       if (error) throw error;
       const sums: Record<string, number> = {};
       for (const lead of data) {
@@ -423,11 +443,13 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
   }, [columnQueries, movedLeads]);
 
   // A unidade vem do contexto da barra lateral e não é filtro do quadro
-  const hasActiveFilters = selectedCampaignId !== "all" || selectedConsultantId !== "all";
+  const hasActiveFilters =
+    selectedCampaignId !== "all" || selectedConsultantId !== "all" || statusFilter !== "open";
 
   const handleClearFilters = () => {
     setSelectedCampaignId("all");
     setSelectedConsultantId("all");
+    setStatusFilter("open");
   };
 
   // Agrupamento dos leads por etapa do Kanban
@@ -675,7 +697,58 @@ export function TodooDailyQueue({ tabs, onCreateCampaignClick, onCreateContactsC
                   </>
                 )}
 
-                {/* Submenu 1: Ação Comercial */}
+                {/* Submenu 1: Status */}
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="cursor-pointer text-xs">
+                    <span>Status</span>
+                    {statusFilter !== "open" && (
+                      <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent className="w-56">
+                      <DropdownMenuItem
+                        onClick={() => setStatusFilter("open")}
+                        className="cursor-pointer text-xs flex items-center justify-between"
+                      >
+                        <span>Em prospecção (Padrão)</span>
+                        {statusFilter === "open" && (
+                          <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setStatusFilter("won")}
+                        className="cursor-pointer text-xs flex items-center justify-between text-emerald-600 focus:text-emerald-600"
+                      >
+                        <span>Fechou (Comprou)</span>
+                        {statusFilter === "won" && (
+                          <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-emerald-600" />
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => setStatusFilter("lost")}
+                        className="cursor-pointer text-xs flex items-center justify-between text-muted-foreground"
+                      >
+                        <span>Sem interesse (Perdido)</span>
+                        {statusFilter === "lost" && (
+                          <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => setStatusFilter("all")}
+                        className="cursor-pointer text-xs flex items-center justify-between"
+                      >
+                        <span>Todos os status</span>
+                        {statusFilter === "all" && (
+                          <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-primary" />
+                        )}
+                      </DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+
+                {/* Submenu 2: Ação Comercial */}
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger className="cursor-pointer text-xs">
                     <span>Ação Comercial</span>

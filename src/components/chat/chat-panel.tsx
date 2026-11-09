@@ -2238,23 +2238,33 @@ export function ChatPanel({
 
               {/* Ferramentas de Apoio & Produtividade */}
               <div className="flex items-center gap-1.5 shrink-0 overflow-x-auto no-scrollbar">
-                {/* Corrigir com IA (visível quando há texto) */}
-                {text.trim().length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => fixTextMutation.mutate(text)}
-                    disabled={fixTextMutation.isPending}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-sky-600 dark:text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 transition-colors cursor-pointer"
-                    title="Corrigir e aprimorar texto com IA"
-                  >
-                    {fixTextMutation.isPending ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-3 w-3" />
-                    )}
-                    <span className="hidden sm:inline">Melhorar</span>
-                  </button>
-                )}
+                {/* Corrigir texto com IA (ao lado esquerdo do Coach) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!text.trim()) {
+                      toast.info("Digite uma mensagem primeiro para corrigir com IA.");
+                      return;
+                    }
+                    fixTextMutation.mutate(text);
+                  }}
+                  disabled={fixTextMutation.isPending}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer",
+                    text.trim()
+                      ? "text-sky-600 dark:text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20"
+                      : "text-muted-foreground/70 bg-muted/40 hover:bg-muted/70 border border-border/50",
+                  )}
+                  title="Corrigir texto com IA"
+                >
+                  {fixTextMutation.isPending ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3 w-3 text-sky-500" />
+                  )}
+                  <span className="hidden sm:inline">Corrigir texto com IA</span>
+                  <span className="sm:hidden">Corrigir IA</span>
+                </button>
 
                 {/* Sales Coach */}
                 {showCoach && (
@@ -2298,7 +2308,7 @@ export function ChatPanel({
                     ) : (
                       <Bot className="h-3 w-3" />
                     )}
-                    <span className="hidden md:inline">Coach</span>
+                    <span className="hidden sm:inline">Coach</span>
                   </button>
                 )}
 

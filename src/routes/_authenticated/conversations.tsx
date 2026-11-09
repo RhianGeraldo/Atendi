@@ -340,7 +340,7 @@ function ConversationsPage() {
         }
         query = query.not("contact.is_blocked", "is", true);
 
-        if (selectedUnitId) {
+        if (selectedUnitId && selectedUnitId !== "all") {
           query = query.eq("unit_id", selectedUnitId);
         } else {
           query = applyUnitScope(query);
@@ -432,7 +432,10 @@ function ConversationsPage() {
       if (from === 0 && activeCompanyId && tab !== "groups" && tab !== "resolved") {
         const { data: awaiting, error: awaitingErr } = await (supabase as any).rpc(
           "conversations_awaiting_reply",
-          { p_company_id: activeCompanyId, p_unit_id: selectedUnitId || null },
+          {
+            p_company_id: activeCompanyId,
+            p_unit_id: selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null,
+          },
         );
         if (awaitingErr) {
           console.warn("[conversations] Erro ao buscar conversas esperando resposta:", awaitingErr);
@@ -666,7 +669,7 @@ function ConversationsPage() {
       }
       query = query.not("contact.is_blocked", "is", true);
 
-      if (selectedUnitId) {
+      if (selectedUnitId && selectedUnitId !== "all") {
         query = query.eq("unit_id", selectedUnitId);
       } else {
         query = applyUnitScope(query);

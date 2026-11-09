@@ -841,19 +841,31 @@ export const sendMessageAction = createServerFn({ method: "POST" })
       throw new Error("Message sent but failed to save in history.");
     }
 
-    // Envio para contato provisório (telefone = LID) e a API devolveu o número real:
-    // aprende o par e corrige o contato (funções não lançam erro)
+    // Envio para contato: se a API devolveu LID ou número real, aprende o mapeamento
     const contatoConv = (conv as any)?.contacts;
-    if (
-      typeof evogoChatJid === "string" &&
-      evogoChatJid.endsWith("@s.whatsapp.net") &&
-      contatoConv?.company_id &&
-      isProvisionalPhone(contatoConv.phone, contatoConv.whatsapp_lid)
-    ) {
-      const realPhone = evogoChatJid.split("@")[0];
-      const lid = contatoConv.whatsapp_lid || contatoConv.phone;
-      await rememberLid(contatoConv.company_id, lid, realPhone, "send");
-      await promoteProvisionalContact(contatoConv.company_id, lid, realPhone);
+    if (typeof evogoChatJid === "string" && contatoConv?.company_id && contatoConv.id) {
+      if (
+        evogoChatJid.endsWith("@s.whatsapp.net") &&
+        isProvisionalPhone(contatoConv.phone, contatoConv.whatsapp_lid)
+      ) {
+        const realPhone = evogoChatJid.split("@")[0];
+        const lid = contatoConv.whatsapp_lid || contatoConv.phone;
+        await rememberLid(contatoConv.company_id, lid, realPhone, "send");
+        await promoteProvisionalContact(contatoConv.company_id, lid, realPhone);
+      } else if (
+        evogoChatJid.endsWith("@lid") &&
+        contatoConv.phone &&
+        !isProvisionalPhone(contatoConv.phone, contatoConv.whatsapp_lid)
+      ) {
+        const lid = evogoChatJid.split("@")[0];
+        await rememberLid(contatoConv.company_id, lid, contatoConv.phone, "send_outbound");
+        if (contatoConv.whatsapp_lid !== lid) {
+          await supabaseAdmin
+            .from("contacts")
+            .update({ whatsapp_lid: lid })
+            .eq("id", contatoConv.id);
+        }
+      }
     }
 
     return { success: true, message: msgRes.data };

@@ -41,14 +41,27 @@ export async function handleEvogoWebhook(request: Request): Promise<Response> {
     // otherwise the function is killed the moment we return the Response.
     // Eventos com dados passam pela caixa de entrada (webhook_inbox): se o
     // processamento falhar, o payload fica salvo e é reprocessado depois.
+    const instanceName = body.instanceName || body.instance || "";
+    const info = body.data?.Info;
+    const chatTarget =
+      info?.Chat ||
+      info?.Sender ||
+      info?.SenderAlt ||
+      body.data?.key?.remoteJid ||
+      body.data?.message?.key?.remoteJid ||
+      body.data?.JID ||
+      "";
+    const chatKey = chatTarget ? `${instanceName}:${chatTarget}` : instanceName || "global";
+
     if (INBOX_EVENTS.has(body?.event)) {
       await processWithInbox(
         "evogo",
         body,
         {
           event: body.event,
-          instanceName: body.instanceName || body.instance || null,
+          instanceName: instanceName || null,
           externalId: body.data?.Info?.ID || body.data?.key?.id || null,
+          chatKey,
           // Eventos com @lid ficam guardados para diagnóstico de contatos LID/número
           keepPayload: porta.corpoBruto.includes("@lid"),
         },
@@ -968,6 +981,37 @@ export async function processEvogoWebhookBody(
         department_id: instanceDepartmentId,
       } = instance;
 
+      // Prevenção precoce de eco: se a mensagem já foi gravada no banco pelo sistema (sendMessageAction)
+      // para um contato direto (não-grupo), evita duplicatas/conversas fantasmas.
+      // Em grupos (onde múltiplas instâncias da mesma empresa podem estar presentes), cada instância
+      // precisa registrar sua cópia da mensagem em sua respectiva conversa.
+      if (remoteMsgId && !isGroupMsg) {
+        const { data: existingMsg } = await supabaseAdmin
+          .from("messages")
+          .select("id, conversation_id, conversations(id, contact_id, company_id, whatsapp_instance_id, contacts(id, phone, whatsapp_lid))")
+          .eq("remote_msg_id", remoteMsgId)
+          .maybeSingle();
+
+        if (existingMsg && (existingMsg as any).conversations?.whatsapp_instance_id === instance_id) {
+          console.log(
+            `[evogo-webhook] Mensagem ${remoteMsgId} já gravada nesta instância na conversa real ${existingMsg.conversation_id}. Ignorando duplicata/eco.`,
+          );
+          if (extractedLid && (existingMsg as any).conversations?.contacts) {
+            const realContact = (existingMsg as any).conversations.contacts;
+            if (realContact?.id && realContact.phone && !isProvisionalPhone(realContact.phone, extractedLid)) {
+              await rememberLid(company_id, extractedLid, realContact.phone, "webhook_echo_matched");
+              if (!realContact.whatsapp_lid || realContact.whatsapp_lid !== extractedLid) {
+                await supabaseAdmin
+                  .from("contacts")
+                  .update({ whatsapp_lid: extractedLid })
+                  .eq("id", realContact.id);
+              }
+            }
+          }
+          return;
+        }
+      }
+
       // Mensagem trouxe o par LID + número: guarda e corrige contato provisório (telefone = LID)
       if (extractedLid && phoneNumber && phoneNumber !== extractedLid) {
         await rememberLid(company_id, extractedLid, phoneNumber, "message");
@@ -997,7 +1041,7 @@ export async function processEvogoWebhookBody(
             `[evogo-webhook] Telefone resolvido pelo whatsapp_lid ${extractedLid}: ${phoneNumber}`,
           );
           await promoteProvisionalContact(company_id, extractedLid, knownPhone);
-        } else if (contactByLid?.phone) {
+        } else if (contactByLid?.phone && !isProvisionalPhone(contactByLid.phone, extractedLid)) {
           phoneNumber = contactByLid.phone;
           console.log(
             `[evogo-webhook] Telefone resolvido pelo whatsapp_lid ${extractedLid}: ${phoneNumber}`,
@@ -1051,7 +1095,7 @@ export async function processEvogoWebhookBody(
       const findExistingContacts = async () => {
         let contactQuery = supabaseAdmin
           .from("contacts")
-          .select("id, name, whatsapp_lid, merged_into_id, unit_id")
+          .select("id, name, phone, whatsapp_lid, merged_into_id, unit_id")
           .eq("company_id", company_id);
 
         if (extractedLid && phoneVariants.length > 0) {
@@ -1085,6 +1129,22 @@ export async function processEvogoWebhookBody(
       }
 
       if (existingContacts && existingContacts.length > 0) {
+        // Ordena para que contatos reais tenham prioridade sobre contatos provisórios ou mesclados
+        existingContacts.sort((a, b) => {
+          if (a.merged_into_id && !b.merged_into_id) return 1;
+          if (!a.merged_into_id && b.merged_into_id) return -1;
+          const aProv = isProvisionalPhone(a.phone, extractedLid || undefined);
+          const bProv = isProvisionalPhone(b.phone, extractedLid || undefined);
+          if (aProv && !bProv) return 1;
+          if (!aProv && bProv) return -1;
+          return 0;
+        });
+
+        const realPrimaryContact =
+          existingContacts.find(
+            (c) => !c.merged_into_id && !isProvisionalPhone(c.phone, extractedLid || undefined),
+          ) || existingContacts[0];
+
         // Find if ANY of these contacts has an active conversation
         const contactIds = existingContacts.map((c) => c.merged_into_id || c.id);
         const { data: convs } = await supabaseAdmin
@@ -1093,15 +1153,17 @@ export async function processEvogoWebhookBody(
           .in("contact_id", contactIds)
           .eq("whatsapp_instance_id", instance_id)
           .in("status", ["waiting", "active"])
-          .order("started_at", { ascending: false })
-          .limit(1);
+          .order("started_at", { ascending: false });
 
-        let targetContact = existingContacts[0];
+        let targetContact = realPrimaryContact;
         if (convs && convs.length > 0) {
-          activeConv = convs[0];
+          // Prioriza conversa pertencente diretamente ao contato real
+          activeConv =
+            convs.find((cv) => cv.contact_id === realPrimaryContact.id) ||
+            convs[0];
           targetContact =
             existingContacts.find((c) => (c.merged_into_id || c.id) === activeConv.contact_id) ||
-            existingContacts[0];
+            realPrimaryContact;
         }
 
         contactId = targetContact.id;
@@ -1644,29 +1706,49 @@ export async function processEvogoWebhookBody(
 
       if (msgErr) {
         if (msgErr.code === "23505") {
-          console.log(
-            "[evogo-webhook] Duplicate remote_msg_id during insert. Updating metadata if present:",
-            remoteMsgId,
-          );
-          if (Object.keys(metadata).length > 0 && remoteMsgId && conversationId) {
-            // Fetch existing to merge metadata
-            const { data: existing } = await supabaseAdmin
-              .from("messages")
-              .select("id, metadata")
-              .eq("remote_msg_id", remoteMsgId)
-              .eq("conversation_id", conversationId)
-              .maybeSingle();
+          // Checa se a mensagem já existe NESTA mesma conversa
+          const { data: existingInSameConv } = await supabaseAdmin
+            .from("messages")
+            .select("id, metadata")
+            .eq("conversation_id", conversationId)
+            .or(`remote_msg_id.eq.${remoteMsgId},remote_msg_id.eq.${remoteMsgId}_${conversationId.slice(0, 8)}`)
+            .maybeSingle();
 
-            if (existing) {
+          if (existingInSameConv) {
+            console.log(
+              `[evogo-webhook] Mensagem ${remoteMsgId} já gravada nesta mesma conversa. Atualizando metadados se necessário.`,
+            );
+            if (Object.keys(metadata).length > 0) {
               const currentMeta =
-                typeof existing.metadata === "object" && existing.metadata !== null
-                  ? existing.metadata
+                typeof existingInSameConv.metadata === "object" && existingInSameConv.metadata !== null
+                  ? existingInSameConv.metadata
                   : {};
               const newMetadata = { ...currentMeta, ...metadata };
               await supabaseAdmin
                 .from("messages")
                 .update({ metadata: newMetadata })
-                .eq("id", existing.id);
+                .eq("id", existingInSameConv.id);
+            }
+            return;
+          }
+
+          // Se caiu aqui, a mensagem já existe no banco em OUTRA conversa/instância (ex: 2 instâncias no mesmo grupo).
+          // Para que esta conversa não fique sem a mensagem devido à constraint global de remote_msg_id:
+          const fallbackRemoteId = `${remoteMsgId}_${conversationId.slice(0, 8)}`;
+          const { error: retryErr, data: retryMsg } = await supabaseAdmin
+            .from("messages")
+            .insert({ ...insertPayload, remote_msg_id: fallbackRemoteId })
+            .select()
+            .single();
+
+          if (retryErr) {
+            console.error("[evogo-webhook] Falha ao gravar mensagem para segunda instância:", retryErr);
+          } else {
+            console.log(
+              `[evogo-webhook] Mensagem de grupo gravada com sucesso para a 2ª instância com ID ${fallbackRemoteId}`,
+            );
+            if (retryMsg && mediaType === "audio" && audioBase64 && instance.company_id) {
+              await triggerAudioTranscription(retryMsg.id, audioBase64, instance.company_id);
             }
           }
           return;
