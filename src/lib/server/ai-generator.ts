@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendPlatformMessage } from "./message-sender";
 import { scheduleMessage, cancelScheduledMessagesForConversation } from "./scheduled-messages";
+import { sendMetaCapiEvent } from "./meta-capi";
 
 /**
  * Normaliza valores monetários para número float (ex: "R$ 1.500,50", "1500,00", 1500 -> 1500.5)
@@ -1273,6 +1274,9 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     }
 
     // B. Criar Oportunidade no CRM (Prevenção de Duplicidade - Padrão A Jornada)
+    let processedOppId: string | null = null;
+    let processedStageId: string | null = null;
+
     if (crmOppCreateData && conv.contact_id) {
       const resolvedStage = await resolveStageId(agent.pipeline_id, crmOppCreateData.stage);
       console.log(
@@ -1282,7 +1286,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       // Prevenção de duplicidade: verificar se já existe oportunidade aberta para este contato
       const { data: existingOpps } = await supabaseAdmin
         .from("opportunities")
-        .select("id, title, value, stage_id")
+        .select("id, title, value, stage_id, notes")
         .eq("contact_id", conv.contact_id)
         .eq("status", "open")
         .order("created_at", { ascending: false })
@@ -1298,29 +1302,36 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         if (resolvedStage && resolvedStage !== existingOpp.stage_id) {
           updatePayload.stage_id = resolvedStage;
         }
-        if (crmOppCreateData.value && crmOppCreateData.value > 0) {
+        if (
+          crmOppCreateData.value &&
+          crmOppCreateData.value > 0 &&
+          crmOppCreateData.value !== existingOpp.value
+        ) {
           updatePayload.value = crmOppCreateData.value;
         }
-        if (crmOppCreateData.notes) {
+        if (crmOppCreateData.notes && crmOppCreateData.notes !== existingOpp.notes) {
           updatePayload.notes = crmOppCreateData.notes;
         }
 
         if (Object.keys(updatePayload).length > 0) {
           await supabaseAdmin.from("opportunities").update(updatePayload).eq("id", existingOpp.id);
+
+          await supabaseAdmin.from("messages").insert({
+            conversation_id: conversationId,
+            sender_type: "agent",
+            is_internal: true,
+            content: `🔄 Oportunidade vinculada pela IA: "${existingOpp.title}" mantida/atualizada (Valor: R$ ${(updatePayload.value ?? existingOpp.value ?? 0).toFixed(2)})`,
+          });
+
+          await supabaseAdmin.from("opportunity_history").insert({
+            opportunity_id: existingOpp.id,
+            action_type: "updated",
+            description: `Oportunidade atualizada automaticamente pelo Agente de IA (${agent.name})${updatePayload.value ? ` | Novo valor: R$ ${Number(updatePayload.value).toFixed(2)}` : ""}`,
+          });
         }
 
-        await supabaseAdmin.from("messages").insert({
-          conversation_id: conversationId,
-          sender_type: "agent",
-          is_internal: true,
-          content: `🔄 Oportunidade vinculada pela IA: "${existingOpp.title}" mantida/atualizada (Valor: R$ ${(updatePayload.value ?? existingOpp.value ?? 0).toFixed(2)})`,
-        });
-
-        await supabaseAdmin.from("opportunity_history").insert({
-          opportunity_id: existingOpp.id,
-          action_type: "updated",
-          description: `Oportunidade atualizada automaticamente pelo Agente de IA (${agent.name})`,
-        });
+        processedOppId = existingOpp.id;
+        processedStageId = updatePayload.stage_id || existingOpp.stage_id;
 
         for (const call of toolCalls) {
           if (call.function?.name === "criar_oportunidade") {
@@ -1356,6 +1367,9 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             }
           }
         } else {
+          processedOppId = newOpp.id;
+          processedStageId = resolvedStage;
+
           await supabaseAdmin.from("messages").insert({
             conversation_id: conversationId,
             sender_type: "agent",
@@ -1386,20 +1400,36 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       let targetOppId = crmOppUpdateData.oppId;
 
       if (!targetOppId) {
-        const { data: existingOpp } = await supabaseAdmin
-          .from("opportunities")
-          .select("id")
-          .eq("contact_id", conv.contact_id)
-          .eq("status", "open")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        targetOppId = existingOpp?.id || null;
+        if (processedOppId) {
+          targetOppId = processedOppId;
+        } else {
+          const { data: existingOpp } = await supabaseAdmin
+            .from("opportunities")
+            .select("id, stage_id")
+            .eq("contact_id", conv.contact_id)
+            .eq("status", "open")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          targetOppId = existingOpp?.id || null;
+        }
       }
 
       if (targetOppId) {
         const resolvedStage = await resolveStageId(agent.pipeline_id, crmOppUpdateData.stage);
-        if (resolvedStage) {
+
+        let currentStageId = processedOppId === targetOppId ? processedStageId : null;
+        if (!currentStageId) {
+          const { data: curOpp } = await supabaseAdmin
+            .from("opportunities")
+            .select("stage_id")
+            .eq("id", targetOppId)
+            .single();
+          currentStageId = curOpp?.stage_id || null;
+        }
+
+        // Prevenção de duplicidade: só atualiza e registra no histórico se a etapa for realmente diferente da atual!
+        if (resolvedStage && resolvedStage !== currentStageId) {
           await supabaseAdmin
             .from("opportunities")
             .update({ stage_id: resolvedStage })
@@ -1407,7 +1437,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
           const { data: stName } = await supabaseAdmin
             .from("pipeline_stages")
-            .select("name")
+            .select("name, meta_event_name")
             .eq("id", resolvedStage)
             .single();
 
@@ -1420,15 +1450,48 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
           await supabaseAdmin.from("opportunity_history").insert({
             opportunity_id: targetOppId,
-            action_type: "stage_changed",
+            action_type: "stage_change",
             description: `Etapa alterada pelo Agente de IA (${agent.name}) para ${stName?.name || resolvedStage}`,
           });
+
+          if (stName?.meta_event_name && conv.contact_id && effectiveCompanyId) {
+            try {
+              const { data: oppRow } = await supabaseAdmin
+                .from("opportunities")
+                .select("value")
+                .eq("id", targetOppId)
+                .single();
+
+              sendMetaCapiEvent({
+                companyId: effectiveCompanyId,
+                contactId: conv.contact_id,
+                opportunityId: targetOppId,
+                eventName: stName.meta_event_name,
+                value: oppRow?.value ? Number(oppRow.value) : undefined,
+                currency: "BRL",
+                actionSource: "chat",
+              }).catch((capiErr) =>
+                console.warn("[ai-generator] Falha ao disparar Meta CAPI para etapa:", capiErr),
+              );
+            } catch (err) {
+              console.warn("[ai-generator] Erro ao preparar Meta CAPI:", err);
+            }
+          }
 
           for (const call of toolCalls) {
             if (call.function?.name === "atualizar_oportunidade") {
               toolExecutionResults[call.id] = {
                 status: "success",
                 message: `Oportunidade movida para a etapa '${stName?.name || resolvedStage}' com sucesso.`,
+              };
+            }
+          }
+        } else {
+          for (const call of toolCalls) {
+            if (call.function?.name === "atualizar_oportunidade") {
+              toolExecutionResults[call.id] = {
+                status: "success",
+                message: `Oportunidade já se encontra na etapa informada. Nenhuma alteração redundante foi efetuada.`,
               };
             }
           }

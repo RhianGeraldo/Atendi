@@ -464,7 +464,6 @@ export function OpportunityDialog({
     },
   });
 
-
   // Auto-Save Mutation for existing opportunities
   const autoSaveMutation = useMutation({
     mutationFn: async (updatedFields: Record<string, any>) => {
@@ -516,6 +515,35 @@ export function OpportunityDialog({
             console.warn("[CAPI] Falha ao disparar evento de CAPI para etapa:", err),
           );
         }
+      }
+
+      // Se alterou valor:
+      if (
+        updatedFields.value !== undefined &&
+        parseBRLToFloat(updatedFields.value) !== opportunity.value
+      ) {
+        const formattedVal = new Intl.NumberFormat("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+        }).format(parseBRLToFloat(updatedFields.value));
+        await supabase.from("opportunity_history").insert({
+          opportunity_id: opportunity.id,
+          user_id: profile?.id,
+          action_type: "value_change",
+          description: `Valor alterado para ${formattedVal}`,
+        });
+      }
+
+      // Se alterou responsável:
+      if (updatedFields.ownerId !== undefined && updatedFields.ownerId !== opportunity.owner_id) {
+        const newOwner =
+          companyUsers?.find((u) => u.id === updatedFields.ownerId)?.name || "Sem responsável";
+        await supabase.from("opportunity_history").insert({
+          opportunity_id: opportunity.id,
+          user_id: profile?.id,
+          action_type: "owner_change",
+          description: `Responsável alterado para "${newOwner}"`,
+        });
       }
     },
     onSuccess: () => {
@@ -598,8 +626,7 @@ export function OpportunityDialog({
         contactUnitId = contactRow?.unit_id || null;
       }
       // Sem unidade definida, a oportunidade fica na Rede da empresa
-      const effectiveUnitId =
-        opportunity?.unit_id || contactUnitId || selectedUnitId || null;
+      const effectiveUnitId = opportunity?.unit_id || contactUnitId || selectedUnitId || null;
 
       const payload = {
         title,
@@ -619,6 +646,42 @@ export function OpportunityDialog({
           .update(payload)
           .eq("id", opportunity.id);
         if (error) throw error;
+
+        // Se alterou etapa manualmente:
+        if (payload.stage_id && payload.stage_id !== opportunity.stage_id) {
+          const targetStageName =
+            stages?.find((s) => s.id === payload.stage_id)?.name || "Nova etapa";
+          await supabase.from("opportunity_history").insert({
+            opportunity_id: opportunity.id,
+            user_id: profile?.id,
+            action_type: "stage_change",
+            description: `Etapa alterada para "${targetStageName}"`,
+          });
+        }
+        // Se alterou valor manualmente:
+        if (payload.value !== undefined && payload.value !== opportunity.value) {
+          const formattedVal = new Intl.NumberFormat("pt-BR", {
+            style: "currency",
+            currency: "BRL",
+          }).format(payload.value);
+          await supabase.from("opportunity_history").insert({
+            opportunity_id: opportunity.id,
+            user_id: profile?.id,
+            action_type: "value_change",
+            description: `Valor alterado para ${formattedVal}`,
+          });
+        }
+        // Se alterou responsável manualmente:
+        if (payload.owner_id !== undefined && payload.owner_id !== opportunity.owner_id) {
+          const newOwner =
+            companyUsers?.find((u) => u.id === payload.owner_id)?.name || "Sem responsável";
+          await supabase.from("opportunity_history").insert({
+            opportunity_id: opportunity.id,
+            user_id: profile?.id,
+            action_type: "owner_change",
+            description: `Responsável alterado para "${newOwner}"`,
+          });
+        }
       } else {
         const { data: newOpp, error } = await supabase
           .from("opportunities")
@@ -876,7 +939,9 @@ export function OpportunityDialog({
           histUserName = profile?.name || "Usuário";
         }
 
-        if (h.action_type === "stage_change") {
+        const actionType = (h.action_type || "").toLowerCase();
+
+        if (actionType === "stage_change" || actionType === "stage_changed") {
           events.push({
             id: `hist-${h.id}`,
             type: "status",
@@ -886,7 +951,7 @@ export function OpportunityDialog({
             user: histUserName,
             color: "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30",
           });
-        } else if (h.action_type === "status_change") {
+        } else if (actionType === "status_change") {
           const isWon = h.description?.includes("GANHA");
           const isLost = h.description?.includes("PERDIDA");
           events.push({
@@ -906,7 +971,27 @@ export function OpportunityDialog({
                 ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
                 : "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30",
           });
-        } else if (h.action_type === "notes_change") {
+        } else if (actionType === "value_change") {
+          events.push({
+            id: `hist-${h.id}`,
+            type: "status",
+            timestamp: h.created_at,
+            title: "Valor Alterado 💰",
+            description: h.description,
+            user: histUserName,
+            color: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
+          });
+        } else if (actionType === "owner_change") {
+          events.push({
+            id: `hist-${h.id}`,
+            type: "status",
+            timestamp: h.created_at,
+            title: "Responsável Alterado 👤",
+            description: h.description,
+            user: histUserName,
+            color: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border-indigo-500/30",
+          });
+        } else if (actionType === "notes_change") {
           events.push({
             id: `hist-${h.id}`,
             type: "note",
@@ -916,7 +1001,17 @@ export function OpportunityDialog({
             user: histUserName,
             color: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
           });
-        } else {
+        } else if (actionType === "updated" || actionType === "update") {
+          events.push({
+            id: `hist-${h.id}`,
+            type: "status",
+            timestamp: h.created_at,
+            title: "Oportunidade Atualizada ✏️",
+            description: h.description,
+            user: histUserName,
+            color: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30",
+          });
+        } else if (actionType === "created" || actionType === "creation") {
           events.push({
             id: `hist-${h.id}`,
             type: "creation",
@@ -925,6 +1020,16 @@ export function OpportunityDialog({
             description: h.description,
             user: histUserName,
             color: "bg-primary/15 text-primary border-primary/30",
+          });
+        } else {
+          events.push({
+            id: `hist-${h.id}`,
+            type: "status",
+            timestamp: h.created_at,
+            title: "Atualização Registrada 📋",
+            description: h.description,
+            user: histUserName,
+            color: "bg-muted-foreground/15 text-muted-foreground border-muted-foreground/30",
           });
         }
       });
@@ -972,8 +1077,39 @@ export function OpportunityDialog({
       });
     }
 
-    // Sort descending by timestamp (newest first)
-    return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    // Identificar o evento de criação mais antigo (para manter a data original caso haja duplicatas legadas)
+    const creationEvents = events.filter((e) => e.type === "creation");
+    const oldestCreationId =
+      creationEvents.length > 0
+        ? creationEvents.sort(
+            (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+          )[0]?.id
+        : null;
+
+    // Sort descending by timestamp (newest first) with intelligent deduplication
+    const sorted = events.sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
+
+    const uniqueEvents: typeof events = [];
+    const seenSignatures = new Set<string>();
+
+    for (const evt of sorted) {
+      // Signature baseada em tipo, título, descrição e minuto aproximado
+      const timeMinute = evt.timestamp ? evt.timestamp.slice(0, 16) : "";
+      const sig = `${evt.type}:${evt.title}:${(evt.description || "").trim()}:${timeMinute}`;
+      if (seenSignatures.has(sig)) continue;
+      seenSignatures.add(sig);
+
+      // Prevenir múltiplas criações duplicadas: só mantém o evento original de criação (mais antigo)
+      if (evt.type === "creation" && evt.id !== oldestCreationId) {
+        continue;
+      }
+
+      uniqueEvents.push(evt);
+    }
+
+    return uniqueEvents;
   }, [opportunity, historyList, tasks, notesList, currentOwnerName, companyUsers, profile]);
 
   return (
@@ -1920,7 +2056,7 @@ export function OpportunityDialog({
                                   {evt.type === "creation"
                                     ? "Criação"
                                     : evt.type === "status"
-                                      ? "Status"
+                                      ? "Progresso"
                                       : evt.type === "note"
                                         ? "Observação"
                                         : "Tarefa"}
