@@ -218,7 +218,7 @@ export async function processStevoWebhookBody(
           return;
         }
 
-        isFromMe = Boolean(info.IsFromMe || body.event === "SendMessage");
+        isFromMe = info.IsFromMe;
         const isGroupMsg = Boolean(info.IsGroup || info.Chat?.includes("@g.us") || destinationJid?.includes("@g.us"));
 
         const getPhone = (jids: (string | undefined)[]) => {
@@ -1016,28 +1016,6 @@ export async function processStevoWebhookBody(
       }
 
       const isGroup = remoteJid.includes("@g.us");
-      if (isGroup && !isFromMe) {
-        const participantRaw =
-          body.data?.message?.key?.participant ||
-          messageData?.key?.participant ||
-          body.data?.Info?.Sender ||
-          body.data?.Info?.SenderAlt ||
-          "";
-        const senderPhone = participantRaw.split("@")[0].split(":")[0];
-        if (senderPhone) {
-          const { data: ownInst } = await supabaseAdmin
-            .from("whatsapp_instances")
-            .select("id")
-            .eq("company_id", company_id)
-            .or(`owner_jid.eq.${senderPhone},owner_jid.ilike.%${senderPhone}%`)
-            .maybeSingle();
-
-          if (ownInst) {
-            isFromMe = true;
-          }
-        }
-      }
-
       if (isGroup && !isFromMe && textContent) {
         const senderDisplayName =
           (pushName && pushName !== "Desconhecido" ? pushName : null) ||
