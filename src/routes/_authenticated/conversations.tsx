@@ -329,7 +329,7 @@ function ConversationsPage() {
       const to = from + PAGE_SIZE - 1;
 
       const selectString =
-        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,unit_id), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
 
       // Mesmos filtros para a página e para as conversas esperando resposta
       const buildQuery = () => {
@@ -586,7 +586,7 @@ function ConversationsPage() {
     queryFn: async () => {
       if (!selectedId) return null;
       const selectString =
-        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,unit_id), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
       const { data, error } = await supabase
         .from("conversations")
         .select(selectString)
@@ -1028,7 +1028,7 @@ function ConversationsPage() {
     async (convId: string, preferredStatus?: TabType) => {
       try {
         const selectString =
-          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,unit_id), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
 
         const { data, error } = await supabase
           .from("conversations")

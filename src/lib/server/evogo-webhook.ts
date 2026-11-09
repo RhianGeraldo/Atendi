@@ -1760,6 +1760,13 @@ export async function processEvogoWebhookBody(
         }
       }
 
+      // Se a mensagem veio do cliente, verifica se responde a uma campanha recente
+      if (!isFromMe && conversationId) {
+        import("./campaign-processor")
+          .then((m) => m.markCampaignRecipientReplied(conversationId))
+          .catch((e) => console.error("[evogo-webhook] Error marking campaign replied:", e));
+      }
+
       // 7. Check if we need to queue AI response
       const tooOldForAi =
         opts.isRetry &&

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Users, RefreshCw, Tag, Plus, Square, Target, Check, Edit2, X } from "lucide-react";
+import { Users, RefreshCw, Tag, Plus, Square, Target, Check, Edit2, X, Building2, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -8,6 +8,7 @@ import {
   createLabelAction,
   updateContactFromWhatsappAction,
 } from "@/lib/api/chat.functions";
+import { updateContactUnitAction } from "@/lib/api/contacts.functions";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
@@ -82,6 +83,49 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
       : conv.contact?.contact_labels || [];
 
   const { allSources, addSource, updateContactSource } = useContactSources();
+  const isAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
+
+  const { data: companyUnits } = useQuery({
+    queryKey: ["units", activeCompanyId],
+    enabled: !!activeCompanyId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("units")
+        .select("id, name, color")
+        .eq("company_id", activeCompanyId!)
+        .order("name");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const updateUnitMutation = useMutation({
+    mutationFn: async (newUnitId: string | null) => {
+      if (!conv.contact?.id) return;
+      const compId = activeCompanyId || conv.contact?.company_id || profile?.company_id;
+      if (!compId) throw new Error("Empresa não selecionada.");
+      return await updateContactUnitAction({
+        data: {
+          contactId: conv.contact.id,
+          unitId: newUnitId,
+          companyId: compId,
+        },
+      });
+    },
+    onSuccess: () => {
+      toast.success("Unidade do contato atualizada com sucesso!");
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contacts-counts"] });
+      qc.invalidateQueries({ queryKey: ["contact-details", conv.contact?.id] });
+    },
+    onError: (err: any) => {
+      toast.error("Erro ao alterar unidade", { description: err.message });
+    },
+  });
+
+  const contactUnit = companyUnits?.find((u: any) => u.id === conv.contact?.unit_id);
+
   const [sourcePopoverOpen, setSourcePopoverOpen] = useState(false);
   const [searchSource, setSearchSource] = useState("");
   const [detailsInput, setDetailsInput] = useState(conv.contact?.source_details || "");
@@ -449,6 +493,78 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                     Definir origem do contato
                   </button>
                 )}
+              </div>
+            </div>
+
+            {/* Unidade do Contato */}
+            <div className="pt-2 border-t border-border/40">
+              <div className="flex items-center justify-between mb-1.5">
+                <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                  Unidade
+                </h4>
+
+                {isAdmin && companyUnits && companyUnits.length > 0 && (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 rounded-full text-muted-foreground hover:text-primary cursor-pointer"
+                        title="Alterar unidade do contato (Administrador)"
+                      >
+                        <Edit2 className="h-3 w-3" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="p-1.5 w-56" align="end">
+                      <div className="text-[11px] font-semibold text-muted-foreground px-2 py-1 flex items-center gap-1 border-b border-border/40 pb-1 mb-1">
+                        <Building2 className="h-3 w-3" /> Alterar Unidade do Contato
+                      </div>
+                      <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                        <Button
+                          variant={!conv.contact?.unit_id ? "secondary" : "ghost"}
+                          size="sm"
+                          className="w-full justify-start text-xs h-7 font-normal"
+                          onClick={() => updateUnitMutation.mutate(null)}
+                          disabled={updateUnitMutation.isPending}
+                        >
+                          Sem unidade (Geral / Matriz)
+                          {!conv.contact?.unit_id && <Check className="h-3 w-3 ml-auto text-primary" />}
+                        </Button>
+                        {companyUnits.map((u: any) => (
+                          <Button
+                            key={u.id}
+                            variant={conv.contact?.unit_id === u.id ? "secondary" : "ghost"}
+                            size="sm"
+                            className="w-full justify-start text-xs h-7 font-normal gap-1.5"
+                            onClick={() => updateUnitMutation.mutate(u.id)}
+                            disabled={updateUnitMutation.isPending}
+                          >
+                            <span
+                              className="h-2 w-2 rounded-full shrink-0"
+                              style={{ backgroundColor: u.color || "#6366f1" }}
+                            />
+                            <span className="truncate">{u.name}</span>
+                            {conv.contact?.unit_id === u.id && (
+                              <Check className="h-3 w-3 ml-auto text-primary" />
+                            )}
+                          </Button>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <Badge
+                  variant={contactUnit?.name ? "outline" : "secondary"}
+                  className="text-xs py-0.5 px-2 flex items-center gap-1.5 font-medium border-border/80"
+                  style={contactUnit?.color ? { borderColor: `${contactUnit.color}60`, color: contactUnit.color } : undefined}
+                >
+                  <Building2 className="h-3 w-3 text-muted-foreground" />
+                  <span>{contactUnit?.name || "Sem unidade (Geral / Matriz)"}</span>
+                </Badge>
               </div>
             </div>
 

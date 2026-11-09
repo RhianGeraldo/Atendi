@@ -113,6 +113,14 @@ export async function runCronFollowUps(): Promise<Response> {
       console.error("[cron] Exception during processCadenceQueue:", cadenceEx);
     }
 
+    // Processamento do Motor de Campanhas de Disparos em Massa (Mass Broadcast)
+    try {
+      const { processCampaignsQueue } = await import("./campaign-processor");
+      await processCampaignsQueue();
+    } catch (campaignEx) {
+      console.error("[cron] Exception during processCampaignsQueue:", campaignEx);
+    }
+
     console.log("[cron] Starting follow-up scan...");
 
     // Find active conversations that are handled by AI

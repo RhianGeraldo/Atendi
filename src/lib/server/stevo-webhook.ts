@@ -1669,6 +1669,13 @@ export async function processStevoWebhookBody(body: any): Promise<void> {
         }
       }
 
+      // Se a mensagem veio do cliente, verifica se responde a uma campanha recente
+      if (!isFromMe && conversationId) {
+        import("./campaign-processor")
+          .then((m) => m.markCampaignRecipientReplied(conversationId))
+          .catch((e) => console.error("[stevo-webhook] Error marking campaign replied:", e));
+      }
+
       // 7. Check if we need to queue AI response
       if (aiActive && newMessage && !isFromMe && !isGroup) {
         // Enqueue the AI message generator to allow for 10s buffer

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, ChevronUp, XCircle, Check, Pencil, X, Gift } from "lucide-react";
+import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, ChevronUp, XCircle, Check, Pencil, X, Gift, Building2, Lock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -52,6 +52,7 @@ import { TodooContactReferrals } from "@/components/todoo/todoo-contact-referral
 import { blockContactAction, unblockContactAction } from "@/lib/api/chat.functions";
 import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
+import { updateContactUnitAction } from "@/lib/api/contacts.functions";
 
 interface ContactDetailsSheetProps {
   contactId: string | null;
@@ -905,7 +906,7 @@ export function ContactDetailsTabs({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("contacts")
-        .select("*")
+        .select("*, creator:profiles!contacts_created_by_fkey(name), units(id, name, color)")
         .eq("id", contactId)
         .single();
       if (error) throw error;
@@ -1799,6 +1800,8 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
   const qc = useQueryClient();
   const isAdmin = profile?.role === 'admin_company' || profile?.role === 'super_admin' || profile?.role === 'manager';
   
+  const isSuperOrCompanyAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
+  
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1822,17 +1825,61 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
       toast.error("Erro ao excluir contato", { description: error.message });
     }
   });
+
   const { data: contact, isLoading: isLoadingContact } = useQuery({
     queryKey: ["contact-details", activeContactId],
     enabled: !!activeContactId && open,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("contacts")
-        .select("*, creator:profiles!contacts_created_by_fkey(name)")
+        .select("*, creator:profiles!contacts_created_by_fkey(name), units(id, name, color)")
         .eq("id", activeContactId!)
         .single();
       if (error) throw error;
       return data;
+    },
+  });
+
+  // Busca unidades da empresa caso o usuário seja administrador
+  const { data: companyUnits } = useQuery({
+    queryKey: ["units", contact?.company_id],
+    enabled: !!contact?.company_id && open && isSuperOrCompanyAdmin,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("units")
+        .select("id, name, color")
+        .eq("company_id", contact!.company_id)
+        .order("name");
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Mutação para troca rápida de unidade por administradores
+  const updateUnitMutation = useMutation({
+    mutationFn: async (newUnitId: string | null) => {
+      const targetContactId = activeContactId || contact?.id;
+      if (!targetContactId) throw new Error("Contato não identificado.");
+      const compId = contact?.company_id || profile?.company_id;
+      if (!compId) throw new Error("Empresa não identificada.");
+
+      return await updateContactUnitAction({
+        data: {
+          contactId: targetContactId,
+          unitId: newUnitId,
+          companyId: compId,
+        },
+      });
+    },
+    onSuccess: () => {
+      toast.success("Unidade do contato atualizada com sucesso!");
+      qc.invalidateQueries({ queryKey: ["contact-details", activeContactId] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contacts-counts"] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (err: any) => {
+      toast.error("Erro ao alterar unidade", { description: err.message });
     },
   });
 
@@ -1984,6 +2031,83 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                   <CalendarDays className="h-4 w-4" />
                   <span>Cadastrado em {format(new Date(contact.created_at), "dd/MM/yyyy", { locale: ptBR })}</span>
                 </div>
+
+                {/* Unidade de Criação do Contato */}
+                <div className="flex items-center justify-between gap-2 text-xs mt-2 pt-2 border-t border-border/50">
+                  <div className="flex items-center gap-2 text-muted-foreground min-w-0">
+                    <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="shrink-0">Unidade:</span>
+                    <Badge
+                      variant={contact.units?.name ? "outline" : "secondary"}
+                      className="text-xs font-semibold py-0.5 px-2 flex items-center gap-1.5 truncate max-w-[220px]"
+                      style={contact.units?.color ? { borderColor: `${contact.units.color}60`, color: contact.units.color } : undefined}
+                    >
+                      {contact.units?.name ? (
+                        <>
+                          <span
+                            className="h-2 w-2 rounded-full shrink-0"
+                            style={{ backgroundColor: contact.units.color || "#6366f1" }}
+                          />
+                          <span className="truncate">{contact.units.name}</span>
+                        </>
+                      ) : (
+                        "Sem unidade (Geral / Matriz)"
+                      )}
+                    </Badge>
+                  </div>
+
+                  {isSuperOrCompanyAdmin && companyUnits && companyUnits.length > 0 && (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[11px] gap-1 text-primary hover:text-primary/90 shrink-0"
+                          title="Alterar unidade do contato (Administrador)"
+                        >
+                          <Pencil className="h-3 w-3" />
+                          Alterar
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="p-1.5 w-56" align="end">
+                        <div className="text-[11px] font-semibold text-muted-foreground px-2 py-1 flex items-center gap-1 border-b border-border/40 pb-1.5 mb-1">
+                          <Building2 className="h-3 w-3" /> Alterar Unidade do Contato
+                        </div>
+                        <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                          <Button
+                            variant={!contact.unit_id ? "secondary" : "ghost"}
+                            size="sm"
+                            className="w-full justify-start text-xs h-7 font-normal"
+                            onClick={() => updateUnitMutation.mutate(null)}
+                            disabled={updateUnitMutation.isPending}
+                          >
+                            Sem unidade (Geral / Matriz)
+                            {!contact.unit_id && <Check className="h-3 w-3 ml-auto text-primary" />}
+                          </Button>
+                          {companyUnits.map((u: any) => (
+                            <Button
+                              key={u.id}
+                              variant={contact.unit_id === u.id ? "secondary" : "ghost"}
+                              size="sm"
+                              className="w-full justify-start text-xs h-7 font-normal gap-1.5"
+                              onClick={() => updateUnitMutation.mutate(u.id)}
+                              disabled={updateUnitMutation.isPending}
+                            >
+                              <span
+                                className="h-2 w-2 rounded-full shrink-0"
+                                style={{ backgroundColor: u.color || "#6366f1" }}
+                              />
+                              <span className="truncate">{u.name}</span>
+                              {contact.unit_id === u.id && (
+                                <Check className="h-3 w-3 ml-auto text-primary" />
+                              )}
+                            </Button>
+                          ))}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  )}
+                </div>
               </SheetDescription>
 
               {contact.tags && contact.tags.length > 0 && (
@@ -2035,17 +2159,37 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
 
 function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () => void }) {
   const qc = useQueryClient();
+  const { profile } = useAuth();
+  const isSuperOrCompanyAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
   const { allSources, addSource } = useContactSources();
+
   const [name, setName] = useState(contact.name || "");
   const [email, setEmail] = useState(contact.email || "");
   const [instagram, setInstagram] = useState(contact.instagram_username || "");
   const [source, setSource] = useState(contact.source || "");
   const [sourceDetails, setSourceDetails] = useState(contact.source_details || "");
+  const [unitId, setUnitId] = useState<string>(contact.unit_id || "none");
   const [isAddingNewSource, setIsAddingNewSource] = useState(false);
   const [newCustomSource, setNewCustomSource] = useState("");
   
   const isPsid = contact.phone && contact.phone.length > 15;
   const [phone, setPhone] = useState(isPsid ? "" : (contact.phone || ""));
+
+  // Busca unidades da empresa
+  const { data: units } = useQuery({
+    queryKey: ["units", contact.company_id || profile?.company_id],
+    enabled: !!(contact.company_id || profile?.company_id),
+    queryFn: async () => {
+      const compId = contact.company_id || profile?.company_id;
+      const { data, error } = await supabase
+        .from("units")
+        .select("id, name, color")
+        .eq("company_id", compId)
+        .order("name");
+      if (error) throw error;
+      return data || [];
+    },
+  });
 
   // Update states if contact changes
   useEffect(() => {
@@ -2054,6 +2198,7 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
     setInstagram(contact.instagram_username || "");
     setSource(contact.source || "");
     setSourceDetails(contact.source_details || "");
+    setUnitId(contact.unit_id || "none");
     const newIsPsid = contact.phone && contact.phone.length > 15;
     setPhone(newIsPsid ? "" : (contact.phone || ""));
   }, [contact]);
@@ -2061,6 +2206,21 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
   const updateContact = useMutation({
     mutationFn: async () => {
       const finalPhone = phone.trim() ? phone.trim() : (isPsid ? contact.phone : null);
+      const effectiveUnitId = unitId === "none" ? null : unitId;
+
+      // Se for administrador e a unidade foi alterada, atualiza via server action segura
+      if (isSuperOrCompanyAdmin && effectiveUnitId !== (contact.unit_id || null)) {
+        const compId = contact.company_id || profile?.company_id;
+        if (!compId) throw new Error("Empresa não identificada.");
+        await updateContactUnitAction({
+          data: {
+            contactId: contact.id,
+            unitId: effectiveUnitId,
+            companyId: compId,
+          },
+        });
+      }
+
       const { error } = await supabase
         .from("contacts")
         .update({ 
@@ -2078,6 +2238,7 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
       toast.success("Contato atualizado com sucesso!");
       qc.invalidateQueries({ queryKey: ["contact-details", contact.id] });
       qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contacts-counts"] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
       onSuccess?.();
     },
@@ -2100,13 +2261,15 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
     updateContact.mutate();
   };
 
+  const effectiveUnitId = unitId === "none" ? null : unitId;
   const isUnchanged = 
     name === contact.name && 
     email === (contact.email || "") && 
     instagram === (contact.instagram_username || "") && 
     phone === (isPsid ? "" : (contact.phone || "")) &&
     (source || "") === (contact.source || "") &&
-    (sourceDetails || "") === (contact.source_details || "");
+    (sourceDetails || "") === (contact.source_details || "") &&
+    (!isSuperOrCompanyAdmin || effectiveUnitId === (contact.unit_id || null));
 
   return (
     <div className="space-y-6">
@@ -2134,6 +2297,60 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
             <p className="text-[10px] text-muted-foreground">ID do Canal (Instagram/Messenger): {contact.phone}</p>
           ) : (
             <p className="text-[10px] text-muted-foreground">O número é usado para deduplicação automática.</p>
+          )}
+        </div>
+
+        {/* Unidade do Contato */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="contact-unit" className="flex items-center gap-1.5">
+              <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+              Unidade de Criação
+            </Label>
+            {!isSuperOrCompanyAdmin && (
+              <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <Lock className="h-3 w-3" /> Apenas administradores
+              </span>
+            )}
+          </div>
+
+          {isSuperOrCompanyAdmin ? (
+            <Select value={unitId} onValueChange={setUnitId}>
+              <SelectTrigger id="contact-unit">
+                <SelectValue placeholder="Selecione a unidade" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span>Sem unidade (Geral / Matriz)</span>
+                  </div>
+                </SelectItem>
+                {units?.map((u: any) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full shrink-0"
+                        style={{ backgroundColor: u.color || "#6366f1" }}
+                      />
+                      <span>{u.name}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="flex items-center justify-between p-2.5 rounded-md border border-border/60 bg-muted/30 text-xs">
+              <div className="flex items-center gap-2">
+                <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="font-medium text-foreground">
+                  {units?.find((u: any) => u.id === contact.unit_id)?.name || "Sem unidade (Geral / Matriz)"}
+                </span>
+              </div>
+              <Badge variant="outline" className="text-[10px] text-muted-foreground gap-1">
+                <Lock className="h-2.5 w-2.5" /> Fixo
+              </Badge>
+            </div>
           )}
         </div>
 
