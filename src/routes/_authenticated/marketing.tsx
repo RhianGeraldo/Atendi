@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { toast } from "sonner";
 import {
   TrendingUp,
   Search,
@@ -26,6 +27,9 @@ import {
   ArrowUpRight,
   Maximize2,
   ImageIcon,
+  CheckCircle2,
+  PauseCircle,
+  PlayCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +63,7 @@ import { useActiveCompany } from "@/lib/active-company-context";
 import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import {
   getMarketingAnalyticsAction,
+  updateAdStatusAction,
   type MarketingAdItem,
 } from "@/lib/api/marketing.functions";
 import { AdContactsSheet } from "@/components/marketing/ad-contacts-sheet";
@@ -79,6 +84,7 @@ function MarketingPage() {
   const [unitFilter, setUnitFilter] = useState<string>("all");
   const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [periodFilter, setPeriodFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused">("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState<"revenue" | "leads" | "won" | "conversion">("revenue");
 
@@ -86,6 +92,44 @@ function MarketingPage() {
   const [selectedAdForContacts, setSelectedAdForContacts] = useState<MarketingAdItem | null>(null);
   // Anúncio selecionado para o modal de prévia em alta resolução
   const [previewAd, setPreviewAd] = useState<MarketingAdItem | null>(null);
+
+  const queryClient = useQueryClient();
+
+  // Mutação para alterar status do criativo (Ativo / Pausado)
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ adId, status }: { adId: string; status: "ACTIVE" | "PAUSED" }) => {
+      if (!activeCompanyId) return;
+      return await updateAdStatusAction({
+        data: {
+          companyId: activeCompanyId,
+          adId,
+          status,
+        },
+      });
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["marketing-analytics"] });
+      toast.success(
+        vars.status === "ACTIVE"
+          ? "Criativo marcado como Ativo."
+          : "Criativo marcado como Pausado.",
+      );
+      if (previewAd && previewAd.source_id === vars.adId) {
+        setPreviewAd((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: vars.status,
+                is_active: vars.status === "ACTIVE",
+              }
+            : null,
+        );
+      }
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Erro ao alterar status do criativo.");
+    },
+  });
 
   // Calcula datas a partir do período selecionado
   const dateRange = useMemo(() => {
@@ -151,9 +195,29 @@ function MarketingPage() {
     ticket_medio: 0,
   };
 
+  // Contagem de criativos por status
+  const counts = useMemo(() => {
+    const list = data?.ads || [];
+    let active = 0;
+    let paused = 0;
+    for (const ad of list) {
+      if (ad.is_active) active++;
+      else paused++;
+    }
+    return { all: list.length, active, paused };
+  }, [data?.ads]);
+
   // Filtra e ordena anúncios
   const sortedAds = useMemo(() => {
     let list = data?.ads || [];
+
+    // Filtro por Status (Ativos / Pausados)
+    if (statusFilter === "active") {
+      list = list.filter((ad) => ad.is_active);
+    } else if (statusFilter === "paused") {
+      list = list.filter((ad) => !ad.is_active);
+    }
+
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
       list = list.filter(
@@ -172,7 +236,7 @@ function MarketingPage() {
       if (sortBy === "conversion") return (b.conversion_rate || 0) - (a.conversion_rate || 0);
       return 0;
     });
-  }, [data?.ads, searchTerm, sortBy]);
+  }, [data?.ads, searchTerm, sortBy, statusFilter]);
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat("pt-BR", {
@@ -246,6 +310,20 @@ function MarketingPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-8.5 text-xs h-8.5"
               />
+            </div>
+
+            {/* Status */}
+            <div className="flex items-center gap-1.5 min-w-[140px]">
+              <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
+                <SelectTrigger className="h-8.5 text-xs font-medium">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Status: Todos ({counts.all})</SelectItem>
+                  <SelectItem value="active">🟢 Ativos ({counts.active})</SelectItem>
+                  <SelectItem value="paused">⚪ Pausados ({counts.paused})</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Ordenação */}
@@ -397,20 +475,73 @@ function MarketingPage() {
               Performance por Anúncio Criativo
             </h2>
             <p className="text-xs text-muted-foreground">
-              {sortedAds.length} criativos ativos com tráfego e leads registrados
+              {sortedAds.length} criativos {statusFilter === "active" ? "em veiculação ativa" : statusFilter === "paused" ? "pausados" : "ao todo"}
             </p>
           </div>
 
-          <TabsList className="h-9">
-            <TabsTrigger value="gallery" className="text-xs gap-1.5 cursor-pointer">
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Galeria de Criativos</span>
-            </TabsTrigger>
-            <TabsTrigger value="table" className="text-xs gap-1.5 cursor-pointer">
-              <TableIcon className="w-3.5 h-3.5" />
-              <span>Tabela Comparativa</span>
-            </TabsTrigger>
-          </TabsList>
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Abas Rápidas de Status */}
+            <div className="flex items-center p-1 rounded-lg bg-muted/70 border shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setStatusFilter("all")}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  statusFilter === "all"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>Todos</span>
+                <Badge variant="secondary" className="px-1.5 py-0 h-4 text-[10px] font-mono">
+                  {counts.all}
+                </Badge>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStatusFilter("active")}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  statusFilter === "active"
+                    ? "bg-background text-emerald-600 dark:text-emerald-400 shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Ativos</span>
+                <Badge variant="secondary" className="px-1.5 py-0 h-4 text-[10px] font-mono bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  {counts.active}
+                </Badge>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setStatusFilter("paused")}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  statusFilter === "paused"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-muted-foreground/60" />
+                <span>Pausados</span>
+                <Badge variant="secondary" className="px-1.5 py-0 h-4 text-[10px] font-mono">
+                  {counts.paused}
+                </Badge>
+              </button>
+            </div>
+
+            {/* Alternador de Visualização (Galeria vs Tabela) */}
+            <TabsList className="h-9">
+              <TabsTrigger value="gallery" className="text-xs gap-1.5 cursor-pointer">
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Galeria</span>
+              </TabsTrigger>
+              <TabsTrigger value="table" className="text-xs gap-1.5 cursor-pointer">
+                <TableIcon className="w-3.5 h-3.5" />
+                <span>Tabela</span>
+              </TabsTrigger>
+            </TabsList>
+          </div>
         </div>
 
         {/* Tab 1: Galeria de Criativos */}
@@ -470,8 +601,8 @@ function MarketingPage() {
                         </div>
                       )}
 
-                      {/* Badge da Plataforma */}
-                      <div className="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5 pointer-events-none">
+                      {/* Badges de Plataforma e Status */}
+                      <div className="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5 flex-wrap pointer-events-none">
                         <Badge
                           variant="secondary"
                           className="text-[10px] uppercase font-bold tracking-wider backdrop-blur-md bg-background/85 shadow-xs border flex items-center gap-1 text-foreground"
@@ -483,6 +614,18 @@ function MarketingPage() {
                           )}
                           <span>{ad.source_app || "Instagram"}</span>
                         </Badge>
+
+                        {/* Status Badge */}
+                        {ad.is_active ? (
+                          <Badge className="bg-emerald-600/90 text-white font-bold text-[10px] tracking-wider uppercase shadow-xs border-0 flex items-center gap-1 backdrop-blur-md">
+                            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                            <span>Ativo</span>
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-background/85 backdrop-blur-md text-muted-foreground font-semibold text-[10px] tracking-wider uppercase shadow-xs">
+                            <span>Pausado</span>
+                          </Badge>
+                        )}
                       </div>
 
                       {/* Botões de Ação no Topo Direito: Zoom e Link Externo */}
@@ -574,6 +717,47 @@ function MarketingPage() {
                           <span>Ver {ad.leads_count} Contatos deste Criativo</span>
                           <ArrowUpRight className="w-3.5 h-3.5 ml-auto opacity-70" />
                         </Button>
+
+                        {/* Status de Veiculação & Ação Rápida */}
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t">
+                          <span
+                            className="flex items-center gap-1 truncate"
+                            title={ad.last_lead_at ? format(new Date(ad.last_lead_at), "dd 'de' MMM 'às' HH:mm", { locale: ptBR }) : undefined}
+                          >
+                            <Clock className="w-3 h-3 shrink-0" />
+                            {ad.days_since_last_lead === 0
+                              ? "Lead recebido hoje"
+                              : ad.days_since_last_lead === 1
+                              ? "Último lead ontem"
+                              : `Último lead há ${ad.days_since_last_lead}d`}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              updateStatusMutation.mutate({
+                                adId: ad.source_id,
+                                status: ad.is_active ? "PAUSED" : "ACTIVE",
+                              });
+                            }}
+                            disabled={updateStatusMutation.isPending}
+                            className="text-[11px] font-medium text-muted-foreground hover:text-foreground cursor-pointer transition-colors flex items-center gap-1 shrink-0 ml-2"
+                            title={ad.is_active ? "Marcar criativo como pausado" : "Marcar criativo como ativo"}
+                          >
+                            {ad.is_active ? (
+                              <>
+                                <PauseCircle className="w-3 h-3 text-amber-500" />
+                                <span>Pausar</span>
+                              </>
+                            ) : (
+                              <>
+                                <PlayCircle className="w-3 h-3 text-emerald-500" />
+                                <span>Ativar</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -590,8 +774,9 @@ function MarketingPage() {
               <Table>
                 <TableHeader className="bg-muted/30">
                   <TableRow>
-                    <TableHead className="w-[320px]">Criativo / Anúncio</TableHead>
+                    <TableHead className="w-[300px]">Criativo / Anúncio</TableHead>
                     <TableHead>Plataforma</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead className="text-right">Leads</TableHead>
                     <TableHead className="text-right">Oportunidades</TableHead>
                     <TableHead className="text-right">Vendas Ganhas</TableHead>
@@ -605,12 +790,12 @@ function MarketingPage() {
                   {isLoading ? (
                     Array.from({ length: 5 }).map((_, i) => (
                       <TableRow key={i}>
-                        <TableCell colSpan={9} className="h-14 animate-pulse bg-muted/20" />
+                        <TableCell colSpan={10} className="h-14 animate-pulse bg-muted/20" />
                       </TableRow>
                     ))
                   ) : sortedAds.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="h-32 text-center text-muted-foreground">
+                      <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
                         Nenhum criativo encontrado.
                       </TableCell>
                     </TableRow>
@@ -660,6 +845,42 @@ function MarketingPage() {
                           <Badge variant="outline" className="text-[10px] uppercase font-semibold">
                             {ad.source_app || "Instagram"}
                           </Badge>
+                        </TableCell>
+
+                        {/* Status */}
+                        <TableCell>
+                          <div className="flex flex-col gap-1 items-start">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateStatusMutation.mutate({
+                                  adId: ad.source_id,
+                                  status: ad.is_active ? "PAUSED" : "ACTIVE",
+                                });
+                              }}
+                              disabled={updateStatusMutation.isPending}
+                              className="cursor-pointer transition-transform hover:scale-105"
+                              title={ad.is_active ? "Clique para marcar como Pausado" : "Clique para marcar como Ativo"}
+                            >
+                              {ad.is_active ? (
+                                <Badge className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-semibold text-[10px] flex items-center gap-1 shadow-none">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  <span>Ativo</span>
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-muted-foreground font-semibold text-[10px] hover:bg-muted">
+                                  <span>Pausado</span>
+                                </Badge>
+                              )}
+                            </button>
+                            <span className="text-[10px] text-muted-foreground">
+                              {ad.days_since_last_lead === 0
+                                ? "Hoje"
+                                : ad.days_since_last_lead === 1
+                                ? "Ontem"
+                                : `${ad.days_since_last_lead}d atrás`}
+                            </span>
+                          </div>
                         </TableCell>
 
                         {/* Leads */}
@@ -759,14 +980,28 @@ function MarketingPage() {
             <div className="p-5 flex flex-col justify-between">
               <div className="space-y-4">
                 <div className="flex items-center justify-between gap-2">
-                  <Badge variant="outline" className="text-[11px] uppercase font-bold tracking-wider flex items-center gap-1.5">
-                    {previewAd?.source_app?.toLowerCase() === "instagram" ? (
-                      <Instagram className="w-3.5 h-3.5 text-pink-600" />
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Badge variant="outline" className="text-[11px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                      {previewAd?.source_app?.toLowerCase() === "instagram" ? (
+                        <Instagram className="w-3.5 h-3.5 text-pink-600" />
+                      ) : (
+                        <Facebook className="w-3.5 h-3.5 text-blue-600" />
+                      )}
+                      <span>{previewAd?.source_app || "Instagram"}</span>
+                    </Badge>
+
+                    {previewAd?.is_active ? (
+                      <Badge className="bg-emerald-600 text-white font-bold text-[10px] tracking-wider uppercase shadow-xs flex items-center gap-1 border-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                        <span>Ativo</span>
+                      </Badge>
                     ) : (
-                      <Facebook className="w-3.5 h-3.5 text-blue-600" />
+                      <Badge variant="outline" className="text-muted-foreground font-semibold text-[10px] tracking-wider uppercase">
+                        <span>Pausado</span>
+                      </Badge>
                     )}
-                    <span>{previewAd?.source_app || "Instagram"}</span>
-                  </Badge>
+                  </div>
+
                   <span className="text-xs font-mono text-muted-foreground">
                     ID: {previewAd?.source_id}
                   </span>
@@ -808,10 +1043,55 @@ function MarketingPage() {
                     </span>
                   </div>
                 </div>
+                {/* Informações de Recência */}
+                <div className="pt-2 text-[11px] text-muted-foreground space-y-1">
+                  {previewAd?.last_lead_at && (
+                    <div className="flex items-center justify-between">
+                      <span>Último lead:</span>
+                      <span className="font-medium text-foreground">
+                        {format(new Date(previewAd.last_lead_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })} ({previewAd.days_since_last_lead === 0 ? "Hoje" : previewAd.days_since_last_lead === 1 ? "Ontem" : `há ${previewAd.days_since_last_lead} dias`})
+                      </span>
+                    </div>
+                  )}
+                  {previewAd?.first_lead_at && (
+                    <div className="flex items-center justify-between">
+                      <span>Primeiro lead:</span>
+                      <span className="font-medium text-foreground">
+                        {format(new Date(previewAd.first_lead_at), "dd/MM/yyyy", { locale: ptBR })}
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Botões de Ação */}
               <div className="flex flex-col gap-2 pt-4 border-t mt-4">
+                {previewAd && (
+                  <Button
+                    variant="outline"
+                    className="w-full text-xs font-semibold justify-center gap-1.5 cursor-pointer"
+                    onClick={() => {
+                      updateStatusMutation.mutate({
+                        adId: previewAd.source_id,
+                        status: previewAd.is_active ? "PAUSED" : "ACTIVE",
+                      });
+                    }}
+                    disabled={updateStatusMutation.isPending}
+                  >
+                    {previewAd.is_active ? (
+                      <>
+                        <PauseCircle className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Marcar como Pausado</span>
+                      </>
+                    ) : (
+                      <>
+                        <PlayCircle className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>Marcar como Ativo</span>
+                      </>
+                    )}
+                  </Button>
+                )}
+
                 {previewAd?.source_url && (
                   <Button
                     variant="outline"

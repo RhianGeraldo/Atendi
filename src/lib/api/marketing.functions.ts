@@ -38,6 +38,9 @@ export interface MarketingAdItem {
   source_app: string;
   campaign_name: string | null;
   adset_name: string | null;
+  status: "ACTIVE" | "PAUSED" | string;
+  is_active: boolean;
+  days_since_last_lead: number;
   leads_count: number;
   opportunities_count: number;
   won_count: number;
@@ -203,4 +206,37 @@ export const syncMetaAdDetailsAction = createServerFn({ method: "POST" })
       console.error("[syncMetaAdDetailsAction] Exception:", e);
       return { success: false, error: e.message || String(e) };
     }
+  });
+
+/**
+ * Atualiza o status manual de um anúncio (ex: ACTIVE ou PAUSED) no meta_ads_cache
+ */
+export const updateAdStatusAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      companyId: z.string().uuid(),
+      adId: z.string().min(1),
+      status: z.enum(["ACTIVE", "PAUSED"]),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    await assertCompanyAccess(context.userId, data.companyId);
+
+    const { error } = await supabaseAdmin.from("meta_ads_cache").upsert(
+      {
+        ad_id: data.adId,
+        company_id: data.companyId,
+        status: data.status,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "ad_id" },
+    );
+
+    if (error) {
+      console.error("[updateAdStatusAction] Error updating ad status:", error);
+      throw new Error(`Falha ao alterar status do anúncio: ${error.message}`);
+    }
+
+    return { success: true, status: data.status };
   });
