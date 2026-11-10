@@ -35,6 +35,48 @@ export function extractExternalAdReply(messageData: any, bodyData?: any): any | 
 }
 
 /**
+ * Tenta obter a imagem em alta resolução do anúncio a partir do OpenGraph do sourceURL
+ */
+async function fetchOgImageFromSource(sourceUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+  if (!sourceUrl || !sourceUrl.startsWith('http')) return null;
+
+  try {
+    const res = await fetch(sourceUrl, {
+      headers: {
+        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(4000),
+    });
+
+    if (!res.ok) return null;
+    const html = await res.text();
+    const match = html.match(/property="og:image"\s+content="([^"]+)"/) || html.match(/content="([^"]+)"\s+property="og:image"/);
+    if (!match || !match[1]) return null;
+
+    let ogImageUrl = match[1].replace(/&amp;/g, '&');
+    const imgRes = await fetch(ogImageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(6000),
+    });
+
+    if (imgRes.ok) {
+      const arr = await imgRes.arrayBuffer();
+      const ct = imgRes.headers.get('content-type') || 'image/jpeg';
+      return { buffer: Buffer.from(arr), contentType: ct };
+    }
+  } catch (err) {
+    // Non-blocking fallback
+  }
+
+  return null;
+}
+
+/**
  * Processa a imagem do anúncio:
  * 1. Verifica se já existe em cache no banco ou storage para a empresa (Deduplicação)
  * 2. Se for novo, faz upload de Base64 ou baixa do CDN com headers seguros
@@ -100,48 +142,6 @@ export async function processAndCacheAdPreview({
 
     const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(fileName);
     const storagePublicUrl = publicUrlData?.publicUrl;
-
-/**
- * Tenta obter a imagem em alta resolução do anúncio a partir do OpenGraph do sourceURL
- */
-async function fetchOgImageFromSource(sourceUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
-  if (!sourceUrl || !sourceUrl.startsWith('http')) return null;
-
-  try {
-    const res = await fetch(sourceUrl, {
-      headers: {
-        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
-        'Accept': 'text/html,application/xhtml+xml',
-      },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(4000),
-    });
-
-    if (!res.ok) return null;
-    const html = await res.text();
-    const match = html.match(/property="og:image"\s+content="([^"]+)"/) || html.match(/content="([^"]+)"\s+property="og:image"/);
-    if (!match || !match[1]) return null;
-
-    let ogImageUrl = match[1].replace(/&amp;/g, '&');
-    const imgRes = await fetch(ogImageUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-      },
-      signal: AbortSignal.timeout(6000),
-    });
-
-    if (imgRes.ok) {
-      const arr = await imgRes.arrayBuffer();
-      const ct = imgRes.headers.get('content-type') || 'image/jpeg';
-      return { buffer: Buffer.from(arr), contentType: ct };
-    }
-  } catch (err) {
-    // Non-blocking fallback
-  }
-
-  return null;
-}
 
     // 3. Extrair a imagem (prioriza Alta Resolução via URL externa/OpenGraph antes de fallback para thumbnail Base64 micro)
     let imageBuffer: Buffer | null = null;

@@ -37,6 +37,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -725,6 +726,12 @@ function MarketingPage() {
       {/* Modal de Prévia em Alta Resolução do Criativo */}
       <Dialog open={!!previewAd} onOpenChange={(open) => !open && setPreviewAd(null)}>
         <DialogContent className="max-w-3xl p-0 overflow-hidden bg-background border shadow-2xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{previewAd?.ad_title || "Criativo do Anúncio"}</DialogTitle>
+            <DialogDescription>
+              Visualização detalhada do criativo com métricas de leads e faturamento.
+            </DialogDescription>
+          </DialogHeader>
           <div className="grid grid-cols-1 md:grid-cols-2">
             {/* Lado Esquerdo: Imagem Completa em Alta Resolução */}
             <div className="relative bg-muted/30 min-h-[300px] max-h-[520px] flex items-center justify-center p-4 overflow-hidden border-b md:border-b-0 md:border-r">
