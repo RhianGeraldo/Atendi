@@ -30,6 +30,7 @@ const titles: Record<string, string> = {
   "/tasks": "Tarefas",
   "/todoo": "Meu Todoo",
   "/campaigns": "Campanhas",
+  "/marketing": "Tráfego Pago & ROI",
   "/reports": "Relatórios",
   "/training": "Treinamento & IA",
   "/units": "Gestão de Unidades",

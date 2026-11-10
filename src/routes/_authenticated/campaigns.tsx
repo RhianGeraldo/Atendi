@@ -167,22 +167,16 @@ function CampaignsPage() {
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Top Header */}
+    <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 pb-20">
+      {/* Top Action Bar */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2.5">
-            <Megaphone className="h-6 w-6 text-primary" />
-            Campanhas de Disparos em Massa
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Envios automatizados para clientes da base ou planilhas importadas com rotação anti-bloqueio.
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          Envios automatizados para clientes da base ou planilhas importadas com rotação anti-bloqueio.
+        </p>
 
         <Button
           onClick={() => setCreateDialogOpen(true)}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-sm"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-sm shrink-0 cursor-pointer"
         >
           <Plus className="h-4 w-4 mr-2" />
           Nova Campanha

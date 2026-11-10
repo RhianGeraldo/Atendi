@@ -171,121 +171,99 @@ function MarketingPage() {
   };
 
   return (
-    <div className="flex-1 space-y-6 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto pb-20">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
-              <TrendingUp className="w-6 h-6" />
+    <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 pb-20">
+      {/* Barra de Filtros & Ações */}
+      <Card className="border shadow-xs bg-card/60 backdrop-blur-xs">
+        <CardContent className="p-3.5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
+            {/* Período */}
+            <div className="flex items-center gap-1.5 min-w-[130px]">
+              <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <Select value={periodFilter} onValueChange={setPeriodFilter}>
+                <SelectTrigger className="h-8.5 text-xs font-medium">
+                  <SelectValue placeholder="Período" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todo o Período</SelectItem>
+                  <SelectItem value="today">Hoje</SelectItem>
+                  <SelectItem value="7d">Últimos 7 dias</SelectItem>
+                  <SelectItem value="30d">Últimos 30 dias</SelectItem>
+                  <SelectItem value="90d">Últimos 90 dias</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-                Tráfego Pago & ROI
-                <Badge variant="secondary" className="text-xs font-semibold px-2 py-0.5">
-                  Meta Ads
-                </Badge>
-              </h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Rastreamento e conversão de anúncios em tempo real: de cliques no Instagram/Facebook a vendas ganhas no CRM.
-              </p>
+
+            {/* Unidade */}
+            {units && units.length > 0 && (
+              <div className="flex items-center gap-1.5 min-w-[140px]">
+                <Select value={unitFilter} onValueChange={setUnitFilter}>
+                  <SelectTrigger className="h-8.5 text-xs font-medium">
+                    <SelectValue placeholder="Todas as Unidades" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as Unidades</SelectItem>
+                    {units.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Plataforma */}
+            <div className="flex items-center gap-1.5 min-w-[140px]">
+              <Select value={platformFilter} onValueChange={setPlatformFilter}>
+                <SelectTrigger className="h-8.5 text-xs font-medium">
+                  <SelectValue placeholder="Plataforma" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Instagram & Facebook</SelectItem>
+                  <SelectItem value="instagram">Instagram</SelectItem>
+                  <SelectItem value="facebook">Facebook</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Busca por texto */}
+            <div className="relative flex-1 min-w-[180px]">
+              <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Filtrar por título, texto ou ID do criativo..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8.5 text-xs h-8.5"
+              />
+            </div>
+
+            {/* Ordenação */}
+            <div className="flex items-center gap-1.5 min-w-[150px]">
+              <Select value={sortBy} onValueChange={(v: any) => setSortBy(v)}>
+                <SelectTrigger className="h-8.5 text-xs font-medium">
+                  <SelectValue placeholder="Ordenar por" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="revenue">Maior Faturamento (R$)</SelectItem>
+                  <SelectItem value="leads">Mais Leads</SelectItem>
+                  <SelectItem value="won">Mais Vendas Ganhas</SelectItem>
+                  <SelectItem value="conversion">Maior Taxa de Conversão</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
-        </div>
 
-        {/* Botão de atualização */}
-        <div className="flex items-center gap-2 shrink-0">
+          {/* Botão de atualização */}
           <Button
             variant="outline"
             size="sm"
             onClick={() => refetch()}
             disabled={isRefetching}
-            className="h-9 gap-1.5 text-xs cursor-pointer"
+            className="h-8.5 gap-1.5 text-xs cursor-pointer shrink-0"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefetching ? "animate-spin" : ""}`} />
-            <span>Atualizar Dados</span>
+            <span>Atualizar</span>
           </Button>
-        </div>
-      </div>
-
-      {/* Barra de Filtros */}
-      <Card className="border shadow-xs bg-card/60 backdrop-blur-xs">
-        <CardContent className="p-3.5 flex flex-wrap items-center gap-3">
-          {/* Período */}
-          <div className="flex items-center gap-1.5 min-w-[140px]">
-            <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
-            <Select value={periodFilter} onValueChange={setPeriodFilter}>
-              <SelectTrigger className="h-8.5 text-xs font-medium">
-                <SelectValue placeholder="Período" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todo o Período</SelectItem>
-                <SelectItem value="today">Hoje</SelectItem>
-                <SelectItem value="7d">Últimos 7 dias</SelectItem>
-                <SelectItem value="30d">Últimos 30 dias</SelectItem>
-                <SelectItem value="90d">Últimos 90 dias</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Unidade */}
-          {units && units.length > 0 && (
-            <div className="flex items-center gap-1.5 min-w-[150px]">
-              <Select value={unitFilter} onValueChange={setUnitFilter}>
-                <SelectTrigger className="h-8.5 text-xs font-medium">
-                  <SelectValue placeholder="Todas as Unidades" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas as Unidades</SelectItem>
-                  {units.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {/* Plataforma */}
-          <div className="flex items-center gap-1.5 min-w-[140px]">
-            <Select value={platformFilter} onValueChange={setPlatformFilter}>
-              <SelectTrigger className="h-8.5 text-xs font-medium">
-                <SelectValue placeholder="Plataforma" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Instagram & Facebook</SelectItem>
-                <SelectItem value="instagram">Instagram</SelectItem>
-                <SelectItem value="facebook">Facebook</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Busca por texto */}
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              placeholder="Filtrar por título, texto ou ID do criativo..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-8.5 text-xs h-8.5"
-            />
-          </div>
-
-          {/* Ordenação */}
-          <div className="flex items-center gap-1.5 min-w-[160px]">
-            <Select value={sortBy} onValueChange={(v: any) => setSortBy(v)}>
-              <SelectTrigger className="h-8.5 text-xs font-medium">
-                <SelectValue placeholder="Ordenar por" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="revenue">Maior Faturamento (R$)</SelectItem>
-                <SelectItem value="leads">Mais Leads</SelectItem>
-                <SelectItem value="won">Mais Vendas Ganhas</SelectItem>
-                <SelectItem value="conversion">Maior Taxa de Conversão</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
         </CardContent>
       </Card>
 
