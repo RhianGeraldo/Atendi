@@ -21,6 +21,7 @@ import {
   MapPin,
   GraduationCap,
   Target,
+  TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
@@ -48,6 +49,7 @@ const items = [
   { key: "tasks", to: "/tasks", label: "Tarefas", icon: CheckSquare },
   { key: "todoo", to: "/todoo", label: "Meu Todoo", icon: Target },
   { key: "campaigns", to: "/campaigns", label: "Campanhas", icon: Megaphone },
+  { key: "marketing", to: "/marketing", label: "Tráfego Pago", icon: TrendingUp },
   { key: "reports", to: "/reports", label: "Relatórios", icon: BarChart3 },
   { key: "training", to: "/training", label: "Treinamento & IA", icon: GraduationCap },
   { key: "units", to: "/units", label: "Gestão de Unidades", icon: Building2, globalOnly: true },

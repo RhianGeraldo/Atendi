@@ -170,54 +170,89 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
   const { data: ads, isLoading } = useQuery({
     queryKey: ["contact-ads-history", contactId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("messages")
-        .select(`
-          id,
-          created_at,
-          metadata,
-          conversations!inner (
-            contact_id
-          )
-        `)
-        .eq("conversations.contact_id", contactId)
-        .not("metadata", "is", null)
-        .order("created_at", { ascending: false });
+      const [messagesRes, adLeadsRes] = await Promise.all([
+        supabase
+          .from("messages")
+          .select(`
+            id,
+            created_at,
+            metadata,
+            conversations!inner (
+              contact_id
+            )
+          `)
+          .eq("conversations.contact_id", contactId)
+          .not("metadata", "is", null)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("ad_leads")
+          .select("*")
+          .eq("contact_id", contactId)
+          .order("created_at", { ascending: false }),
+      ]);
 
-      if (error) throw error;
+      const validAds: any[] = [];
+      const seenSources = new Set<string>();
 
-      const validAds = data.filter((msg: any) => {
-        const meta = msg.metadata;
-        if (!meta) return false;
-        
-        const adReply = meta.externalAdReply || 
-                        meta.contextInfo?.externalAdReply || 
-                        meta.extendedTextMessage?.contextInfo?.externalAdReply ||
-                        meta.Message?.extendedTextMessage?.contextInfo?.externalAdReply;
-        return !!adReply;
-      }).map((msg: any) => {
-        const meta = msg.metadata;
-        const adReply = meta.externalAdReply || 
-                        meta.contextInfo?.externalAdReply || 
-                        meta.extendedTextMessage?.contextInfo?.externalAdReply ||
-                        meta.Message?.extendedTextMessage?.contextInfo?.externalAdReply;
-        
-        const conversionSource = meta.conversionSource || 
-                                 meta.contextInfo?.conversionSource || 
-                                 meta.extendedTextMessage?.contextInfo?.conversionSource ||
-                                 meta.Message?.extendedTextMessage?.contextInfo?.conversionSource;
+      // 1. Prioriza leads registrados na tabela ad_leads
+      if (adLeadsRes.data) {
+        adLeadsRes.data.forEach((lead: any) => {
+          const key = lead.source_id || lead.source_url || lead.id;
+          if (key && !seenSources.has(key)) {
+            seenSources.add(key);
+            validAds.push({
+              id: `lead-${lead.id}`,
+              createdAt: lead.created_at,
+              adData: {
+                title: lead.ad_title,
+                body: lead.ad_body,
+                thumbnailURL: lead.thumbnail_url,
+                sourceURL: lead.source_url,
+                sourceID: lead.source_id,
+                sourceApp: lead.source_app,
+              },
+              conversionSource: lead.conversion_source || "Meta Ads",
+              sourceApp: lead.source_app || "instagram",
+            });
+          }
+        });
+      }
 
-        return {
-          id: msg.id,
-          createdAt: msg.created_at,
-          adData: adReply,
-          conversionSource,
-          sourceApp: adReply.sourceApp
-        };
-      });
+      // 2. Completa com anúncios vindos de mensagens
+      if (messagesRes.data) {
+        messagesRes.data.forEach((msg: any) => {
+          const meta = msg.metadata;
+          if (!meta) return;
+
+          const adReply =
+            meta.externalAdReply ||
+            meta.contextInfo?.externalAdReply ||
+            meta.extendedTextMessage?.contextInfo?.externalAdReply ||
+            meta.Message?.extendedTextMessage?.contextInfo?.externalAdReply;
+          if (!adReply) return;
+
+          const key = adReply.sourceID || adReply.sourceURL || msg.id;
+          if (key && !seenSources.has(key)) {
+            seenSources.add(key);
+            const conversionSource =
+              meta.conversionSource ||
+              meta.contextInfo?.conversionSource ||
+              meta.extendedTextMessage?.contextInfo?.conversionSource ||
+              meta.Message?.extendedTextMessage?.contextInfo?.conversionSource;
+
+            validAds.push({
+              id: msg.id,
+              createdAt: msg.created_at,
+              adData: adReply,
+              conversionSource,
+              sourceApp: adReply.sourceApp,
+            });
+          }
+        });
+      }
 
       return validAds;
-    }
+    },
   });
 
   if (isLoading) {
