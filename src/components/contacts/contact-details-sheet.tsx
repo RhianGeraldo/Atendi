@@ -305,7 +305,7 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
                     <img 
                       src={ad.adData.thumbnailURL || ad.adData.originalImageURL} 
                       alt="Ad thumbnail" 
-                      className="h-full w-full object-cover"
+                      className="h-full w-full object-contain"
                       onError={(e) => {
                         e.currentTarget.style.display = 'none';
                         e.currentTarget.parentElement?.classList.add('p-2');
@@ -548,7 +548,7 @@ function ContactJourney({ contactId }: { contactId: string }) {
                           <img 
                             src={adThumb} 
                             alt="Ad thumbnail" 
-                            className="h-full w-full object-cover"
+                            className="h-full w-full object-contain"
                             onError={(e) => {
                               e.currentTarget.style.display = 'none';
                               e.currentTarget.parentElement?.classList.add('p-2');

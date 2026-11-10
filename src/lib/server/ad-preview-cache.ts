@@ -101,28 +101,71 @@ export async function processAndCacheAdPreview({
     const { data: publicUrlData } = supabaseAdmin.storage.from('media').getPublicUrl(fileName);
     const storagePublicUrl = publicUrlData?.publicUrl;
 
-    // 3. Extrair a imagem (suporta Base64 direto do WhatsApp ou URL externa da Meta)
+/**
+ * Tenta obter a imagem em alta resolução do anúncio a partir do OpenGraph do sourceURL
+ */
+async function fetchOgImageFromSource(sourceUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+  if (!sourceUrl || !sourceUrl.startsWith('http')) return null;
+
+  try {
+    const res = await fetch(sourceUrl, {
+      headers: {
+        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(4000),
+    });
+
+    if (!res.ok) return null;
+    const html = await res.text();
+    const match = html.match(/property="og:image"\s+content="([^"]+)"/) || html.match(/content="([^"]+)"\s+property="og:image"/);
+    if (!match || !match[1]) return null;
+
+    let ogImageUrl = match[1].replace(/&amp;/g, '&');
+    const imgRes = await fetch(ogImageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(6000),
+    });
+
+    if (imgRes.ok) {
+      const arr = await imgRes.arrayBuffer();
+      const ct = imgRes.headers.get('content-type') || 'image/jpeg';
+      return { buffer: Buffer.from(arr), contentType: ct };
+    }
+  } catch (err) {
+    // Non-blocking fallback
+  }
+
+  return null;
+}
+
+    // 3. Extrair a imagem (prioriza Alta Resolução via URL externa/OpenGraph antes de fallback para thumbnail Base64 micro)
     let imageBuffer: Buffer | null = null;
     let contentType = 'image/jpeg';
 
     const rawJpegThumb = adReply.jpegThumbnail || adReply.thumbnail;
     const rawThumbUrl = adReply.thumbnailURL || adReply.thumbnailUrl || adReply.originalImageURL || adReply.originalImageUrl;
+    const sourceUrl = adReply.sourceURL || adReply.sourceUrl;
 
-    // Caso A: A imagem veio em Base64 (muito comum em mensagens do WhatsApp)
-    if (rawJpegThumb) {
+    // Prioridade 1: Buscar do OpenGraph do post (Instagram/Facebook) se disponível para imagem em Alta Resolução (HD)
+    if (sourceUrl && typeof sourceUrl === 'string' && sourceUrl.startsWith('http')) {
       try {
-        if (typeof rawJpegThumb === 'string') {
-          const base64Data = rawJpegThumb.replace(/^data:image\/\w+;base64,/, '');
-          imageBuffer = Buffer.from(base64Data, 'base64');
-        } else if (Buffer.isBuffer(rawJpegThumb)) {
-          imageBuffer = rawJpegThumb;
+        const ogResult = await fetchOgImageFromSource(sourceUrl);
+        if (ogResult && ogResult.buffer.length > 5000) {
+          imageBuffer = ogResult.buffer;
+          contentType = ogResult.contentType;
+          console.log(`[ad-preview-cache] Imagem HD obtida com sucesso via OpenGraph (${imageBuffer.length} bytes)`);
         }
-      } catch (b64Err) {
-        console.error('[ad-preview-cache] Erro decodificando Base64 da thumbnail:', b64Err);
+      } catch (ogErr) {
+        console.warn('[ad-preview-cache] Falha ao obter HD via OpenGraph:', ogErr);
       }
     }
 
-    // Caso B: A imagem veio como URL externa do CDN da Meta
+    // Prioridade 2: Baixar do CDN externo via URL (Meta CDN)
     if (!imageBuffer && rawThumbUrl && typeof rawThumbUrl === 'string' && rawThumbUrl.startsWith('http')) {
       // Se já for uma URL do nosso próprio storage, não precisa baixar de novo
       if (rawThumbUrl.includes('/storage/') || rawThumbUrl.includes('supabase.co')) {
@@ -150,6 +193,20 @@ export async function processAndCacheAdPreview({
         }
       } catch (fetchErr) {
         console.error('[ad-preview-cache] Erro no fetch da thumbnail externa:', fetchErr);
+      }
+    }
+
+    // Prioridade 3: Fallback para a miniatura Base64 enviada pelo WhatsApp (geralmente de baixa resolução)
+    if (!imageBuffer && rawJpegThumb) {
+      try {
+        if (typeof rawJpegThumb === 'string') {
+          const base64Data = rawJpegThumb.replace(/^data:image\/\w+;base64,/, '');
+          imageBuffer = Buffer.from(base64Data, 'base64');
+        } else if (Buffer.isBuffer(rawJpegThumb)) {
+          imageBuffer = rawJpegThumb;
+        }
+      } catch (b64Err) {
+        console.error('[ad-preview-cache] Erro decodificando Base64 da thumbnail:', b64Err);
       }
     }
 

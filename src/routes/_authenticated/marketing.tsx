@@ -24,12 +24,20 @@ import {
   HelpCircle,
   Clock,
   ArrowUpRight,
+  Maximize2,
+  ImageIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -75,6 +83,8 @@ function MarketingPage() {
 
   // Anúncio selecionado para a Sheet de contatos
   const [selectedAdForContacts, setSelectedAdForContacts] = useState<MarketingAdItem | null>(null);
+  // Anúncio selecionado para o modal de prévia em alta resolução
+  const [previewAd, setPreviewAd] = useState<MarketingAdItem | null>(null);
 
   // Calcula datas a partir do período selecionado
   const dateRange = useMemo(() => {
@@ -428,53 +438,83 @@ function MarketingPage() {
                     className="border shadow-xs hover:border-primary/40 hover:shadow-md transition-all flex flex-col overflow-hidden group bg-card"
                   >
                     {/* Imagem / Header do Card */}
-                    <div className="relative aspect-video w-full bg-muted/60 overflow-hidden border-b">
+                    <div
+                      className="relative h-60 sm:h-64 w-full bg-muted/20 dark:bg-muted/10 overflow-hidden border-b flex items-center justify-center p-2.5 group/img cursor-pointer select-none"
+                      onClick={() => setPreviewAd(ad)}
+                      title="Clique para ampliar o criativo"
+                    >
                       {ad.thumbnail_url ? (
-                        <img
-                          src={ad.thumbnail_url}
-                          alt={ad.ad_title || "Criativo"}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          onError={(e) => {
-                            (e.target as HTMLElement).style.display = "none";
-                          }}
-                        />
+                        <>
+                          {/* Ambient background blur */}
+                          <div
+                            className="absolute inset-0 bg-cover bg-center filter blur-2xl opacity-40 dark:opacity-25 scale-125 pointer-events-none transition-transform duration-500 group-hover/img:scale-150"
+                            style={{ backgroundImage: `url(${ad.thumbnail_url})` }}
+                          />
+
+                          {/* Imagem do criativo centralizada e nítida */}
+                          <img
+                            src={ad.thumbnail_url}
+                            alt={ad.ad_title || "Criativo"}
+                            className="relative z-10 max-h-full max-w-full rounded-md object-contain shadow-sm transition-transform duration-300 group-hover/img:scale-[1.03]"
+                            loading="lazy"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = "none";
+                            }}
+                          />
+                        </>
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/5 to-muted">
-                          <Users className="w-10 h-10 text-muted-foreground/40" />
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-primary/5 to-muted gap-2 text-muted-foreground/40">
+                          <ImageIcon className="w-10 h-10" />
+                          <span className="text-xs">Sem prévia</span>
                         </div>
                       )}
 
                       {/* Badge da Plataforma */}
-                      <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
+                      <div className="absolute top-2.5 left-2.5 z-20 flex items-center gap-1.5 pointer-events-none">
                         <Badge
                           variant="secondary"
-                          className="text-[10px] uppercase font-bold tracking-wider backdrop-blur-md bg-background/80 shadow-xs border flex items-center gap-1"
+                          className="text-[10px] uppercase font-bold tracking-wider backdrop-blur-md bg-background/85 shadow-xs border flex items-center gap-1 text-foreground"
                         >
                           {isInstagram ? (
-                            <Instagram className="w-3 h-3 text-pink-600" />
+                            <Instagram className="w-3 h-3 text-pink-600 shrink-0" />
                           ) : (
-                            <Facebook className="w-3 h-3 text-blue-600" />
+                            <Facebook className="w-3 h-3 text-blue-600 shrink-0" />
                           )}
                           <span>{ad.source_app || "Instagram"}</span>
                         </Badge>
                       </div>
 
-                      {/* Link externo para o post original */}
-                      {ad.source_url && (
-                        <a
-                          href={ad.source_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="absolute top-2.5 right-2.5 p-1.5 rounded-md bg-background/80 backdrop-blur-md hover:bg-background border shadow-xs text-muted-foreground hover:text-foreground transition-colors"
-                          title="Ver anúncio/post original"
+                      {/* Botões de Ação no Topo Direito: Zoom e Link Externo */}
+                      <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPreviewAd(ad);
+                          }}
+                          className="p-1.5 rounded-md bg-background/85 backdrop-blur-md hover:bg-background border shadow-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                          title="Ampliar criativo"
                         >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      )}
+                          <Maximize2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {ad.source_url && (
+                          <a
+                            href={ad.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="p-1.5 rounded-md bg-background/85 backdrop-blur-md hover:bg-background border shadow-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                            title="Ver anúncio/post original no Instagram ou Facebook"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
 
                       {/* Badge de Faturamento em Destaque no Criativo */}
                       {ad.won_revenue > 0 && (
-                        <div className="absolute bottom-2.5 right-2.5">
+                        <div className="absolute bottom-2.5 right-2.5 z-20 pointer-events-none">
                           <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md border-0">
                             {formatCurrency(ad.won_revenue)}
                           </Badge>
@@ -580,16 +620,26 @@ function MarketingPage() {
                         <TableCell>
                           <div className="flex items-center gap-3">
                             {ad.thumbnail_url ? (
-                              <img
-                                src={ad.thumbnail_url}
-                                alt={ad.ad_title}
-                                className="w-10 h-10 rounded-md object-cover border shrink-0 bg-muted"
-                                onError={(e) => {
-                                  (e.target as HTMLElement).style.display = "none";
-                                }}
-                              />
+                              <button
+                                type="button"
+                                onClick={() => setPreviewAd(ad)}
+                                className="relative w-11 h-11 rounded-md overflow-hidden border shrink-0 bg-muted/40 cursor-pointer group/thumb hover:ring-2 hover:ring-primary/50 transition-all flex items-center justify-center"
+                                title="Clique para ampliar o criativo"
+                              >
+                                <img
+                                  src={ad.thumbnail_url}
+                                  alt={ad.ad_title}
+                                  className="w-full h-full object-cover group-hover/thumb:scale-110 transition-transform duration-200"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = "none";
+                                  }}
+                                />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center transition-opacity text-white">
+                                  <Eye className="w-4 h-4" />
+                                </div>
+                              </button>
                             ) : (
-                              <div className="w-10 h-10 rounded-md bg-muted flex items-center justify-center shrink-0 border">
+                              <div className="w-11 h-11 rounded-md bg-muted flex items-center justify-center shrink-0 border">
                                 <Users className="w-5 h-5 text-muted-foreground" />
                               </div>
                             )}
@@ -671,6 +721,116 @@ function MarketingPage() {
         companyId={activeCompanyId || ""}
         unitId={unitFilter !== "all" ? unitFilter : null}
       />
+
+      {/* Modal de Prévia em Alta Resolução do Criativo */}
+      <Dialog open={!!previewAd} onOpenChange={(open) => !open && setPreviewAd(null)}>
+        <DialogContent className="max-w-3xl p-0 overflow-hidden bg-background border shadow-2xl">
+          <div className="grid grid-cols-1 md:grid-cols-2">
+            {/* Lado Esquerdo: Imagem Completa em Alta Resolução */}
+            <div className="relative bg-muted/30 min-h-[300px] max-h-[520px] flex items-center justify-center p-4 overflow-hidden border-b md:border-b-0 md:border-r">
+              {previewAd?.thumbnail_url && (
+                <div
+                  className="absolute inset-0 bg-cover bg-center filter blur-3xl opacity-35 dark:opacity-20 scale-125 pointer-events-none"
+                  style={{ backgroundImage: `url(${previewAd.thumbnail_url})` }}
+                />
+              )}
+              {previewAd?.thumbnail_url ? (
+                <img
+                  src={previewAd.thumbnail_url}
+                  alt={previewAd.ad_title || "Criativo"}
+                  className="relative z-10 max-h-[460px] max-w-full rounded-lg object-contain shadow-md"
+                />
+              ) : (
+                <div className="text-center text-muted-foreground p-8">
+                  <ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">Sem imagem disponível</p>
+                </div>
+              )}
+            </div>
+
+            {/* Lado Direito: Detalhes, KPIs e Ações */}
+            <div className="p-5 flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <Badge variant="outline" className="text-[11px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                    {previewAd?.source_app?.toLowerCase() === "instagram" ? (
+                      <Instagram className="w-3.5 h-3.5 text-pink-600" />
+                    ) : (
+                      <Facebook className="w-3.5 h-3.5 text-blue-600" />
+                    )}
+                    <span>{previewAd?.source_app || "Instagram"}</span>
+                  </Badge>
+                  <span className="text-xs font-mono text-muted-foreground">
+                    ID: {previewAd?.source_id}
+                  </span>
+                </div>
+
+                <div>
+                  <h3 className="font-bold text-base text-foreground leading-snug">
+                    {previewAd?.ad_title || "Criativo sem título"}
+                  </h3>
+                  {previewAd?.ad_body && (
+                    <p className="text-xs text-muted-foreground mt-2 line-clamp-5 whitespace-pre-line leading-relaxed">
+                      {previewAd.ad_body}
+                    </p>
+                  )}
+                </div>
+
+                {/* Grid de Métricas do Criativo */}
+                <div className="grid grid-cols-2 gap-2.5 pt-2 border-t">
+                  <div className="p-2.5 rounded-lg bg-muted/40 border">
+                    <span className="text-[10px] text-muted-foreground uppercase font-semibold block">Leads</span>
+                    <span className="text-base font-bold text-foreground">{previewAd?.leads_count || 0}</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase font-semibold block">Faturamento</span>
+                    <span className="text-base font-bold text-emerald-700 dark:text-emerald-400">
+                      {formatCurrency(previewAd?.won_revenue || 0)}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-muted/40 border">
+                    <span className="text-[10px] text-muted-foreground uppercase font-semibold block">Conversão</span>
+                    <span className="text-base font-bold text-foreground">
+                      {previewAd ? ((previewAd.won_count / Math.max(1, previewAd.leads_count)) * 100).toFixed(1) : 0}%
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-muted/40 border">
+                    <span className="text-[10px] text-muted-foreground uppercase font-semibold block">Ticket Médio</span>
+                    <span className="text-base font-bold text-foreground">
+                      {formatCurrency(previewAd?.ticket_medio || 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Botões de Ação */}
+              <div className="flex flex-col gap-2 pt-4 border-t mt-4">
+                {previewAd?.source_url && (
+                  <Button
+                    variant="outline"
+                    className="w-full text-xs font-semibold justify-center gap-1.5 cursor-pointer"
+                    onClick={() => window.open(previewAd.source_url!, "_blank")}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Ver no {previewAd.source_app || "Instagram/Facebook"}</span>
+                  </Button>
+                )}
+                <Button
+                  className="w-full text-xs font-semibold justify-center gap-1.5 cursor-pointer bg-primary hover:bg-primary/90 text-primary-foreground"
+                  onClick={() => {
+                    const ad = previewAd;
+                    setPreviewAd(null);
+                    setSelectedAdForContacts(ad);
+                  }}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Ver Leads ({previewAd?.leads_count || 0})</span>
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

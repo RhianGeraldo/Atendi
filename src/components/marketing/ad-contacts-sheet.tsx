@@ -98,19 +98,25 @@ export function AdContactsSheet({
       <SheetContent side="right" className="w-full sm:max-w-xl p-0 flex flex-col bg-background">
         {/* Header com miniatura do anúncio */}
         <SheetHeader className="p-5 border-b bg-muted/20">
-          <div className="flex items-start gap-3">
+          <div className="flex items-start gap-3.5">
             {ad?.thumbnail_url ? (
-              <img
-                src={ad.thumbnail_url}
-                alt={ad.ad_title || "Criativo"}
-                className="w-14 h-14 rounded-lg object-cover border shadow-sm shrink-0 bg-muted"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = "none";
-                }}
-              />
+              <div className="relative w-16 h-16 rounded-xl overflow-hidden border shadow-sm shrink-0 bg-muted/40">
+                <div
+                  className="absolute inset-0 bg-cover bg-center filter blur-md opacity-35 scale-125 pointer-events-none"
+                  style={{ backgroundImage: `url(${ad.thumbnail_url})` }}
+                />
+                <img
+                  src={ad.thumbnail_url}
+                  alt={ad.ad_title || "Criativo"}
+                  className="relative z-10 w-full h-full object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = "none";
+                  }}
+                />
+              </div>
             ) : (
-              <div className="w-14 h-14 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 border">
-                <Users className="w-6 h-6 text-primary" />
+              <div className="w-16 h-16 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 border">
+                <Users className="w-7 h-7 text-primary" />
               </div>
             )}
             <div className="flex-1 min-w-0">
@@ -122,6 +128,18 @@ export function AdContactsSheet({
                   <span className="text-[11px] text-muted-foreground font-mono">
                     ID: {ad.source_id}
                   </span>
+                )}
+                {ad?.source_url && (
+                  <a
+                    href={ad.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline ml-auto font-medium"
+                    title="Ver anúncio original"
+                  >
+                    <span>Ver anúncio</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
                 )}
               </div>
               <SheetTitle className="text-base font-semibold leading-snug line-clamp-2 mt-1">
