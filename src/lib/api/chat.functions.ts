@@ -19,7 +19,6 @@ import {
 import type { CanalAberto, Destinatario } from "@/lib/canais/tipos";
 import {
   sendEvogoText,
-  sendEvogoLink,
   sendEvogoMedia,
   sendEvogoReaction,
   editEvogoMessage,
@@ -33,7 +32,6 @@ import {
 } from "../evogo";
 import {
   sendStevoText,
-  sendStevoLink,
   sendStevoMedia,
   sendStevoReaction,
   editStevoMessage,
@@ -705,15 +703,6 @@ export const sendMessageAction = createServerFn({ method: "POST" })
                 caption: textToSend,
                 quoted,
               });
-            } else if (textToSend.match(/https?:\/\//)) {
-              evogoResponse = await sendStevoLink({
-                host: host!,
-                token: token!,
-                instanceName: instanceName!,
-                number: phoneToSend,
-                text: textToSend,
-                quoted,
-              });
             } else {
               evogoResponse = await sendStevoText({
                 host: host!,
@@ -749,15 +738,6 @@ export const sendMessageAction = createServerFn({ method: "POST" })
                 base64: mediaUrlToSend!,
                 mediatype: data.mediaType as any,
                 caption: textToSend,
-                quoted,
-              });
-            } else if (textToSend.match(/https?:\/\//)) {
-              evogoResponse = await sendEvogoLink({
-                host: host!,
-                token: token!,
-                instanceName: instanceName!,
-                number: phoneToSend,
-                text: textToSend,
                 quoted,
               });
             } else {

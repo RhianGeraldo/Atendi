@@ -324,31 +324,34 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       return;
     }
 
-    // Garantia 1º: Empresa e Unidade sempre resolvidas
+    // 1. Resolver Empresa e Unidade
     const instData = Array.isArray(conv.whatsapp_instances)
       ? conv.whatsapp_instances[0]
       : conv.whatsapp_instances;
     const effectiveCompanyId =
       companyId || conv.contacts?.company_id || (instData as any)?.company_id;
-    let effectiveUnitId =
-      conv.unit_id || conv.contacts?.unit_id || (instData as any)?.unit_id || null;
 
-    if (!effectiveUnitId && effectiveCompanyId) {
-      const { data: defaultUnit } = await supabaseAdmin
-        .from("units")
-        .select("id")
-        .eq("company_id", effectiveCompanyId)
-        .limit(1)
-        .maybeSingle();
-      if (defaultUnit) {
-        effectiveUnitId = defaultUnit.id;
-      }
+    // Verificar se já temos unidade específica vinculada à conversa, instância ou contato
+    const hasSpecificUnit = !!(conv.unit_id || (instData as any)?.unit_id || conv.contacts?.unit_id);
+    let effectiveUnitId =
+      conv.unit_id || (instData as any)?.unit_id || conv.contacts?.unit_id || null;
+
+    // Buscar todas as unidades da empresa para contexto global
+    const { data: allCompanyUnits } = await supabaseAdmin
+      .from("units")
+      .select("id, name, address, business_hours")
+      .eq("company_id", effectiveCompanyId);
+
+    let fallbackUnitId = effectiveUnitId;
+    if (!fallbackUnitId && allCompanyUnits && allCompanyUnits.length > 0) {
+      fallbackUnitId = allCompanyUnits[0].id;
     }
 
-    if (!conv.unit_id && effectiveUnitId) {
+    // Se a instância é de uma filial física específica mas a conversa ainda não tinha unit_id gravado, vincula à filial
+    if (!conv.unit_id && (instData as any)?.unit_id) {
       await supabaseAdmin
         .from("conversations")
-        .update({ unit_id: effectiveUnitId })
+        .update({ unit_id: (instData as any).unit_id })
         .eq("id", conversationId);
     }
 
@@ -568,31 +571,38 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       minute: "2-digit",
     });
 
+    const availableUnitsList =
+      allCompanyUnits && allCompanyUnits.length > 0
+        ? allCompanyUnits.map((u) => u.name).join(", ")
+        : "Aracruz, Linhares, Mantena, São Mateus, Serra";
+
     const contextHeader = [
       `=== CONTEXTO DO ATENDIMENTO ATUAL (DADOS AUTORITATIVOS DO SISTEMA) ===`,
       `DATA E HORA ATUAL: ${spNowStr} (Horário de Brasília - America/Sao_Paulo)`,
       `EMPRESA: ${companyName}`,
-      `UNIDADE ATUAL DE ATENDIMENTO: ${unitName}`,
+      hasSpecificUnit
+        ? `UNIDADE ATUAL DE ATENDIMENTO: ${unitName}`
+        : `CANAL DE ATENDIMENTO: Central Geral da Rede (Unidade física ainda não vinculada)`,
       rawClientName
         ? `NOME DO CLIENTE: ${rawClientName} (Primeiro nome: ${clientFirstName})`
         : `NOME DO CLIENTE: Não informado ainda`,
       conv.contacts?.phone ? `TELEFONE DO CLIENTE: ${conv.contacts.phone}` : null,
-      unitData?.address
-        ? `ENDEREÇO DA UNIDADE: ${unitData.address}`
-        : company.address
-          ? `ENDEREÇO DA EMPRESA: ${company.address}`
-          : null,
-      unitData?.business_hours
-        ? `HORÁRIOS DA UNIDADE: ${unitData.business_hours}`
-        : company.business_hours
-          ? `HORÁRIOS: ${company.business_hours}`
-          : null,
+      hasSpecificUnit
+        ? (unitData?.address ? `ENDEREÇO DA UNIDADE: ${unitData.address}` : null)
+        : `UNIDADES DISPONÍVEIS NA REDE: ${availableUnitsList}`,
+      hasSpecificUnit
+        ? (unitData?.business_hours ? `HORÁRIOS DA UNIDADE: ${unitData.business_hours}` : null)
+        : (company.business_hours ? `HORÁRIOS DA REDE: ${company.business_hours}` : null),
       `--- DIRETRIZES CRÍTICAS DE CONTEXTO E LOCALIZAÇÃO ---`,
-      `1. O cliente JÁ ESTÁ em contato diretamente com a unidade '${unitName}'. Você está respondendo exclusivamente pela unidade '${unitName}'.`,
-      `2. NUNCA pergunte 'qual unidade você prefere?', 'qual cidade você está?' ou apresente lista de outras unidades/cidades da empresa. A unidade já está 100% definida como '${unitName}'. Só aborde outras filiais se o próprio cliente disser explicitamente que deseja atendimento em outra cidade.`,
+      hasSpecificUnit
+        ? `1. O cliente está em contato direto com a unidade '${unitName}'. Você está respondendo exclusivamente por esta filial. Não pergunte qual cidade ele prefere, pois a unidade já está definida como '${unitName}'.`
+        : `1. ATENDIMENTO CENTRAL DA REDE: O cliente entrou pelo canal geral da empresa e a unidade física ainda não foi selecionada.
+- A empresa atende nas cidades: ${availableUnitsList}.
+- Pergunte de forma muito cordial e natural qual cidade/unidade o cliente prefere ou onde deseja ser atendido.
+- Assim que o cliente indicar a cidade (ex: 'Aracruz', 'Linhares', 'Mantena', 'São Mateus', 'Serra'), acione nativamente a ferramenta 'definir_unidade' para fixar o atendimento nesta filial.`,
       rawClientName
-        ? `3. O nome do cliente já é conhecido (${rawClientName}). Trate-o com naturalidade e cordialidade (preferencialmente chamando por ${clientFirstName}). NUNCA pergunte 'qual é o seu nome?' ou 'com quem estou falando?'.`
-        : null,
+        ? `2. O nome do cliente já é conhecido (${rawClientName}). Trate-o com naturalidade e cordialidade chamando preferencialmente por ${clientFirstName}. NUNCA pergunte 'qual é o seu nome?' ou 'com quem estou falando?'.`
+        : `2. O nome do cliente ainda NÃO foi informado no sistema. Na mensagem inicial, cumprimente calorosamente e pergunte amigavelmente como pode chamá-lo(a) ou com quem está falando. Assim que ele disser o nome, chame a ferramenta 'atualizar_nome_cliente' para salvar no CRM.`,
       `======================================================================`,
     ]
       .filter(Boolean)
@@ -602,7 +612,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
     // Diretriz Mandatória de Ferramentas Nativas, Tamanho de Mensagem e Especialização
     systemPromptParts.push(`=== DIRETRIZES DE FERRAMENTAS E COMUNICAÇÃO ===
-1. Você dispõe de ferramentas nativas (tools/functions) para criar/atualizar oportunidades no CRM, agendar tarefas, agendar mensagens futuras ('agendar_mensagem'), transferir o atendimento para equipe humana ou colegas, e encerrar o chamado. Chame SEMPRE a ferramenta correspondente nativamente quando o contexto exigir.
+1. Você dispõe de ferramentas nativas (tools/functions) para criar/atualizar oportunidades no CRM, agendar tarefas, agendar mensagens futuras ('agendar_mensagem'), definir unidade ('definir_unidade'), salvar nome do cliente ('atualizar_nome_cliente'), transferir o atendimento para equipe humana ou colegas, e encerrar o chamado. Chame SEMPRE a ferramenta correspondente nativamente quando o contexto exigir.
 2. É ESTRITAMENTE PROIBIDO escrever tags textuais como '[CRIAR_OPORTUNIDADE]', '[ATUALIZAR_OPORTUNIDADE]', '[TRANSFERIR]', '[TRANSFERIR_AGENTE]', '[ENCERRAR]', '[CRIAR_TAREFA]', '[AGENDAR_MENSAGEM]' ou qualquer comando em colchetes no texto enviado ao cliente.
 3. O cliente é uma pessoa real no WhatsApp e NUNCA deve ler comandos técnicos de bastidor. Qualquer tag exposta no texto é uma falha grave.
 4. Para ferramentas que interagem com o cliente (como transferir_atendimento, delegar_para_outro_agente_ia ou encerrar_atendimento), preencha o argumento 'aviso' ou 'despedida' com a mensagem calorosa, curta e natural que o cliente lerá.
@@ -926,6 +936,47 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       },
     });
 
+    // Ferramenta nativa para Definir Unidade de Atendimento
+    tools.push({
+      type: "function",
+      function: {
+        name: "definir_unidade",
+        description:
+          "Define ou altera a unidade física da clínica para este atendimento (ex: quando o cliente informa qual cidade/unidade prefere ser atendido entre Aracruz, Linhares, Mantena, São Mateus ou Serra).",
+        parameters: {
+          type: "object",
+          properties: {
+            unidade_nome: {
+              type: "string",
+              description:
+                "Nome da unidade ou cidade desejada pelo cliente (ex: 'Aracruz', 'Linhares', 'Mantena', 'São Mateus', 'Serra').",
+            },
+          },
+          required: ["unidade_nome"],
+        },
+      },
+    });
+
+    // Ferramenta nativa para Atualizar Nome do Cliente
+    tools.push({
+      type: "function",
+      function: {
+        name: "atualizar_nome_cliente",
+        description:
+          "Salva ou atualiza o nome do cliente no cadastro assim que ele se apresentar na conversa.",
+        parameters: {
+          type: "object",
+          properties: {
+            nome: {
+              type: "string",
+              description: "Nome informado pelo cliente (ex: 'Mariana', 'Lucas Silva').",
+            },
+          },
+          required: ["nome"],
+        },
+      },
+    });
+
     if (agent.allow_opportunities) {
       tools.push({
         type: "function",
@@ -1047,6 +1098,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     let transferAgentAviso: string | null = null;
 
     let crmTaskData: { title: string; description: string; dueDate: string } | null = null;
+    let setUnitData: string | null = null;
+    let updateClientNameData: string | null = null;
     let crmOppCreateData: {
       title: string;
       value: number;
@@ -1105,6 +1158,10 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             dueDate: args.data_hora || "",
             reason: args.motivo || "",
           };
+        } else if (fnName === "definir_unidade") {
+          setUnitData = args.unidade_nome || args.unidade_nome_ou_id || null;
+        } else if (fnName === "atualizar_nome_cliente") {
+          updateClientNameData = args.nome || null;
         } else if (fnName === "criar_oportunidade" && agent.allow_opportunities) {
           crmOppCreateData = {
             title: args.titulo || "Nova Oportunidade",
@@ -1227,6 +1284,68 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     // Dicionário de resultados das tools executadas para alimentar Turn 2 se necessário
     const toolExecutionResults: Record<string, any> = {};
 
+    // 7.5 Executar Definição de Unidade e Atualização de Nome do Cliente
+    if (setUnitData && effectiveCompanyId) {
+      const cleanUnitInput = setUnitData.trim();
+      const { data: matchedUnit } = await supabaseAdmin
+        .from("units")
+        .select("id, name")
+        .eq("company_id", effectiveCompanyId)
+        .ilike("name", `%${cleanUnitInput}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (matchedUnit) {
+        effectiveUnitId = matchedUnit.id;
+        await supabaseAdmin
+          .from("conversations")
+          .update({ unit_id: matchedUnit.id })
+          .eq("id", conversationId);
+
+        if (conv.contact_id) {
+          await supabaseAdmin
+            .from("contacts")
+            .update({ unit_id: matchedUnit.id })
+            .eq("id", conv.contact_id);
+        }
+
+        await supabaseAdmin.from("messages").insert({
+          conversation_id: conversationId,
+          sender_type: "agent",
+          is_internal: true,
+          content: `📍 Unidade definida pela IA: ${matchedUnit.name}`,
+        });
+
+        for (const call of toolCalls) {
+          if (call.function?.name === "definir_unidade") {
+            toolExecutionResults[call.id] = {
+              status: "success",
+              message: `Unidade vinculada com sucesso: '${matchedUnit.name}'.`,
+            };
+          }
+        }
+      }
+    }
+
+    if (updateClientNameData && conv.contact_id) {
+      const cleanName = updateClientNameData.trim();
+      if (cleanName.length >= 2) {
+        await supabaseAdmin
+          .from("contacts")
+          .update({ name: cleanName })
+          .eq("id", conv.contact_id);
+
+        for (const call of toolCalls) {
+          if (call.function?.name === "atualizar_nome_cliente") {
+            toolExecutionResults[call.id] = {
+              status: "success",
+              message: `Nome do cliente salvo no CRM como '${cleanName}'.`,
+            };
+          }
+        }
+      }
+    }
+
     // 8. Executar Ações de CRM (Tarefas, Criação e Atualização de Oportunidades)
     // A. Criar Tarefa no CRM
     if (crmTaskData && conv.contact_id) {
@@ -1240,7 +1359,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           description: crmTaskData.description || null,
           due_date: parsedDue,
           contact_id: conv.contact_id,
-          unit_id: effectiveUnitId,
+          unit_id: effectiveUnitId || fallbackUnitId,
           status: "pending",
           priority: "medium",
           task_type: "follow_up",
@@ -1349,7 +1468,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             title: crmOppCreateData.title,
             value: crmOppCreateData.value,
             contact_id: conv.contact_id,
-            unit_id: effectiveUnitId,
+            unit_id: effectiveUnitId || fallbackUnitId,
             conversation_id: conversationId,
             stage_id: resolvedStage,
             owner_id: conv.assigned_agent_id || null,
@@ -1510,7 +1629,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           companyId: effectiveCompanyId,
           conversationId,
           contactId: conv.contact_id,
-          unitId: effectiveUnitId,
+          unitId: effectiveUnitId || fallbackUnitId,
           creatorType: "agent",
           aiAgentId: agent.id,
           content: scheduledMessageData.content,

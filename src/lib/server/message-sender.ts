@@ -4,8 +4,8 @@ import {
   pegarConversaDeVolta,
   MENSAGEM_SEM_DONO_DA_CONVERSA,
 } from "./instagram-thread";
-import { sendEvogoText, sendEvogoMedia, sendEvogoLink } from "../evogo";
-import { sendStevoText, sendStevoMedia, sendStevoLink } from "../stevo";
+import { sendEvogoText, sendEvogoMedia } from "../evogo";
+import { sendStevoText, sendStevoMedia } from "../stevo";
 import { abrirCanal, destinatarioDe } from "../canais/motor";
 import { garantirConexaoWhatsApp, explicarFalhaDeEnvio } from "./whatsapp-conexao";
 
@@ -228,71 +228,25 @@ export async function sendPlatformMessage({
           }
         } else {
           const messageText = text || "";
-          // Regex to detect if there's any URL in the text, avoiding trailing punctuation or markdown chars like *, ), ], }
-          const hasUrl = /(https?:\/\/[^\s*()\[\]{}]+)/g.test(messageText);
-
-          if (hasUrl) {
-            try {
-              if (provider === "stevo") {
-                evogoResponse = await sendStevoLink({
-                  host,
-                  token,
-                  instanceName,
-                  number: phone,
-                  text: messageText,
-                });
-              } else {
-                evogoResponse = await sendEvogoLink({
-                  host,
-                  token,
-                  instanceName,
-                  number: phone,
-                  text: messageText,
-                });
-              }
-            } catch (linkErr: any) {
-              // Timeout é o aparelho desconectado, não a URL: tentar como texto só dobraria a espera.
-              if (linkErr?.name === "TimeoutError" || linkErr?.name === "AbortError") throw linkErr;
-              console.warn(
-                "[message-sender] sendLink failed (possibly invalid URL format), falling back to text:",
-                linkErr,
-              );
-              if (provider === "stevo") {
-                evogoResponse = await sendStevoText({
-                  host,
-                  token,
-                  instanceName,
-                  number: phone,
-                  text: messageText,
-                });
-              } else {
-                evogoResponse = await sendEvogoText({
-                  host,
-                  token,
-                  instanceName,
-                  number: phone,
-                  text: messageText,
-                });
-              }
-            }
+          // Envia sempre como texto. Enviar URLs via rota /send/link quebra a renderização no iOS (iPhone),
+          // deixando a bolha totalmente vazia/preta devido a falhas na montagem do link preview (OpenGraph/extendedTextMessage).
+          // Como texto puro, o WhatsApp (iOS e Android) reconhece nativamente links https:// e os torna azuis/clicáveis.
+          if (provider === "stevo") {
+            evogoResponse = await sendStevoText({
+              host,
+              token,
+              instanceName,
+              number: phone,
+              text: messageText,
+            });
           } else {
-            if (provider === "stevo") {
-              evogoResponse = await sendStevoText({
-                host,
-                token,
-                instanceName,
-                number: phone,
-                text: messageText,
-              });
-            } else {
-              evogoResponse = await sendEvogoText({
-                host,
-                token,
-                instanceName,
-                number: phone,
-                text: messageText,
-              });
-            }
+            evogoResponse = await sendEvogoText({
+              host,
+              token,
+              instanceName,
+              number: phone,
+              text: messageText,
+            });
           }
         }
       } catch (envioErr) {
