@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
 
 export const Route = createFileRoute("/")({
@@ -9,9 +9,11 @@ export const Route = createFileRoute("/")({
 function Index() {
   const { loading, session } = useAuth();
   const navigate = useNavigate();
+  const hasNavigatedRef = useRef(false);
 
   useEffect(() => {
-    if (!loading) {
+    if (!loading && !hasNavigatedRef.current) {
+      hasNavigatedRef.current = true;
       navigate({ to: session ? "/dashboard" : "/auth", replace: true });
     }
   }, [loading, session, navigate]);

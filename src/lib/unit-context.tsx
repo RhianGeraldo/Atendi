@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, type ReactNode } from "react";
 import { useAuth } from "./auth-context";
 
 interface UnitContextType {
@@ -18,7 +18,7 @@ export function UnitProvider({ children }: { children: ReactNode }) {
     return saved ? saved : null;
   });
 
-  const setSelectedUnitId = (id: string | null) => {
+  const setSelectedUnitId = useCallback((id: string | null) => {
     setSelectedUnitIdState(id);
     if (typeof window !== "undefined") {
       if (id) {
@@ -27,17 +27,22 @@ export function UnitProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem("atendiai_selected_unit_id");
       }
     }
-  };
+  }, []);
 
-  // Se o usuário deslogar ou trocar de empresa (hipoteticamente), reseta a unidade
+  // Se o usuário deslogar ou trocar de empresa, reseta a unidade se houver valor
   useEffect(() => {
-    if (!profile) {
+    if (!profile && selectedUnitId !== null) {
       setSelectedUnitId(null);
     }
-  }, [profile]);
+  }, [profile, selectedUnitId, setSelectedUnitId]);
+
+  const value = useMemo(
+    () => ({ selectedUnitId, setSelectedUnitId }),
+    [selectedUnitId, setSelectedUnitId]
+  );
 
   return (
-    <UnitContext.Provider value={{ selectedUnitId, setSelectedUnitId }}>
+    <UnitContext.Provider value={value}>
       {children}
     </UnitContext.Provider>
   );

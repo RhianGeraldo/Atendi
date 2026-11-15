@@ -8,6 +8,7 @@ import {
   Users,
   KanbanSquare,
   CheckSquare,
+  Ticket,
   Megaphone,
   BarChart3,
   Settings,
@@ -47,6 +48,7 @@ const items = [
   { key: "contacts", to: "/contacts", label: "Contatos", icon: Users },
   { key: "pipeline", to: "/pipeline", label: "Funil de Vendas", icon: KanbanSquare },
   { key: "tasks", to: "/tasks", label: "Tarefas", icon: CheckSquare },
+  { key: "tickets", to: "/tickets", label: "Tickets", icon: Ticket },
   { key: "todoo", to: "/todoo", label: "Meu Todoo", icon: Target },
   { key: "campaigns", to: "/campaigns", label: "Campanhas", icon: Megaphone },
   { key: "marketing", to: "/marketing", label: "Tráfego Pago", icon: TrendingUp },
@@ -76,8 +78,13 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
     queryKey: ["company-name", effectiveCompanyId],
     enabled: !!effectiveCompanyId,
     queryFn: async () => {
-      const { data } = await supabase.from("companies").select("name").eq("id", effectiveCompanyId!).single();
-      return data?.name || "Minha Empresa";
+      const { data, error } = await supabase
+        .from("companies")
+        .select("name")
+        .eq("id", effectiveCompanyId!)
+        .maybeSingle();
+      if (error || !data) return "Minha Empresa";
+      return data.name || "Minha Empresa";
     }
   });
 
@@ -85,8 +92,13 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
     queryKey: ["department-name", profile?.department_id],
     enabled: !!profile?.department_id,
     queryFn: async () => {
-      const { data } = await supabase.from("departments").select("name").eq("id", profile!.department_id!).single();
-      return data?.name;
+      const { data, error } = await supabase
+        .from("departments")
+        .select("name")
+        .eq("id", profile!.department_id!)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data.name || null;
     }
   });
 
@@ -137,7 +149,7 @@ export function AppSidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: P
     if (!selectedUnitId && profile && profile.role !== 'admin_company' && profile.role !== 'super_admin' && units && units.length > 0) {
       setSelectedUnitId(units[0].id);
     }
-  }, [selectedUnitId, profile, units, setSelectedUnitId]);
+  }, [selectedUnitId, profile?.role, units?.[0]?.id]);
 
   const selectedUnit = units?.find(u => u.id === selectedUnitId);
 

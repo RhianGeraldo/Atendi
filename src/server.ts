@@ -71,6 +71,12 @@ export default {
     try {
       const url = new URL(request.url);
       
+      // API de Tickets / SAC e Integrações Externas
+      if (url.pathname.startsWith('/api/tickets') || url.pathname.startsWith('/api/sac/tickets')) {
+        const { handleTicketsApi } = await import('./lib/server/tickets-api');
+        return await handleTicketsApi(request);
+      }
+
       // Webhooks padronizados
       if (url.pathname === '/api/webhooks/evogo' && request.method === 'POST') {
         return await handleEvogoWebhook(request);

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, ChevronUp, XCircle, Check, Pencil, X, Gift, Building2, Lock } from "lucide-react";
+import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, ChevronUp, XCircle, Check, Pencil, X, Gift, Building2, Lock, Ticket } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -53,6 +53,7 @@ import { blockContactAction, unblockContactAction } from "@/lib/api/chat.functio
 import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
 import { updateContactUnitAction } from "@/lib/api/contacts.functions";
+import { ContactTickets } from "./contact-tickets";
 
 interface ContactDetailsSheetProps {
   contactId: string | null;
@@ -1244,13 +1245,14 @@ export function ContactDetailsTabs({
 
   const totalOppValue = opportunities?.reduce((sum: number, opp: any) => sum + (Number(opp.value) || 0), 0) || 0;
 
-  const isMoreActive = ["jornada", "conversations", "ads", "indicacoes"].includes(activeTab);
+  const isMoreActive = ["jornada", "conversations", "ads", "indicacoes", "tickets"].includes(activeTab);
 
   const moreLabels: Record<string, { label: string; icon: any }> = {
     jornada: { label: "Jornada", icon: Map },
     conversations: { label: "Histórico", icon: MessageSquare },
     ads: { label: "Anúncios", icon: Megaphone },
     indicacoes: { label: "Indicações", icon: Gift },
+    tickets: { label: "Tickets", icon: Ticket },
   };
 
   const activeMore = isMoreActive ? moreLabels[activeTab] : null;
@@ -1334,12 +1336,27 @@ export function ContactDetailsTabs({
                 <Gift className="h-4 w-4" />
                 <span>Indicações</span>
               </DropdownMenuItem>
+              <DropdownMenuItem 
+                onClick={() => setActiveTab("tickets")} 
+                className={cn("gap-2 text-xs cursor-pointer", activeTab === "tickets" && "bg-accent font-semibold text-primary")}
+              >
+                <Ticket className="h-4 w-4" />
+                <span>Tickets & Chamados</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </TabsList>
       </div>
 
       <div className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-w-0">
+        <TabsContent value="tickets" className="mt-0">
+          <ContactTickets 
+            contactId={contactId} 
+            unitId={contact.unit_id} 
+            conversationId={conversationId} 
+          />
+        </TabsContent>
+
         <TabsContent value="jornada" className="mt-0">
           <ContactJourney contactId={contactId} />
         </TabsContent>

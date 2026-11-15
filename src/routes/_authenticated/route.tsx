@@ -1,5 +1,5 @@
 import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AppShell } from "@/components/layout/app-shell";
 import { useAuth } from "@/lib/auth-context";
 import { AtendiCallsProvider } from "@/hooks/use-atendicalls";
@@ -24,8 +24,11 @@ function AuthenticatedLayout() {
   // Gerenciador Global de Notificações (Sons iPhone/ICQ, Push Desktop, Título da aba e Toasts)
   useGlobalNotifications();
 
+  const hasNavigatedRef = useRef(false);
+
   useEffect(() => {
-    if (!loading && !session) {
+    if (!loading && !session && !hasNavigatedRef.current) {
+      hasNavigatedRef.current = true;
       navigate({ to: "/auth", replace: true });
     }
   }, [loading, session, navigate]);

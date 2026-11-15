@@ -13,6 +13,7 @@ export const ALL_MENU_PERMISSIONS: MenuItemPermission[] = [
   { key: "contacts", label: "Contatos", description: "Gestão da base de contatos de clientes" },
   { key: "pipeline", label: "Funil de Vendas", description: "Kanban do CRM e gestão de oportunidades" },
   { key: "tasks", label: "Tarefas", description: "Lista de tarefas e acompanhamento de equipe" },
+  { key: "tickets", label: "Tickets & Chamados", description: "Central de helpdesk, chamados internos e externos" },
   { key: "todoo", label: "Meu Todoo", description: "CRM de execução comercial diária, listas quentes e metas" },
   { key: "campaigns", label: "Campanhas", description: "Disparos em massa e campanhas ativas" },
   { key: "marketing", label: "Tráfego Pago", description: "Métricas de ROI, anúncios do Meta Ads e conversão de leads" },
@@ -25,8 +26,8 @@ export const ALL_MENU_PERMISSIONS: MenuItemPermission[] = [
 export const DEFAULT_ROLE_MENUS: Record<string, string[]> = {
   super_admin: ALL_MENU_PERMISSIONS.map(m => m.key).concat(["companies"]),
   admin_company: ALL_MENU_PERMISSIONS.map(m => m.key),
-  manager: ["dashboard", "conversations", "calls", "contacts", "pipeline", "tasks", "todoo", "campaigns", "marketing", "reports", "training", "settings"],
-  agent: ["conversations", "calls", "contacts", "tasks", "todoo", "training"],
+  manager: ["dashboard", "conversations", "calls", "contacts", "pipeline", "tasks", "tickets", "todoo", "campaigns", "marketing", "reports", "training", "settings"],
+  agent: ["conversations", "calls", "contacts", "tasks", "tickets", "todoo", "training"],
 };
 
 /**

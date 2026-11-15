@@ -8,7 +8,7 @@
  * Use `useActiveCompany()` no lugar de `profile?.company_id` em queries
  * que devem responder ao seletor de empresa do super_admin.
  */
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, type ReactNode } from "react";
 import { useAuth } from "./auth-context";
 
 const STORAGE_KEY = "atendiai_selected_company_id";
@@ -34,26 +34,31 @@ export function ActiveCompanyProvider({ children }: { children: ReactNode }) {
     return localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
   });
 
-  const setActiveCompanyId = (id: string | null) => {
+  const setActiveCompanyId = useCallback((id: string | null) => {
     setSuperCompanyId(id);
     if (typeof window !== "undefined") {
       if (id) localStorage.setItem(STORAGE_KEY, id);
       else localStorage.removeItem(STORAGE_KEY);
     }
-  };
+  }, []);
 
   // Quando o perfil carrega e não é super_admin, limpa eventual valor salvo
   useEffect(() => {
-    if (profile && !isSuperAdmin) {
+    if (profile && !isSuperAdmin && superCompanyId !== null) {
       setSuperCompanyId(null);
       localStorage.removeItem(STORAGE_KEY);
     }
-  }, [profile, isSuperAdmin]);
+  }, [profile, isSuperAdmin, superCompanyId]);
 
   const activeCompanyId = isSuperAdmin ? superCompanyId : (profile?.company_id ?? null);
 
+  const value = useMemo(
+    () => ({ activeCompanyId, setActiveCompanyId, isSuperAdmin }),
+    [activeCompanyId, setActiveCompanyId, isSuperAdmin]
+  );
+
   return (
-    <ActiveCompanyContext.Provider value={{ activeCompanyId, setActiveCompanyId, isSuperAdmin }}>
+    <ActiveCompanyContext.Provider value={value}>
       {children}
     </ActiveCompanyContext.Provider>
   );

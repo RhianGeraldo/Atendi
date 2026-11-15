@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Users, RefreshCw, Tag, Plus, Square, Target, Check, Edit2, X, Building2, ChevronDown } from "lucide-react";
+import { Users, RefreshCw, Tag, Plus, Square, Target, Check, Edit2, X, Building2, ChevronDown, Ticket, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { TicketDetailsSheet } from "@/components/tickets/ticket-details-sheet";
+import { TicketDialog } from "@/components/tickets/ticket-dialog";
 import {
   toggleContactLabelAction,
   createLabelAction,
@@ -47,6 +49,37 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
   const { activeCompanyId } = useActiveCompany();
   const [searchLabel, setSearchLabel] = useState("");
   const [labelPopoverOpen, setLabelPopoverOpen] = useState(false);
+
+  // Estados de Tickets
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const [ticketDetailsOpen, setTicketDetailsOpen] = useState(false);
+  const [newTicketDialogOpen, setNewTicketDialogOpen] = useState(false);
+
+  // Busca tickets ativos do contato
+  const { data: activeTickets = [] } = useQuery({
+    queryKey: ["contact-sidebar-active-tickets", conv.contact?.id],
+    enabled: !!conv.contact?.id,
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("tickets")
+        .select(`
+          id,
+          ticket_number,
+          title,
+          status,
+          priority,
+          created_at,
+          unit:units!unit_id(name),
+          department:departments!department_id(name)
+        `)
+        .eq("requester_contact_id", conv.contact!.id)
+        .not("status", "in", '("resolved","closed","cancelled")')
+        .order("created_at", { ascending: false });
+      if (error) return [];
+      return data || [];
+    },
+    staleTime: 10 * 1000,
+  });
 
   const { data: allLabels } = useQuery({
     queryKey: ["labels", activeCompanyId],
@@ -702,6 +735,74 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
             </div>
           </div>
 
+          {/* Alerta de Tickets em Aberto do Contato */}
+          {conv.contact?.id && activeTickets.length > 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 shadow-xs space-y-2 shrink-0">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 font-semibold text-xs text-amber-900 dark:text-amber-200">
+                  <Ticket className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <span>
+                    {activeTickets.length} Chamado{activeTickets.length > 1 ? "s" : ""} em Aberto
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-[11px] text-amber-700 dark:text-amber-300 hover:bg-amber-500/20"
+                  onClick={() => setNewTicketDialogOpen(true)}
+                >
+                  <Plus className="h-3 w-3 mr-0.5" /> Novo
+                </Button>
+              </div>
+
+              <div className="space-y-1.5">
+                {activeTickets.slice(0, 2).map((t: any) => (
+                  <div
+                    key={t.id}
+                    onClick={() => {
+                      setSelectedTicketId(t.id);
+                      setTicketDetailsOpen(true);
+                    }}
+                    className="p-2 rounded-lg bg-background/80 hover:bg-background border border-amber-500/20 cursor-pointer transition-colors space-y-1"
+                  >
+                    <div className="flex items-center justify-between gap-1 text-[11px]">
+                      <span className="font-mono font-bold text-muted-foreground">
+                        #{t.ticket_number || t.id.slice(0, 6)}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[10px] font-medium ${
+                          t.priority === "urgent"
+                            ? "bg-destructive/15 text-destructive font-bold"
+                            : t.priority === "high"
+                            ? "bg-amber-500/20 text-amber-600 font-semibold"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {t.priority === "urgent" ? "Urgente" : t.priority === "high" ? "Alta" : "Média"}
+                      </span>
+                    </div>
+                    <p className="text-xs font-medium text-foreground line-clamp-1">{t.title}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Ação rápida para criar ticket se não houver chamado aberto */}
+          {conv.contact?.id && activeTickets.length === 0 && (
+            <div className="flex items-center justify-between px-1 shrink-0">
+              <span className="text-[11px] text-muted-foreground">Sem chamados abertos</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs text-primary hover:bg-primary/10 gap-1 font-medium"
+                onClick={() => setNewTicketDialogOpen(true)}
+              >
+                <Plus className="h-3 w-3" /> Abrir Ticket
+              </Button>
+            </div>
+          )}
+
           {/* Ficha Completa */}
           {conv.contact?.id && (
             <div className="bg-card border border-border/60 rounded-xl shadow-sm overflow-hidden flex-1 flex flex-col min-h-[350px]">
@@ -710,6 +811,23 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
           )}
         </div>
       </div>
+
+      {/* Detalhes do Ticket */}
+      <TicketDetailsSheet
+        ticketId={selectedTicketId}
+        open={ticketDetailsOpen}
+        onOpenChange={setTicketDetailsOpen}
+      />
+
+      {/* Modal de Criação de Ticket a partir da conversa */}
+      <TicketDialog
+        open={newTicketDialogOpen}
+        onOpenChange={setNewTicketDialogOpen}
+        defaultScope="external"
+        defaultContactId={conv.contact?.id}
+        defaultConversationId={conv.id}
+        defaultUnitId={conv.unit_id || conv.contact?.unit_id}
+      />
     </div>
   );
 }
