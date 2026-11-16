@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendPlatformMessage } from "./message-sender";
 import { scheduleMessage, cancelScheduledMessagesForConversation } from "./scheduled-messages";
 import { sendMetaCapiEvent } from "./meta-capi";
+import { analyzeTicketWithAI } from "./ticket-ai";
 
 /**
  * Normaliza valores monetários para número float (ex: "R$ 1.500,50", "1500,00", 1500 -> 1500.5)
@@ -49,7 +50,7 @@ function sanitizeCustomerFacingText(text: string | null | undefined): string {
 
   // Remove tags conhecidas de ação (com ou sem argumentos, tolerante a espaços)
   cleaned = cleaned.replace(
-    /\[\s*(?:CRIAR[_\s]?OPORTUNIDADE|ATUALIZAR[_\s]?OPORTUNIDADE|MOVER[_\s]?OPORTUNIDADE|TRANSFERIR[_\s]?AGENTE|TRANSFERIR|ENCERRAR|CRIAR[_\s]?TAREFA|AGENDAR[_\s]?MENSAGEM|OPORTUNIDADE|TAREFA)(?::[\s\S]*?)?\]/gi,
+    /\[\s*(?:CRIAR[_\s]?OPORTUNIDADE|ATUALIZAR[_\s]?OPORTUNIDADE|MOVER[_\s]?OPORTUNIDADE|TRANSFERIR[_\s]?AGENTE|TRANSFERIR|ENCERRAR|CRIAR[_\s]?TAREFA|AGENDAR[_\s]?MENSAGEM|ABRIR[_\s]?TICKET|TICKET|OPORTUNIDADE|TAREFA)(?::[\s\S]*?)?\]/gi,
     "",
   );
 
@@ -73,7 +74,7 @@ function cleanPromptDirective(prompt: string | null | undefined): string {
     /(?:Use|Inclua|utilize)?\s*(?:a|exatamente a)?\s*tag\s*\[[A-Z0-9_\-\s:\|]+\]/gi,
     "Use a ferramenta nativa correspondente",
   );
-  p = p.replace(/\[\s*(?:CRIAR_|ATUALIZAR_|MOVER_|TRANSFERIR|ENCERRAR).*?\]/gi, "");
+  p = p.replace(/\[\s*(?:CRIAR_|ATUALIZAR_|MOVER_|TRANSFERIR|ENCERRAR|ABRIR_).*?\]/gi, "");
   return p.trim();
 }
 
@@ -709,6 +710,33 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       }
     }
 
+    if (agent.allow_tickets) {
+      const customTicketPrompt = cleanPromptDirective(applyVars(agent.prompt_tickets));
+      systemPromptParts.push(
+        `ABERTURA DE TICKETS / CHAMADOS DE SUPORTE:
+Você tem a capacidade de abrir um chamado formal na central de tickets da empresa usando a ferramenta nativa 'abrir_ticket'.
+IMPORTANTE: Utilize essa ferramenta com MUITO DISCERNIMENTO para evitar falsos positivos!
+
+QUANDO VOCÊ DEVE ABRIR TICKET:
+- Falhas técnicas ou operacionais relatadas pelo cliente (ex: link de agendamento quebrado ou dando erro, link de pagamento não funcionando, formulário com erro).
+- Reclamações graves de insatisfação sobre atendimento anterior, produto ou serviço com o qual você não consegue resolver diretamente.
+- Solicitações que exigem intervenção de um setor específico fora do chat imediato (ex: estornos financeiros, segunda via de contrato complexo, reanálise médica/administrativa).
+- Casos em que você já tentou orientar ou ajudar o cliente com as instruções disponíveis, mas a situação não pôde ser solucionada no canal.
+
+QUANDO VOCÊ NUNCA DEVE ABRIR TICKET:
+- Dúvidas rotineiras, perguntas sobre preços, catálogo de produtos, horários de funcionamento, endereços ou especialidades.
+- Clientes iniciando a conversa, dando saudações normais ou pedindo informações gerais.
+- Agendamentos normais que podem ser feitos via link ou fluxo de atendimento comum.
+- Pequenas dúvidas que você mesmo tem a resposta no seu contexto ou base de conhecimento.
+
+Ao abrir um chamado:
+1. Passe 'assunto' conciso e profissional.
+2. Passe 'descricao' detalhada do que o cliente relatou e o que foi tentado.
+3. Sugira o 'departamento_sugerido' (ex: 'Suporte', 'Financeiro', 'Agendamento', 'Recepção', etc.) e a 'prioridade' ('low', 'medium', 'high' ou 'urgent').
+4. Forneça o 'aviso_ao_cliente' informando com empatia que um chamado formal foi gerado e que a equipe responsável irá verificar.${customTicketPrompt ? `\n\nDIRETRIZES ESPECÍFICAS DA EMPRESA PARA TICKETS:\n${customTicketPrompt}` : ""}`,
+      );
+    }
+
     const systemPrompt = systemPromptParts.join("\n\n");
 
     const isFollowUpTrigger =
@@ -901,6 +929,49 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
               },
             },
             required: ["titulo", "data_hora"],
+          },
+        },
+      });
+    }
+
+    if (agent.allow_tickets) {
+      tools.push({
+        type: "function",
+        function: {
+          name: "abrir_ticket",
+          description:
+            "Abre um chamado/ticket formal de suporte ou atendimento quando houver problema técnico, link com falha, reclamação grave ou quando não conseguir resolver a solicitação do cliente no chat.",
+          parameters: {
+            type: "object",
+            properties: {
+              assunto: {
+                type: "string",
+                description:
+                  "Título conciso do chamado (ex: 'Falha no link de agendamento', 'Reclamação sobre atendimento', 'Solicitação de estorno').",
+              },
+              descricao: {
+                type: "string",
+                description:
+                  "Detalhamento completo do problema relatado pelo cliente e o que foi tentado.",
+              },
+              departamento_sugerido: {
+                type: "string",
+                description:
+                  "Nome do departamento sugerido (ex: 'Suporte', 'Financeiro', 'Comercial', 'Operações', 'Recepção'). Opcional.",
+              },
+              prioridade: {
+                type: "string",
+                enum: ["low", "medium", "high", "urgent"],
+                description:
+                  "Prioridade do chamado: 'low' (baixa), 'medium' (média/normal), 'high' (alta) ou 'urgent' (urgente).",
+              },
+              aviso_ao_cliente: {
+                type: "string",
+                description:
+                  "Mensagem empática que será dita ao cliente para tranquilizá-lo de que o chamado foi registrado.",
+              },
+            },
+            required: ["assunto", "descricao"],
           },
         },
       });
@@ -1113,6 +1184,14 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       dueDate: string;
       reason?: string;
     } | null = null;
+    let openTicketData: {
+      subject: string;
+      description: string;
+      department?: string | null;
+      priority?: string;
+      customerNotice?: string | null;
+    } | null = null;
+    let openTicketNotice: string | null = null;
 
     // A. Processar Native Tool Calls
     if (toolCalls && toolCalls.length > 0) {
@@ -1175,6 +1254,21 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             stage: args.nova_etapa_nome_ou_id || args.etapa_nome_ou_id || args.nova_etapa || "",
             notes: args.observacoes ? String(args.observacoes).trim() : null,
           };
+        } else if (fnName === "abrir_ticket" && agent.allow_tickets) {
+          openTicketData = {
+            subject: args.assunto || "Chamado aberto via IA",
+            description: args.descricao || "",
+            department: args.departamento_sugerido || null,
+            priority: ["low", "medium", "high", "urgent"].includes(args.prioridade)
+              ? args.prioridade
+              : "medium",
+            customerNotice: args.aviso_ao_cliente
+              ? sanitizeCustomerFacingText(args.aviso_ao_cliente)
+              : null,
+          };
+          if (openTicketData.customerNotice) {
+            openTicketNotice = openTicketData.customerNotice;
+          }
         }
       }
     }
@@ -1253,6 +1347,20 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             stage: updateOppMatch2[2].trim(),
           };
         }
+      }
+    }
+
+    if (!openTicketData && agent.allow_tickets) {
+      const ticketMatch = cleanResponse.match(
+        /\[ABRIR_TICKET:\s*(.*?)\s*\|\s*(.*?)(?:\s*\|\s*(.*?))?\]/i,
+      );
+      if (ticketMatch) {
+        openTicketData = {
+          subject: ticketMatch[1].trim(),
+          description: ticketMatch[2].trim(),
+          department: ticketMatch[3] ? ticketMatch[3].trim() : null,
+          priority: "medium",
+        };
       }
     }
 
@@ -1669,6 +1777,165 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       }
     }
 
+    // E. Abertura Autônoma de Chamado / Ticket
+    if (openTicketData && effectiveCompanyId) {
+      console.log(
+        `[ai-generator] Opening ticket: "${openTicketData.subject}" (Contact: ${conv.contact_id})`,
+      );
+
+      // Resolução de departamento sugerido
+      let matchedDeptId: string | null = null;
+      if (openTicketData.department) {
+        const { data: dept } = await supabaseAdmin
+          .from("departments")
+          .select("id, name")
+          .eq("company_id", effectiveCompanyId)
+          .ilike("name", `%${openTicketData.department.trim()}%`)
+          .limit(1)
+          .maybeSingle();
+        if (dept) {
+          matchedDeptId = dept.id;
+        }
+      }
+
+      // Prevenção de duplicidade: verificar se já existe chamado aberto nas últimas 24h para este contato ou conversa
+      const dedupCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      let dedupQuery = supabaseAdmin
+        .from("tickets")
+        .select("id, ticket_number, title, status")
+        .eq("company_id", effectiveCompanyId)
+        .not("status", "in", '("resolved","closed","cancelled")')
+        .gte("created_at", dedupCutoff)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (conv.contact_id) {
+        dedupQuery = dedupQuery.eq("requester_contact_id", conv.contact_id);
+      } else {
+        dedupQuery = dedupQuery.eq("conversation_id", conversationId);
+      }
+
+      const { data: existingTickets } = await dedupQuery;
+
+      if (existingTickets && existingTickets.length > 0) {
+        const existingTicket = existingTickets[0];
+        console.log(
+          `[ai-generator] Recent ticket #${existingTicket.ticket_number} already open. Appending note instead of creating duplicate.`,
+        );
+
+        // Anexar como nota interna no ticket existente
+        await supabaseAdmin.from("ticket_messages").insert({
+          ticket_id: existingTicket.id,
+          is_internal_note: true,
+          content: `🤖 O cliente voltou a relatar uma situação durante o atendimento com a IA (${agent.name}):\n\n*Assunto:* ${openTicketData.subject}\n*Descrição:* ${openTicketData.description}`,
+        });
+
+        // Registrar aviso no chat da conversa
+        await supabaseAdmin.from("messages").insert({
+          conversation_id: conversationId,
+          sender_type: "agent",
+          is_internal: true,
+          content: `🎫 Chamado #${existingTicket.ticket_number} já estava aberto para este cliente. Nova atualização anexada internamente ao ticket pela IA.`,
+        });
+
+        for (const call of toolCalls) {
+          if (call.function?.name === "abrir_ticket") {
+            toolExecutionResults[call.id] = {
+              status: "success",
+              ticket_id: existingTicket.id,
+              ticket_number: existingTicket.ticket_number,
+              message: `Chamado #${existingTicket.ticket_number} já se encontra aberto para este cliente. Uma nota interna com os novos detalhes foi anexada ao chamado existente.`,
+            };
+          }
+        }
+      } else {
+        let targetUnitId = effectiveUnitId || fallbackUnitId;
+        if (!targetUnitId) {
+          const { data: firstUnit } = await supabaseAdmin
+            .from("units")
+            .select("id")
+            .eq("company_id", effectiveCompanyId)
+            .limit(1)
+            .maybeSingle();
+          targetUnitId = firstUnit?.id || null;
+        }
+
+        if (!targetUnitId) {
+          console.error(`[ai-generator] Não foi possível abrir ticket: nenhuma unidade encontrada para a empresa ${effectiveCompanyId}`);
+          for (const call of toolCalls) {
+            if (call.function?.name === "abrir_ticket") {
+              toolExecutionResults[call.id] = {
+                status: "error",
+                error: "Nenhuma unidade cadastrada encontrada para vincular o chamado.",
+              };
+            }
+          }
+        } else {
+          const priorityToUse = (openTicketData.priority || "medium") as
+            | "low"
+            | "medium"
+            | "high"
+            | "urgent";
+
+          const { data: newTicket, error: ticketErr } = await supabaseAdmin
+            .from("tickets")
+            .insert({
+              company_id: effectiveCompanyId,
+              unit_id: targetUnitId,
+              department_id: matchedDeptId,
+              scope: "external",
+              title: openTicketData.subject,
+              description: openTicketData.description,
+              status: "new",
+              priority: priorityToUse,
+              requester_contact_id: conv.contact_id || null,
+              conversation_id: conversationId,
+              tags: ["aberto-por-ia"],
+            })
+            .select("id, ticket_number, title")
+            .single();
+
+          if (ticketErr) {
+            console.error(`[ai-generator] Erro ao criar ticket:`, ticketErr);
+            for (const call of toolCalls) {
+              if (call.function?.name === "abrir_ticket") {
+                toolExecutionResults[call.id] = { status: "error", error: ticketErr.message };
+              }
+            }
+          } else {
+            console.log(`[ai-generator] Ticket #${newTicket.ticket_number} successfully created!`);
+
+            // Mensagem interna no chat da conversa
+            await supabaseAdmin.from("messages").insert({
+              conversation_id: conversationId,
+              sender_type: "agent",
+              is_internal: true,
+              content: `🎫 Chamado #${newTicket.ticket_number} aberto pela IA (${agent.name}): ${newTicket.title} (Prioridade: ${priorityToUse})`,
+            });
+
+            // Disparar análise de IA do chamado em background
+            analyzeTicketWithAI(newTicket.id, effectiveCompanyId).catch((aiErr) =>
+              console.warn(
+                `[ai-generator] Falha ao analisar ticket #${newTicket.ticket_number} com IA:`,
+                aiErr,
+              ),
+            );
+
+            for (const call of toolCalls) {
+              if (call.function?.name === "abrir_ticket") {
+                toolExecutionResults[call.id] = {
+                  status: "success",
+                  ticket_id: newTicket.id,
+                  ticket_number: newTicket.ticket_number,
+                  message: `Chamado #${newTicket.ticket_number} ('${newTicket.title}') aberto com sucesso na central de tickets da empresa.`,
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+
     // 9. Se o modelo chamou ferramentas de CRM mas não gerou o texto do cliente, executar Turn 2
     if (
       toolCalls &&
@@ -1734,6 +2001,11 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       if (handoffCustomerAviso) cleanResponse = handoffCustomerAviso;
       else if (transferAgentAviso) cleanResponse = transferAgentAviso;
       else if (resolveFarewell) cleanResponse = resolveFarewell;
+      else if (openTicketNotice) cleanResponse = openTicketNotice;
+      else if (openTicketData) {
+        cleanResponse =
+          "Abri um chamado formal com a nossa equipe especializada para verificar essa questão com prioridade. Em breve entraremos em contato!";
+      }
     }
 
     // Sanitização final rigorosa: NENHUMA tag ou comando em colchetes chega ao WhatsApp do cliente

@@ -12,6 +12,7 @@ import {
   CalendarCheck,
   BadgeDollarSign,
   HelpCircle,
+  Ticket,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -76,6 +77,8 @@ export function AiAgentsTab() {
   const [promptTasks, setPromptTasks] = useState("");
   const [allowOpportunities, setAllowOpportunities] = useState(false);
   const [promptOpportunities, setPromptOpportunities] = useState("");
+  const [allowTickets, setAllowTickets] = useState(false);
+  const [promptTickets, setPromptTickets] = useState("");
   const [pipelineId, setPipelineId] = useState<string>("none");
   const [allowedAgentIds, setAllowedAgentIds] = useState<string[]>([]);
 
@@ -219,6 +222,8 @@ export function AiAgentsTab() {
     setPromptTasks("");
     setAllowOpportunities(false);
     setPromptOpportunities("");
+    setAllowTickets(false);
+    setPromptTickets("");
     setPipelineId("none");
     setAllowedAgentIds([]);
     setAllowFollowup(false);
@@ -256,6 +261,8 @@ export function AiAgentsTab() {
     setPromptTasks(agent.prompt_tasks || "");
     setAllowOpportunities(agent.allow_opportunities || false);
     setPromptOpportunities(agent.prompt_opportunities || "");
+    setAllowTickets(agent.allow_tickets || false);
+    setPromptTickets(agent.prompt_tickets || "");
     setPipelineId(agent.pipeline_id || "none");
     setAllowedAgentIds(agent.allowed_agent_ids || []);
     setAllowFollowup(agent.allow_followup || false);
@@ -303,6 +310,8 @@ export function AiAgentsTab() {
         prompt_tasks: promptTasks,
         allow_opportunities: allowOpportunities,
         prompt_opportunities: promptOpportunities,
+        allow_tickets: allowTickets,
+        prompt_tickets: promptTickets,
         pipeline_id: pipelineId === "none" ? null : pipelineId,
         allowed_agent_ids: allowedAgentIds.length > 0 ? allowedAgentIds : null,
         allow_followup: allowFollowup,
@@ -1152,6 +1161,54 @@ export function AiAgentsTab() {
                         </>
                       )}
                     </div>
+
+                    <div className="border rounded-md p-4 space-y-4 bg-muted/10">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <label className="text-sm font-medium flex items-center gap-2">
+                            <Ticket className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                            Permitir Abertura de Chamados (Tickets)
+                          </label>
+                          <p className="text-xs text-muted-foreground">
+                            A IA poderá abrir chamados quando detectar problemas técnicos, reclamações graves ou quando não conseguir resolver a solicitação do cliente.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={allowTickets}
+                          onCheckedChange={setAllowTickets}
+                        />
+                      </div>
+                      {allowTickets && (
+                        <div className="space-y-2 pt-2 border-t">
+                          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                            <CornerDownRight className="h-3 w-3" />
+                            Instruções Específicas para Abertura de Chamados
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-xs space-y-2 text-xs">
+                                <p>
+                                  A IA já possui diretrizes de discernimento para evitar falsos positivos (ex: nunca abre chamado para perguntas simples de preços ou dúvidas frequentes).
+                                </p>
+                                <p>
+                                  Aqui você pode adicionar orientações customizadas (ex: <em>"Se o link da agenda estiver quebrado, abra com prioridade alta para o departamento Suporte"</em>).
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </label>
+                          <Textarea
+                            className="min-h-[100px] text-xs font-mono"
+                            placeholder="Ex: Se o cliente relatar erro no sistema, link quebrado ou insatisfação com prazos, abra chamado detalhando o ocorrido..."
+                            value={promptTickets}
+                            onChange={(e) => setPromptTickets(e.target.value)}
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            Deixe em branco para usar as regras e discernimento padrão do sistema.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </TabsContent>
               </Tabs>
@@ -1219,6 +1276,42 @@ export function AiAgentsTab() {
                     <span className="text-muted-foreground">Modelo:</span>
                     <span className="font-medium truncate max-w-[120px]">{agent.model}</span>
                   </div>
+                  {(agent.allow_handoff ||
+                    agent.allow_resolution ||
+                    agent.allow_tasks ||
+                    agent.allow_opportunities ||
+                    agent.allow_tickets) && (
+                    <div className="flex flex-wrap gap-1 pt-2 border-t border-border/40">
+                      {agent.allow_handoff && (
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+                          Transfere
+                        </Badge>
+                      )}
+                      {agent.allow_resolution && (
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+                          Encerra
+                        </Badge>
+                      )}
+                      {agent.allow_tasks && (
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+                          Tarefas
+                        </Badge>
+                      )}
+                      {agent.allow_opportunities && (
+                        <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+                          CRM
+                        </Badge>
+                      )}
+                      {agent.allow_tickets && (
+                        <Badge
+                          variant="outline"
+                          className="text-[9px] px-1.5 py-0 border-purple-500/40 text-purple-600 dark:text-purple-400"
+                        >
+                          Tickets
+                        </Badge>
+                      )}
+                    </div>
+                  )}
                 </div>
               </CardContent>
               <div className="p-4 pt-0 mt-auto flex gap-2">
