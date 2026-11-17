@@ -131,3 +131,48 @@ export function formatDateOnly(dateVal: string | Date | null | undefined, format
     return "";
   }
 }
+
+/**
+ * Formata o código oficial do chamado seguindo a padronização (Opção A):
+ * - Radar de Riscos: RAD-00006
+ * - Agente de IA: IA-00005
+ * - Manual (Operador): TCK-00002
+ */
+export function formatTicketCode(
+  ticket?: {
+    ticket_number?: number | string | null;
+    origin?: string | null;
+    id?: string | null;
+    tags?: string[] | null;
+  } | null,
+): string {
+  if (!ticket) return "TCK-00000";
+
+  // Determina prefixo pela origem
+  let prefix = "TCK";
+  const origin =
+    ticket.origin ||
+    (ticket.tags?.includes("radar-conversas")
+      ? "radar"
+      : ticket.tags?.includes("aberto-por-ia")
+        ? "ai_agent"
+        : "manual");
+
+  if (origin === "radar") {
+    prefix = "RAD";
+  } else if (origin === "ai_agent") {
+    prefix = "IA";
+  } else {
+    prefix = "TCK";
+  }
+
+  if (ticket.ticket_number != null && !isNaN(Number(ticket.ticket_number))) {
+    return `${prefix}-${String(ticket.ticket_number).padStart(5, "0")}`;
+  }
+
+  if (ticket.id) {
+    return `${prefix}-${ticket.id.slice(0, 5).toUpperCase()}`;
+  }
+
+  return `${prefix}-00000`;
+}

@@ -42,6 +42,7 @@ import {
 import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
 import { TicketDialog } from "@/components/tickets/ticket-dialog";
 import { TicketDetailsSheet } from "@/components/tickets/ticket-details-sheet";
+import { formatTicketCode } from "@/lib/format";
 
 export const Route = createFileRoute("/_authenticated/tickets")({
   component: () => (
@@ -67,6 +68,7 @@ function TicketsPage() {
   const [scopeFilter, setScopeFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [originFilter, setOriginFilter] = useState<string>("all");
 
   // Modais
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -76,23 +78,21 @@ function TicketsPage() {
 
   // Busca lista de tickets
   const { data: tickets = [], isLoading } = useQuery({
-    queryKey: [
-      "tickets",
-      effectiveCompanyId,
-      selectedUnitId,
-    ],
+    queryKey: ["tickets", effectiveCompanyId, selectedUnitId],
     enabled: !!effectiveCompanyId,
     queryFn: async () => {
       let query = (supabase as any)
         .from("tickets")
-        .select(`
+        .select(
+          `
           *,
           unit:units!unit_id(id, name),
           department:departments!department_id(id, name),
           requester_user:profiles!requester_user_id(id, name, email),
           requester_contact:contacts!requester_contact_id(id, name, phone, email),
           assigned_user:profiles!assigned_to_user_id(id, name, email)
-        `)
+        `,
+        )
         .eq("company_id", effectiveCompanyId)
         .order("created_at", { ascending: false });
 
@@ -123,7 +123,7 @@ function TicketsPage() {
         },
         () => {
           qc.invalidateQueries({ queryKey: ["tickets"] });
-        }
+        },
       )
       .subscribe();
 
@@ -144,18 +144,60 @@ function TicketsPage() {
     if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
     // Status
     if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    // Origem (manual, ai_agent, radar)
+    if (originFilter !== "all" && (t.origin || "manual") !== originFilter) return false;
 
-    // Busca textual
+    // Busca textual inteligente (número de ticket exato, código formatado ou termos de busca)
     if (searchTerm.trim()) {
-      const lower = searchTerm.toLowerCase();
-      const numMatch = String(t.ticket_number || "").includes(lower);
-      const titleMatch = t.title?.toLowerCase().includes(lower);
-      const descMatch = t.description?.toLowerCase().includes(lower);
-      const requesterName = (
-        t.scope === "internal" ? t.requester_user?.name : t.requester_contact?.name
-      )?.toLowerCase();
-      const reqMatch = requesterName?.includes(lower);
-      if (!numMatch && !titleMatch && !descMatch && !reqMatch) return false;
+      const rawTerm = searchTerm.trim().toLowerCase();
+      const code = formatTicketCode(t).toLowerCase();
+      const cleanNum = rawTerm.replace(/^[#№\s]+/, "").trim();
+      const isPureNumeric = /^\d+$/.test(cleanNum);
+
+      if (isPureNumeric) {
+        // Se o usuário digitou número ou #número (ex: "2", "#2", "6", "#6", "00006"),
+        // busca especificamente pelo número do ticket (exato, prefixo ou com zeros: RAD-00006)
+        const numStr = t.ticket_number != null ? String(t.ticket_number) : "";
+        const formattedTarget = cleanNum.padStart(5, "0");
+        const numMatch =
+          numStr === cleanNum ||
+          numStr.startsWith(cleanNum) ||
+          code.endsWith("-" + formattedTarget);
+
+        if (!numMatch) {
+          return false;
+        }
+      } else {
+        // Busca por código (ex: "RAD", "RAD-00006", "RAD-6", "IA-5", "TCK")
+        const codeMatch =
+          code.includes(rawTerm) ||
+          code.replace(/-0+/, "-").includes(rawTerm.replace(/-0+/, "-"));
+
+        // Busca textual por texto (título, solicitante, departamento, tags ou UUID parcial)
+        const titleMatch = t.title?.toLowerCase().includes(rawTerm);
+        const requesterName = (
+          t.scope === "internal" ? t.requester_user?.name : t.requester_contact?.name
+        )?.toLowerCase();
+        const reqMatch = requesterName?.includes(rawTerm);
+        const unitMatch = t.unit?.name?.toLowerCase().includes(rawTerm);
+        const deptMatch = t.department?.name?.toLowerCase().includes(rawTerm);
+        const tagsMatch = t.tags?.some((tag: string) => tag.toLowerCase().includes(rawTerm));
+
+        // UUID só se o termo tiver 4 ou mais caracteres para evitar falsos positivos
+        const uuidMatch = rawTerm.length >= 4 && t.id.toLowerCase().includes(rawTerm);
+
+        if (
+          !codeMatch &&
+          !titleMatch &&
+          !reqMatch &&
+          !unitMatch &&
+          !deptMatch &&
+          !tagsMatch &&
+          !uuidMatch
+        ) {
+          return false;
+        }
+      }
     }
 
     return true;
@@ -164,7 +206,9 @@ function TicketsPage() {
   // Métricas
   const metrics = {
     totalOpen: tickets.filter((t: any) => ["new", "in_progress"].includes(t.status)).length,
-    urgent: tickets.filter((t: any) => t.priority === "urgent" && !["resolved", "closed"].includes(t.status)).length,
+    urgent: tickets.filter(
+      (t: any) => t.priority === "urgent" && !["resolved", "closed"].includes(t.status),
+    ).length,
     myTickets: tickets.filter((t: any) => t.requester_user_id === profile?.id).length,
     resolved: tickets.filter((t: any) => ["resolved", "closed"].includes(t.status)).length,
   };
@@ -195,7 +239,11 @@ function TicketsPage() {
       case "resolved":
         return <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white">Resolvido</Badge>;
       case "closed":
-        return <Badge variant="outline" className="text-muted-foreground">Fechado</Badge>;
+        return (
+          <Badge variant="outline" className="text-muted-foreground">
+            Fechado
+          </Badge>
+        );
       case "cancelled":
         return <Badge variant="destructive">Cancelado</Badge>;
       default:
@@ -311,7 +359,7 @@ function TicketsPage() {
       </div>
 
       {/* Filtros */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
         <div className="relative">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -320,6 +368,20 @@ function TicketsPage() {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-9 h-9 text-xs"
           />
+        </div>
+
+        <div className="relative">
+          <select
+            value={originFilter}
+            onChange={(e) => setOriginFilter(e.target.value)}
+            aria-label="Filtrar por origem do ticket"
+            className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+          >
+            <option value="all">Todas as Origens</option>
+            <option value="manual">👤 Manual (Operador)</option>
+            <option value="ai_agent">🤖 Agente de IA</option>
+            <option value="radar">🚨 Radar de Riscos</option>
+          </select>
         </div>
 
         <div className="relative">
@@ -407,12 +469,30 @@ function TicketsPage() {
             >
               <div className="space-y-1.5 flex-1 min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-xs font-bold text-muted-foreground">
-                    #{t.ticket_number || t.id.slice(0, 6)}
+                  <span className="font-mono text-xs font-bold text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded border border-border/40">
+                    {formatTicketCode(t)}
                   </span>
-                  <Badge variant={t.scope === "internal" ? "outline" : "default"} className="text-[10px]">
+                  <Badge
+                    variant={t.scope === "internal" ? "outline" : "default"}
+                    className="text-[10px]"
+                  >
                     {t.scope === "internal" ? "Interno" : "Cliente"}
                   </Badge>
+                  {t.origin === "radar" && (
+                    <Badge className="bg-rose-600 hover:bg-rose-700 text-white text-[10px] gap-1 animate-pulse">
+                      🚨 Radar
+                    </Badge>
+                  )}
+                  {t.origin === "ai_agent" && (
+                    <Badge className="bg-purple-600 hover:bg-purple-700 text-white text-[10px] gap-1">
+                      🤖 IA
+                    </Badge>
+                  )}
+                  {t.origin === "manual" && (
+                    <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                      👤 Manual
+                    </Badge>
+                  )}
                   {getStatusBadge(t.status)}
                   {getPriorityBadge(t.priority)}
                 </div>
@@ -425,7 +505,11 @@ function TicketsPage() {
                     {t.unit?.name} {t.department ? `• ${t.department.name}` : ""}
                   </span>
                   <span className="flex items-center gap-1">
-                    {t.scope === "internal" ? <User className="h-3 w-3" /> : <Users className="h-3 w-3" />}
+                    {t.scope === "internal" ? (
+                      <User className="h-3 w-3" />
+                    ) : (
+                      <Users className="h-3 w-3" />
+                    )}
                     {t.scope === "internal"
                       ? t.requester_user?.name || "Interno"
                       : t.requester_contact?.name || "Cliente"}
@@ -450,7 +534,11 @@ function TicketsPage() {
                 {/* Ações administrativas (Editar/Excluir apenas para quem tem permissão de suporte) */}
                 {(() => {
                   const isTicketRequester = t.requester_user_id === profile?.id;
-                  const canManageThis = isSuperAdmin || profile?.role === "admin_company" || profile?.role === "manager" || (profile?.role === "agent" && !isTicketRequester);
+                  const canManageThis =
+                    isSuperAdmin ||
+                    profile?.role === "admin_company" ||
+                    profile?.role === "manager" ||
+                    (profile?.role === "agent" && !isTicketRequester);
                   if (!canManageThis) return null;
 
                   return (
@@ -505,7 +593,9 @@ function TicketsPage() {
               <div key={col.key} className="space-y-3 bg-muted/30 p-3 rounded-xl border">
                 <div className="flex items-center justify-between pb-2 border-b">
                   <span className="font-semibold text-sm flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full ${col.color.replace("border-", "bg-")}`} />
+                    <span
+                      className={`w-2.5 h-2.5 rounded-full ${col.color.replace("border-", "bg-")}`}
+                    />
                     {col.title}
                   </span>
                   <Badge variant="secondary" className="text-xs">
@@ -524,9 +614,21 @@ function TicketsPage() {
                       className="p-3 bg-card hover:shadow cursor-pointer transition-shadow space-y-2 text-xs"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-mono text-[10px] font-bold text-muted-foreground">
-                          #{t.ticket_number || t.id.slice(0, 6)}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[10px] font-bold text-muted-foreground bg-muted/60 px-1 py-0.5 rounded border border-border/40">
+                            {formatTicketCode(t)}
+                          </span>
+                          {t.origin === "radar" && (
+                            <span className="text-[9px] bg-rose-600 text-white px-1 rounded font-bold">
+                              Radar
+                            </span>
+                          )}
+                          {t.origin === "ai_agent" && (
+                            <span className="text-[9px] bg-purple-600 text-white px-1 rounded font-bold">
+                              IA
+                            </span>
+                          )}
+                        </div>
                         {getPriorityBadge(t.priority)}
                       </div>
                       <p className="font-semibold text-sm line-clamp-2 leading-snug">{t.title}</p>
@@ -544,11 +646,7 @@ function TicketsPage() {
       )}
 
       {/* Modal de Criação / Edição */}
-      <TicketDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        ticketToEdit={ticketToEdit}
-      />
+      <TicketDialog open={dialogOpen} onOpenChange={setDialogOpen} ticketToEdit={ticketToEdit} />
 
       {/* Gaveta de Detalhes e Mensagens */}
       <TicketDetailsSheet

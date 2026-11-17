@@ -23,6 +23,7 @@ import {
   GraduationCap,
   Target,
   TrendingUp,
+  Radar,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
@@ -49,6 +50,7 @@ const items = [
   { key: "pipeline", to: "/pipeline", label: "Funil de Vendas", icon: KanbanSquare },
   { key: "tasks", to: "/tasks", label: "Tarefas", icon: CheckSquare },
   { key: "tickets", to: "/tickets", label: "Tickets", icon: Ticket },
+  { key: "radar", to: "/radar", label: "Radar de Riscos", icon: Radar },
   { key: "todoo", to: "/todoo", label: "Meu Todoo", icon: Target },
   { key: "campaigns", to: "/campaigns", label: "Campanhas", icon: Megaphone },
   { key: "marketing", to: "/marketing", label: "Tráfego Pago", icon: TrendingUp },

@@ -1785,6 +1785,27 @@ export function ChatPanel({
           </div>
         </header>
 
+        {conv.radar_status === "active" && (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 px-4 py-2.5 bg-rose-500/10 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-b border-rose-500/20 text-xs md:text-sm"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="flex h-2 w-2 rounded-full bg-rose-600 animate-pulse shrink-0" />
+              <span className="font-semibold shrink-0">🚨 Radar de Riscos:</span>
+              <span className="truncate">
+                Sinal de cancelamento ou problema crítico detectado pela IA nesta conversa.
+              </span>
+            </div>
+            <Link
+              to="/radar"
+              className="inline-flex items-center gap-1 shrink-0 font-medium underline hover:text-rose-900 dark:hover:text-rose-100 text-xs ml-2"
+            >
+              Ver no Radar &rarr;
+            </Link>
+          </div>
+        )}
+
         {canalDesconectado && (
           <div
             role="alert"

@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { useRouterState, Link, useNavigate } from "@tanstack/react-router";
-import { Bell, BellRing, Menu, CheckSquare, Clock, Info, MessageSquare, Sparkles } from "lucide-react";
+import {
+  Bell,
+  BellRing,
+  Menu,
+  CheckSquare,
+  Clock,
+  Info,
+  MessageSquare,
+  Sparkles,
+} from "lucide-react";
 import { ChannelIcon } from "@/components/common/channel-icon";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -29,6 +38,7 @@ const titles: Record<string, string> = {
   "/pipeline": "Funil de Vendas",
   "/tasks": "Tarefas",
   "/tickets": "Tickets",
+  "/radar": "Radar de Riscos",
   "/todoo": "Meu Todoo",
   "/campaigns": "Campanhas",
   "/marketing": "Tráfego Pago & ROI",
@@ -42,8 +52,7 @@ const titles: Record<string, string> = {
 export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
-  const title =
-    Object.entries(titles).find(([k]) => pathname.startsWith(k))?.[1] ?? "AtendiAI";
+  const title = Object.entries(titles).find(([k]) => pathname.startsWith(k))?.[1] ?? "AtendiAI";
 
   const { profile } = useAuth();
   const { activeCompanyId } = useActiveCompany();
@@ -60,7 +69,11 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
         .order("due_date", { ascending: true })
         .limit(5);
 
-      if (profile?.role !== "admin_company" && profile?.role !== "super_admin" && profile?.role !== "manager") {
+      if (
+        profile?.role !== "admin_company" &&
+        profile?.role !== "super_admin" &&
+        profile?.role !== "manager"
+      ) {
         query = query.eq("assigned_to", profile!.id);
       }
 
@@ -84,8 +97,8 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
         .limit(10);
 
       if (error) {
-         console.warn("Notifications table might not exist yet", error);
-         return [];
+        console.warn("Notifications table might not exist yet", error);
+        return [];
       }
       return data || [];
     },
@@ -96,18 +109,18 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
     if (!profile?.id || !activeCompanyId) return;
 
     const channel = supabase
-      .channel('schema-db-changes')
+      .channel("schema-db-changes")
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
+          event: "INSERT",
+          schema: "public",
+          table: "notifications",
           filter: `user_id=eq.${profile.id}`,
         },
         () => {
           refetchNotifications();
-        }
+        },
       )
       .subscribe();
 
@@ -117,13 +130,16 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
   }, [profile?.id, activeCompanyId, refetchNotifications]);
 
   const markAsRead = async (id: string, link: string | null) => {
-    await supabase.from("notifications" as any).update({ is_read: true }).eq("id", id);
+    await supabase
+      .from("notifications" as any)
+      .update({ is_read: true })
+      .eq("id", id);
     refetchNotifications();
     if (link) {
-      if (link.startsWith('/conversations?c=')) {
-        navigate({ to: '/conversations', search: { c: link.split('=')[1] } });
-      } else if (link.startsWith('/conversations?id=')) {
-        navigate({ to: '/conversations', search: { c: link.split('=')[1] } });
+      if (link.startsWith("/conversations?c=")) {
+        navigate({ to: "/conversations", search: { c: link.split("=")[1] } });
+      } else if (link.startsWith("/conversations?id=")) {
+        navigate({ to: "/conversations", search: { c: link.split("=")[1] } });
       } else {
         window.location.href = link;
       }
@@ -162,7 +178,7 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
     <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card px-4 md:px-6">
       <div className="flex items-center gap-3">
         {onMobileMenuToggle && (
-          <button 
+          <button
             onClick={onMobileMenuToggle}
             className="md:hidden p-2 -ml-2 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
           >
@@ -202,8 +218,7 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
             <button className="relative rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground outline-none">
               <Bell className="h-4 w-4" />
               {totalNotifications > 0 && (
-                <span className="absolute right-1.5 top-1.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
-                </span>
+                <span className="absolute right-1.5 top-1.5 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground"></span>
               )}
             </button>
           </DropdownMenuTrigger>
@@ -218,14 +233,22 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
               ) : (
                 <div className="flex flex-col gap-1 p-1">
                   {systemNotifications?.map((notif: any) => {
-                    const isTransfer = notif.type.startsWith('transfer');
-                    const channel = isTransfer ? notif.type.split('_')[1] || 'whatsapp' : null;
-                    
+                    const isTransfer = notif.type.startsWith("transfer");
+                    const channel = isTransfer ? notif.type.split("_")[1] || "whatsapp" : null;
+
                     return (
-                      <DropdownMenuItem key={`notif-${notif.id}`} className="cursor-pointer p-0" onSelect={() => markAsRead(notif.id, notif.link)}>
+                      <DropdownMenuItem
+                        key={`notif-${notif.id}`}
+                        className="cursor-pointer p-0"
+                        onSelect={() => markAsRead(notif.id, notif.link)}
+                      >
                         <div className="flex flex-col gap-1 items-start w-full px-2 py-1.5">
                           <div className="flex items-center gap-2 font-medium w-full">
-                            {isTransfer ? <ChannelIcon channel={channel as any} className="h-5 w-5 shrink-0" /> : <Info className="h-5 w-5 text-primary shrink-0" />}
+                            {isTransfer ? (
+                              <ChannelIcon channel={channel as any} className="h-5 w-5 shrink-0" />
+                            ) : (
+                              <Info className="h-5 w-5 text-primary shrink-0" />
+                            )}
                             <span className="truncate">{notif.title}</span>
                           </div>
                           <div className="text-xs text-muted-foreground pl-7 line-clamp-2">
@@ -235,7 +258,7 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
                       </DropdownMenuItem>
                     );
                   })}
-                  
+
                   {tasks?.map((task: any) => {
                     const isOverdue = task.due_date && new Date(task.due_date) < new Date();
                     return (
@@ -247,9 +270,11 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
                           </div>
                           {task.due_date && (
                             <div className="flex items-center gap-1 text-xs text-muted-foreground pl-6">
-                              <Clock className={`h-3 w-3 ${isOverdue ? 'text-destructive' : ''}`} />
-                              <span className={isOverdue ? 'text-destructive font-medium' : ''}>
-                                {format(new Date(task.due_date), "dd/MM 'às' HH:mm", { locale: ptBR })}
+                              <Clock className={`h-3 w-3 ${isOverdue ? "text-destructive" : ""}`} />
+                              <span className={isOverdue ? "text-destructive font-medium" : ""}>
+                                {format(new Date(task.due_date), "dd/MM 'às' HH:mm", {
+                                  locale: ptBR,
+                                })}
                               </span>
                             </div>
                           )}
@@ -263,7 +288,10 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
             {totalNotifications > 0 && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem asChild className="cursor-pointer justify-center text-primary font-medium">
+                <DropdownMenuItem
+                  asChild
+                  className="cursor-pointer justify-center text-primary font-medium"
+                >
                   <Link to="/tasks">Ver todas as tarefas</Link>
                 </DropdownMenuItem>
               </>

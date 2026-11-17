@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { TicketDialog } from "@/components/tickets/ticket-dialog";
 import { TicketDetailsSheet } from "@/components/tickets/ticket-details-sheet";
+import { formatTicketCode } from "@/lib/format";
 
 interface Props {
   contactId: string;
@@ -142,7 +143,7 @@ export function ContactTickets({ contactId, unitId, conversationId }: Props) {
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 font-mono font-bold text-muted-foreground">
-                    #{ticket.ticket_number || ticket.id.slice(0, 6)}
+                    {formatTicketCode(ticket)}
                   </div>
                   <div className="flex items-center gap-1">
                     {getStatusBadge(ticket.status)}

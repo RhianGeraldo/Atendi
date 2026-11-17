@@ -853,6 +853,23 @@ async function processIncomingMessage(params: any) {
     return;
   }
 
+  // Radar de Conversas: Monitora riscos de cancelamento e incidentes em background
+  if (textContent) {
+    import('./radar-engine')
+      .then((m) =>
+        m.evaluateMessageForRadar({
+          messageId: msgData.id,
+          conversationId,
+          contactId,
+          companyId,
+          unitId: unitId || null,
+          content: textContent,
+          senderType: 'contact',
+        })
+      )
+      .catch((e) => console.error('[Whatsapp Cloud] Erro no radar de conversas:', e));
+  }
+
   // Se o contato já for atendido por IA, enfileirar (Se for waiting, a cron/AI processa)
   if (aiActive) {
     await enqueueAiMessage(conversationId, msgData.id, companyId);

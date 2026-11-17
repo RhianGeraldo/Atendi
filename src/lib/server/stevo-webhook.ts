@@ -1777,6 +1777,23 @@ export async function processStevoWebhookBody(
         import("./campaign-processor")
           .then((m) => m.markCampaignRecipientReplied(conversationId))
           .catch((e) => console.error("[stevo-webhook] Error marking campaign replied:", e));
+
+        // Radar de Conversas: Monitora riscos de cancelamento e incidentes em background
+        if (textContent && !isGroup) {
+          import("./radar-engine")
+            .then((m) =>
+              m.evaluateMessageForRadar({
+                messageId: newMessage?.id,
+                conversationId,
+                contactId,
+                companyId: instance.company_id,
+                unitId: instance.unit_id || null,
+                content: textContent,
+                senderType: "contact",
+              })
+            )
+            .catch((e) => console.error("[stevo-webhook] Erro no radar de conversas:", e));
+        }
       }
 
       // 7. Check if we need to queue AI response

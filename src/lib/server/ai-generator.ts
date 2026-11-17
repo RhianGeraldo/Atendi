@@ -1877,6 +1877,11 @@ Ao abrir um chamado:
             | "high"
             | "urgent";
 
+          const cleanSubject = openTicketData.subject?.replace(/\.$/, "") || "Atendimento";
+          const formattedTitle = openTicketData.subject?.startsWith("[IA")
+            ? openTicketData.subject
+            : `[IA · SUPORTE] ${conv.contact?.name ? `${conv.contact.name} — ` : ""}${cleanSubject}`;
+
           const { data: newTicket, error: ticketErr } = await supabaseAdmin
             .from("tickets")
             .insert({
@@ -1884,7 +1889,8 @@ Ao abrir um chamado:
               unit_id: targetUnitId,
               department_id: matchedDeptId,
               scope: "external",
-              title: openTicketData.subject,
+              origin: "ai_agent",
+              title: formattedTitle,
               description: openTicketData.description,
               status: "new",
               priority: priorityToUse,
@@ -1903,14 +1909,15 @@ Ao abrir um chamado:
               }
             }
           } else {
-            console.log(`[ai-generator] Ticket #${newTicket.ticket_number} successfully created!`);
+            const formattedCode = `IA-${String(newTicket.ticket_number).padStart(5, "0")}`;
+            console.log(`[ai-generator] Ticket ${formattedCode} successfully created!`);
 
             // Mensagem interna no chat da conversa
             await supabaseAdmin.from("messages").insert({
               conversation_id: conversationId,
               sender_type: "agent",
               is_internal: true,
-              content: `🎫 Chamado #${newTicket.ticket_number} aberto pela IA (${agent.name}): ${newTicket.title} (Prioridade: ${priorityToUse})`,
+              content: `🎫 Chamado ${formattedCode} aberto pela IA (${agent.name}): ${newTicket.title} (Prioridade: ${priorityToUse})`,
             });
 
             // Disparar análise de IA do chamado em background
@@ -1927,7 +1934,8 @@ Ao abrir um chamado:
                   status: "success",
                   ticket_id: newTicket.id,
                   ticket_number: newTicket.ticket_number,
-                  message: `Chamado #${newTicket.ticket_number} ('${newTicket.title}') aberto com sucesso na central de tickets da empresa.`,
+                  ticket_code: formattedCode,
+                  message: `Chamado ${formattedCode} ('${newTicket.title}') aberto com sucesso na central de tickets da empresa.`,
                 };
               }
             }

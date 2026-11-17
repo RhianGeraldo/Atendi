@@ -24,6 +24,7 @@ import { Route as AuthenticatedConversationsRouteImport } from './routes/_authen
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedMarketingRouteImport } from './routes/_authenticated/marketing'
 import { Route as AuthenticatedPipelineRouteImport } from './routes/_authenticated/pipeline'
+import { Route as AuthenticatedRadarRouteImport } from './routes/_authenticated/radar'
 import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
@@ -107,6 +108,11 @@ const AuthenticatedPipelineRoute = AuthenticatedPipelineRouteImport.update({
   path: '/pipeline',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedRadarRoute = AuthenticatedRadarRouteImport.update({
+  id: '/radar',
+  path: '/radar',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
@@ -158,6 +164,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/marketing': typeof AuthenticatedMarketingRoute
   '/pipeline': typeof AuthenticatedPipelineRoute
+  '/radar': typeof AuthenticatedRadarRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/tasks': typeof AuthenticatedTasksRoute
@@ -181,6 +188,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/marketing': typeof AuthenticatedMarketingRoute
   '/pipeline': typeof AuthenticatedPipelineRoute
+  '/radar': typeof AuthenticatedRadarRoute
   '/reports': typeof AuthenticatedReportsRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/tasks': typeof AuthenticatedTasksRoute
@@ -206,6 +214,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/marketing': typeof AuthenticatedMarketingRoute
   '/_authenticated/pipeline': typeof AuthenticatedPipelineRoute
+  '/_authenticated/radar': typeof AuthenticatedRadarRoute
   '/_authenticated/reports': typeof AuthenticatedReportsRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
@@ -231,6 +240,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/marketing'
     | '/pipeline'
+    | '/radar'
     | '/reports'
     | '/settings'
     | '/tasks'
@@ -254,6 +264,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/marketing'
     | '/pipeline'
+    | '/radar'
     | '/reports'
     | '/settings'
     | '/tasks'
@@ -278,6 +289,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard'
     | '/_authenticated/marketing'
     | '/_authenticated/pipeline'
+    | '/_authenticated/radar'
     | '/_authenticated/reports'
     | '/_authenticated/settings'
     | '/_authenticated/tasks'
@@ -404,6 +416,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPipelineRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/radar': {
+      id: '/_authenticated/radar'
+      path: '/radar'
+      fullPath: '/radar'
+      preLoaderRoute: typeof AuthenticatedRadarRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/reports': {
       id: '/_authenticated/reports'
       path: '/reports'
@@ -465,6 +484,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedMarketingRoute: typeof AuthenticatedMarketingRoute
   AuthenticatedPipelineRoute: typeof AuthenticatedPipelineRoute
+  AuthenticatedRadarRoute: typeof AuthenticatedRadarRoute
   AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
@@ -483,6 +503,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedMarketingRoute: AuthenticatedMarketingRoute,
   AuthenticatedPipelineRoute: AuthenticatedPipelineRoute,
+  AuthenticatedRadarRoute: AuthenticatedRadarRoute,
   AuthenticatedReportsRoute: AuthenticatedReportsRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedTasksRoute: AuthenticatedTasksRoute,

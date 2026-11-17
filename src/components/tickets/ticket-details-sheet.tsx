@@ -32,6 +32,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
+import { formatTicketCode } from "@/lib/format";
 
 interface Props {
   ticketId: string | null;
@@ -206,12 +207,49 @@ export function TicketDetailsSheet({
         .update(updates)
         .eq("id", ticketId);
       if (error) throw error;
+
+      // Se o chamado foi resolvido ou fechado, sincroniza o alerta no Radar de Riscos
+      if (updates.status === "resolved" || updates.status === "closed") {
+        try {
+          const { data: linkedAlerts } = await (supabase as any)
+            .from("conversation_radar_alerts")
+            .update({
+              status: "resolved",
+              resolved_at: new Date().toISOString(),
+              resolved_by_user_id: profile?.id || null,
+            })
+            .eq("ticket_id", ticketId)
+            .select("conversation_id");
+
+          if (linkedAlerts && linkedAlerts.length > 0) {
+            for (const alert of linkedAlerts) {
+              const { data: remaining } = await (supabase as any)
+                .from("conversation_radar_alerts")
+                .select("id")
+                .eq("conversation_id", alert.conversation_id)
+                .in("status", ["pending", "in_review", "ticket_created"])
+                .limit(1);
+
+              if (!remaining || remaining.length === 0) {
+                await (supabase as any)
+                  .from("conversations")
+                  .update({ radar_status: "resolved" })
+                  .eq("id", alert.conversation_id);
+              }
+            }
+          }
+        } catch (radarSyncErr) {
+          console.warn("[ticket-details-sheet] Falha ao sincronizar radar:", radarSyncErr);
+        }
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tickets"] });
       qc.invalidateQueries({ queryKey: ["ticket-details", ticketId] });
       qc.invalidateQueries({ queryKey: ["contact-tickets"] });
       qc.invalidateQueries({ queryKey: ["contact-sidebar-active-tickets"] });
+      qc.invalidateQueries({ queryKey: ["radar-alerts"] });
+      qc.invalidateQueries({ queryKey: ["radar-metrics"] });
       toast.success("Ticket atualizado!");
     },
     onError: (err: any) => {
@@ -267,13 +305,23 @@ export function TicketDetailsSheet({
           ) : ticket ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm font-semibold text-muted-foreground">
-                    #{ticket.ticket_number || ticket.id.slice(0, 6)}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-xs font-bold text-muted-foreground bg-muted/80 px-2 py-0.5 rounded border border-border/50">
+                    {formatTicketCode(ticket)}
                   </span>
                   <Badge variant={ticket.scope === "internal" ? "outline" : "default"}>
                     {ticket.scope === "internal" ? "Chamado Interno" : "Cliente Externo"}
                   </Badge>
+                  {ticket.origin === "radar" && (
+                    <Badge className="bg-rose-600 hover:bg-rose-700 text-white text-[10px] gap-1">
+                      🚨 Radar
+                    </Badge>
+                  )}
+                  {ticket.origin === "ai_agent" && (
+                    <Badge className="bg-purple-600 hover:bg-purple-700 text-white text-[10px] gap-1">
+                      🤖 IA
+                    </Badge>
+                  )}
                   {getStatusBadge(ticket.status)}
                   {getPriorityBadge(ticket.priority)}
                 </div>
@@ -294,7 +342,7 @@ export function TicketDetailsSheet({
                 {ticket.title}
               </SheetTitle>
               <SheetDescription className="text-xs text-muted-foreground sr-only">
-                Detalhes do ticket #{ticket.ticket_number || ticket.id.slice(0, 6)}
+                Detalhes do chamado {formatTicketCode(ticket)}
               </SheetDescription>
               <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground pt-1">
                 <span className="flex items-center gap-1">

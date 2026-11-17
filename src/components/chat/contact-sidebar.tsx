@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
 import { cn } from "@/lib/utils";
-import { initials, formatPhone } from "@/lib/format";
+import { initials, formatPhone, formatTicketCode } from "@/lib/format";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ContactAvatar } from "./contact-avatar";
 import { Button } from "@/components/ui/button";
@@ -65,6 +65,8 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
         .select(`
           id,
           ticket_number,
+          origin,
+          tags,
           title,
           status,
           priority,
@@ -767,7 +769,7 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                   >
                     <div className="flex items-center justify-between gap-1 text-[11px]">
                       <span className="font-mono font-bold text-muted-foreground">
-                        #{t.ticket_number || t.id.slice(0, 6)}
+                        {formatTicketCode(t)}
                       </span>
                       <span
                         className={`px-1.5 py-0.2 rounded text-[10px] font-medium ${

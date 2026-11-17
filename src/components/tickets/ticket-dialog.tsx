@@ -277,6 +277,7 @@ export function TicketDialog({
         requester_user_id: profile?.id || null,
         requester_contact_id: cleanRequesterContactId,
         conversation_id: defaultConversationId || null,
+        origin: "manual",
         tags,
       };
 

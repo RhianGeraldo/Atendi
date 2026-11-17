@@ -636,6 +636,23 @@ async function processarMensagem(
     });
   }
 
+  // Radar de Conversas: Monitora riscos de cancelamento e incidentes em background
+  if (!isFromMe && evento.texto) {
+    import("./radar-engine")
+      .then((m) =>
+        m.evaluateMessageForRadar({
+          messageId: insertedMsg.id,
+          conversationId,
+          contactId,
+          companyId,
+          unitId: canal.unit_id || null,
+          content: evento.texto,
+          senderType: "contact",
+        })
+      )
+      .catch((e) => console.error("[zernio:webhook] Erro no radar de conversas:", e));
+  }
+
   // 6. Enfileirar resposta da IA se conversa ativa e recebida do cliente
   if (!isFromMe && aiActive) {
     try {

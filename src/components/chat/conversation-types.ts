@@ -36,6 +36,8 @@ export interface ConvRow {
   ai_agent?: { name: string } | null;
   unit_id: string;
   whatsapp_instance_id: string | null;
+  radar_status?: "active" | "resolved" | "dismissed" | null;
+  radar_last_alert_at?: string | null;
   unit?: { name: string; color?: string | null; custom_variables?: any } | null;
   whatsapp_instance?: { name: string } | null;
   last_message?: {

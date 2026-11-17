@@ -41,9 +41,7 @@ export const ConversationItem = memo(function ConversationItem({
   const rawName = conv.contact?.name?.trim();
   const isPhoneOrJidName =
     rawName &&
-    (rawName.includes("@g.us") ||
-      rawName.startsWith("120363") ||
-      rawName === conv.contact?.phone);
+    (rawName.includes("@g.us") || rawName.startsWith("120363") || rawName === conv.contact?.phone);
 
   const contactName = isGroup
     ? !rawName || rawName === "Desconhecido" || isPhoneOrJidName
@@ -70,6 +68,7 @@ export const ConversationItem = memo(function ConversationItem({
       className={cn(
         "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-colors hover:bg-accent/40",
         selected && "bg-accent/60",
+        conv.radar_status === "active" && "border-l-4 border-l-rose-600 bg-rose-500/[0.04]",
         slaInfo.status === "breached" && "border-l-4 border-l-destructive bg-destructive/[0.02]",
         slaInfo.status === "warning" && "border-l-2 border-l-amber-500/70",
       )}
@@ -190,6 +189,15 @@ export const ConversationItem = memo(function ConversationItem({
               {getSourceIcon(conv.contact.source, "h-2.5 w-2.5 shrink-0")}
               <span className="truncate font-medium">{conv.contact.source}</span>
             </div>
+          )}
+          {conv.radar_status === "active" && (
+            <Badge
+              variant="destructive"
+              className="px-1.5 py-0 text-[10px] font-bold bg-rose-600 hover:bg-rose-700 animate-pulse text-white shadow-xs"
+              title="Alerta crítico ou risco de churn detectado pelo Radar de Conversas"
+            >
+              🚨 Radar
+            </Badge>
           )}
           {conv.department?.name && (
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-normal">
