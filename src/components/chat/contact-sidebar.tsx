@@ -1,6 +1,22 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Users, RefreshCw, Tag, Plus, Square, Target, Check, Edit2, X, Building2, ChevronDown, Ticket, AlertCircle } from "lucide-react";
+import {
+  Users,
+  RefreshCw,
+  Tag,
+  Plus,
+  Square,
+  Target,
+  Check,
+  Edit2,
+  X,
+  Building2,
+  ChevronDown,
+  Ticket,
+  AlertCircle,
+  Sparkles,
+  UserCheck,
+} from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { TicketDetailsSheet } from "@/components/tickets/ticket-details-sheet";
@@ -10,7 +26,7 @@ import {
   createLabelAction,
   updateContactFromWhatsappAction,
 } from "@/lib/api/chat.functions";
-import { updateContactUnitAction } from "@/lib/api/contacts.functions";
+import { updateContactUnitAction, updateContactTypeAction } from "@/lib/api/contacts.functions";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { useUnit } from "@/lib/unit-context";
@@ -62,7 +78,8 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
     queryFn: async () => {
       const { data, error } = await (supabase as any)
         .from("tickets")
-        .select(`
+        .select(
+          `
           id,
           ticket_number,
           origin,
@@ -73,7 +90,8 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
           created_at,
           unit:units!unit_id(name),
           department:departments!department_id(name)
-        `)
+        `,
+        )
         .eq("requester_contact_id", conv.contact!.id)
         .not("status", "in", '("resolved","closed","cancelled")')
         .order("created_at", { ascending: false });
@@ -156,6 +174,33 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
     },
     onError: (err: any) => {
       toast.error("Erro ao alterar unidade", { description: err.message });
+    },
+  });
+
+  const updateContactTypeMutation = useMutation({
+    mutationFn: async (newType: "lead" | "client") => {
+      if (!conv.contact?.id) return;
+      const compId = activeCompanyId || conv.contact?.company_id || profile?.company_id;
+      if (!compId) throw new Error("Empresa não selecionada.");
+      return await updateContactTypeAction({
+        data: {
+          contactId: conv.contact.id,
+          contactType: newType,
+          companyId: compId,
+        },
+      });
+    },
+    onSuccess: (_, newType) => {
+      toast.success(
+        newType === "client" ? "Contato promovido a Cliente! 🎉" : "Contato definido como Lead",
+      );
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contacts-counts"] });
+      qc.invalidateQueries({ queryKey: ["contact-details", conv.contact?.id] });
+    },
+    onError: (err: any) => {
+      toast.error("Erro ao alterar status do contato", { description: err.message });
     },
   });
 
@@ -373,6 +418,70 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                         ? `@${conv.contact.instagram_username}`
                         : "Sem número"}
                 </p>
+
+                {/* Status Lead / Cliente Badge com Quick Toggle */}
+                {!isGroup && conv.contact && (
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className={cn(
+                            "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border transition-all cursor-pointer shadow-xs",
+                            conv.contact.contact_type === "client"
+                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
+                              : "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20",
+                          )}
+                          title="Clique para alternar entre Lead e Cliente"
+                        >
+                          <span
+                            className={cn(
+                              "h-1.5 w-1.5 rounded-full shrink-0",
+                              conv.contact.contact_type === "client"
+                                ? "bg-emerald-500"
+                                : "bg-amber-500",
+                            )}
+                          />
+                          {conv.contact.contact_type === "client" ? "Cliente" : "Lead"}
+                          <ChevronDown className="h-2.5 w-2.5 opacity-60 ml-0.5" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="p-1 w-44" align="start">
+                        <div className="text-[10px] font-medium text-muted-foreground px-2 py-1 border-b border-border/40">
+                          Classificação do Contato
+                        </div>
+                        <div className="space-y-0.5 pt-1">
+                          <Button
+                            variant={conv.contact.contact_type !== "client" ? "secondary" : "ghost"}
+                            size="sm"
+                            className="w-full justify-start text-xs h-7 font-normal gap-2"
+                            onClick={() => updateContactTypeMutation.mutate("lead")}
+                            disabled={updateContactTypeMutation.isPending}
+                          >
+                            <span className="h-2 w-2 rounded-full bg-amber-500" />
+                            <span>Lead</span>
+                            {conv.contact.contact_type !== "client" && (
+                              <Check className="h-3 w-3 ml-auto text-primary" />
+                            )}
+                          </Button>
+                          <Button
+                            variant={conv.contact.contact_type === "client" ? "secondary" : "ghost"}
+                            size="sm"
+                            className="w-full justify-start text-xs h-7 font-normal gap-2"
+                            onClick={() => updateContactTypeMutation.mutate("client")}
+                            disabled={updateContactTypeMutation.isPending}
+                          >
+                            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                            <span>Cliente</span>
+                            {conv.contact.contact_type === "client" && (
+                              <Check className="h-3 w-3 ml-auto text-primary" />
+                            )}
+                          </Button>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -564,7 +673,9 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                           disabled={updateUnitMutation.isPending}
                         >
                           Sem unidade (Geral / Matriz)
-                          {!conv.contact?.unit_id && <Check className="h-3 w-3 ml-auto text-primary" />}
+                          {!conv.contact?.unit_id && (
+                            <Check className="h-3 w-3 ml-auto text-primary" />
+                          )}
                         </Button>
                         {companyUnits.map((u: any) => (
                           <Button
@@ -595,7 +706,11 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                 <Badge
                   variant={contactUnit?.name ? "outline" : "secondary"}
                   className="text-xs py-0.5 px-2 flex items-center gap-1.5 font-medium border-border/80"
-                  style={contactUnit?.color ? { borderColor: `${contactUnit.color}60`, color: contactUnit.color } : undefined}
+                  style={
+                    contactUnit?.color
+                      ? { borderColor: `${contactUnit.color}60`, color: contactUnit.color }
+                      : undefined
+                  }
                 >
                   <Building2 className="h-3 w-3 text-muted-foreground" />
                   <span>{contactUnit?.name || "Sem unidade (Geral / Matriz)"}</span>
@@ -776,11 +891,15 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
                           t.priority === "urgent"
                             ? "bg-destructive/15 text-destructive font-bold"
                             : t.priority === "high"
-                            ? "bg-amber-500/20 text-amber-600 font-semibold"
-                            : "bg-muted text-muted-foreground"
+                              ? "bg-amber-500/20 text-amber-600 font-semibold"
+                              : "bg-muted text-muted-foreground"
                         }`}
                       >
-                        {t.priority === "urgent" ? "Urgente" : t.priority === "high" ? "Alta" : "Média"}
+                        {t.priority === "urgent"
+                          ? "Urgente"
+                          : t.priority === "high"
+                            ? "Alta"
+                            : "Média"}
                       </span>
                     </div>
                     <p className="text-xs font-medium text-foreground line-clamp-1">{t.title}</p>

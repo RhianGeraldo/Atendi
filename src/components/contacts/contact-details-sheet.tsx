@@ -2,7 +2,48 @@ import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, differenceInMinutes, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { History, Bot, MessageCircle, Phone, Mail, Clock, CalendarDays, Loader2, Smartphone, Target, CheckSquare, DollarSign, Save, User, Plus, Trash2, Edit2, MessageSquare, Video, MoreHorizontal, Circle, CalendarClock, CheckCircle2, Users, Megaphone, ExternalLink, Image as ImageIcon, Map, Hash, Ban, ChevronDown, ChevronUp, XCircle, Check, Pencil, X, Gift, Building2, Lock, Ticket } from "lucide-react";
+import {
+  History,
+  Bot,
+  MessageCircle,
+  Phone,
+  Mail,
+  Clock,
+  CalendarDays,
+  Loader2,
+  Smartphone,
+  Target,
+  CheckSquare,
+  DollarSign,
+  Save,
+  User,
+  Plus,
+  Trash2,
+  Edit2,
+  MessageSquare,
+  Video,
+  MoreHorizontal,
+  Circle,
+  CalendarClock,
+  CheckCircle2,
+  Users,
+  Megaphone,
+  ExternalLink,
+  Image as ImageIcon,
+  Map,
+  Hash,
+  Ban,
+  ChevronDown,
+  ChevronUp,
+  XCircle,
+  Check,
+  Pencil,
+  X,
+  Gift,
+  Building2,
+  Lock,
+  Ticket,
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -22,11 +63,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -41,8 +78,20 @@ import { useUnit } from "@/lib/unit-context";
 import { OpportunityDialog } from "@/components/crm/opportunity-dialog";
 import { OpportunityQualificationView } from "@/components/crm/opportunity-qualification-view";
 import { TaskDialog } from "@/components/crm/task-dialog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Link } from "@tanstack/react-router";
 import { MergeContactDialog } from "./merge-contact-dialog";
 import { ContactBlockDialog } from "./contact-block-dialog";
@@ -52,7 +101,7 @@ import { TodooContactReferrals } from "@/components/todoo/todoo-contact-referral
 import { blockContactAction, unblockContactAction } from "@/lib/api/chat.functions";
 import { triggerOpportunityCapiAction } from "@/lib/api/meta-capi.functions";
 import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
-import { updateContactUnitAction } from "@/lib/api/contacts.functions";
+import { updateContactUnitAction, updateContactTypeAction } from "@/lib/api/contacts.functions";
 import { ContactTickets } from "./contact-tickets";
 
 interface ContactDetailsSheetProps {
@@ -80,13 +129,16 @@ function ContactTasks({ contactId }: { contactId: string }) {
   const toggleTask = useMutation({
     mutationFn: async (task: any) => {
       const newStatus = task.status === "done" ? "pending" : "done";
-      const { error } = await supabase.from("tasks").update({ status: newStatus }).eq("id", task.id);
+      const { error } = await supabase
+        .from("tasks")
+        .update({ status: newStatus })
+        .eq("id", task.id);
       if (error) throw error;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contact-tasks", contactId] });
       qc.invalidateQueries({ queryKey: ["opp-tasks"] }); // Might be linked to an opp
-    }
+    },
   });
 
   const deleteTask = useMutation({
@@ -98,7 +150,7 @@ function ContactTasks({ contactId }: { contactId: string }) {
       qc.invalidateQueries({ queryKey: ["contact-tasks", contactId] });
       qc.invalidateQueries({ queryKey: ["opp-tasks"] });
       toast.success("Tarefa removida!");
-    }
+    },
   });
 
   return (
@@ -119,27 +171,51 @@ function ContactTasks({ contactId }: { contactId: string }) {
 
       <div className="space-y-2 mt-4">
         {isLoading ? (
-          <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+          <div className="flex justify-center py-4">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
         ) : !tasks || tasks.length === 0 ? (
           <div className="text-sm text-muted-foreground text-center py-4 border rounded-lg border-dashed">
             Nenhuma tarefa pendente.
           </div>
         ) : (
           tasks.map((task: any) => (
-            <div key={task.id} className="flex flex-col gap-1 p-3 border rounded-lg group bg-muted/30 hover:bg-muted/50 transition-colors">
+            <div
+              key={task.id}
+              className="flex flex-col gap-1 p-3 border rounded-lg group bg-muted/30 hover:bg-muted/50 transition-colors"
+            >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 flex-1 overflow-hidden">
-                  <button onClick={() => toggleTask.mutate(task)} className="text-muted-foreground hover:text-primary transition-colors cursor-pointer p-0.5 rounded-full hover:bg-primary/10">
-                    {task.status === 'done' ? <CheckCircle2 className="h-5 w-5 text-emerald-500 fill-emerald-500/15 cursor-pointer" /> : <Circle className="h-5 w-5 text-muted-foreground hover:text-emerald-600 cursor-pointer" />}
+                  <button
+                    onClick={() => toggleTask.mutate(task)}
+                    className="text-muted-foreground hover:text-primary transition-colors cursor-pointer p-0.5 rounded-full hover:bg-primary/10"
+                  >
+                    {task.status === "done" ? (
+                      <CheckCircle2 className="h-5 w-5 text-emerald-500 fill-emerald-500/15 cursor-pointer" />
+                    ) : (
+                      <Circle className="h-5 w-5 text-muted-foreground hover:text-emerald-600 cursor-pointer" />
+                    )}
                   </button>
-                  {task.task_type === "call" && <Phone className="h-4 w-4 text-blue-500 flex-shrink-0" />}
-                  {task.task_type === "message" && <MessageSquare className="h-4 w-4 text-emerald-500 flex-shrink-0" />}
-                  {task.task_type === "meeting" && <Video className="h-4 w-4 text-purple-500 flex-shrink-0" />}
-                  {task.task_type === "follow_up" && <CalendarClock className="h-4 w-4 text-orange-500 flex-shrink-0" />}
-                  {(task.task_type === "other" || !task.task_type) && <CheckSquare className="h-4 w-4 text-muted-foreground flex-shrink-0" />}
-                  
+                  {task.task_type === "call" && (
+                    <Phone className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                  )}
+                  {task.task_type === "message" && (
+                    <MessageSquare className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+                  )}
+                  {task.task_type === "meeting" && (
+                    <Video className="h-4 w-4 text-purple-500 flex-shrink-0" />
+                  )}
+                  {task.task_type === "follow_up" && (
+                    <CalendarClock className="h-4 w-4 text-orange-500 flex-shrink-0" />
+                  )}
+                  {(task.task_type === "other" || !task.task_type) && (
+                    <CheckSquare className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  )}
+
                   <div className="flex flex-col overflow-hidden">
-                    <span className={`text-sm font-medium truncate ${task.status === 'done' ? 'line-through text-muted-foreground' : ''}`}>
+                    <span
+                      className={`text-sm font-medium truncate ${task.status === "done" ? "line-through text-muted-foreground" : ""}`}
+                    >
                       {task.title}
                     </span>
                     {task.due_date && (
@@ -150,13 +226,20 @@ function ContactTasks({ contactId }: { contactId: string }) {
                     )}
                   </div>
                 </div>
-                <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive" onClick={() => deleteTask.mutate(task.id)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive"
+                  onClick={() => deleteTask.mutate(task.id)}
+                >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
               {task.opportunity_id && (
                 <div className="flex pl-11">
-                  <Badge variant="outline" className="text-[10px] text-muted-foreground">Vinculado a Oportunidade</Badge>
+                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                    Vinculado a Oportunidade
+                  </Badge>
                 </div>
               )}
             </div>
@@ -174,14 +257,16 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
       const [messagesRes, adLeadsRes] = await Promise.all([
         supabase
           .from("messages")
-          .select(`
+          .select(
+            `
             id,
             created_at,
             metadata,
             conversations!inner (
               contact_id
             )
-          `)
+          `,
+          )
           .eq("conversations.contact_id", contactId)
           .not("metadata", "is", null)
           .order("created_at", { ascending: false }),
@@ -280,7 +365,7 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
           <p className="text-[10px] text-muted-foreground">Campanhas e anúncios de origem</p>
         </div>
       </div>
-      
+
       <div className="flex flex-col">
         {ads.map((ad: any, index: number) => (
           <React.Fragment key={ad.id}>
@@ -291,7 +376,9 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
                 </div>
                 <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-1" />
                 <span className="text-xs font-medium text-muted-foreground">
-                  {format(new Date(ad.createdAt), "dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: ptBR })}
+                  {format(new Date(ad.createdAt), "dd 'de' MMMM 'de' yyyy 'às' HH:mm", {
+                    locale: ptBR,
+                  })}
                 </span>
                 {index === 0 && (
                   <Badge className="ml-auto text-[10px] bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 shadow-none border-none">
@@ -303,13 +390,13 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
               <div className="flex gap-4">
                 {ad.adData.thumbnailURL || ad.adData.originalImageURL ? (
                   <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-md overflow-hidden bg-muted flex items-center justify-center border shrink-0">
-                    <img 
-                      src={ad.adData.thumbnailURL || ad.adData.originalImageURL} 
-                      alt="Ad thumbnail" 
+                    <img
+                      src={ad.adData.thumbnailURL || ad.adData.originalImageURL}
+                      alt="Ad thumbnail"
                       className="h-full w-full object-contain"
                       onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                        e.currentTarget.parentElement?.classList.add('p-2');
+                        e.currentTarget.style.display = "none";
+                        e.currentTarget.parentElement?.classList.add("p-2");
                       }}
                     />
                     <ImageIcon className="h-5 w-5 text-muted-foreground absolute -z-10" />
@@ -319,17 +406,23 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
                     <ImageIcon className="h-5 w-5" />
                   </div>
                 )}
-                
+
                 <div className="flex-1 min-w-0 flex flex-col justify-center">
-                  <h4 className="font-semibold text-sm sm:text-base line-clamp-2 leading-tight" title={ad.adData.title}>
+                  <h4
+                    className="font-semibold text-sm sm:text-base line-clamp-2 leading-tight"
+                    title={ad.adData.title}
+                  >
                     {ad.adData.title || "Anúncio sem título"}
                   </h4>
                   {ad.adData.body && (
-                    <p className="text-xs text-muted-foreground line-clamp-2 mt-1" title={ad.adData.body}>
+                    <p
+                      className="text-xs text-muted-foreground line-clamp-2 mt-1"
+                      title={ad.adData.body}
+                    >
                       {ad.adData.body}
                     </p>
                   )}
-                  
+
                   <div className="flex flex-wrap items-center gap-2 mt-2">
                     {ad.conversionSource && (
                       <Badge variant="secondary" className="text-[10px]">
@@ -342,9 +435,9 @@ function ContactAdsHistory({ contactId }: { contactId: string }) {
                       </Badge>
                     )}
                     {ad.adData.sourceURL && (
-                      <a 
-                        href={ad.adData.sourceURL} 
-                        target="_blank" 
+                      <a
+                        href={ad.adData.sourceURL}
+                        target="_blank"
                         rel="noreferrer"
                         className="text-xs text-primary flex items-center gap-1 hover:underline ml-auto"
                       >
@@ -373,17 +466,19 @@ function ContactJourney({ contactId }: { contactId: string }) {
         { data: opportunities },
         { data: tasks },
         { data: contactNotes },
-        { data: oppNotes }
+        { data: oppNotes },
       ] = await Promise.all([
         supabase
           .from("messages")
           .select(`id, created_at, metadata, conversations!inner(contact_id)`)
           .eq("conversations.contact_id", contactId)
           .not("metadata", "is", null),
-          
+
         supabase
           .from("conversation_sessions" as any)
-          .select(`id, started_at, resolved_at, resolution_observation, whatsapp_instances(name), resolution_reasons(label), assigned_agent:profiles!conversation_sessions_assigned_agent_id_fkey(name), conversation:conversations!conversation_sessions_conversation_id_fkey(ai_active, ai_agent:ai_agents(name))`)
+          .select(
+            `id, started_at, resolved_at, resolution_observation, whatsapp_instances(name), resolution_reasons(label), assigned_agent:profiles!conversation_sessions_assigned_agent_id_fkey(name), conversation:conversations!conversation_sessions_conversation_id_fkey(ai_active, ai_agent:ai_agents(name))`,
+          )
           .eq("contact_id", contactId),
 
         supabase
@@ -403,23 +498,33 @@ function ContactJourney({ contactId }: { contactId: string }) {
 
         supabase
           .from("opportunity_notes" as any)
-          .select(`id, content, created_at, profiles(name, email), opportunities!inner(id, title, contact_id)`)
-          .eq("opportunities.contact_id", contactId)
+          .select(
+            `id, content, created_at, profiles(name, email), opportunities!inner(id, title, contact_id)`,
+          )
+          .eq("opportunities.contact_id", contactId),
       ]);
 
       const journeyEvents: any[] = [];
 
       if (messages) {
-        messages.forEach(msg => {
+        messages.forEach((msg) => {
           const meta = msg.metadata;
-          const adReply = meta?.externalAdReply || meta?.contextInfo?.externalAdReply || meta?.extendedTextMessage?.contextInfo?.externalAdReply || meta?.Message?.extendedTextMessage?.contextInfo?.externalAdReply;
+          const adReply =
+            meta?.externalAdReply ||
+            meta?.contextInfo?.externalAdReply ||
+            meta?.extendedTextMessage?.contextInfo?.externalAdReply ||
+            meta?.Message?.extendedTextMessage?.contextInfo?.externalAdReply;
           if (adReply) {
-            const conversionSource = meta.conversionSource || meta.contextInfo?.conversionSource || meta.extendedTextMessage?.contextInfo?.conversionSource || meta.Message?.extendedTextMessage?.contextInfo?.conversionSource;
+            const conversionSource =
+              meta.conversionSource ||
+              meta.contextInfo?.conversionSource ||
+              meta.extendedTextMessage?.contextInfo?.conversionSource ||
+              meta.Message?.extendedTextMessage?.contextInfo?.conversionSource;
             journeyEvents.push({
               id: `ad-${msg.id}`,
               date: new Date(msg.created_at),
-              type: 'ad',
-              data: { adReply, conversionSource, sourceApp: adReply.sourceApp }
+              type: "ad",
+              data: { adReply, conversionSource, sourceApp: adReply.sourceApp },
             });
           }
         });
@@ -430,8 +535,8 @@ function ContactJourney({ contactId }: { contactId: string }) {
           journeyEvents.push({
             id: `sess-${sess.id}`,
             date: new Date(sess.started_at),
-            type: 'conversation',
-            data: sess
+            type: "conversation",
+            data: sess,
           });
         });
       }
@@ -441,8 +546,8 @@ function ContactJourney({ contactId }: { contactId: string }) {
           journeyEvents.push({
             id: `opp-${opp.id}`,
             date: new Date(opp.created_at),
-            type: 'opportunity',
-            data: opp
+            type: "opportunity",
+            data: opp,
           });
         });
       }
@@ -452,8 +557,8 @@ function ContactJourney({ contactId }: { contactId: string }) {
           journeyEvents.push({
             id: `task-${task.id}`,
             date: new Date(task.created_at),
-            type: 'task',
-            data: task
+            type: "task",
+            data: task,
           });
         });
       }
@@ -463,8 +568,8 @@ function ContactJourney({ contactId }: { contactId: string }) {
           journeyEvents.push({
             id: `cnote-${note.id}`,
             date: new Date(note.created_at),
-            type: 'note',
-            data: { ...note, isOppNote: false }
+            type: "note",
+            data: { ...note, isOppNote: false },
           });
         });
       }
@@ -474,14 +579,14 @@ function ContactJourney({ contactId }: { contactId: string }) {
           journeyEvents.push({
             id: `onote-${note.id}`,
             date: new Date(note.created_at),
-            type: 'note',
-            data: { ...note, isOppNote: true }
+            type: "note",
+            data: { ...note, isOppNote: true },
           });
         });
       }
 
       return journeyEvents.sort((a, b) => b.date.getTime() - a.date.getTime());
-    }
+    },
   });
 
   const getDuration = (start: string, end?: string | null) => {
@@ -517,11 +622,11 @@ function ContactJourney({ contactId }: { contactId: string }) {
           <p className="text-[10px] text-muted-foreground">Linha do tempo consolidada</p>
         </div>
       </div>
-      
+
       <div className="flex flex-col">
         {events.map((event: any, index: number) => {
           // AD EVENT
-          if (event.type === 'ad') {
+          if (event.type === "ad") {
             const adData = event.data.adReply;
             return (
               <React.Fragment key={event.id}>
@@ -537,22 +642,32 @@ function ContactJourney({ contactId }: { contactId: string }) {
                   </div>
                   <div className="flex gap-4">
                     {(() => {
-                      const adThumb = adData.thumbnailURL || 
-                                      adData.thumbnailUrl || 
-                                      adData.originalImageURL || 
-                                      adData.originalImageUrl || 
-                                      (adData.jpegThumbnail ? (adData.jpegThumbnail.startsWith('data:') ? adData.jpegThumbnail : `data:image/jpeg;base64,${adData.jpegThumbnail}`) : null) ||
-                                      (adData.thumbnail ? (adData.thumbnail.startsWith('http') || adData.thumbnail.startsWith('data:') ? adData.thumbnail : `data:image/jpeg;base64,${adData.thumbnail}`) : null);
+                      const adThumb =
+                        adData.thumbnailURL ||
+                        adData.thumbnailUrl ||
+                        adData.originalImageURL ||
+                        adData.originalImageUrl ||
+                        (adData.jpegThumbnail
+                          ? adData.jpegThumbnail.startsWith("data:")
+                            ? adData.jpegThumbnail
+                            : `data:image/jpeg;base64,${adData.jpegThumbnail}`
+                          : null) ||
+                        (adData.thumbnail
+                          ? adData.thumbnail.startsWith("http") ||
+                            adData.thumbnail.startsWith("data:")
+                            ? adData.thumbnail
+                            : `data:image/jpeg;base64,${adData.thumbnail}`
+                          : null);
 
                       return adThumb ? (
                         <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-md overflow-hidden bg-muted flex items-center justify-center border shrink-0 relative">
-                          <img 
-                            src={adThumb} 
-                            alt="Ad thumbnail" 
+                          <img
+                            src={adThumb}
+                            alt="Ad thumbnail"
                             className="h-full w-full object-contain"
                             onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                              e.currentTarget.parentElement?.classList.add('p-2');
+                              e.currentTarget.style.display = "none";
+                              e.currentTarget.parentElement?.classList.add("p-2");
                             }}
                           />
                           <ImageIcon className="h-5 w-5 text-muted-foreground absolute -z-10" />
@@ -564,8 +679,13 @@ function ContactJourney({ contactId }: { contactId: string }) {
                       );
                     })()}
                     <div className="flex-1 min-w-0 flex flex-col justify-center">
-                      <span className="text-xs font-semibold text-primary mb-1">Interação via Anúncio</span>
-                      <h4 className="font-semibold text-sm sm:text-base line-clamp-2 leading-tight" title={adData.title}>
+                      <span className="text-xs font-semibold text-primary mb-1">
+                        Interação via Anúncio
+                      </span>
+                      <h4
+                        className="font-semibold text-sm sm:text-base line-clamp-2 leading-tight"
+                        title={adData.title}
+                      >
                         {adData.title || "Anúncio sem título"}
                       </h4>
                       <div className="flex flex-wrap items-center gap-2 mt-2">
@@ -583,13 +703,15 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     </div>
                   </div>
                 </div>
-                {index < events.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+                {index < events.length - 1 && (
+                  <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>
+                )}
               </React.Fragment>
             );
           }
 
           // CONVERSATION EVENT
-          if (event.type === 'conversation') {
+          if (event.type === "conversation") {
             const sess = event.data;
             return (
               <React.Fragment key={event.id}>
@@ -599,19 +721,25 @@ function ContactJourney({ contactId }: { contactId: string }) {
                       <MessageCircle className="h-3.5 w-3.5" />
                     </div>
                     <span className="text-xs font-semibold text-blue-600">Atendimento</span>
-                    <span className="text-xs font-mono text-muted-foreground uppercase truncate">#{sess.id.substring(0, 8)}</span>
+                    <span className="text-xs font-mono text-muted-foreground uppercase truncate">
+                      #{sess.id.substring(0, 8)}
+                    </span>
                   </div>
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <Clock className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{format(event.date, "dd/MM/yy HH:mm", { locale: ptBR })}</span>
+                        <span className="truncate">
+                          {format(event.date, "dd/MM/yy HH:mm", { locale: ptBR })}
+                        </span>
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       <div className="flex items-center gap-1.5 text-[10px] bg-muted px-2 py-0.5 rounded-full font-medium">
                         <Smartphone className="h-3 w-3 text-green-500 shrink-0" />
-                        <span className="truncate max-w-[80px]">{sess.whatsapp_instances?.name || "WhatsApp"}</span>
+                        <span className="truncate max-w-[80px]">
+                          {sess.whatsapp_instances?.name || "WhatsApp"}
+                        </span>
                       </div>
                       <div className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full">
                         {getDuration(sess.started_at, sess.resolved_at)}
@@ -622,10 +750,12 @@ function ContactJourney({ contactId }: { contactId: string }) {
                   <div className="flex items-start gap-2">
                     <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
-                      <span className="text-[11px] font-semibold block mb-0.5 text-foreground/80">Atendido por</span>
+                      <span className="text-[11px] font-semibold block mb-0.5 text-foreground/80">
+                        Atendido por
+                      </span>
                       <span className="text-[11px] text-muted-foreground truncate block">
-                        {sess.assigned_agent?.name 
-                          ? sess.assigned_agent.name 
+                        {sess.assigned_agent?.name
+                          ? sess.assigned_agent.name
                           : sess.conversation?.ai_active && sess.conversation?.ai_agent?.name
                             ? `🤖 ${sess.conversation.ai_agent.name}`
                             : "Bot / Não atribuído"}
@@ -633,13 +763,15 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     </div>
                   </div>
                 </div>
-                {index < events.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+                {index < events.length - 1 && (
+                  <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>
+                )}
               </React.Fragment>
             );
           }
 
           // OPPORTUNITY EVENT
-          if (event.type === 'opportunity') {
+          if (event.type === "opportunity") {
             const opp = event.data;
             return (
               <React.Fragment key={event.id}>
@@ -655,7 +787,9 @@ function ContactJourney({ contactId }: { contactId: string }) {
                   </div>
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <span className="text-xs font-semibold text-green-600 mb-1 block">Oportunidade Criada</span>
+                      <span className="text-xs font-semibold text-green-600 mb-1 block">
+                        Oportunidade Criada
+                      </span>
                       <div className="font-medium">{opp.title}</div>
                       {opp.pipeline_stages?.pipelines?.name && (
                         <div className="text-xs text-muted-foreground mt-0.5">
@@ -664,7 +798,10 @@ function ContactJourney({ contactId }: { contactId: string }) {
                       )}
                     </div>
                     {opp.pipeline_stages && (
-                      <Badge style={{ backgroundColor: opp.pipeline_stages.color, color: '#fff' }} variant="outline">
+                      <Badge
+                        style={{ backgroundColor: opp.pipeline_stages.color, color: "#fff" }}
+                        variant="outline"
+                      >
                         {opp.pipeline_stages.name}
                       </Badge>
                     )}
@@ -672,25 +809,36 @@ function ContactJourney({ contactId }: { contactId: string }) {
                   <div className="flex items-center gap-1.5 text-green-600 font-medium text-sm mt-3">
                     <DollarSign className="h-4 w-4" />
                     <span>
-                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(opp.value || 0)}
+                      {new Intl.NumberFormat("pt-BR", {
+                        style: "currency",
+                        currency: "BRL",
+                      }).format(opp.value || 0)}
                     </span>
                   </div>
                 </div>
-                {index < events.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+                {index < events.length - 1 && (
+                  <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>
+                )}
               </React.Fragment>
             );
           }
 
           // TASK EVENT
-          if (event.type === 'task') {
+          if (event.type === "task") {
             const task = event.data;
-            const isDone = task.status === 'done';
+            const isDone = task.status === "done";
             return (
               <React.Fragment key={event.id}>
                 <div className="flex-1 min-w-0 p-3 rounded-xl border bg-card text-card-foreground shadow-sm">
                   <div className="flex items-center gap-2 mb-3">
-                    <div className={`flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${isDone ? 'bg-emerald-500/10 text-emerald-600' : 'bg-orange-500/10 text-orange-600'}`}>
-                      {isDone ? <CheckSquare className="h-3.5 w-3.5" /> : <CalendarClock className="h-3.5 w-3.5" />}
+                    <div
+                      className={`flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${isDone ? "bg-emerald-500/10 text-emerald-600" : "bg-orange-500/10 text-orange-600"}`}
+                    >
+                      {isDone ? (
+                        <CheckSquare className="h-3.5 w-3.5" />
+                      ) : (
+                        <CalendarClock className="h-3.5 w-3.5" />
+                      )}
                     </div>
                     <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-1" />
                     <span className="text-xs font-medium text-muted-foreground">
@@ -698,27 +846,34 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     </span>
                   </div>
                   <div>
-                    <span className={`text-xs font-semibold mb-1 block ${isDone ? 'text-emerald-600' : 'text-orange-600'}`}>
-                      {isDone ? 'Tarefa Concluída' : 'Tarefa Criada'}
+                    <span
+                      className={`text-xs font-semibold mb-1 block ${isDone ? "text-emerald-600" : "text-orange-600"}`}
+                    >
+                      {isDone ? "Tarefa Concluída" : "Tarefa Criada"}
                     </span>
-                    <span className={`text-sm font-medium ${isDone ? 'line-through text-muted-foreground' : ''}`}>
+                    <span
+                      className={`text-sm font-medium ${isDone ? "line-through text-muted-foreground" : ""}`}
+                    >
                       {task.title}
                     </span>
                     {task.due_date && (
                       <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-1">
                         <CalendarDays className="h-3 w-3" />
-                        Vencimento: {format(new Date(task.due_date), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                        Vencimento:{" "}
+                        {format(new Date(task.due_date), "dd/MM/yyyy HH:mm", { locale: ptBR })}
                       </div>
                     )}
                   </div>
                 </div>
-                {index < events.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+                {index < events.length - 1 && (
+                  <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>
+                )}
               </React.Fragment>
             );
           }
 
           // NOTE EVENT
-          if (event.type === 'note') {
+          if (event.type === "note") {
             const note = event.data;
             return (
               <React.Fragment key={event.id}>
@@ -733,7 +888,9 @@ function ContactJourney({ contactId }: { contactId: string }) {
                     </span>
                   </div>
                   <div>
-                    <span className="text-xs font-semibold text-amber-600 mb-1 block">Anotação Adicionada</span>
+                    <span className="text-xs font-semibold text-amber-600 mb-1 block">
+                      Anotação Adicionada
+                    </span>
                     <p className="text-sm whitespace-pre-wrap">{note.content}</p>
                     <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground mt-2">
                       <div className="flex items-center gap-1.5">
@@ -745,14 +902,18 @@ function ContactJourney({ contactId }: { contactId: string }) {
                           <span>•</span>
                           <div className="flex items-center gap-1.5 text-primary">
                             <Target className="h-3 w-3" />
-                            <span className="truncate max-w-[150px]">{note.opportunities.title}</span>
+                            <span className="truncate max-w-[150px]">
+                              {note.opportunities.title}
+                            </span>
                           </div>
                         </>
                       )}
                     </div>
                   </div>
                 </div>
-                {index < events.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+                {index < events.length - 1 && (
+                  <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>
+                )}
               </React.Fragment>
             );
           }
@@ -764,13 +925,13 @@ function ContactJourney({ contactId }: { contactId: string }) {
   );
 }
 
-function OpportunityValueEditor({ 
-  opp, 
-  onSave, 
-  isPending 
-}: { 
-  opp: any; 
-  onSave: (val: number) => void; 
+function OpportunityValueEditor({
+  opp,
+  onSave,
+  isPending,
+}: {
+  opp: any;
+  onSave: (val: number) => void;
   isPending?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -783,7 +944,7 @@ function OpportunityValueEditor({
   }, [opp.value, open]);
 
   const handleSave = () => {
-    const cleanStr = String(value).trim().replace(/\s/g, '').replace(',', '.');
+    const cleanStr = String(value).trim().replace(/\s/g, "").replace(",", ".");
     const num = parseFloat(cleanStr);
     if (isNaN(num) || num < 0) {
       toast.error("Por favor, informe um valor válido.");
@@ -815,7 +976,9 @@ function OpportunityValueEditor({
           title="Clique para editar o valor"
         >
           <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(opp.value || 0)}
+            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+              opp.value || 0,
+            )}
           </span>
           <Pencil className="h-2.5 w-2.5 text-muted-foreground/40 group-hover/val:text-primary transition-colors shrink-0" />
         </button>
@@ -827,7 +990,9 @@ function OpportunityValueEditor({
             <span className="text-[10px] text-muted-foreground font-mono">BRL (R$)</span>
           </div>
           <div className="relative flex items-center">
-            <span className="absolute left-2.5 text-xs text-muted-foreground font-mono font-medium">R$</span>
+            <span className="absolute left-2.5 text-xs text-muted-foreground font-mono font-medium">
+              R$
+            </span>
             <input
               type="text"
               inputMode="decimal"
@@ -865,13 +1030,13 @@ function OpportunityValueEditor({
   );
 }
 
-export function ContactDetailsTabs({ 
-  contactId, 
-  conversationId, 
-  defaultTab = "opportunities" 
-}: { 
-  contactId: string; 
-  conversationId?: string; 
+export function ContactDetailsTabs({
+  contactId,
+  conversationId,
+  defaultTab = "opportunities",
+}: {
+  contactId: string;
+  conversationId?: string;
   defaultTab?: string;
 }) {
   const qc = useQueryClient();
@@ -894,7 +1059,7 @@ export function ContactDetailsTabs({
   const [qualifyingOppId, setQualifyingOppId] = useState<string | null>(null);
 
   const toggleSession = (id: string) => {
-    setExpandedSessions(prev => {
+    setExpandedSessions((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -903,7 +1068,10 @@ export function ContactDetailsTabs({
   };
 
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin_company' || profile?.role === 'super_admin' || profile?.role === 'manager';
+  const isAdmin =
+    profile?.role === "admin_company" ||
+    profile?.role === "super_admin" ||
+    profile?.role === "manager";
 
   // Realtime subscription: updates opportunities, stages and qualification whenever changed in CRM or elsewhere
   useEffect(() => {
@@ -927,7 +1095,7 @@ export function ContactDetailsTabs({
           qc.invalidateQueries({ queryKey: ["opportunities"] });
           qc.invalidateQueries({ queryKey: ["contact-journey", contactId] });
           qc.invalidateQueries({ queryKey: ["opportunity-history"] });
-        }
+        },
       )
       .subscribe();
 
@@ -956,7 +1124,8 @@ export function ContactDetailsTabs({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("conversation_sessions" as any)
-        .select(`
+        .select(
+          `
           id,
           conversation_id,
           started_at,
@@ -989,7 +1158,8 @@ export function ContactDetailsTabs({
               name
             )
           )
-        `)
+        `,
+        )
         .eq("contact_id", contactId)
         .order("started_at", { ascending: false });
       if (error) throw error;
@@ -1012,7 +1182,8 @@ export function ContactDetailsTabs({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("opportunities")
-        .select(`
+        .select(
+          `
           id,
           title,
           value,
@@ -1031,7 +1202,8 @@ export function ContactDetailsTabs({
               name
             )
           )
-        `)
+        `,
+        )
         .eq("contact_id", contactId)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -1065,7 +1237,15 @@ export function ContactDetailsTabs({
   });
 
   const moveOpportunityStage = useMutation({
-    mutationFn: async ({ oppId, newStageId, targetStageName }: { oppId: string; newStageId: string; targetStageName: string }) => {
+    mutationFn: async ({
+      oppId,
+      newStageId,
+      targetStageName,
+    }: {
+      oppId: string;
+      newStageId: string;
+      targetStageName: string;
+    }) => {
       const { error: oppError } = await supabase
         .from("opportunities")
         .update({ stage_id: newStageId })
@@ -1073,15 +1253,13 @@ export function ContactDetailsTabs({
       if (oppError) throw oppError;
 
       // Record stage movement in opportunity_history
-      const { error: histError } = await supabase
-        .from("opportunity_history")
-        .insert({
-          opportunity_id: oppId,
-          user_id: profile?.id,
-          action_type: "stage_change",
-          description: `Oportunidade movida para a etapa "${targetStageName}"`
-        });
-      if (histError && histError.code !== '42P01') {
+      const { error: histError } = await supabase.from("opportunity_history").insert({
+        opportunity_id: oppId,
+        user_id: profile?.id,
+        action_type: "stage_change",
+        description: `Oportunidade movida para a etapa "${targetStageName}"`,
+      });
+      if (histError && histError.code !== "42P01") {
         console.warn("Could not record stage history:", histError);
       }
 
@@ -1094,8 +1272,8 @@ export function ContactDetailsTabs({
             opportunityId: oppId,
             triggerType: "stage_change",
             stageId: newStageId,
-          }
-        }).catch(err => console.warn("[CAPI] Falha ao disparar evento de etapa:", err));
+          },
+        }).catch((err) => console.warn("[CAPI] Falha ao disparar evento de etapa:", err));
       }
     },
     onSuccess: (_, variables) => {
@@ -1111,11 +1289,17 @@ export function ContactDetailsTabs({
     onError: (err: any) => {
       console.error("[moveOpportunityStage] Erro ao alterar etapa:", err);
       toast.error("Erro ao alterar etapa: " + (err.message || "Tente novamente"));
-    }
+    },
   });
 
   const changeOpportunityStatus = useMutation({
-    mutationFn: async ({ oppId, newStatus }: { oppId: string; newStatus: "won" | "lost" | "open" }) => {
+    mutationFn: async ({
+      oppId,
+      newStatus,
+    }: {
+      oppId: string;
+      newStatus: "won" | "lost" | "open";
+    }) => {
       const { error: oppError } = await supabase
         .from("opportunities")
         .update({ status: newStatus })
@@ -1128,15 +1312,13 @@ export function ContactDetailsTabs({
       else statusText = "Oportunidade REABERTA no funil 🔄";
 
       // Save status change in dedicated opportunity_history table
-      const { error: histError } = await supabase
-        .from("opportunity_history")
-        .insert({
-          opportunity_id: oppId,
-          user_id: profile?.id,
-          action_type: "status_change",
-          description: statusText
-        });
-      if (histError && histError.code !== '42P01') {
+      const { error: histError } = await supabase.from("opportunity_history").insert({
+        opportunity_id: oppId,
+        user_id: profile?.id,
+        action_type: "status_change",
+        description: statusText,
+      });
+      if (histError && histError.code !== "42P01") {
         console.warn("Could not record status history:", histError);
       }
 
@@ -1148,19 +1330,19 @@ export function ContactDetailsTabs({
             companyId,
             opportunityId: oppId,
             triggerType: "won",
-          }
-        }).catch(err => console.warn("[CAPI] Falha ao disparar evento de Purchase:", err));
+          },
+        }).catch((err) => console.warn("[CAPI] Falha ao disparar evento de Purchase:", err));
       }
 
       return newStatus;
     },
     onSuccess: (newStatus) => {
       toast.success(
-        newStatus === 'won' 
-          ? "Oportunidade marcada como GANHA! 🎉" 
-          : newStatus === 'lost' 
-            ? "Oportunidade marcada como PERDIDA!" 
-            : "Oportunidade REABERTA no funil!"
+        newStatus === "won"
+          ? "Oportunidade marcada como GANHA! 🎉"
+          : newStatus === "lost"
+            ? "Oportunidade marcada como PERDIDA!"
+            : "Oportunidade REABERTA no funil!",
       );
       qc.invalidateQueries({ queryKey: ["contact-opportunities", contactId] });
       qc.invalidateQueries({ queryKey: ["opportunities"] });
@@ -1169,7 +1351,7 @@ export function ContactDetailsTabs({
       qc.invalidateQueries({ queryKey: ["contact-journey", contactId] });
       qc.invalidateQueries({ queryKey: ["opportunity-history"] });
     },
-    onError: (e: any) => toast.error("Erro ao alterar status: " + (e.message || "Tente novamente"))
+    onError: (e: any) => toast.error("Erro ao alterar status: " + (e.message || "Tente novamente")),
   });
 
   const updateOpportunityValue = useMutation({
@@ -1180,29 +1362,33 @@ export function ContactDetailsTabs({
         .eq("id", oppId);
       if (oppError) throw oppError;
 
-      const formattedVal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(newValue);
+      const formattedVal = new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      }).format(newValue);
 
       // Record value change in opportunity_history table
-      const { error: histError } = await supabase
-        .from("opportunity_history")
-        .insert({
-          opportunity_id: oppId,
-          user_id: profile?.id,
-          action_type: "value_change",
-          description: `Valor alterado para ${formattedVal}`
-        });
-      if (histError && histError.code !== '42P01') {
+      const { error: histError } = await supabase.from("opportunity_history").insert({
+        opportunity_id: oppId,
+        user_id: profile?.id,
+        action_type: "value_change",
+        description: `Valor alterado para ${formattedVal}`,
+      });
+      if (histError && histError.code !== "42P01") {
         console.warn("Could not record value history:", histError);
       }
     },
     onSuccess: (_, variables) => {
-      const formattedVal = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(variables.newValue);
+      const formattedVal = new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      }).format(variables.newValue);
       toast.success(`Valor atualizado para ${formattedVal}`);
       qc.invalidateQueries({ queryKey: ["contact-opportunities", contactId] });
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["contact-journey", contactId] });
     },
-    onError: (e: any) => toast.error("Erro ao alterar valor: " + (e.message || "Tente novamente"))
+    onError: (e: any) => toast.error("Erro ao alterar valor: " + (e.message || "Tente novamente")),
   });
 
   const getStatusColor = (status: string) => {
@@ -1220,10 +1406,14 @@ export function ContactDetailsTabs({
 
   const translateStatus = (status: string) => {
     switch (status) {
-      case "waiting": return "Aguardando";
-      case "active": return "Em Atendimento";
-      case "resolved": return "Resolvido";
-      default: return status;
+      case "waiting":
+        return "Aguardando";
+      case "active":
+        return "Em Atendimento";
+      case "resolved":
+        return "Resolvido";
+      default:
+        return status;
     }
   };
 
@@ -1243,9 +1433,12 @@ export function ContactDetailsTabs({
     );
   }
 
-  const totalOppValue = opportunities?.reduce((sum: number, opp: any) => sum + (Number(opp.value) || 0), 0) || 0;
+  const totalOppValue =
+    opportunities?.reduce((sum: number, opp: any) => sum + (Number(opp.value) || 0), 0) || 0;
 
-  const isMoreActive = ["jornada", "conversations", "ads", "indicacoes", "tickets"].includes(activeTab);
+  const isMoreActive = ["jornada", "conversations", "ads", "indicacoes", "tickets"].includes(
+    activeTab,
+  );
 
   const moreLabels: Record<string, { label: string; icon: any }> = {
     jornada: { label: "Jornada", icon: Map },
@@ -1259,11 +1452,15 @@ export function ContactDetailsTabs({
   const MoreIcon = activeMore ? activeMore.icon : MoreHorizontal;
 
   return (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col h-full min-h-0 w-full">
+    <Tabs
+      value={activeTab}
+      onValueChange={setActiveTab}
+      className="flex-1 flex flex-col h-full min-h-0 w-full"
+    >
       <div className="px-3 pt-3 pb-2 border-b w-full bg-card">
         <TabsList className="grid w-full grid-cols-4 h-9 p-0.5 bg-muted/70 gap-0.5 rounded-lg">
-          <TabsTrigger 
-            value="opportunities" 
+          <TabsTrigger
+            value="opportunities"
             className="gap-1 px-1.5 py-1 text-xs font-medium data-[state=active]:font-semibold"
           >
             <Target className="h-3.5 w-3.5 text-primary shrink-0" />
@@ -1275,16 +1472,16 @@ export function ContactDetailsTabs({
             )}
           </TabsTrigger>
 
-          <TabsTrigger 
-            value="observacoes" 
+          <TabsTrigger
+            value="observacoes"
             className="gap-1 px-1.5 py-1 text-xs font-medium data-[state=active]:font-semibold"
           >
             <Edit2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="truncate">Notas</span>
           </TabsTrigger>
 
-          <TabsTrigger 
-            value="tasks" 
+          <TabsTrigger
+            value="tasks"
             className="gap-1 px-1.5 py-1 text-xs font-medium data-[state=active]:font-semibold"
           >
             <CheckSquare className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -1299,7 +1496,7 @@ export function ContactDetailsTabs({
                   "inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium ring-offset-background cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                   isMoreActive
                     ? "bg-background text-foreground shadow-xs font-semibold"
-                    : "text-muted-foreground hover:bg-background/50 hover:text-foreground"
+                    : "text-muted-foreground hover:bg-background/50 hover:text-foreground",
                 )}
               >
                 <MoreIcon className="h-3.5 w-3.5 shrink-0" />
@@ -1308,37 +1505,52 @@ export function ContactDetailsTabs({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48 shadow-lg">
-              <DropdownMenuItem 
-                onClick={() => setActiveTab("jornada")} 
-                className={cn("gap-2 text-xs cursor-pointer", activeTab === "jornada" && "bg-accent font-semibold text-primary")}
+              <DropdownMenuItem
+                onClick={() => setActiveTab("jornada")}
+                className={cn(
+                  "gap-2 text-xs cursor-pointer",
+                  activeTab === "jornada" && "bg-accent font-semibold text-primary",
+                )}
               >
                 <Map className="h-4 w-4" />
                 <span>Jornada do Contato</span>
               </DropdownMenuItem>
-              <DropdownMenuItem 
-                onClick={() => setActiveTab("conversations")} 
-                className={cn("gap-2 text-xs cursor-pointer", activeTab === "conversations" && "bg-accent font-semibold text-primary")}
+              <DropdownMenuItem
+                onClick={() => setActiveTab("conversations")}
+                className={cn(
+                  "gap-2 text-xs cursor-pointer",
+                  activeTab === "conversations" && "bg-accent font-semibold text-primary",
+                )}
               >
                 <MessageSquare className="h-4 w-4" />
                 <span>Histórico de Atendimentos</span>
               </DropdownMenuItem>
-              <DropdownMenuItem 
-                onClick={() => setActiveTab("ads")} 
-                className={cn("gap-2 text-xs cursor-pointer", activeTab === "ads" && "bg-accent font-semibold text-primary")}
+              <DropdownMenuItem
+                onClick={() => setActiveTab("ads")}
+                className={cn(
+                  "gap-2 text-xs cursor-pointer",
+                  activeTab === "ads" && "bg-accent font-semibold text-primary",
+                )}
               >
                 <Megaphone className="h-4 w-4" />
                 <span>Origem / Anúncios</span>
               </DropdownMenuItem>
-              <DropdownMenuItem 
-                onClick={() => setActiveTab("indicacoes")} 
-                className={cn("gap-2 text-xs cursor-pointer", activeTab === "indicacoes" && "bg-accent font-semibold text-primary")}
+              <DropdownMenuItem
+                onClick={() => setActiveTab("indicacoes")}
+                className={cn(
+                  "gap-2 text-xs cursor-pointer",
+                  activeTab === "indicacoes" && "bg-accent font-semibold text-primary",
+                )}
               >
                 <Gift className="h-4 w-4" />
                 <span>Indicações</span>
               </DropdownMenuItem>
-              <DropdownMenuItem 
-                onClick={() => setActiveTab("tickets")} 
-                className={cn("gap-2 text-xs cursor-pointer", activeTab === "tickets" && "bg-accent font-semibold text-primary")}
+              <DropdownMenuItem
+                onClick={() => setActiveTab("tickets")}
+                className={cn(
+                  "gap-2 text-xs cursor-pointer",
+                  activeTab === "tickets" && "bg-accent font-semibold text-primary",
+                )}
               >
                 <Ticket className="h-4 w-4" />
                 <span>Tickets & Chamados</span>
@@ -1350,10 +1562,10 @@ export function ContactDetailsTabs({
 
       <div className="flex-1 p-3 overflow-y-auto overflow-x-hidden min-w-0">
         <TabsContent value="tickets" className="mt-0">
-          <ContactTickets 
-            contactId={contactId} 
-            unitId={contact.unit_id} 
-            conversationId={conversationId} 
+          <ContactTickets
+            contactId={contactId}
+            unitId={contact.unit_id}
+            conversationId={conversationId}
           />
         </TabsContent>
 
@@ -1365,7 +1577,9 @@ export function ContactDetailsTabs({
           <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
             <div>
               <span className="text-xs font-semibold text-foreground">Notas e Observações</span>
-              <p className="text-[10px] text-muted-foreground">Anotações internas sobre o contato</p>
+              <p className="text-[10px] text-muted-foreground">
+                Anotações internas sobre o contato
+              </p>
             </div>
           </div>
           <ContactNotes contactId={contactId} />
@@ -1374,7 +1588,9 @@ export function ContactDetailsTabs({
         <TabsContent value="conversations" className="mt-0 space-y-3">
           <div className="flex items-center justify-between gap-2 pb-2 border-b border-border/40">
             <div>
-              <span className="text-xs font-semibold text-foreground">Histórico de Atendimentos</span>
+              <span className="text-xs font-semibold text-foreground">
+                Histórico de Atendimentos
+              </span>
               <p className="text-[10px] text-muted-foreground">Tickets e sessões anteriores</p>
             </div>
           </div>
@@ -1396,44 +1612,66 @@ export function ContactDetailsTabs({
                       <div className="min-w-[130px] flex-1">
                         <div className="flex flex-wrap items-center gap-2 mb-1">
                           {session.conversation?.channel ? (
-                            <ChannelIcon channel={session.conversation.channel} className="h-6 w-6" />
+                            <ChannelIcon
+                              channel={session.conversation.channel}
+                              className="h-6 w-6"
+                            />
                           ) : (
                             <div className="flex items-center justify-center w-6 h-6 rounded-full bg-muted text-muted-foreground shrink-0">
                               <MessageCircle className="h-3 w-3" />
                             </div>
                           )}
-                          <span className="text-xs font-mono text-muted-foreground uppercase truncate">#{session.id.substring(0, 8)}</span>
-                          <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wider", session.resolved_at ? getStatusColor("resolved") : getStatusColor("active"))}>
+                          <span className="text-xs font-mono text-muted-foreground uppercase truncate">
+                            #{session.id.substring(0, 8)}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] uppercase tracking-wider",
+                              session.resolved_at
+                                ? getStatusColor("resolved")
+                                : getStatusColor("active"),
+                            )}
+                          >
                             {session.resolved_at ? "Resolvido" : "Em Andamento"}
                           </Badge>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <Clock className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate">{format(new Date(session.started_at), "dd/MM/yy HH:mm", { locale: ptBR })}</span>
+                          <span className="truncate">
+                            {format(new Date(session.started_at), "dd/MM/yy HH:mm", {
+                              locale: ptBR,
+                            })}
+                          </span>
                         </div>
                       </div>
-                      
+
                       <div className="flex flex-row sm:flex-col items-center sm:items-end gap-1.5 shrink-0 w-full sm:w-auto mt-1 sm:mt-0">
                         <div className="flex items-center gap-1.5 text-[10px] bg-muted px-2 py-0.5 rounded-full font-medium">
                           <Smartphone className="h-3 w-3 text-green-500 shrink-0" />
-                          <span className="truncate max-w-[100px]">{session.whatsapp_instances?.name || "WhatsApp"}</span>
+                          <span className="truncate max-w-[100px]">
+                            {session.whatsapp_instances?.name || "WhatsApp"}
+                          </span>
                         </div>
                         <div className="text-[10px] font-medium text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full">
                           {getDuration(session.started_at, session.resolved_at)}
                         </div>
-                        {session.conversation_id && (isAdmin || !session.assigned_agent_id || session.assigned_agent_id === profile?.id) && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-6 text-[11px] gap-1 px-2 text-primary hover:text-primary hover:bg-primary/10 mt-0.5"
-                            onClick={() => {
-                              window.location.href = `/conversations?c=${session.conversation_id}&tab=active`;
-                            }}
-                          >
-                            <MessageSquare className="h-3 w-3" />
-                            Ir para chat
-                          </Button>
-                        )}
+                        {session.conversation_id &&
+                          (isAdmin ||
+                            !session.assigned_agent_id ||
+                            session.assigned_agent_id === profile?.id) && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 text-[11px] gap-1 px-2 text-primary hover:text-primary hover:bg-primary/10 mt-0.5"
+                              onClick={() => {
+                                window.location.href = `/conversations?c=${session.conversation_id}&tab=active`;
+                              }}
+                            >
+                              <MessageSquare className="h-3 w-3" />
+                              Ir para chat
+                            </Button>
+                          )}
                       </div>
                     </div>
 
@@ -1444,11 +1682,14 @@ export function ContactDetailsTabs({
                       <div className="flex items-start gap-2">
                         <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
                         <div className="flex-1 min-w-0">
-                          <span className="text-[11px] font-semibold block mb-0.5 text-foreground/80">Atendente</span>
+                          <span className="text-[11px] font-semibold block mb-0.5 text-foreground/80">
+                            Atendente
+                          </span>
                           <span className="text-[11px] text-muted-foreground truncate block">
-                            {session.assigned_agent?.name 
-                              ? session.assigned_agent.name 
-                              : session.conversation?.ai_active && session.conversation?.ai_agent?.name
+                            {session.assigned_agent?.name
+                              ? session.assigned_agent.name
+                              : session.conversation?.ai_active &&
+                                  session.conversation?.ai_agent?.name
                                 ? `🤖 ${session.conversation.ai_agent.name}`
                                 : "Não atribuído"}
                           </span>
@@ -1460,7 +1701,9 @@ export function ContactDetailsTabs({
                         <div className="mt-2 rounded-md bg-primary/5 border border-primary/10 px-2.5 py-2 space-y-1">
                           <div className="flex items-center gap-1.5 text-[11px] font-semibold text-primary">
                             <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">{session.resolution_reason?.label || "Atendimento Encerrado"}</span>
+                            <span className="truncate">
+                              {session.resolution_reason?.label || "Atendimento Encerrado"}
+                            </span>
                           </div>
                           {session.resolution_observation && (
                             <p className="text-[11px] text-muted-foreground pl-5 leading-relaxed italic line-clamp-3">
@@ -1469,50 +1712,94 @@ export function ContactDetailsTabs({
                           )}
                         </div>
                       )}
-                      
+
                       {/* Timeline details (Jornada) */}
                       {session.session_events && session.session_events.length > 0 && (
                         <div className="mt-4 border-t pt-3">
-                          <button 
+                          <button
                             onClick={() => toggleSession(session.id)}
                             className="flex items-center justify-between w-full text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors group/toggle"
                           >
                             <div className="flex items-center gap-1.5">
                               <History className="h-3.5 w-3.5" />
-                              <span>{expandedSessions.has(session.id) ? "Ocultar linha do tempo" : "Ver linha do tempo"}</span>
+                              <span>
+                                {expandedSessions.has(session.id)
+                                  ? "Ocultar linha do tempo"
+                                  : "Ver linha do tempo"}
+                              </span>
                             </div>
                             <span className="bg-muted px-1.5 py-0.5 rounded text-[9px] group-hover/toggle:bg-muted-foreground/20 transition-colors">
-                              {session.session_events.length} {session.session_events.length === 1 ? 'evento' : 'eventos'}
+                              {session.session_events.length}{" "}
+                              {session.session_events.length === 1 ? "evento" : "eventos"}
                             </span>
                           </button>
-                          
+
                           {expandedSessions.has(session.id) && (
                             <div className="mt-3 pl-2 border-l-2 border-muted space-y-3 w-full animate-in slide-in-from-top-2 fade-in duration-200">
-                              {session.session_events.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).map((event: any) => {
-                                const actorName = event.metadata?.by_ai 
-                                  ? `🤖 ${event.metadata.ai_agent_name || session.conversation?.ai_agent?.name || 'IA'}`
-                                  : event.actor?.name || 'Sistema';
-                                
-                                return (
-                                  <div key={event.id} className="flex items-start gap-2 text-xs text-muted-foreground w-full">
-                                    <span className="shrink-0 font-mono text-[10px] mt-0.5">{format(new Date(event.created_at), "HH:mm")}</span>
-                                    <div className="flex-1 min-w-0 break-words leading-relaxed pr-1">
-                                      {event.event_type === 'started' && <span>Ticket aberto</span>}
-                                      {event.event_type === 'assigned' && <span>Atribuído para <strong>{actorName}</strong></span>}
-                                      {event.event_type === 'transferred' && <span>Transferido por <strong>{actorName}</strong>{event.metadata?.targetName ? <span> para <strong>{event.metadata.targetName}</strong></span> : ''}</span>}
-                                      {event.event_type === 'returned_to_queue' && <span>Retornado à fila por <strong>{actorName}</strong></span>}
-                                      {event.event_type === 'resolved' && <span>Encerrado por <strong>{actorName}</strong></span>}
+                              {session.session_events
+                                .sort(
+                                  (a: any, b: any) =>
+                                    new Date(a.created_at).getTime() -
+                                    new Date(b.created_at).getTime(),
+                                )
+                                .map((event: any) => {
+                                  const actorName = event.metadata?.by_ai
+                                    ? `🤖 ${event.metadata.ai_agent_name || session.conversation?.ai_agent?.name || "IA"}`
+                                    : event.actor?.name || "Sistema";
+
+                                  return (
+                                    <div
+                                      key={event.id}
+                                      className="flex items-start gap-2 text-xs text-muted-foreground w-full"
+                                    >
+                                      <span className="shrink-0 font-mono text-[10px] mt-0.5">
+                                        {format(new Date(event.created_at), "HH:mm")}
+                                      </span>
+                                      <div className="flex-1 min-w-0 break-words leading-relaxed pr-1">
+                                        {event.event_type === "started" && (
+                                          <span>Ticket aberto</span>
+                                        )}
+                                        {event.event_type === "assigned" && (
+                                          <span>
+                                            Atribuído para <strong>{actorName}</strong>
+                                          </span>
+                                        )}
+                                        {event.event_type === "transferred" && (
+                                          <span>
+                                            Transferido por <strong>{actorName}</strong>
+                                            {event.metadata?.targetName ? (
+                                              <span>
+                                                {" "}
+                                                para <strong>{event.metadata.targetName}</strong>
+                                              </span>
+                                            ) : (
+                                              ""
+                                            )}
+                                          </span>
+                                        )}
+                                        {event.event_type === "returned_to_queue" && (
+                                          <span>
+                                            Retornado à fila por <strong>{actorName}</strong>
+                                          </span>
+                                        )}
+                                        {event.event_type === "resolved" && (
+                                          <span>
+                                            Encerrado por <strong>{actorName}</strong>
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                })}
                             </div>
                           )}
                         </div>
                       )}
                     </div>
                   </div>
-                  {index < sessions.length - 1 && <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>}
+                  {index < sessions.length - 1 && (
+                    <div className="w-0.5 h-4 bg-border mx-auto my-1"></div>
+                  )}
                 </React.Fragment>
               ))}
             </div>
@@ -1524,17 +1811,21 @@ export function ContactDetailsTabs({
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-semibold text-foreground">
-                  {opportunities?.length || 0} {opportunities?.length === 1 ? "Oportunidade" : "Oportunidades"}
+                  {opportunities?.length || 0}{" "}
+                  {opportunities?.length === 1 ? "Oportunidade" : "Oportunidades"}
                 </span>
                 {totalOppValue > 0 && (
-                  <Badge variant="secondary" className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20 px-1.5 py-0 h-4">
-                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalOppValue)}
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20 px-1.5 py-0 h-4"
+                  >
+                    {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+                      totalOppValue,
+                    )}
                   </Badge>
                 )}
               </div>
-              <p className="text-[10px] text-muted-foreground">
-                Negócios vinculados no CRM
-              </p>
+              <p className="text-[10px] text-muted-foreground">Negócios vinculados no CRM</p>
             </div>
 
             <OpportunityDialog defaultContactId={contactId}>
@@ -1554,7 +1845,9 @@ export function ContactDetailsTabs({
                 <Target className="h-5 w-5" />
               </div>
               <div className="space-y-0.5">
-                <p className="text-xs font-semibold text-foreground">Nenhuma oportunidade em aberto</p>
+                <p className="text-xs font-semibold text-foreground">
+                  Nenhuma oportunidade em aberto
+                </p>
                 <p className="text-[11px] text-muted-foreground max-w-[220px]">
                   Cadastre este lead no funil de vendas para acompanhar a negociação.
                 </p>
@@ -1569,22 +1862,25 @@ export function ContactDetailsTabs({
             <div className="space-y-2.5">
               {opportunities.map((opp: any) => {
                 const oppPipelineId = opp.pipeline_stages?.pipeline_id;
-                const stages = pipelineStages?.filter((s: any) => !oppPipelineId || s.pipeline_id === oppPipelineId) || [];
-                const isWon = opp.status === 'won';
-                const isLost = opp.status === 'lost';
+                const stages =
+                  pipelineStages?.filter(
+                    (s: any) => !oppPipelineId || s.pipeline_id === oppPipelineId,
+                  ) || [];
+                const isWon = opp.status === "won";
+                const isLost = opp.status === "lost";
                 const isOpen = !isWon && !isLost;
 
                 return (
-                  <div 
-                    key={opp.id} 
+                  <div
+                    key={opp.id}
                     className="relative group rounded-xl border border-border/70 bg-card p-3 shadow-xs hover:shadow-md hover:border-primary/40 transition-all space-y-2.5"
                   >
                     {/* Linha 1: Título e Funil (com link externo para o pipeline) */}
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <OpportunityDialog opportunity={opp}>
-                          <span 
-                            className="font-semibold text-sm text-foreground hover:text-primary transition-colors cursor-pointer line-clamp-1 block" 
+                          <span
+                            className="font-semibold text-sm text-foreground hover:text-primary transition-colors cursor-pointer line-clamp-1 block"
                             title={opp.title}
                           >
                             {opp.title}
@@ -1593,19 +1889,21 @@ export function ContactDetailsTabs({
                         {opp.pipeline_stages?.pipelines?.name && (
                           <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5 truncate">
                             <span className="opacity-70">Funil:</span>
-                            <span className="font-medium text-foreground/80">{opp.pipeline_stages.pipelines.name}</span>
+                            <span className="font-medium text-foreground/80">
+                              {opp.pipeline_stages.pipelines.name}
+                            </span>
                           </div>
                         )}
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
-                        <Link 
-                          to="/pipeline" 
+                        <Link
+                          to="/pipeline"
                           search={{
                             pipelineId: oppPipelineId,
                             opportunityId: opp.id,
                           }}
-                          className="h-6 w-6 rounded-md bg-muted/60 flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors" 
+                          className="h-6 w-6 rounded-md bg-muted/60 flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                           title="Ver no Funil / Pipeline"
                         >
                           <ExternalLink className="h-3 w-3" />
@@ -1618,16 +1916,19 @@ export function ContactDetailsTabs({
                       <div className="min-w-0 flex-1">
                         {stages.length === 0 ? (
                           opp.pipeline_stages ? (
-                            <Badge 
-                              variant="outline" 
+                            <Badge
+                              variant="outline"
                               className="text-[10px] font-medium px-2 py-0.5 border truncate max-w-[140px]"
-                              style={{ 
-                                backgroundColor: `${opp.pipeline_stages.color || '#3b82f6'}15`, 
-                                color: opp.pipeline_stages.color || '#3b82f6',
-                                borderColor: `${opp.pipeline_stages.color || '#3b82f6'}40`
+                              style={{
+                                backgroundColor: `${opp.pipeline_stages.color || "#3b82f6"}15`,
+                                color: opp.pipeline_stages.color || "#3b82f6",
+                                borderColor: `${opp.pipeline_stages.color || "#3b82f6"}40`,
                               }}
                             >
-                              <span className="w-1.5 h-1.5 rounded-full mr-1.5 shrink-0" style={{ backgroundColor: opp.pipeline_stages.color || '#3b82f6' }} />
+                              <span
+                                className="w-1.5 h-1.5 rounded-full mr-1.5 shrink-0"
+                                style={{ backgroundColor: opp.pipeline_stages.color || "#3b82f6" }}
+                              />
                               <span className="truncate">{opp.pipeline_stages.name}</span>
                             </Badge>
                           ) : null
@@ -1639,18 +1940,20 @@ export function ContactDetailsTabs({
                                 disabled={moveOpportunityStage.isPending}
                                 className={cn(
                                   "inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full border transition-all cursor-pointer hover:opacity-90 active:scale-95 select-none focus:outline-none focus:ring-1 focus:ring-ring max-w-full",
-                                  moveOpportunityStage.isPending && "opacity-50 cursor-not-allowed"
+                                  moveOpportunityStage.isPending && "opacity-50 cursor-not-allowed",
                                 )}
-                                style={{ 
-                                  backgroundColor: `${opp.pipeline_stages?.color || '#3b82f6'}15`, 
-                                  color: opp.pipeline_stages?.color || '#3b82f6',
-                                  borderColor: `${opp.pipeline_stages?.color || '#3b82f6'}40`
+                                style={{
+                                  backgroundColor: `${opp.pipeline_stages?.color || "#3b82f6"}15`,
+                                  color: opp.pipeline_stages?.color || "#3b82f6",
+                                  borderColor: `${opp.pipeline_stages?.color || "#3b82f6"}40`,
                                 }}
                                 title="Clique para alterar a etapa diretamente"
                               >
-                                <span 
-                                  className="w-1.5 h-1.5 rounded-full shrink-0" 
-                                  style={{ backgroundColor: opp.pipeline_stages?.color || '#3b82f6' }} 
+                                <span
+                                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                                  style={{
+                                    backgroundColor: opp.pipeline_stages?.color || "#3b82f6",
+                                  }}
                                 />
                                 <span className="truncate font-semibold max-w-[110px]">
                                   {opp.pipeline_stages?.name || "Sem Etapa"}
@@ -1680,13 +1983,13 @@ export function ContactDetailsTabs({
                                     }}
                                     className={cn(
                                       "flex items-center justify-between text-xs py-1.5 px-2 rounded-md cursor-pointer transition-colors",
-                                      isCurrent && "bg-muted font-bold cursor-default"
+                                      isCurrent && "bg-muted font-bold cursor-default",
                                     )}
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
                                       <span
                                         className="w-2.5 h-2.5 rounded-full shrink-0"
-                                        style={{ backgroundColor: stage.color || '#3b82f6' }}
+                                        style={{ backgroundColor: stage.color || "#3b82f6" }}
                                       />
                                       <span className="truncate">{stage.name}</span>
                                     </div>
@@ -1703,7 +2006,9 @@ export function ContactDetailsTabs({
 
                       <OpportunityValueEditor
                         opp={opp}
-                        onSave={(val) => updateOpportunityValue.mutate({ oppId: opp.id, newValue: val })}
+                        onSave={(val) =>
+                          updateOpportunityValue.mutate({ oppId: opp.id, newValue: val })
+                        }
                         isPending={updateOpportunityValue.isPending}
                       />
                     </div>
@@ -1712,10 +2017,9 @@ export function ContactDetailsTabs({
                     <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                       <CalendarDays className="h-3 w-3 shrink-0 opacity-70" />
                       <span>
-                        {opp.expected_close_date 
+                        {opp.expected_close_date
                           ? `Previsão: ${formatDateOnly(opp.expected_close_date, "dd/MM/yyyy")}`
-                          : `Criado em: ${format(new Date(opp.created_at), "dd/MM/yyyy", { locale: ptBR })}`
-                        }
+                          : `Criado em: ${format(new Date(opp.created_at), "dd/MM/yyyy", { locale: ptBR })}`}
                       </span>
                     </div>
 
@@ -1731,7 +2035,7 @@ export function ContactDetailsTabs({
                           "w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all cursor-pointer select-none",
                           qualifyingOppId === opp.id
                             ? "bg-primary/10 border-primary/40 text-primary font-semibold"
-                            : "bg-muted/30 border-border/50 hover:bg-muted/60 text-muted-foreground hover:text-foreground"
+                            : "bg-muted/30 border-border/50 hover:bg-muted/60 text-muted-foreground hover:text-foreground",
                         )}
                         title="Ver passos da etapa"
                       >
@@ -1762,7 +2066,7 @@ export function ContactDetailsTabs({
                             disabled={changeOpportunityStatus.isPending}
                             onClick={(e) => {
                               e.stopPropagation();
-                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: 'won' });
+                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: "won" });
                             }}
                             className="inline-flex items-center justify-center gap-1.5 h-7 px-2 text-xs font-semibold rounded-lg border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-600 hover:text-white transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                             title="Marcar oportunidade como Ganha"
@@ -1775,7 +2079,7 @@ export function ContactDetailsTabs({
                             disabled={changeOpportunityStatus.isPending}
                             onClick={(e) => {
                               e.stopPropagation();
-                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: 'lost' });
+                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: "lost" });
                             }}
                             className="inline-flex items-center justify-center gap-1.5 h-7 px-2 text-xs font-semibold rounded-lg border border-rose-500/40 text-rose-600 dark:text-rose-400 bg-rose-500/10 hover:bg-rose-600 hover:text-white transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                             title="Marcar oportunidade como Perdida"
@@ -1794,7 +2098,7 @@ export function ContactDetailsTabs({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: 'open' });
+                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: "open" });
                             }}
                             disabled={changeOpportunityStatus.isPending}
                             className="text-xs text-muted-foreground hover:text-foreground font-medium hover:underline cursor-pointer transition-colors"
@@ -1813,7 +2117,7 @@ export function ContactDetailsTabs({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: 'open' });
+                              changeOpportunityStatus.mutate({ oppId: opp.id, newStatus: "open" });
                             }}
                             disabled={changeOpportunityStatus.isPending}
                             className="text-xs text-muted-foreground hover:text-foreground font-medium hover:underline cursor-pointer transition-colors"
@@ -1847,13 +2151,21 @@ export function ContactDetailsTabs({
   );
 }
 
-export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenChange }: ContactDetailsSheetProps) {
+export function ContactDetailsSheet({
+  contactId: initialContactId,
+  open,
+  onOpenChange,
+}: ContactDetailsSheetProps) {
   const { profile } = useAuth();
   const qc = useQueryClient();
-  const isAdmin = profile?.role === 'admin_company' || profile?.role === 'super_admin' || profile?.role === 'manager';
-  
-  const isSuperOrCompanyAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
-  
+  const isAdmin =
+    profile?.role === "admin_company" ||
+    profile?.role === "super_admin" ||
+    profile?.role === "manager";
+
+  const isSuperOrCompanyAdmin =
+    profile?.role === "admin_company" || profile?.role === "super_admin";
+
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1862,10 +2174,7 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
 
   const deleteContact = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
-        .from("contacts")
-        .delete()
-        .eq("id", activeContactId!);
+      const { error } = await supabase.from("contacts").delete().eq("id", activeContactId!);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -1875,7 +2184,7 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
     },
     onError: (error) => {
       toast.error("Erro ao excluir contato", { description: error.message });
-    }
+    },
   });
 
   const { data: contact, isLoading: isLoadingContact } = useQuery({
@@ -1935,6 +2244,35 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
     },
   });
 
+  // Mutação para troca rápida de tipo/status (Lead vs Cliente)
+  const updateContactTypeMutation = useMutation({
+    mutationFn: async (newType: "lead" | "client") => {
+      const targetContactId = activeContactId || contact?.id;
+      if (!targetContactId) throw new Error("Contato não identificado.");
+      const compId = contact?.company_id || profile?.company_id;
+
+      return await updateContactTypeAction({
+        data: {
+          contactId: targetContactId,
+          contactType: newType,
+          companyId: compId,
+        },
+      });
+    },
+    onSuccess: (_, newType) => {
+      toast.success(
+        newType === "client" ? "Contato promovido a Cliente! 🎉" : "Contato definido como Lead",
+      );
+      qc.invalidateQueries({ queryKey: ["contact-details", activeContactId] });
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contacts-counts"] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (err: any) => {
+      toast.error("Erro ao alterar tipo do contato", { description: err.message });
+    },
+  });
+
   // Automatically follow merged_into_id if we fetch a merged contact
   useEffect(() => {
     if (contact?.merged_into_id) {
@@ -1960,9 +2298,9 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                 <div className="flex items-center gap-3">
                   <Avatar className="h-12 w-12 border shrink-0">
                     {contact.profile_picture_url && (
-                      <AvatarImage 
-                        src={contact.profile_picture_url} 
-                        alt={contact.name || ""} 
+                      <AvatarImage
+                        src={contact.profile_picture_url}
+                        alt={contact.name || ""}
                         className="object-cover"
                         referrerPolicy="no-referrer"
                       />
@@ -1971,18 +2309,96 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                       {initials(contact.name)}
                     </AvatarFallback>
                   </Avatar>
-                  <SheetTitle className="text-2xl">{contact.name}</SheetTitle>
-                  {contact.is_blocked && (
-                    <Badge variant="destructive" className="ml-2 text-xs">Bloqueado</Badge>
-                  )}
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <SheetTitle className="text-xl md:text-2xl truncate">
+                        {contact.name}
+                      </SheetTitle>
+                      {contact.is_blocked && (
+                        <Badge variant="destructive" className="text-xs">
+                          Bloqueado
+                        </Badge>
+                      )}
+                    </div>
+                    {/* Status Lead / Cliente Badge com Quick Toggle */}
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className={cn(
+                              "h-6 px-2 text-[11px] font-semibold rounded-full gap-1 transition-all cursor-pointer shadow-xs",
+                              contact.contact_type === "client"
+                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
+                                : "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20",
+                            )}
+                            title="Clique para alternar entre Lead e Cliente"
+                          >
+                            <span
+                              className={cn(
+                                "h-1.5 w-1.5 rounded-full shrink-0",
+                                contact.contact_type === "client"
+                                  ? "bg-emerald-500"
+                                  : "bg-amber-500",
+                              )}
+                            />
+                            {contact.contact_type === "client" ? "Cliente" : "Lead"}
+                            <ChevronDown className="h-2.5 w-2.5 opacity-60 ml-0.5" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="p-1 w-44" align="start">
+                          <div className="text-[10px] font-medium text-muted-foreground px-2 py-1 border-b border-border/40">
+                            Classificação do Contato
+                          </div>
+                          <div className="space-y-0.5 pt-1">
+                            <Button
+                              variant={contact.contact_type !== "client" ? "secondary" : "ghost"}
+                              size="sm"
+                              className="w-full justify-start text-xs h-7 font-normal gap-2"
+                              onClick={() => updateContactTypeMutation.mutate("lead")}
+                              disabled={updateContactTypeMutation.isPending}
+                            >
+                              <span className="h-2 w-2 rounded-full bg-amber-500" />
+                              <span>Lead</span>
+                              {contact.contact_type !== "client" && (
+                                <Check className="h-3 w-3 ml-auto text-primary" />
+                              )}
+                            </Button>
+                            <Button
+                              variant={contact.contact_type === "client" ? "secondary" : "ghost"}
+                              size="sm"
+                              className="w-full justify-start text-xs h-7 font-normal gap-2"
+                              onClick={() => updateContactTypeMutation.mutate("client")}
+                              disabled={updateContactTypeMutation.isPending}
+                            >
+                              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                              <span>Cliente</span>
+                              {contact.contact_type === "client" && (
+                                <Check className="h-3 w-3 ml-auto text-primary" />
+                              )}
+                            </Button>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <MergeContactDialog sourceContact={contact} onSuccess={(targetId) => setActiveContactId(targetId)} />
+                  <MergeContactDialog
+                    sourceContact={contact}
+                    onSuccess={(targetId) => setActiveContactId(targetId)}
+                  />
                   <ContactEditDialog contact={contact} />
                   {isAdmin && (
                     <Dialog>
                       <DialogTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-destructive hover:text-destructive hover:bg-destructive/10" title="Excluir contato">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 rounded-full text-destructive hover:text-destructive hover:bg-destructive/10"
+                          title="Excluir contato"
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </DialogTrigger>
@@ -1992,24 +2408,39 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                         </DialogHeader>
                         <div className="py-4">
                           <p className="text-sm text-muted-foreground">
-                            Tem certeza que deseja excluir o contato <strong>{contact.name}</strong>? Esta ação não pode ser desfeita e todas as conversas e dados vinculados serão perdidos.
+                            Tem certeza que deseja excluir o contato <strong>{contact.name}</strong>
+                            ? Esta ação não pode ser desfeita e todas as conversas e dados
+                            vinculados serão perdidos.
                           </p>
                         </div>
                         <div className="flex justify-end gap-2">
-                          <Button variant="outline" onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))}>
+                          <Button
+                            variant="outline"
+                            onClick={() =>
+                              document.dispatchEvent(
+                                new KeyboardEvent("keydown", { key: "Escape" }),
+                              )
+                            }
+                          >
                             Cancelar
                           </Button>
-                          <Button variant="destructive" onClick={() => deleteContact.mutate()} disabled={deleteContact.isPending}>
-                            {deleteContact.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                          <Button
+                            variant="destructive"
+                            onClick={() => deleteContact.mutate()}
+                            disabled={deleteContact.isPending}
+                          >
+                            {deleteContact.isPending ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="mr-2 h-4 w-4" />
+                            )}
                             Excluir
                           </Button>
                         </div>
                       </DialogContent>
                     </Dialog>
                   )}
-                  {isAdmin && (
-                    <ContactBlockDialog contact={contact} />
-                  )}
+                  {isAdmin && <ContactBlockDialog contact={contact} />}
                 </div>
               </div>
               <SheetDescription className="flex flex-col gap-3 mt-4">
@@ -2022,21 +2453,21 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                         <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                                <ContactChatButton
-                                  contactId={contact.id}
-                                  contactName={contact.name || ""}
-                                  phone={contact.phone || ""}
-                                  unitId={contact.unit_id}
-                                  trigger={
-                                    <Button 
-                                      variant="secondary" 
-                                      size="icon" 
-                                      className="h-6 w-6 ml-1 rounded-full shadow-sm hover:bg-primary hover:text-primary-foreground transition-colors"
-                                    >
-                                      <MessageCircle className="h-3 w-3" />
-                                    </Button>
-                                  }
-                                />
+                              <ContactChatButton
+                                contactId={contact.id}
+                                contactName={contact.name || ""}
+                                phone={contact.phone || ""}
+                                unitId={contact.unit_id}
+                                trigger={
+                                  <Button
+                                    variant="secondary"
+                                    size="icon"
+                                    className="h-6 w-6 ml-1 rounded-full shadow-sm hover:bg-primary hover:text-primary-foreground transition-colors"
+                                  >
+                                    <MessageCircle className="h-3 w-3" />
+                                  </Button>
+                                }
+                              />
                             </TooltipTrigger>
                             <TooltipContent side="top">
                               <p className="text-xs">Ir para conversa</p>
@@ -2063,7 +2494,9 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                     )}
                     {contact.instagram_id && (
                       <div className="flex items-center gap-2 text-xs text-muted-foreground pl-6">
-                        {!contact.instagram_username && <ChannelIcon channel="instagram" className="h-4 w-4 absolute -ml-6" />}
+                        {!contact.instagram_username && (
+                          <ChannelIcon channel="instagram" className="h-4 w-4 absolute -ml-6" />
+                        )}
                         <span>Insta ID: {contact.instagram_id}</span>
                       </div>
                     )}
@@ -2081,7 +2514,10 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
 
                 <div className="flex items-center gap-2 text-xs mt-2 pt-2 border-t border-border/50">
                   <CalendarDays className="h-4 w-4" />
-                  <span>Cadastrado em {format(new Date(contact.created_at), "dd/MM/yyyy", { locale: ptBR })}</span>
+                  <span>
+                    Cadastrado em{" "}
+                    {format(new Date(contact.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                  </span>
                 </div>
 
                 {/* Unidade de Criação do Contato */}
@@ -2092,7 +2528,11 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                     <Badge
                       variant={contact.units?.name ? "outline" : "secondary"}
                       className="text-xs font-semibold py-0.5 px-2 flex items-center gap-1.5 truncate max-w-[220px]"
-                      style={contact.units?.color ? { borderColor: `${contact.units.color}60`, color: contact.units.color } : undefined}
+                      style={
+                        contact.units?.color
+                          ? { borderColor: `${contact.units.color}60`, color: contact.units.color }
+                          : undefined
+                      }
                     >
                       {contact.units?.name ? (
                         <>
@@ -2177,7 +2617,10 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                   {contact.creator && (
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <User className="h-3.5 w-3.5" />
-                      <span>Criado por: <span className="font-medium text-foreground">{contact.creator.name}</span></span>
+                      <span>
+                        Criado por:{" "}
+                        <span className="font-medium text-foreground">{contact.creator.name}</span>
+                      </span>
                     </div>
                   )}
                   {contact.source && (
@@ -2185,7 +2628,10 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
                       <Target className="h-3.5 w-3.5" />
                       <div className="flex items-center gap-1.5">
                         <span>Origem:</span>
-                        <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4 font-semibold">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] py-0 px-1.5 h-4 font-semibold"
+                        >
                           {contact.source}
                         </Badge>
                         {contact.source_details && (
@@ -2209,10 +2655,11 @@ export function ContactDetailsSheet({ contactId: initialContactId, open, onOpenC
   );
 }
 
-function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () => void }) {
+function ContactEditForm({ contact, onSuccess }: { contact: any; onSuccess?: () => void }) {
   const qc = useQueryClient();
   const { profile } = useAuth();
-  const isSuperOrCompanyAdmin = profile?.role === "admin_company" || profile?.role === "super_admin";
+  const isSuperOrCompanyAdmin =
+    profile?.role === "admin_company" || profile?.role === "super_admin";
   const { allSources, addSource } = useContactSources();
 
   const [name, setName] = useState(contact.name || "");
@@ -2221,11 +2668,12 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
   const [source, setSource] = useState(contact.source || "");
   const [sourceDetails, setSourceDetails] = useState(contact.source_details || "");
   const [unitId, setUnitId] = useState<string>(contact.unit_id || "none");
+  const [contactType, setContactType] = useState<"lead" | "client">(contact.contact_type || "lead");
   const [isAddingNewSource, setIsAddingNewSource] = useState(false);
   const [newCustomSource, setNewCustomSource] = useState("");
-  
+
   const isPsid = contact.phone && contact.phone.length > 15;
-  const [phone, setPhone] = useState(isPsid ? "" : (contact.phone || ""));
+  const [phone, setPhone] = useState(isPsid ? "" : contact.phone || "");
 
   // Busca unidades da empresa
   const { data: units } = useQuery({
@@ -2251,13 +2699,14 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
     setSource(contact.source || "");
     setSourceDetails(contact.source_details || "");
     setUnitId(contact.unit_id || "none");
+    setContactType(contact.contact_type || "lead");
     const newIsPsid = contact.phone && contact.phone.length > 15;
-    setPhone(newIsPsid ? "" : (contact.phone || ""));
+    setPhone(newIsPsid ? "" : contact.phone || "");
   }, [contact]);
 
   const updateContact = useMutation({
     mutationFn: async () => {
-      const finalPhone = phone.trim() ? phone.trim() : (isPsid ? contact.phone : null);
+      const finalPhone = phone.trim() ? phone.trim() : isPsid ? contact.phone : null;
       const effectiveUnitId = unitId === "none" ? null : unitId;
 
       // Se for administrador e a unidade foi alterada, atualiza via server action segura
@@ -2273,17 +2722,24 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
         });
       }
 
-      const { error } = await supabase
-        .from("contacts")
-        .update({ 
-          name, 
-          email, 
-          instagram_username: instagram, 
-          phone: finalPhone,
-          source: source && source !== "none" ? source.trim() : null,
-          source_details: source && source !== "none" && sourceDetails.trim() ? sourceDetails.trim() : null,
-        })
-        .eq("id", contact.id);
+      const updates: Record<string, any> = {
+        name,
+        email,
+        instagram_username: instagram,
+        phone: finalPhone,
+        source: source && source !== "none" ? source.trim() : null,
+        source_details:
+          source && source !== "none" && sourceDetails.trim() ? sourceDetails.trim() : null,
+        contact_type: contactType,
+      };
+
+      if (contactType === "client") {
+        updates.became_client_at = contact.became_client_at || new Date().toISOString();
+      } else {
+        updates.became_client_at = null;
+      }
+
+      const { error } = await supabase.from("contacts").update(updates).eq("id", contact.id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -2296,7 +2752,7 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
     },
     onError: (e) => {
       toast.error("Erro ao atualizar", { description: (e as Error).message });
-    }
+    },
   });
 
   const handleAddNewSource = async () => {
@@ -2314,13 +2770,14 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
   };
 
   const effectiveUnitId = unitId === "none" ? null : unitId;
-  const isUnchanged = 
-    name === contact.name && 
-    email === (contact.email || "") && 
-    instagram === (contact.instagram_username || "") && 
-    phone === (isPsid ? "" : (contact.phone || "")) &&
+  const isUnchanged =
+    name === contact.name &&
+    email === (contact.email || "") &&
+    instagram === (contact.instagram_username || "") &&
+    phone === (isPsid ? "" : contact.phone || "") &&
     (source || "") === (contact.source || "") &&
     (sourceDetails || "") === (contact.source_details || "") &&
+    contactType === (contact.contact_type || "lead") &&
     (!isSuperOrCompanyAdmin || effectiveUnitId === (contact.unit_id || null));
 
   return (
@@ -2328,27 +2785,63 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="name">Nome do Contato</Label>
-          <Input 
-            id="name" 
-            value={name} 
-            onChange={(e) => setName(e.target.value)} 
+          <Input
+            id="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             placeholder="Nome completo"
             required
           />
         </div>
-        
+
+        <div className="space-y-2">
+          <Label htmlFor="contact-type-edit">Classificação / Tipo</Label>
+          <Select
+            value={contactType}
+            onValueChange={(val: "lead" | "client") => setContactType(val)}
+          >
+            <SelectTrigger id="contact-type-edit">
+              <SelectValue placeholder="Selecione o tipo" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="lead">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+                  <span className="font-medium">Lead</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    (Potencial cliente / Prospect)
+                  </span>
+                </div>
+              </SelectItem>
+              <SelectItem value="client">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="font-medium">Cliente</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    (Já realizou compra / Ativo)
+                  </span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="phone">Telefone (WhatsApp)</Label>
-          <Input 
-            id="phone" 
-            value={phone} 
-            onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+          <Input
+            id="phone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
             placeholder="5511999999999"
           />
           {isPsid ? (
-            <p className="text-[10px] text-muted-foreground">ID do Canal (Instagram/Messenger): {contact.phone}</p>
+            <p className="text-[10px] text-muted-foreground">
+              ID do Canal (Instagram/Messenger): {contact.phone}
+            </p>
           ) : (
-            <p className="text-[10px] text-muted-foreground">O número é usado para deduplicação automática.</p>
+            <p className="text-[10px] text-muted-foreground">
+              O número é usado para deduplicação automática.
+            </p>
           )}
         </div>
 
@@ -2396,7 +2889,8 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
               <div className="flex items-center gap-2">
                 <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="font-medium text-foreground">
-                  {units?.find((u: any) => u.id === contact.unit_id)?.name || "Sem unidade (Geral / Matriz)"}
+                  {units?.find((u: any) => u.id === contact.unit_id)?.name ||
+                    "Sem unidade (Geral / Matriz)"}
                 </span>
               </div>
               <Badge variant="outline" className="text-[10px] text-muted-foreground gap-1">
@@ -2408,21 +2902,21 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
 
         <div className="space-y-2">
           <Label htmlFor="instagram">Usuário do Instagram (@)</Label>
-          <Input 
-            id="instagram" 
-            value={instagram} 
-            onChange={(e) => setInstagram(e.target.value.replace('@', ''))} 
+          <Input
+            id="instagram"
+            value={instagram}
+            onChange={(e) => setInstagram(e.target.value.replace("@", ""))}
             placeholder="usuario_do_instagram"
           />
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="email">E-mail</Label>
-          <Input 
-            id="email" 
+          <Input
+            id="email"
             type="email"
-            value={email} 
-            onChange={(e) => setEmail(e.target.value)} 
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             placeholder="email@empresa.com"
           />
         </div>
@@ -2431,16 +2925,16 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
           <div className="flex items-center justify-between">
             <Label htmlFor="source">Origem do Contato</Label>
             {!isAddingNewSource ? (
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => setIsAddingNewSource(true)}
                 className="text-[11px] text-primary hover:underline"
               >
                 + Nova origem
               </button>
             ) : (
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => setIsAddingNewSource(false)}
                 className="text-[11px] text-muted-foreground hover:underline"
               >
@@ -2451,29 +2945,32 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
 
           {isAddingNewSource ? (
             <div className="flex items-center gap-1.5">
-              <Input 
-                placeholder="Nome da nova origem (ex: TikTok)" 
-                value={newCustomSource} 
-                onChange={(e) => setNewCustomSource(e.target.value)} 
+              <Input
+                placeholder="Nome da nova origem (ex: TikTok)"
+                value={newCustomSource}
+                onChange={(e) => setNewCustomSource(e.target.value)}
                 className="h-9"
               />
-              <Button 
-                type="button" 
-                size="sm" 
-                onClick={handleAddNewSource} 
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleAddNewSource}
                 disabled={!newCustomSource.trim() || addSource.isPending}
               >
                 Salvar
               </Button>
             </div>
           ) : (
-            <Select value={source || "none"} onValueChange={(val) => setSource(val === "none" ? "" : val)}>
+            <Select
+              value={source || "none"}
+              onValueChange={(val) => setSource(val === "none" ? "" : val)}
+            >
               <SelectTrigger id="source">
                 <SelectValue placeholder="Selecione a origem" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Nenhuma (Não definida)</SelectItem>
-                {allSources.map(s => (
+                {allSources.map((s) => (
                   <SelectItem key={s} value={s}>
                     <div className="flex items-center gap-2">
                       {getSourceIcon(s)}
@@ -2489,19 +2986,19 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
         {source && source !== "none" && (
           <div className="space-y-2">
             <Label htmlFor="source_details">Detalhes da Origem (Opcional)</Label>
-            <Input 
-              id="source_details" 
-              placeholder="Ex: Campanha Dia das Mães, Indicado por João" 
-              value={sourceDetails} 
-              onChange={(e) => setSourceDetails(e.target.value)} 
+            <Input
+              id="source_details"
+              placeholder="Ex: Campanha Dia das Mães, Indicado por João"
+              value={sourceDetails}
+              onChange={(e) => setSourceDetails(e.target.value)}
             />
           </div>
         )}
 
         <div className="pt-4">
-          <Button 
-            type="submit" 
-            className="w-full" 
+          <Button
+            type="submit"
+            className="w-full"
             disabled={updateContact.isPending || isUnchanged}
           >
             {updateContact.isPending ? (
@@ -2516,8 +3013,6 @@ function ContactEditForm({ contact, onSuccess }: { contact: any, onSuccess?: () 
     </div>
   );
 }
-
-
 
 export function ContactEditDialog({ contact }: { contact: any }) {
   const [open, setOpen] = useState(false);
@@ -2552,7 +3047,8 @@ function ContactNotes({ contactId }: { contactId: string }) {
       // 1. Fetch contact notes
       const { data: contactNotes, error: err1 } = await supabase
         .from("contact_notes" as any)
-        .select(`
+        .select(
+          `
           id,
           content,
           created_at,
@@ -2560,15 +3056,17 @@ function ContactNotes({ contactId }: { contactId: string }) {
             name,
             email
           )
-        `)
+        `,
+        )
         .eq("contact_id", contactId);
-      
-      if (err1 && err1.code !== '42P01') throw err1;
+
+      if (err1 && err1.code !== "42P01") throw err1;
 
       // 2. Fetch opportunity notes for this contact
       const { data: oppNotes, error: err2 } = await supabase
         .from("opportunity_notes" as any)
-        .select(`
+        .select(
+          `
           id,
           content,
           created_at,
@@ -2581,32 +3079,39 @@ function ContactNotes({ contactId }: { contactId: string }) {
             title,
             contact_id
           )
-        `)
+        `,
+        )
         .eq("opportunities.contact_id", contactId);
-      
-      if (err2 && err2.code !== '42P01') throw err2;
+
+      if (err2 && err2.code !== "42P01") throw err2;
 
       const allNotes: any[] = [];
       if (contactNotes) {
-        allNotes.push(...contactNotes.map((n: any) => ({ ...n, type: 'contact' })));
+        allNotes.push(...contactNotes.map((n: any) => ({ ...n, type: "contact" })));
       }
       if (oppNotes) {
-        allNotes.push(...oppNotes.map((n: any) => ({ ...n, type: 'opportunity', opportunity: n.opportunities })));
+        allNotes.push(
+          ...oppNotes.map((n: any) => ({
+            ...n,
+            type: "opportunity",
+            opportunity: n.opportunities,
+          })),
+        );
       }
 
-      return allNotes.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      return allNotes.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
     },
   });
 
   const addNote = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
-        .from("contact_notes" as any)
-        .insert({
-          contact_id: contactId,
-          user_id: user?.id,
-          content: newNote
-        });
+      const { error } = await supabase.from("contact_notes" as any).insert({
+        contact_id: contactId,
+        user_id: user?.id,
+        content: newNote,
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -2614,13 +3119,13 @@ function ContactNotes({ contactId }: { contactId: string }) {
       toast.success("Observação adicionada!");
       qc.invalidateQueries({ queryKey: ["contact-notes", contactId] });
     },
-    onError: (e) => toast.error("Erro ao adicionar", { description: (e as Error).message })
+    onError: (e) => toast.error("Erro ao adicionar", { description: (e as Error).message }),
   });
 
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <Textarea 
+        <Textarea
           placeholder="Adicione uma observação sobre este contato..."
           value={newNote}
           onChange={(e) => setNewNote(e.target.value)}
@@ -2628,11 +3133,12 @@ function ContactNotes({ contactId }: { contactId: string }) {
           rows={3}
         />
         <div className="flex justify-end">
-          <Button 
-            onClick={() => addNote.mutate()}
-            disabled={!newNote.trim() || addNote.isPending}
-          >
-            {addNote.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+          <Button onClick={() => addNote.mutate()} disabled={!newNote.trim() || addNote.isPending}>
+            {addNote.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
             Salvar Observação
           </Button>
         </div>
@@ -2642,7 +3148,9 @@ function ContactNotes({ contactId }: { contactId: string }) {
 
       <div className="space-y-4">
         {isLoading ? (
-          <div className="flex justify-center py-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+          <div className="flex justify-center py-4">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
         ) : !notes || notes.length === 0 ? (
           <div className="text-sm text-muted-foreground text-center py-4 border rounded-lg border-dashed">
             Nenhuma observação registrada.
@@ -2659,9 +3167,13 @@ function ContactNotes({ contactId }: { contactId: string }) {
                 <span>•</span>
                 <div className="flex items-center gap-1.5">
                   <Clock className="h-3 w-3" />
-                  <span>{note.created_at && !isNaN(new Date(note.created_at).getTime()) ? format(new Date(note.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR }) : ""}</span>
+                  <span>
+                    {note.created_at && !isNaN(new Date(note.created_at).getTime())
+                      ? format(new Date(note.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })
+                      : ""}
+                  </span>
                 </div>
-                {note.type === 'opportunity' && note.opportunity && (
+                {note.type === "opportunity" && note.opportunity && (
                   <>
                     <span>•</span>
                     <div className="flex items-center gap-1.5 text-primary">

@@ -177,6 +177,15 @@ export const ConversationItem = memo(function ConversationItem({
               <span className="truncate">{conv.whatsapp_instance.name}</span>
             </div>
           ) : null}
+          {conv.contact?.contact_type === "client" && (
+            <div
+              className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded font-semibold border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0"
+              title="Cliente ativo"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+              <span>Cliente</span>
+            </div>
+          )}
           {conv.contact?.source && (
             <div
               className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded w-fit max-w-[130px] truncate border border-border/50 bg-muted/40 text-muted-foreground"

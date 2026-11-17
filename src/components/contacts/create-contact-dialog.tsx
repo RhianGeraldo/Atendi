@@ -38,6 +38,7 @@ interface CreateContactForm {
   source: string;
   source_details: string;
   unit_id?: string;
+  contact_type: "lead" | "client";
 }
 
 export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) {
@@ -85,7 +86,14 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
     profile?.role === "admin_company" ||
     Boolean(profile?.has_matriz_access);
 
-  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<CreateContactForm>({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+    formState: { errors },
+  } = useForm<CreateContactForm>({
     defaultValues: {
       name: "",
       phone: "",
@@ -93,16 +101,19 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
       source: "",
       source_details: "",
       unit_id: "",
+      contact_type: "lead",
     },
   });
 
   const source = watch("source");
   const formUnitId = watch("unit_id");
+  const contactType = watch("contact_type");
 
   // Preenche a unidade inicial ao abrir o diálogo
   useEffect(() => {
     if (open) {
-      const defaultUnit = (selectedUnitId && selectedUnitId !== "all") ? selectedUnitId : (userUnitId || "");
+      const defaultUnit =
+        selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : userUnitId || "";
       if (defaultUnit) {
         setValue("unit_id", defaultUnit);
       } else if (!canChooseNoUnit && units && units.length > 0) {
@@ -126,7 +137,10 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
       if (data.unit_id && data.unit_id !== "none") {
         effectiveUnitId = data.unit_id;
       } else if (!canChooseNoUnit) {
-        effectiveUnitId = (selectedUnitId && selectedUnitId !== "all") ? selectedUnitId : (userUnitId || (units?.[0]?.id ?? null));
+        effectiveUnitId =
+          selectedUnitId && selectedUnitId !== "all"
+            ? selectedUnitId
+            : userUnitId || (units?.[0]?.id ?? null);
         if (!effectiveUnitId && units && units.length > 0) {
           throw new Error("Selecione uma unidade para o contato.");
         }
@@ -147,6 +161,8 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
           created_by: creatorId,
           source: data.source || null,
           source_details: data.source_details?.trim() || null,
+          contact_type: data.contact_type || "lead",
+          became_client_at: data.contact_type === "client" ? new Date().toISOString() : null,
         })
         .select()
         .single();
@@ -198,46 +214,74 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Novo Contato</DialogTitle>
-          <DialogDescription>
-            Adicione um novo contato manualmente à sua base.
-          </DialogDescription>
+          <DialogDescription>Adicione um novo contato manualmente à sua base.</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Nome <span className="text-destructive">*</span></Label>
-            <Input 
-              id="name" 
-              placeholder="Ex: João Silva" 
-              {...register("name", { required: "Nome é obrigatório" })} 
+            <Label htmlFor="name">
+              Nome <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="name"
+              placeholder="Ex: João Silva"
+              {...register("name", { required: "Nome é obrigatório" })}
             />
             {errors.name && <span className="text-xs text-destructive">{errors.name.message}</span>}
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="phone">Telefone / WhatsApp</Label>
-            <Input 
-              id="phone" 
-              placeholder="Ex: 11999999999" 
-              {...register("phone")} 
-            />
+            <Input id="phone" placeholder="Ex: 11999999999" {...register("phone")} />
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="email">E-mail</Label>
-            <Input 
-              id="email" 
-              type="email" 
-              placeholder="Ex: joao@email.com" 
-              {...register("email")} 
+            <Input
+              id="email"
+              type="email"
+              placeholder="Ex: joao@email.com"
+              {...register("email")}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="contact_type">Classificação / Tipo</Label>
+            <Select
+              value={contactType || "lead"}
+              onValueChange={(val: "lead" | "client") => setValue("contact_type", val)}
+            >
+              <SelectTrigger id="contact_type">
+                <SelectValue placeholder="Selecione o tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="lead">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+                    <span className="font-medium">Lead</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      (Potencial cliente / Prospect)
+                    </span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="client">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                    <span className="font-medium">Cliente</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      (Já realizou compra / Ativo)
+                    </span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {units && units.length > 0 && (
             <div className="space-y-2">
               <Label htmlFor="unit_id">Unidade</Label>
-              <Select 
-                value={formUnitId || (canChooseNoUnit ? "none" : "")} 
+              <Select
+                value={formUnitId || (canChooseNoUnit ? "none" : "")}
                 onValueChange={(val) => setValue("unit_id", val === "none" ? "" : val)}
               >
                 <SelectTrigger id="unit_id">
@@ -252,9 +296,9 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
                   {units.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       <div className="flex items-center gap-2">
-                        <span 
-                          className="h-2.5 w-2.5 rounded-full inline-block shrink-0" 
-                          style={{ backgroundColor: u.color || "#3b82f6" }} 
+                        <span
+                          className="h-2.5 w-2.5 rounded-full inline-block shrink-0"
+                          style={{ backgroundColor: u.color || "#3b82f6" }}
                         />
                         <span>{u.name}</span>
                       </div>
@@ -272,7 +316,7 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
                 <SelectValue placeholder="Selecione a origem" />
               </SelectTrigger>
               <SelectContent>
-                {allSources.map(src => (
+                {allSources.map((src) => (
                   <SelectItem key={src} value={src}>
                     <div className="flex items-center gap-2">
                       {getSourceIcon(src)}
@@ -287,16 +331,23 @@ export function CreateContactDialog({ trigger }: { trigger?: React.ReactNode }) 
           {source && (
             <div className="space-y-2">
               <Label htmlFor="source_details">Detalhes (Por quem? Qual campanha?)</Label>
-              <Input 
-                id="source_details" 
-                placeholder={source === "Indicação" ? "Nome de quem indicou" : "Ex: Campanha Dia das Mães"} 
-                {...register("source_details")} 
+              <Input
+                id="source_details"
+                placeholder={
+                  source === "Indicação" ? "Nome de quem indicou" : "Ex: Campanha Dia das Mães"
+                }
+                {...register("source_details")}
               />
             </div>
           )}
 
           <DialogFooter className="pt-4">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={createContact.isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpen(false)}
+              disabled={createContact.isPending}
+            >
               Cancelar
             </Button>
             <Button type="submit" disabled={createContact.isPending}>

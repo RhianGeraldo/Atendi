@@ -511,6 +511,8 @@ export type Database = {
           tags: string[]
           unit_id: string | null
           whatsapp_lid: string | null
+          contact_type: "lead" | "client"
+          became_client_at: string | null
         }
         Insert: {
           company_id: string
@@ -527,6 +529,8 @@ export type Database = {
           tags?: string[]
           unit_id?: string | null
           whatsapp_lid?: string | null
+          contact_type?: "lead" | "client"
+          became_client_at?: string | null
         }
         Update: {
           company_id?: string
@@ -543,6 +547,8 @@ export type Database = {
           tags?: string[]
           unit_id?: string | null
           whatsapp_lid?: string | null
+          contact_type?: "lead" | "client"
+          became_client_at?: string | null
         }
         Relationships: [
           {

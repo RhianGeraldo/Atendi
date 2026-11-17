@@ -75,7 +75,12 @@ export const Route = createFileRoute("/_authenticated/conversations")({
 });
 
 function ConversationsPage() {
-  const { c: searchConvId, tab: searchTab, mode: searchMode, channelId: searchChannelId } = Route.useSearch();
+  const {
+    c: searchConvId,
+    tab: searchTab,
+    mode: searchMode,
+    channelId: searchChannelId,
+  } = Route.useSearch();
   const navigate = Route.useNavigate();
   const qc = useQueryClient();
   const isDesktop = useMediaQuery("(min-width: 768px)");
@@ -129,10 +134,10 @@ function ConversationsPage() {
 
   // Estados do Chat da Equipe (Multiunidades)
   const [chatMode, setChatMode] = useState<"clients" | "team">(
-    searchMode === "team" || searchChannelId ? "team" : "clients"
+    searchMode === "team" || searchChannelId ? "team" : "clients",
   );
   const [selectedTeamChannelId, setSelectedTeamChannelId] = useState<string | null>(
-    searchChannelId || null
+    searchChannelId || null,
   );
   const [createChannelOpen, setCreateChannelOpen] = useState(false);
   const [newDirectChatOpen, setNewDirectChatOpen] = useState(false);
@@ -161,7 +166,12 @@ function ConversationsPage() {
 
   // Seleciona o primeiro canal por padrão no desktop ao entrar no modo equipe
   useEffect(() => {
-    if (isDesktop && chatMode === "team" && !selectedTeamChannelId && teamChat.channels.length > 0) {
+    if (
+      isDesktop &&
+      chatMode === "team" &&
+      !selectedTeamChannelId &&
+      teamChat.channels.length > 0
+    ) {
       const firstChannelId = teamChat.channels[0].id;
       setSelectedTeamChannelId(firstChannelId);
       navigate({
@@ -329,7 +339,7 @@ function ConversationsPage() {
       const to = from + PAGE_SIZE - 1;
 
       const selectString =
-        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, radar_status, radar_last_alert_at, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,unit_id), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, radar_status, radar_last_alert_at, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,unit_id,contact_type,became_client_at), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
 
       // Mesmos filtros para a página e para as conversas esperando resposta
       const buildQuery = () => {
@@ -368,13 +378,18 @@ function ConversationsPage() {
         }
 
         if (debouncedSearch) {
-          query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%,whatsapp_lid.ilike.%${debouncedSearch}%`, {
-            foreignTable: "contact",
-          });
+          query = query.or(
+            `name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%,whatsapp_lid.ilike.%${debouncedSearch}%`,
+            {
+              foreignTable: "contact",
+            },
+          );
         }
 
         if (tab === "groups") {
-          query = query.or("phone.like.120363%,phone.like.%-%,phone.like.%@g.us%", { foreignTable: "contact" });
+          query = query.or("phone.like.120363%,phone.like.%-%,phone.like.%@g.us%", {
+            foreignTable: "contact",
+          });
         }
 
         // Server-side status filter for non-group tabs
@@ -486,16 +501,15 @@ function ConversationsPage() {
           .limit(convIds.length * 5);
 
         // Agrupa mensagens por conversa para identificar o turno contínuo sem resposta
-        const msgsByConv = new Map<
-          string,
-          Array<{ sender_type: string; created_at: string }>
-        >();
+        const msgsByConv = new Map<string, Array<{ sender_type: string; created_at: string }>>();
         if (recentMsgs) {
           for (const msg of recentMsgs) {
             if (!msg.conversation_id) continue;
             const arr = msgsByConv.get(msg.conversation_id);
             if (!arr) {
-              msgsByConv.set(msg.conversation_id, [{ sender_type: msg.sender_type, created_at: msg.created_at }]);
+              msgsByConv.set(msg.conversation_id, [
+                { sender_type: msg.sender_type, created_at: msg.created_at },
+              ]);
             } else {
               arr.push({ sender_type: msg.sender_type, created_at: msg.created_at });
             }
@@ -589,7 +603,7 @@ function ConversationsPage() {
     queryFn: async () => {
       if (!selectedId) return null;
       const selectString =
-        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, radar_status, radar_last_alert_at, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,unit_id), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+        "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, radar_status, radar_last_alert_at, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,unit_id,contact_type,became_client_at), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
       const { data, error } = await supabase
         .from("conversations")
         .select(selectString)
@@ -657,51 +671,54 @@ function ConversationsPage() {
       // A empresa passa de 1.000 conversas (limite por consulta do banco): sem as páginas, só
       // as mais recentes eram contadas e as antigas em Aguardando ficavam fora do número da aba
       const build = () => {
-      let query = supabase
-        .from("conversations")
-        .select(selectString)
-        // Ordem fixa entre as páginas: por last_message_at, uma conversa que recebe mensagem
-        // no meio da leitura muda de página e podia ficar fora da contagem
-        .order("id", { ascending: true });
+        let query = supabase
+          .from("conversations")
+          .select(selectString)
+          // Ordem fixa entre as páginas: por last_message_at, uma conversa que recebe mensagem
+          // no meio da leitura muda de página e podia ficar fora da contagem
+          .order("id", { ascending: true });
 
-      if (activeCompanyId) {
-        query = query.eq("contact.company_id", activeCompanyId);
-      }
-      query = query.not("contact.is_blocked", "is", true);
-
-      if (selectedUnitId && selectedUnitId !== "all") {
-        query = query.eq("unit_id", selectedUnitId);
-      } else {
-        query = applyUnitScope(query);
-      }
-
-      if (instanceFilter && instanceFilter !== "all") {
-        query = query.eq("whatsapp_instance_id", instanceFilter);
-      } else if (!isAdmin && instances && instances.length > 0) {
-        const allowedIds = instances.map((inst: any) => inst.id);
-        query = query.in("whatsapp_instance_id", allowedIds);
-      } else if (!isAdmin && instances && instances.length === 0) {
-        query = query.eq("whatsapp_instance_id", "00000000-0000-0000-0000-000000000000");
-      }
-
-      if (departmentFilter && departmentFilter !== "all") {
-        query = query.eq("department_id", departmentFilter);
-      }
-
-      if (agentFilter && agentFilter !== "all") {
-        if (agentFilter === "unassigned") {
-          query = query.is("assigned_agent_id", null);
-        } else {
-          query = query.eq("assigned_agent_id", agentFilter);
+        if (activeCompanyId) {
+          query = query.eq("contact.company_id", activeCompanyId);
         }
-      }
+        query = query.not("contact.is_blocked", "is", true);
 
-      if (debouncedSearch) {
-        query = query.or(`name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%,whatsapp_lid.ilike.%${debouncedSearch}%`, {
-          foreignTable: "contact",
-        });
-      }
-      return query;
+        if (selectedUnitId && selectedUnitId !== "all") {
+          query = query.eq("unit_id", selectedUnitId);
+        } else {
+          query = applyUnitScope(query);
+        }
+
+        if (instanceFilter && instanceFilter !== "all") {
+          query = query.eq("whatsapp_instance_id", instanceFilter);
+        } else if (!isAdmin && instances && instances.length > 0) {
+          const allowedIds = instances.map((inst: any) => inst.id);
+          query = query.in("whatsapp_instance_id", allowedIds);
+        } else if (!isAdmin && instances && instances.length === 0) {
+          query = query.eq("whatsapp_instance_id", "00000000-0000-0000-0000-000000000000");
+        }
+
+        if (departmentFilter && departmentFilter !== "all") {
+          query = query.eq("department_id", departmentFilter);
+        }
+
+        if (agentFilter && agentFilter !== "all") {
+          if (agentFilter === "unassigned") {
+            query = query.is("assigned_agent_id", null);
+          } else {
+            query = query.eq("assigned_agent_id", agentFilter);
+          }
+        }
+
+        if (debouncedSearch) {
+          query = query.or(
+            `name.ilike.%${debouncedSearch}%,phone.ilike.%${debouncedSearch}%,whatsapp_lid.ilike.%${debouncedSearch}%`,
+            {
+              foreignTable: "contact",
+            },
+          );
+        }
+        return query;
       };
 
       const counts = {
@@ -806,10 +823,7 @@ function ConversationsPage() {
   });
 
   const checkConversationMatchesQuery = useCallback(
-    (
-      conv: ConvRow,
-      queryKey: unknown[],
-    ): boolean => {
+    (conv: ConvRow, queryKey: unknown[]): boolean => {
       if (!conv || !queryKey || queryKey[0] !== "conversations") return false;
 
       const queryCompanyId = queryKey[1] as string | undefined;
@@ -821,7 +835,11 @@ function ConversationsPage() {
       const queryAgentFilter = queryKey[10] as string | null | undefined;
 
       // 1. Empresa
-      if (queryCompanyId && conv.contact?.company_id && conv.contact.company_id !== queryCompanyId) {
+      if (
+        queryCompanyId &&
+        conv.contact?.company_id &&
+        conv.contact.company_id !== queryCompanyId
+      ) {
         return false;
       }
 
@@ -1031,7 +1049,7 @@ function ConversationsPage() {
     async (convId: string, preferredStatus?: TabType) => {
       try {
         const selectString =
-          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, radar_status, radar_last_alert_at, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,unit_id), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
+          "id, channel, status, last_message_at, started_at, tags, unread_count, last_message_preview, department_id, assigned_agent_id, unit_id, whatsapp_instance_id, current_session_id, ai_active, ai_agent_id, radar_status, radar_last_alert_at, contact:contacts!inner(id,name,phone,email,avatar_url:profile_picture_url,tags,instagram_username,whatsapp_lid,instagram_id,company_id,is_blocked,source,source_details,unit_id,contact_type,became_client_at), department:departments(name), assigned_agent:profiles!conversations_assigned_agent_id_fkey(name), ai_agent:ai_agents(name), unit:units(name,color,custom_variables), whatsapp_instance:whatsapp_instances(name)";
 
         const { data, error } = await supabase
           .from("conversations")
@@ -1116,10 +1134,14 @@ function ConversationsPage() {
           targetStatus = (fullConv.status as TabType) || preferredStatus || "waiting";
         }
 
-        updateConversationInCache(convId, { ...fullConv, status: targetStatus as any }, {
-          moveToTop: true,
-          status: targetStatus,
-        });
+        updateConversationInCache(
+          convId,
+          { ...fullConv, status: targetStatus as any },
+          {
+            moveToTop: true,
+            status: targetStatus,
+          },
+        );
 
         return fullConv;
       } catch (err) {
@@ -1363,7 +1385,8 @@ function ConversationsPage() {
                   // Nota interna e aviso do sistema não respondem nem fazem o cliente esperar:
                   // mantêm a última mensagem que conta para o SLA
                   last_message:
-                    newMsg.is_internal || (newMsg.sender_type !== "contact" && newMsg.sender_type !== "agent")
+                    newMsg.is_internal ||
+                    (newMsg.sender_type !== "contact" && newMsg.sender_type !== "agent")
                       ? (existingConv as ConvRow).last_message
                       : [
                           {
@@ -1661,9 +1684,7 @@ function ConversationsPage() {
       <aside
         className={cn(
           "flex w-full md:w-[360px] shrink-0 flex-col border-r border-border bg-card",
-          (chatMode === "clients" ? selectedId : selectedTeamChannelId)
-            ? "hidden md:flex"
-            : "flex",
+          (chatMode === "clients" ? selectedId : selectedTeamChannelId) ? "hidden md:flex" : "flex",
         )}
       >
         {/* Alternador de Modo: Clientes vs Equipe */}
@@ -1758,393 +1779,399 @@ function ConversationsPage() {
                     className="h-9 pl-8"
                   />
                 </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="icon"
-                  variant={
-                    (instanceFilter && instanceFilter !== "all") ||
-                    (departmentFilter && departmentFilter !== "all") ||
-                    (agentFilter && agentFilter !== "all") ||
-                    slaFilter !== "all"
-                      ? "default"
-                      : "outline"
-                  }
-                  className="h-9 w-9 shrink-0"
-                >
-                  <Filter className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
-                {((instanceFilter && instanceFilter !== "all") ||
-                  (departmentFilter && departmentFilter !== "all") ||
-                  (agentFilter && agentFilter !== "all") ||
-                  slaFilter !== "all") && (
-                  <>
-                    <DropdownMenuItem
-                      className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer font-medium"
-                      onClick={() => {
-                        setInstanceFilter("all");
-                        setDepartmentFilter("all");
-                        setAgentFilter("all");
-                        setSlaFilter("all");
-                      }}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant={
+                        (instanceFilter && instanceFilter !== "all") ||
+                        (departmentFilter && departmentFilter !== "all") ||
+                        (agentFilter && agentFilter !== "all") ||
+                        slaFilter !== "all"
+                          ? "default"
+                          : "outline"
+                      }
+                      className="h-9 w-9 shrink-0"
                     >
-                      Limpar Filtros
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    Status SLA
-                    {slaFilter !== "all" && (
-                      <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
-                    )}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuPortal>
-                    <DropdownMenuSubContent className="w-56">
-                      <DropdownMenuItem
-                        onClick={() => setSlaFilter("all")}
-                        className="cursor-pointer"
-                      >
-                        Todos os status
-                        {slaFilter === "all" && (
-                          <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
-                        )}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setSlaFilter("breached")}
-                        className="cursor-pointer text-destructive focus:text-destructive flex items-center justify-between"
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full bg-destructive" />
-                          Estourados (Crítico)
-                        </span>
-                        {slaFilter === "breached" && (
-                          <CheckCircle2 className="ml-auto h-4 w-4 text-destructive" />
-                        )}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setSlaFilter("warning")}
-                        className="cursor-pointer text-amber-600 dark:text-amber-400 focus:text-amber-600 flex items-center justify-between"
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full bg-amber-500" />
-                          Atenção (Alerta)
-                        </span>
-                        {slaFilter === "warning" && (
-                          <CheckCircle2 className="ml-auto h-4 w-4 text-amber-500" />
-                        )}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => setSlaFilter("ok")}
-                        className="cursor-pointer text-emerald-600 dark:text-emerald-400 focus:text-emerald-600 flex items-center justify-between"
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                          No Prazo
-                        </span>
-                        {slaFilter === "ok" && (
-                          <CheckCircle2 className="ml-auto h-4 w-4 text-emerald-500" />
-                        )}
-                      </DropdownMenuItem>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuPortal>
-                </DropdownMenuSub>
-
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    Instâncias
-                    {instanceFilter && instanceFilter !== "all" && (
-                      <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
-                    )}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuPortal>
-                    <DropdownMenuSubContent className="w-64">
-                      <ScrollArea className="h-[300px] w-full p-1">
+                      <Filter className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    {((instanceFilter && instanceFilter !== "all") ||
+                      (departmentFilter && departmentFilter !== "all") ||
+                      (agentFilter && agentFilter !== "all") ||
+                      slaFilter !== "all") && (
+                      <>
                         <DropdownMenuItem
-                          onClick={() => setInstanceFilter("all")}
-                          className="cursor-pointer"
+                          className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer font-medium"
+                          onClick={() => {
+                            setInstanceFilter("all");
+                            setDepartmentFilter("all");
+                            setAgentFilter("all");
+                            setSlaFilter("all");
+                          }}
                         >
-                          Todas as instâncias
-                          {(!instanceFilter || instanceFilter === "all") && (
-                            <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
-                          )}
+                          Limpar Filtros
                         </DropdownMenuItem>
-                        {instances?.map((inst: any) => {
-                          const unitName = inst.units?.name || (!inst.unit_id ? "Sede" : "");
-                          return (
-                            <DropdownMenuItem
-                              key={inst.id}
-                              onClick={() => setInstanceFilter(inst.id)}
-                              className="flex items-center justify-between gap-2 cursor-pointer"
-                            >
-                              <div className="flex items-center gap-2 truncate min-w-0">
-                                <ProviderIcon
-                                  provider={inst.provider}
-                                  network={inst.network}
-                                  className="h-4 w-4 shrink-0"
-                                />
-                                <span className="truncate">{inst.name || inst.instance_name}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                {unitName && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[10px] px-1 py-0 h-4 font-normal text-muted-foreground bg-muted/30"
-                                  >
-                                    {unitName}
-                                  </Badge>
-                                )}
-                                {inst.departments?.name ? (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[10px] px-1 py-0 h-4 font-normal text-primary bg-primary/10 border-primary/20"
-                                  >
-                                    {inst.departments.name}
-                                  </Badge>
-                                ) : (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[10px] px-1 py-0 h-4 font-normal text-muted-foreground bg-muted/20"
-                                  >
-                                    Geral
-                                  </Badge>
-                                )}
-                                {instanceFilter === inst.id && (
-                                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                                )}
-                              </div>
-                            </DropdownMenuItem>
-                          );
-                        })}
-                      </ScrollArea>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuPortal>
-                </DropdownMenuSub>
-
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    Departamentos
-                    {departmentFilter && departmentFilter !== "all" && (
-                      <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
+                        <DropdownMenuSeparator />
+                      </>
                     )}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuPortal>
-                    <DropdownMenuSubContent className="w-64">
-                      <ScrollArea className="h-[300px] w-full p-1">
-                        <DropdownMenuItem
-                          onClick={() => setDepartmentFilter("all")}
-                          className="cursor-pointer"
-                        >
-                          Todos os departamentos
-                          {(!departmentFilter || departmentFilter === "all") && (
-                            <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
-                          )}
-                        </DropdownMenuItem>
-                        {departments?.map((dept) => (
+
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        Status SLA
+                        {slaFilter !== "all" && (
+                          <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
+                        )}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuPortal>
+                        <DropdownMenuSubContent className="w-56">
                           <DropdownMenuItem
-                            key={dept.id}
-                            onClick={() => setDepartmentFilter(dept.id)}
+                            onClick={() => setSlaFilter("all")}
                             className="cursor-pointer"
                           >
-                            <span className="truncate">{dept.name}</span>
-                            {departmentFilter === dept.id && (
+                            Todos os status
+                            {slaFilter === "all" && (
                               <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
                             )}
                           </DropdownMenuItem>
-                        ))}
-                      </ScrollArea>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuPortal>
-                </DropdownMenuSub>
-
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    Atendentes
-                    {agentFilter && agentFilter !== "all" && (
-                      <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
-                    )}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuPortal>
-                    <DropdownMenuSubContent className="w-64">
-                      <ScrollArea className="h-[300px] w-full p-1">
-                        <DropdownMenuItem
-                          onClick={() => setAgentFilter("all")}
-                          className="cursor-pointer"
-                        >
-                          Todos os atendentes
-                          {(!agentFilter || agentFilter === "all") && (
-                            <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => setAgentFilter("unassigned")}
-                          className="cursor-pointer"
-                        >
-                          Sem Atendente (Fila Geral)
-                          {agentFilter === "unassigned" && (
-                            <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
-                          )}
-                        </DropdownMenuItem>
-                        {agents?.map((agent) => (
                           <DropdownMenuItem
-                            key={agent.id}
-                            onClick={() => setAgentFilter(agent.id)}
-                            className="cursor-pointer flex items-center justify-between gap-2"
+                            onClick={() => setSlaFilter("breached")}
+                            className="cursor-pointer text-destructive focus:text-destructive flex items-center justify-between"
                           >
-                            <span className="truncate flex-1">{agent.name}</span>
-                            {agentFilter === agent.id && (
-                              <CheckCircle2 className="ml-auto h-4 w-4 shrink-0 text-primary" />
+                            <span className="flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full bg-destructive" />
+                              Estourados (Crítico)
+                            </span>
+                            {slaFilter === "breached" && (
+                              <CheckCircle2 className="ml-auto h-4 w-4 text-destructive" />
                             )}
                           </DropdownMenuItem>
-                        ))}
-                      </ScrollArea>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuPortal>
-                </DropdownMenuSub>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <StartConversationDialog
-              onCreated={(id) => {
-                setTab("active");
-                setSelectedId(id);
-                navigate({ search: (prev: any) => ({ ...prev, c: id, tab: "active" }) });
-              }}
-            />
-            <Button
-              size="icon"
-              variant="outline"
-              className="h-9 w-9 shrink-0"
-              title="Discar / Ligar para novo número"
-              onClick={() => setDialerOpen(true)}
-            >
-              <Phone className="h-4 w-4" />
-            </Button>
-            <AtendiCallsDialer open={dialerOpen} onOpenChange={setDialerOpen} />
-          </div>
-          <Tabs value={tab} onValueChange={(v) => handleTabChange(v as TabType)} className="mt-3">
-            <TabsList className="grid w-full grid-cols-4 h-auto p-1 gap-1">
-              <TabsTrigger
-                value="waiting"
-                className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
-              >
-                <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
-                  {unreadCounts?.waiting?.total || 0}
-                </span>
-                <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
-                  Aguardando
-                </span>
-                {unreadCounts && unreadCounts.waiting?.unread > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
-                    {unreadCounts.waiting.unread > 99 ? "99+" : unreadCounts.waiting.unread}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger
-                value="active"
-                className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
-              >
-                <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
-                  {unreadCounts?.active?.total || 0}
-                </span>
-                <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
-                  Andamento
-                </span>
-                {unreadCounts && unreadCounts.active?.unread > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
-                    {unreadCounts.active.unread > 99 ? "99+" : unreadCounts.active.unread}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger
-                value="resolved"
-                className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
-              >
-                <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
-                  {unreadCounts?.resolved?.total || 0}
-                </span>
-                <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
-                  Resolvido
-                </span>
-                {unreadCounts && unreadCounts.resolved?.unread > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
-                    {unreadCounts.resolved.unread > 99 ? "99+" : unreadCounts.resolved.unread}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger
-                value="groups"
-                className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
-              >
-                <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
-                  {unreadCounts?.groups?.total || 0}
-                </span>
-                <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
-                  Grupos
-                </span>
-                {unreadCounts && unreadCounts.groups?.unread > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
-                    {unreadCounts.groups.unread > 99 ? "99+" : unreadCounts.groups.unread}
-                  </span>
-                )}
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {filtered.map((c) => (
-            <ConversationItem
-              key={c.id}
-              conv={c}
-              selected={selectedId === c.id}
-              onClick={() => {
-                setSelectedId(c.id);
-                setLastSelectedConv(c);
-                navigate({ search: (prev: any) => ({ ...prev, c: c.id, tab }) });
-              }}
-              onPrefetch={() => {
-                qc.prefetchQuery({
-                  queryKey: ["messages", c.id],
-                  queryFn: () => fetchConversationMessages(c.id),
-                  staleTime: 1000 * 60 * 5,
-                });
-              }}
-              currentUserId={profile?.id}
-              showUnitInfo={!selectedUnitId}
-              slaSettings={slaSettings}
-            />
-          ))}
-          {!filtered.length && !isConvFetching && (
-            <div className="p-6 text-center text-sm text-muted-foreground">
-              Nada por aqui ainda.
-            </div>
-          )}
-          {isFetchingNextPage && (
-            <>
-              {[1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  className="flex items-start gap-3 px-3 py-3 border-b border-border animate-pulse"
+                          <DropdownMenuItem
+                            onClick={() => setSlaFilter("warning")}
+                            className="cursor-pointer text-amber-600 dark:text-amber-400 focus:text-amber-600 flex items-center justify-between"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full bg-amber-500" />
+                              Atenção (Alerta)
+                            </span>
+                            {slaFilter === "warning" && (
+                              <CheckCircle2 className="ml-auto h-4 w-4 text-amber-500" />
+                            )}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => setSlaFilter("ok")}
+                            className="cursor-pointer text-emerald-600 dark:text-emerald-400 focus:text-emerald-600 flex items-center justify-between"
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                              No Prazo
+                            </span>
+                            {slaFilter === "ok" && (
+                              <CheckCircle2 className="ml-auto h-4 w-4 text-emerald-500" />
+                            )}
+                          </DropdownMenuItem>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuPortal>
+                    </DropdownMenuSub>
+
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        Instâncias
+                        {instanceFilter && instanceFilter !== "all" && (
+                          <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
+                        )}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuPortal>
+                        <DropdownMenuSubContent className="w-64">
+                          <ScrollArea className="h-[300px] w-full p-1">
+                            <DropdownMenuItem
+                              onClick={() => setInstanceFilter("all")}
+                              className="cursor-pointer"
+                            >
+                              Todas as instâncias
+                              {(!instanceFilter || instanceFilter === "all") && (
+                                <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
+                              )}
+                            </DropdownMenuItem>
+                            {instances?.map((inst: any) => {
+                              const unitName = inst.units?.name || (!inst.unit_id ? "Sede" : "");
+                              return (
+                                <DropdownMenuItem
+                                  key={inst.id}
+                                  onClick={() => setInstanceFilter(inst.id)}
+                                  className="flex items-center justify-between gap-2 cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-2 truncate min-w-0">
+                                    <ProviderIcon
+                                      provider={inst.provider}
+                                      network={inst.network}
+                                      className="h-4 w-4 shrink-0"
+                                    />
+                                    <span className="truncate">
+                                      {inst.name || inst.instance_name}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {unitName && (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] px-1 py-0 h-4 font-normal text-muted-foreground bg-muted/30"
+                                      >
+                                        {unitName}
+                                      </Badge>
+                                    )}
+                                    {inst.departments?.name ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] px-1 py-0 h-4 font-normal text-primary bg-primary/10 border-primary/20"
+                                      >
+                                        {inst.departments.name}
+                                      </Badge>
+                                    ) : (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] px-1 py-0 h-4 font-normal text-muted-foreground bg-muted/20"
+                                      >
+                                        Geral
+                                      </Badge>
+                                    )}
+                                    {instanceFilter === inst.id && (
+                                      <CheckCircle2 className="h-4 w-4 text-primary" />
+                                    )}
+                                  </div>
+                                </DropdownMenuItem>
+                              );
+                            })}
+                          </ScrollArea>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuPortal>
+                    </DropdownMenuSub>
+
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        Departamentos
+                        {departmentFilter && departmentFilter !== "all" && (
+                          <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
+                        )}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuPortal>
+                        <DropdownMenuSubContent className="w-64">
+                          <ScrollArea className="h-[300px] w-full p-1">
+                            <DropdownMenuItem
+                              onClick={() => setDepartmentFilter("all")}
+                              className="cursor-pointer"
+                            >
+                              Todos os departamentos
+                              {(!departmentFilter || departmentFilter === "all") && (
+                                <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
+                              )}
+                            </DropdownMenuItem>
+                            {departments?.map((dept) => (
+                              <DropdownMenuItem
+                                key={dept.id}
+                                onClick={() => setDepartmentFilter(dept.id)}
+                                className="cursor-pointer"
+                              >
+                                <span className="truncate">{dept.name}</span>
+                                {departmentFilter === dept.id && (
+                                  <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
+                                )}
+                              </DropdownMenuItem>
+                            ))}
+                          </ScrollArea>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuPortal>
+                    </DropdownMenuSub>
+
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        Atendentes
+                        {agentFilter && agentFilter !== "all" && (
+                          <CheckCircle2 className="ml-auto h-3 w-3 text-primary" />
+                        )}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuPortal>
+                        <DropdownMenuSubContent className="w-64">
+                          <ScrollArea className="h-[300px] w-full p-1">
+                            <DropdownMenuItem
+                              onClick={() => setAgentFilter("all")}
+                              className="cursor-pointer"
+                            >
+                              Todos os atendentes
+                              {(!agentFilter || agentFilter === "all") && (
+                                <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => setAgentFilter("unassigned")}
+                              className="cursor-pointer"
+                            >
+                              Sem Atendente (Fila Geral)
+                              {agentFilter === "unassigned" && (
+                                <CheckCircle2 className="ml-auto h-4 w-4 text-primary" />
+                              )}
+                            </DropdownMenuItem>
+                            {agents?.map((agent) => (
+                              <DropdownMenuItem
+                                key={agent.id}
+                                onClick={() => setAgentFilter(agent.id)}
+                                className="cursor-pointer flex items-center justify-between gap-2"
+                              >
+                                <span className="truncate flex-1">{agent.name}</span>
+                                {agentFilter === agent.id && (
+                                  <CheckCircle2 className="ml-auto h-4 w-4 shrink-0 text-primary" />
+                                )}
+                              </DropdownMenuItem>
+                            ))}
+                          </ScrollArea>
+                        </DropdownMenuSubContent>
+                      </DropdownMenuPortal>
+                    </DropdownMenuSub>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <StartConversationDialog
+                  onCreated={(id) => {
+                    setTab("active");
+                    setSelectedId(id);
+                    navigate({ search: (prev: any) => ({ ...prev, c: id, tab: "active" }) });
+                  }}
+                />
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-9 w-9 shrink-0"
+                  title="Discar / Ligar para novo número"
+                  onClick={() => setDialerOpen(true)}
                 >
-                  <div className="h-10 w-10 rounded-full bg-muted shrink-0" />
-                  <div className="flex-1 space-y-2">
-                    <div className="flex justify-between">
-                      <div className="h-3 w-32 rounded bg-muted" />
-                      <div className="h-3 w-16 rounded bg-muted" />
-                    </div>
-                    <div className="h-3 w-full rounded bg-muted" />
-                    <div className="flex gap-1">
-                      <div className="h-4 w-14 rounded-full bg-muted" />
-                      <div className="h-4 w-14 rounded-full bg-muted" />
-                    </div>
-                  </div>
-                </div>
+                  <Phone className="h-4 w-4" />
+                </Button>
+                <AtendiCallsDialer open={dialerOpen} onOpenChange={setDialerOpen} />
+              </div>
+              <Tabs
+                value={tab}
+                onValueChange={(v) => handleTabChange(v as TabType)}
+                className="mt-3"
+              >
+                <TabsList className="grid w-full grid-cols-4 h-auto p-1 gap-1">
+                  <TabsTrigger
+                    value="waiting"
+                    className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
+                  >
+                    <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
+                      {unreadCounts?.waiting?.total || 0}
+                    </span>
+                    <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
+                      Aguardando
+                    </span>
+                    {unreadCounts && unreadCounts.waiting?.unread > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
+                        {unreadCounts.waiting.unread > 99 ? "99+" : unreadCounts.waiting.unread}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="active"
+                    className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
+                  >
+                    <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
+                      {unreadCounts?.active?.total || 0}
+                    </span>
+                    <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
+                      Andamento
+                    </span>
+                    {unreadCounts && unreadCounts.active?.unread > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
+                        {unreadCounts.active.unread > 99 ? "99+" : unreadCounts.active.unread}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="resolved"
+                    className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
+                  >
+                    <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
+                      {unreadCounts?.resolved?.total || 0}
+                    </span>
+                    <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
+                      Resolvido
+                    </span>
+                    {unreadCounts && unreadCounts.resolved?.unread > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
+                        {unreadCounts.resolved.unread > 99 ? "99+" : unreadCounts.resolved.unread}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="groups"
+                    className="group relative flex flex-col items-center justify-center py-1.5 px-1 rounded-md transition-all gap-0.5"
+                  >
+                    <span className="text-sm font-semibold leading-none group-data-[state=active]:text-primary text-foreground/80">
+                      {unreadCounts?.groups?.total || 0}
+                    </span>
+                    <span className="text-[11px] leading-tight text-muted-foreground group-data-[state=active]:text-foreground group-data-[state=active]:font-medium">
+                      Grupos
+                    </span>
+                    {unreadCounts && unreadCounts.groups?.unread > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 text-[9px] font-bold text-white shadow-xs">
+                        {unreadCounts.groups.unread > 99 ? "99+" : unreadCounts.groups.unread}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {filtered.map((c) => (
+                <ConversationItem
+                  key={c.id}
+                  conv={c}
+                  selected={selectedId === c.id}
+                  onClick={() => {
+                    setSelectedId(c.id);
+                    setLastSelectedConv(c);
+                    navigate({ search: (prev: any) => ({ ...prev, c: c.id, tab }) });
+                  }}
+                  onPrefetch={() => {
+                    qc.prefetchQuery({
+                      queryKey: ["messages", c.id],
+                      queryFn: () => fetchConversationMessages(c.id),
+                      staleTime: 1000 * 60 * 5,
+                    });
+                  }}
+                  currentUserId={profile?.id}
+                  showUnitInfo={!selectedUnitId}
+                  slaSettings={slaSettings}
+                />
               ))}
-            </>
-          )}
+              {!filtered.length && !isConvFetching && (
+                <div className="p-6 text-center text-sm text-muted-foreground">
+                  Nada por aqui ainda.
+                </div>
+              )}
+              {isFetchingNextPage && (
+                <>
+                  {[1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      className="flex items-start gap-3 px-3 py-3 border-b border-border animate-pulse"
+                    >
+                      <div className="h-10 w-10 rounded-full bg-muted shrink-0" />
+                      <div className="flex-1 space-y-2">
+                        <div className="flex justify-between">
+                          <div className="h-3 w-32 rounded bg-muted" />
+                          <div className="h-3 w-16 rounded bg-muted" />
+                        </div>
+                        <div className="h-3 w-full rounded bg-muted" />
+                        <div className="flex gap-1">
+                          <div className="h-4 w-14 rounded-full bg-muted" />
+                          <div className="h-4 w-14 rounded-full bg-muted" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
               {hasNextPage && !isFetchingNextPage && (
                 <div className="flex justify-center p-3">
                   <Button
@@ -2211,7 +2238,8 @@ function ConversationsPage() {
               </div>
               <h3 className="text-base font-semibold text-foreground">Chat da Equipe</h3>
               <p className="text-xs max-w-sm">
-                Selecione um canal da empresa, da sua unidade ou converse diretamente com um colega de trabalho.
+                Selecione um canal da empresa, da sua unidade ou converse diretamente com um colega
+                de trabalho.
               </p>
               <div className="flex gap-2 mt-2">
                 <Button size="sm" variant="outline" onClick={() => setNewDirectChatOpen(true)}>

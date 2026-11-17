@@ -4,7 +4,33 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Search, Phone, Mail, User, UserPlus, Loader2, Building, RefreshCw, ShieldAlert, X, Link, ExternalLink, Image as ImageIcon, Calendar as CalendarIcon, Tag, CheckSquare, Megaphone, ChevronLeft, ChevronRight, Sparkles, Building2, Lock, ChevronDown, Check } from "lucide-react";
+import {
+  Search,
+  Phone,
+  Mail,
+  User,
+  UserPlus,
+  Loader2,
+  Building,
+  RefreshCw,
+  ShieldAlert,
+  X,
+  Link,
+  ExternalLink,
+  Image as ImageIcon,
+  Calendar as CalendarIcon,
+  Tag,
+  CheckSquare,
+  Megaphone,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+  Building2,
+  Lock,
+  ChevronDown,
+  Check,
+  UserCheck,
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
@@ -21,8 +47,21 @@ import { CreateContactDialog } from "@/components/contacts/create-contact-dialog
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -34,7 +73,11 @@ import {
 import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
 import { ProtectedMenuRoute } from "@/components/auth/protected-menu-route";
-import { updateContactUnitAction } from "@/lib/api/contacts.functions";
+import {
+  updateContactUnitAction,
+  updateContactTypeAction,
+  bulkUpdateContactTypeAction,
+} from "@/lib/api/contacts.functions";
 
 export const Route = createFileRoute("/_authenticated/contacts")({
   component: () => (
@@ -103,6 +146,71 @@ function ContactsPage() {
     },
   });
 
+  // Mutação para alterar tipo de contato (Lead vs Cliente)
+  const updateContactTypeMutation = useMutation({
+    mutationFn: async ({
+      contactId,
+      contactType,
+    }: {
+      contactId: string;
+      contactType: "lead" | "client";
+    }) => {
+      const compId = activeCompanyId || profile?.company_id;
+      if (!compId) throw new Error("Empresa não selecionada.");
+      return await updateContactTypeAction({
+        data: {
+          contactId,
+          contactType,
+          companyId: compId,
+        },
+      });
+    },
+    onSuccess: (_, variables) => {
+      toast.success(
+        variables.contactType === "client"
+          ? "Contato promovido a Cliente! 🎉"
+          : "Contato definido como Lead",
+      );
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contacts-counts"] });
+      qc.invalidateQueries({ queryKey: ["contact-details"] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (err: any) => {
+      toast.error("Erro ao alterar tipo do contato", { description: err.message });
+    },
+  });
+
+  // Mutação para atualização de tipo em lote
+  const bulkUpdateContactType = useMutation({
+    mutationFn: async (contactType: "lead" | "client") => {
+      const compId = activeCompanyId || profile?.company_id;
+      if (!compId) throw new Error("Empresa não selecionada.");
+      const contactIds = Array.from(selectedContactIds);
+      if (!contactIds.length) throw new Error("Nenhum contato selecionado.");
+      return await bulkUpdateContactTypeAction({
+        data: {
+          contactIds,
+          contactType,
+          companyId: compId,
+        },
+      });
+    },
+    onSuccess: (res, contactType) => {
+      toast.success(
+        `${res.updatedCount} contato(s) definidos como ${contactType === "client" ? "Cliente" : "Lead"}!`,
+      );
+      setSelectedContactIds(new Set());
+      qc.invalidateQueries({ queryKey: ["contacts"] });
+      qc.invalidateQueries({ queryKey: ["contacts-counts"] });
+      qc.invalidateQueries({ queryKey: ["contact-details"] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (err: any) => {
+      toast.error("Erro na atualização em massa", { description: err.message });
+    },
+  });
+
   // KPIs calculados via contagem de linhas no banco (sem baixar payload, 0 bytes)
   const { data: counts } = useQuery({
     queryKey: ["contacts-counts", activeCompanyId, selectedUnitId, dateRange],
@@ -119,6 +227,22 @@ function ContactsPage() {
         .select(`id, ${convRel}`, { count: "exact", head: true })
         .eq("company_id", activeCompanyId!)
         .eq("is_blocked", false)
+        .is("merged_into_id", null);
+
+      let qLeads = supabase
+        .from("contacts")
+        .select(`id, ${convRel}`, { count: "exact", head: true })
+        .eq("company_id", activeCompanyId!)
+        .eq("is_blocked", false)
+        .eq("contact_type", "lead")
+        .is("merged_into_id", null);
+
+      let qClients = supabase
+        .from("contacts")
+        .select(`id, ${convRel}`, { count: "exact", head: true })
+        .eq("company_id", activeCompanyId!)
+        .eq("is_blocked", false)
+        .eq("contact_type", "client")
         .is("merged_into_id", null);
 
       let qAds = supabase
@@ -145,6 +269,8 @@ function ContactsPage() {
 
       if (isFilteredUnit) {
         qTotal = qTotal.eq("conversations.unit_id", selectedUnitId);
+        qLeads = qLeads.eq("conversations.unit_id", selectedUnitId);
+        qClients = qClients.eq("conversations.unit_id", selectedUnitId);
         qAds = qAds.eq("conversations.unit_id", selectedUnitId);
         qNewThisMonth = qNewThisMonth.eq("conversations.unit_id", selectedUnitId);
         qBlocked = qBlocked.eq("conversations.unit_id", selectedUnitId);
@@ -152,6 +278,8 @@ function ContactsPage() {
 
       if (dateRange?.from) {
         qTotal = qTotal.gte("created_at", dateRange.from.toISOString());
+        qLeads = qLeads.gte("created_at", dateRange.from.toISOString());
+        qClients = qClients.gte("created_at", dateRange.from.toISOString());
         qAds = qAds.gte("created_at", dateRange.from.toISOString());
         qNewThisMonth = qNewThisMonth.gte("created_at", dateRange.from.toISOString());
         qBlocked = qBlocked.gte("created_at", dateRange.from.toISOString());
@@ -160,13 +288,17 @@ function ContactsPage() {
         const toDate = new Date(dateRange.to);
         toDate.setHours(23, 59, 59, 999);
         qTotal = qTotal.lte("created_at", toDate.toISOString());
+        qLeads = qLeads.lte("created_at", toDate.toISOString());
+        qClients = qClients.lte("created_at", toDate.toISOString());
         qAds = qAds.lte("created_at", toDate.toISOString());
         qNewThisMonth = qNewThisMonth.lte("created_at", toDate.toISOString());
         qBlocked = qBlocked.lte("created_at", toDate.toISOString());
       }
 
-      const [resTotal, resAds, resNew, resBlocked] = await Promise.all([
+      const [resTotal, resLeads, resClients, resAds, resNew, resBlocked] = await Promise.all([
         qTotal,
+        qLeads,
+        qClients,
         qAds,
         qNewThisMonth,
         qBlocked,
@@ -174,6 +306,8 @@ function ContactsPage() {
 
       return {
         total: resTotal.count || 0,
+        leads: resLeads.count || 0,
+        clients: resClients.count || 0,
         ads: resAds.count || 0,
         newThisMonth: resNew.count || 0,
         blocked: resBlocked.count || 0,
@@ -183,16 +317,26 @@ function ContactsPage() {
 
   // Consulta paginada (traz apenas os 50 primeiros da página atual)
   const { data: contactsResult, isLoading } = useQuery({
-    queryKey: ["contacts", activeCompanyId, searchTerm, channelFilter, selectedUnitId, dateRange, activeTab, page],
+    queryKey: [
+      "contacts",
+      activeCompanyId,
+      searchTerm,
+      channelFilter,
+      selectedUnitId,
+      dateRange,
+      activeTab,
+      page,
+    ],
     enabled: !!activeCompanyId,
     queryFn: async () => {
       const isFilteredUnit = !!selectedUnitId && selectedUnitId !== "all";
-      const relation = isFilteredUnit ? 'conversations!inner' : 'conversations';
-      const adRelation = activeTab === 'ads' ? 'ad_leads!inner' : 'ad_leads';
-      
+      const relation = isFilteredUnit ? "conversations!inner" : "conversations";
+      const adRelation = activeTab === "ads" ? "ad_leads!inner" : "ad_leads";
+
       let query = supabase
         .from("contacts")
-        .select(`
+        .select(
+          `
           *,
           units (
             id,
@@ -218,7 +362,9 @@ function ContactsPage() {
             units ( name ),
             started_at
           )
-        `, { count: "exact" })
+        `,
+          { count: "exact" },
+        )
         .eq("company_id", activeCompanyId!)
         .is("merged_into_id", null)
         .order("created_at", { ascending: false });
@@ -229,13 +375,21 @@ function ContactsPage() {
         query = query.eq("is_blocked", false);
       }
 
+      if (activeTab === "leads") {
+        query = query.eq("contact_type", "lead");
+      } else if (activeTab === "clients") {
+        query = query.eq("contact_type", "client");
+      }
+
       if (isFilteredUnit) {
         query = query.eq("conversations.unit_id", selectedUnitId);
       }
 
       if (searchTerm.trim()) {
         const term = searchTerm.trim();
-        query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%,email.ilike.%${term}%,instagram_username.ilike.%${term}%`);
+        query = query.or(
+          `name.ilike.%${term}%,phone.ilike.%${term}%,email.ilike.%${term}%,instagram_username.ilike.%${term}%`,
+        );
       }
 
       if (channelFilter === "whatsapp") {
@@ -259,27 +413,29 @@ function ContactsPage() {
 
       const { data, count, error } = await query;
       if (error) throw error;
-      
-      const list = (data || []).filter(c => !c.phone || c.phone.length <= 17).map(c => {
-        // Sort conversations to get the latest
-        const sortedConvs = (c.conversations || []).sort((a: any, b: any) => 
-          new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
-        );
-        const lastConv = sortedConvs[0];
 
-        // Sort ad_leads to get the latest
-        const sortedAds = (c.ad_leads || []).sort((a: any, b: any) => 
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-        const latestAd = sortedAds[0] || null;
+      const list = (data || [])
+        .filter((c) => !c.phone || c.phone.length <= 17)
+        .map((c) => {
+          // Sort conversations to get the latest
+          const sortedConvs = (c.conversations || []).sort(
+            (a: any, b: any) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+          );
+          const lastConv = sortedConvs[0];
 
-        return {
-          ...c,
-          last_unit_name: lastConv?.units?.name,
-          latest_ad: latestAd,
-          has_ad: !!latestAd,
-        };
-      });
+          // Sort ad_leads to get the latest
+          const sortedAds = (c.ad_leads || []).sort(
+            (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+          );
+          const latestAd = sortedAds[0] || null;
+
+          return {
+            ...c,
+            last_unit_name: lastConv?.units?.name,
+            latest_ad: latestAd,
+            has_ad: !!latestAd,
+          };
+        });
 
       return {
         contacts: list,
@@ -310,7 +466,8 @@ function ContactsPage() {
   });
 
   const allVisibleIds = filteredContacts.map((c: any) => c.id);
-  const isAllSelected = allVisibleIds.length > 0 && allVisibleIds.every((id: string) => selectedContactIds.has(id));
+  const isAllSelected =
+    allVisibleIds.length > 0 && allVisibleIds.every((id: string) => selectedContactIds.has(id));
   const isSomeSelected = allVisibleIds.some((id: string) => selectedContactIds.has(id));
 
   const toggleSelectContact = (id: string, e?: React.MouseEvent) => {
@@ -351,7 +508,9 @@ function ContactsPage() {
     },
     onSuccess: () => {
       const labelObj = labels?.find((l) => l.id === bulkLabelId);
-      toast.success(`Etiqueta "${labelObj?.name || 'selecionada'}" aplicada a ${selectedContactIds.size} contato(s)!`);
+      toast.success(
+        `Etiqueta "${labelObj?.name || "selecionada"}" aplicada a ${selectedContactIds.size} contato(s)!`,
+      );
       setIsAddLabelModalOpen(false);
       setSelectedContactIds(new Set());
       setBulkLabelId("");
@@ -365,11 +524,11 @@ function ContactsPage() {
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6">
       {/* Top KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card 
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+        <Card
           className={cn(
             "p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm cursor-pointer transition-all hover:border-primary/50",
-            activeTab === "all" && "ring-1 ring-primary/50"
+            activeTab === "all" && "ring-1 ring-primary/50",
           )}
           onClick={() => {
             setActiveTab("all");
@@ -387,14 +546,64 @@ function ContactsPage() {
           </div>
           <div className="mt-2 text-2xl font-bold">{counts?.total ?? 0}</div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {dateRange ? "No período selecionado" : "Base ativa"}
+            {dateRange ? "No período selecionado" : "Base total ativa"}
           </p>
         </Card>
 
-        <Card 
+        <Card
+          className={cn(
+            "p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm cursor-pointer transition-all hover:border-amber-500/50",
+            activeTab === "leads" && "ring-1 ring-amber-500/50",
+          )}
+          onClick={() => {
+            setActiveTab("leads");
+            setPage(1);
+            setSelectedContactIds(new Set());
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Leads
+            </span>
+            <div className="rounded-lg bg-amber-500/10 p-2 text-amber-500">
+              <Sparkles className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold text-amber-600 dark:text-amber-400">
+            {counts?.leads ?? 0}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">Potenciais clientes</p>
+        </Card>
+
+        <Card
+          className={cn(
+            "p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm cursor-pointer transition-all hover:border-emerald-500/50",
+            activeTab === "clients" && "ring-1 ring-emerald-500/50",
+          )}
+          onClick={() => {
+            setActiveTab("clients");
+            setPage(1);
+            setSelectedContactIds(new Set());
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Clientes
+            </span>
+            <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-500">
+              <UserCheck className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+            {counts?.clients ?? 0}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">Clientes cadastrados</p>
+        </Card>
+
+        <Card
           className={cn(
             "p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm cursor-pointer transition-all hover:border-blue-500/50",
-            activeTab === "ads" && "ring-1 ring-blue-500/50"
+            activeTab === "ads" && "ring-1 ring-blue-500/50",
           )}
           onClick={() => {
             setActiveTab("ads");
@@ -404,7 +613,7 @@ function ContactsPage() {
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Leads de Anúncios
+              Leads Anúncios
             </span>
             <div className="rounded-lg bg-blue-500/10 p-2 text-blue-500">
               <Link className="h-4 w-4" />
@@ -416,25 +625,10 @@ function ContactsPage() {
           <p className="text-xs text-muted-foreground mt-0.5">Origem Meta Ads (CTWA)</p>
         </Card>
 
-        <Card className="p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Novos no Mês
-            </span>
-            <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-500">
-              <UserPlus className="h-4 w-4" />
-            </div>
-          </div>
-          <div className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-            {counts?.newThisMonth ?? 0}
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5">Cadastrados neste mês</p>
-        </Card>
-
-        <Card 
+        <Card
           className={cn(
             "p-4 bg-card/70 backdrop-blur-sm border-border/80 shadow-sm cursor-pointer transition-all hover:border-destructive/50",
-            activeTab === "blocked" && "ring-1 ring-destructive/50"
+            activeTab === "blocked" && "ring-1 ring-destructive/50",
           )}
           onClick={() => {
             setActiveTab("blocked");
@@ -457,24 +651,32 @@ function ContactsPage() {
         </Card>
       </div>
 
-      <Tabs 
-        value={activeTab} 
+      <Tabs
+        value={activeTab}
         onValueChange={(val) => {
           setActiveTab(val);
           setPage(1);
           setSelectedContactIds(new Set());
-        }} 
+        }}
         className="space-y-4"
       >
         <Card>
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <TabsList className="h-9 w-fit">
+              <TabsList className="h-9 w-fit flex-wrap">
                 <TabsTrigger value="all" className="text-xs">
-                  Todos os Contatos ({counts?.total ?? 0})
+                  Todos ({counts?.total ?? 0})
+                </TabsTrigger>
+                <TabsTrigger value="leads" className="text-xs gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  Leads ({counts?.leads ?? 0})
+                </TabsTrigger>
+                <TabsTrigger value="clients" className="text-xs gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  Clientes ({counts?.clients ?? 0})
                 </TabsTrigger>
                 <TabsTrigger value="ads" className="text-xs">
-                  Origem Anúncio ({counts?.ads ?? 0})
+                  Com Anúncio ({counts?.ads ?? 0})
                 </TabsTrigger>
                 <TabsTrigger value="blocked" className="text-xs">
                   Bloqueados ({counts?.blocked ?? 0})
@@ -508,8 +710,8 @@ function ContactsPage() {
                 </div>
 
                 {/* Channel Filter */}
-                <Select 
-                  value={channelFilter} 
+                <Select
+                  value={channelFilter}
                   onValueChange={(val) => {
                     setChannelFilter(val);
                     setPage(1);
@@ -533,7 +735,7 @@ function ContactsPage() {
                       size="sm"
                       className={cn(
                         "h-8 text-xs font-normal",
-                        !dateRange && "text-muted-foreground"
+                        !dateRange && "text-muted-foreground",
                       )}
                     >
                       <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
@@ -566,10 +768,10 @@ function ContactsPage() {
                 </Popover>
 
                 {dateRange && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-8 px-2 text-xs" 
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-xs"
                     onClick={() => {
                       setDateRange(undefined);
                       setPage(1);
@@ -607,358 +809,487 @@ function ContactsPage() {
               <div className="space-y-4">
                 <div className="rounded-md border overflow-x-auto">
                   <Table className="min-w-[750px]">
-                  <TableHeader>
-                    <TableRow className="bg-muted/50">
-                      <TableHead className="w-12 px-4">
-                        <Checkbox
-                          checked={isAllSelected}
-                          onCheckedChange={toggleSelectAll}
-                          aria-label="Selecionar todos os contatos"
-                        />
-                      </TableHead>
-                      <TableHead>Contato</TableHead>
-                      <TableHead>Telefone / Canal</TableHead>
-                      <TableHead>Unidade</TableHead>
-                      <TableHead>Origem / Campanha</TableHead>
-                      <TableHead className="hidden md:table-cell">Etiquetas</TableHead>
-                      <TableHead className="hidden sm:table-cell">Data de Cadastro</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredContacts.map((contact: any) => {
-                      const isSelected = selectedContactIds.has(contact.id);
-                      return (
-                        <TableRow 
-                          key={contact.id} 
-                          className={cn(
-                            "hover:bg-muted/50 cursor-pointer transition-colors",
-                            isSelected && "bg-primary/5 hover:bg-primary/10",
-                            contact.is_blocked && "opacity-80"
-                          )}
-                          onClick={() => setSelectedContactId(contact.id)}
-                        >
-                          <TableCell 
-                            className="w-12 px-4" 
-                            onClick={(e) => e.stopPropagation()}
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead className="w-12 px-4">
+                          <Checkbox
+                            checked={isAllSelected}
+                            onCheckedChange={toggleSelectAll}
+                            aria-label="Selecionar todos os contatos"
+                          />
+                        </TableHead>
+                        <TableHead>Contato</TableHead>
+                        <TableHead>Telefone / Canal</TableHead>
+                        <TableHead>Unidade</TableHead>
+                        <TableHead>Origem / Campanha</TableHead>
+                        <TableHead className="hidden md:table-cell">Etiquetas</TableHead>
+                        <TableHead className="hidden sm:table-cell">Data de Cadastro</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredContacts.map((contact: any) => {
+                        const isSelected = selectedContactIds.has(contact.id);
+                        return (
+                          <TableRow
+                            key={contact.id}
+                            className={cn(
+                              "hover:bg-muted/50 cursor-pointer transition-colors",
+                              isSelected && "bg-primary/5 hover:bg-primary/10",
+                              contact.is_blocked && "opacity-80",
+                            )}
+                            onClick={() => setSelectedContactId(contact.id)}
                           >
-                            <Checkbox
-                              checked={isSelected}
-                              onCheckedChange={() => toggleSelectContact(contact.id)}
-                              aria-label={`Selecionar ${contact.name}`}
-                            />
-                          </TableCell>
-                          <TableCell className="p-4">
-                            <div className="flex items-center gap-2.5">
-                              <div className={cn(
-                                "flex h-8 w-8 items-center justify-center rounded-full shrink-0",
-                                contact.is_blocked ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary"
-                              )}>
-                                {contact.is_blocked ? (
-                                  <ShieldAlert className="h-4 w-4" />
-                                ) : (
-                                  <User className="h-4 w-4" />
-                                )}
-                              </div>
-                              <div className="flex flex-col min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <span className={cn("font-medium text-sm truncate", contact.is_blocked && "text-destructive")}>
-                                    {contact.name || "Sem nome"}
-                                  </span>
-                                  {contact.is_blocked && (
-                                    <Badge variant="destructive" className="text-[9px] px-1.5 py-0 h-4 font-normal">
-                                      Bloqueado
-                                    </Badge>
+                            <TableCell className="w-12 px-4" onClick={(e) => e.stopPropagation()}>
+                              <Checkbox
+                                checked={isSelected}
+                                onCheckedChange={() => toggleSelectContact(contact.id)}
+                                aria-label={`Selecionar ${contact.name}`}
+                              />
+                            </TableCell>
+                            <TableCell className="p-4">
+                              <div className="flex items-center gap-2.5">
+                                <div
+                                  className={cn(
+                                    "flex h-8 w-8 items-center justify-center rounded-full shrink-0",
+                                    contact.is_blocked
+                                      ? "bg-destructive/10 text-destructive"
+                                      : "bg-primary/10 text-primary",
+                                  )}
+                                >
+                                  {contact.is_blocked ? (
+                                    <ShieldAlert className="h-4 w-4" />
+                                  ) : (
+                                    <User className="h-4 w-4" />
                                   )}
                                 </div>
-                                {contact.is_blocked && contact.block_reason && (
-                                  <span className="text-[11px] text-muted-foreground truncate" title={contact.block_reason}>
-                                    Motivo: {contact.block_reason}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="p-4">
-                            <div className="flex flex-col gap-1 text-muted-foreground">
-                              {contact.phone && contact.phone.length <= 15 && (
-                                <div className="flex items-center gap-1.5">
-                                  <Phone className="h-3 w-3 text-foreground/70" />
-                                  <span className="text-xs">{contact.phone}</span>
-                                </div>
-                              )}
-                              {contact.phone && contact.phone.length > 15 && !contact.instagram_username && (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs" title="ID do Canal">ID: {contact.phone}</span>
-                                </div>
-                              )}
-                              {contact.instagram_username && (
-                                <div className="flex items-center gap-1.5">
-                                  <User className="h-3 w-3 text-pink-500" />
-                                  <span className="text-xs font-medium text-pink-600 dark:text-pink-400">@{contact.instagram_username}</span>
-                                </div>
-                              )}
-                              {contact.email && (
-                                <div className="flex items-center gap-1.5">
-                                  <Mail className="h-3 w-3" />
-                                  <span className="truncate max-w-[150px] text-xs">{contact.email}</span>
-                                </div>
-                              )}
-                              {!contact.phone && !contact.email && !contact.instagram_username && (
-                                <span className="text-xs text-muted-foreground">-</span>
-                              )}
-                            </div>
-                          </TableCell>
-                          {/* Unidade do Contato */}
-                          <TableCell className="p-4" onClick={(e) => e.stopPropagation()}>
-                            {isAdmin && companyUnits && companyUnits.length > 0 ? (
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-auto py-1 px-2 text-xs flex items-center gap-1.5 hover:bg-muted font-normal max-w-[170px] border border-border/40"
-                                    title="Clique para alterar a unidade (Administrador)"
-                                  >
-                                    {contact.units?.name ? (
-                                      <span
-                                        className="h-2 w-2 rounded-full shrink-0"
-                                        style={{ backgroundColor: contact.units.color || "#6366f1" }}
-                                      />
-                                    ) : (
-                                      <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                    )}
-                                    <span className="truncate font-medium">
-                                      {contact.units?.name || "Sem unidade"}
-                                    </span>
-                                    <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0 opacity-70 ml-auto" />
-                                  </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="p-1.5 w-56" align="start">
-                                  <div className="text-[11px] font-semibold text-muted-foreground px-2 py-1 flex items-center gap-1 border-b border-border/40 pb-1 mb-1">
-                                    <Building2 className="h-3 w-3" /> Alterar Unidade
-                                  </div>
-                                  <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                                    <Button
-                                      variant={!contact.unit_id ? "secondary" : "ghost"}
-                                      size="sm"
-                                      className="w-full justify-start text-xs h-7 font-normal"
-                                      onClick={() =>
-                                        updateContactUnitMutation.mutate({
-                                          contactId: contact.id,
-                                          unitId: null,
-                                        })
-                                      }
-                                      disabled={updateContactUnitMutation.isPending}
+                                <div className="flex flex-col min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span
+                                      className={cn(
+                                        "font-medium text-sm truncate",
+                                        contact.is_blocked && "text-destructive",
+                                      )}
                                     >
-                                      Sem unidade (Geral / Matriz)
-                                      {!contact.unit_id && <Check className="h-3 w-3 ml-auto text-primary" />}
+                                      {contact.name || "Sem nome"}
+                                    </span>
+                                    {/* Status Badge (Lead vs Cliente) */}
+                                    <div onClick={(e) => e.stopPropagation()}>
+                                      <Popover>
+                                        <PopoverTrigger asChild>
+                                          <button
+                                            type="button"
+                                            className={cn(
+                                              "inline-flex items-center gap-1 px-1.5 py-0 h-4 rounded text-[10px] font-semibold border transition-all cursor-pointer",
+                                              contact.contact_type === "client"
+                                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
+                                                : "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20",
+                                            )}
+                                            title="Clique para alternar entre Lead e Cliente"
+                                          >
+                                            <span
+                                              className={cn(
+                                                "h-1.5 w-1.5 rounded-full shrink-0",
+                                                contact.contact_type === "client"
+                                                  ? "bg-emerald-500"
+                                                  : "bg-amber-500",
+                                              )}
+                                            />
+                                            {contact.contact_type === "client" ? "Cliente" : "Lead"}
+                                            <ChevronDown className="h-2 w-2 opacity-50" />
+                                          </button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="p-1 w-36" align="start">
+                                          <div className="space-y-0.5">
+                                            <Button
+                                              variant={
+                                                contact.contact_type !== "client"
+                                                  ? "secondary"
+                                                  : "ghost"
+                                              }
+                                              size="sm"
+                                              className="w-full justify-start text-xs h-7 font-normal gap-1.5"
+                                              onClick={() =>
+                                                updateContactTypeMutation.mutate({
+                                                  contactId: contact.id,
+                                                  contactType: "lead",
+                                                })
+                                              }
+                                              disabled={updateContactTypeMutation.isPending}
+                                            >
+                                              <span className="h-2 w-2 rounded-full bg-amber-500" />
+                                              <span>Lead</span>
+                                              {contact.contact_type !== "client" && (
+                                                <Check className="h-3 w-3 ml-auto text-primary" />
+                                              )}
+                                            </Button>
+                                            <Button
+                                              variant={
+                                                contact.contact_type === "client"
+                                                  ? "secondary"
+                                                  : "ghost"
+                                              }
+                                              size="sm"
+                                              className="w-full justify-start text-xs h-7 font-normal gap-1.5"
+                                              onClick={() =>
+                                                updateContactTypeMutation.mutate({
+                                                  contactId: contact.id,
+                                                  contactType: "client",
+                                                })
+                                              }
+                                              disabled={updateContactTypeMutation.isPending}
+                                            >
+                                              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                              <span>Cliente</span>
+                                              {contact.contact_type === "client" && (
+                                                <Check className="h-3 w-3 ml-auto text-primary" />
+                                              )}
+                                            </Button>
+                                          </div>
+                                        </PopoverContent>
+                                      </Popover>
+                                    </div>
+                                    {contact.is_blocked && (
+                                      <Badge
+                                        variant="destructive"
+                                        className="text-[9px] px-1.5 py-0 h-4 font-normal"
+                                      >
+                                        Bloqueado
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  {contact.is_blocked && contact.block_reason && (
+                                    <span
+                                      className="text-[11px] text-muted-foreground truncate"
+                                      title={contact.block_reason}
+                                    >
+                                      Motivo: {contact.block_reason}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="p-4">
+                              <div className="flex flex-col gap-1 text-muted-foreground">
+                                {contact.phone && contact.phone.length <= 15 && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Phone className="h-3 w-3 text-foreground/70" />
+                                    <span className="text-xs">{contact.phone}</span>
+                                  </div>
+                                )}
+                                {contact.phone &&
+                                  contact.phone.length > 15 &&
+                                  !contact.instagram_username && (
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-xs" title="ID do Canal">
+                                        ID: {contact.phone}
+                                      </span>
+                                    </div>
+                                  )}
+                                {contact.instagram_username && (
+                                  <div className="flex items-center gap-1.5">
+                                    <User className="h-3 w-3 text-pink-500" />
+                                    <span className="text-xs font-medium text-pink-600 dark:text-pink-400">
+                                      @{contact.instagram_username}
+                                    </span>
+                                  </div>
+                                )}
+                                {contact.email && (
+                                  <div className="flex items-center gap-1.5">
+                                    <Mail className="h-3 w-3" />
+                                    <span className="truncate max-w-[150px] text-xs">
+                                      {contact.email}
+                                    </span>
+                                  </div>
+                                )}
+                                {!contact.phone &&
+                                  !contact.email &&
+                                  !contact.instagram_username && (
+                                    <span className="text-xs text-muted-foreground">-</span>
+                                  )}
+                              </div>
+                            </TableCell>
+                            {/* Unidade do Contato */}
+                            <TableCell className="p-4" onClick={(e) => e.stopPropagation()}>
+                              {isAdmin && companyUnits && companyUnits.length > 0 ? (
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-auto py-1 px-2 text-xs flex items-center gap-1.5 hover:bg-muted font-normal max-w-[170px] border border-border/40"
+                                      title="Clique para alterar a unidade (Administrador)"
+                                    >
+                                      {contact.units?.name ? (
+                                        <span
+                                          className="h-2 w-2 rounded-full shrink-0"
+                                          style={{
+                                            backgroundColor: contact.units.color || "#6366f1",
+                                          }}
+                                        />
+                                      ) : (
+                                        <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                      )}
+                                      <span className="truncate font-medium">
+                                        {contact.units?.name || "Sem unidade"}
+                                      </span>
+                                      <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0 opacity-70 ml-auto" />
                                     </Button>
-                                    {companyUnits.map((u: any) => (
+                                  </PopoverTrigger>
+                                  <PopoverContent className="p-1.5 w-56" align="start">
+                                    <div className="text-[11px] font-semibold text-muted-foreground px-2 py-1 flex items-center gap-1 border-b border-border/40 pb-1 mb-1">
+                                      <Building2 className="h-3 w-3" /> Alterar Unidade
+                                    </div>
+                                    <div className="space-y-0.5 max-h-48 overflow-y-auto">
                                       <Button
-                                        key={u.id}
-                                        variant={contact.unit_id === u.id ? "secondary" : "ghost"}
+                                        variant={!contact.unit_id ? "secondary" : "ghost"}
                                         size="sm"
-                                        className="w-full justify-start text-xs h-7 font-normal gap-1.5"
+                                        className="w-full justify-start text-xs h-7 font-normal"
                                         onClick={() =>
                                           updateContactUnitMutation.mutate({
                                             contactId: contact.id,
-                                            unitId: u.id,
+                                            unitId: null,
                                           })
                                         }
                                         disabled={updateContactUnitMutation.isPending}
                                       >
-                                        <span
-                                          className="h-2 w-2 rounded-full shrink-0"
-                                          style={{ backgroundColor: u.color || "#6366f1" }}
-                                        />
-                                        <span className="truncate">{u.name}</span>
-                                        {contact.unit_id === u.id && (
+                                        Sem unidade (Geral / Matriz)
+                                        {!contact.unit_id && (
                                           <Check className="h-3 w-3 ml-auto text-primary" />
                                         )}
                                       </Button>
-                                    ))}
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
-                            ) : (
-                              <Badge
-                                variant={contact.units?.name ? "outline" : "secondary"}
-                                className="text-xs font-normal gap-1.5 max-w-[160px] truncate"
-                                title="Unidade de criação do contato (Somente administradores podem editar)"
-                              >
-                                {contact.units?.name ? (
-                                  <span
-                                    className="h-2 w-2 rounded-full shrink-0"
-                                    style={{ backgroundColor: contact.units.color || "#6366f1" }}
-                                  />
-                                ) : (
-                                  <Building2 className="h-3 w-3 shrink-0 text-muted-foreground" />
-                                )}
-                                <span className="truncate">{contact.units?.name || "Sem unidade"}</span>
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="p-4">
-                            {contact.has_ad && contact.latest_ad ? (
-                              <div className="flex items-center gap-2.5 max-w-[260px]">
-                                {contact.latest_ad.thumbnail_url ? (
-                                  <>
-                                    <img 
-                                      src={contact.latest_ad.thumbnail_url} 
-                                      alt="Ad thumbnail" 
-                                      className="h-9 w-9 rounded-md object-cover border border-border shrink-0 shadow-2xs"
-                                      onError={(e) => { 
-                                        e.currentTarget.style.display = 'none'; 
-                                        const fallback = e.currentTarget.nextElementSibling as HTMLElement;
-                                        if (fallback) fallback.style.display = 'flex';
-                                      }}
+                                      {companyUnits.map((u: any) => (
+                                        <Button
+                                          key={u.id}
+                                          variant={contact.unit_id === u.id ? "secondary" : "ghost"}
+                                          size="sm"
+                                          className="w-full justify-start text-xs h-7 font-normal gap-1.5"
+                                          onClick={() =>
+                                            updateContactUnitMutation.mutate({
+                                              contactId: contact.id,
+                                              unitId: u.id,
+                                            })
+                                          }
+                                          disabled={updateContactUnitMutation.isPending}
+                                        >
+                                          <span
+                                            className="h-2 w-2 rounded-full shrink-0"
+                                            style={{ backgroundColor: u.color || "#6366f1" }}
+                                          />
+                                          <span className="truncate">{u.name}</span>
+                                          {contact.unit_id === u.id && (
+                                            <Check className="h-3 w-3 ml-auto text-primary" />
+                                          )}
+                                        </Button>
+                                      ))}
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
+                              ) : (
+                                <Badge
+                                  variant={contact.units?.name ? "outline" : "secondary"}
+                                  className="text-xs font-normal gap-1.5 max-w-[160px] truncate"
+                                  title="Unidade de criação do contato (Somente administradores podem editar)"
+                                >
+                                  {contact.units?.name ? (
+                                    <span
+                                      className="h-2 w-2 rounded-full shrink-0"
+                                      style={{ backgroundColor: contact.units.color || "#6366f1" }}
                                     />
-                                    <div 
-                                      style={{ display: 'none' }}
-                                      className="h-9 w-9 rounded-md bg-blue-500/10 text-blue-600 items-center justify-center border border-blue-500/20 shrink-0"
-                                    >
+                                  ) : (
+                                    <Building2 className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                  )}
+                                  <span className="truncate">
+                                    {contact.units?.name || "Sem unidade"}
+                                  </span>
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="p-4">
+                              {contact.has_ad && contact.latest_ad ? (
+                                <div className="flex items-center gap-2.5 max-w-[260px]">
+                                  {contact.latest_ad.thumbnail_url ? (
+                                    <>
+                                      <img
+                                        src={contact.latest_ad.thumbnail_url}
+                                        alt="Ad thumbnail"
+                                        className="h-9 w-9 rounded-md object-cover border border-border shrink-0 shadow-2xs"
+                                        onError={(e) => {
+                                          e.currentTarget.style.display = "none";
+                                          const fallback = e.currentTarget
+                                            .nextElementSibling as HTMLElement;
+                                          if (fallback) fallback.style.display = "flex";
+                                        }}
+                                      />
+                                      <div
+                                        style={{ display: "none" }}
+                                        className="h-9 w-9 rounded-md bg-blue-500/10 text-blue-600 items-center justify-center border border-blue-500/20 shrink-0"
+                                      >
+                                        <Megaphone className="h-4 w-4" />
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div className="h-9 w-9 rounded-md bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20 shrink-0">
                                       <Megaphone className="h-4 w-4" />
                                     </div>
-                                  </>
-                                ) : (
-                                  <div className="h-9 w-9 rounded-md bg-blue-500/10 text-blue-600 flex items-center justify-center border border-blue-500/20 shrink-0">
-                                    <Megaphone className="h-4 w-4" />
-                                  </div>
-                                )}
-                                <div className="flex flex-col min-w-0">
-                                  <div className="flex items-center gap-1">
-                                    <Badge variant="outline" className="text-[9px] gap-1 px-1.5 py-0 h-4 font-normal bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20">
-                                      <Link className="h-2.5 w-2.5" /> Anúncio CTWA
-                                    </Badge>
-                                    {contact.latest_ad.source_app && (
-                                      <span className="text-[9px] text-muted-foreground uppercase font-medium">
-                                        {contact.latest_ad.source_app}
-                                      </span>
+                                  )}
+                                  <div className="flex flex-col min-w-0">
+                                    <div className="flex items-center gap-1">
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[9px] gap-1 px-1.5 py-0 h-4 font-normal bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+                                      >
+                                        <Link className="h-2.5 w-2.5" /> Anúncio CTWA
+                                      </Badge>
+                                      {contact.latest_ad.source_app && (
+                                        <span className="text-[9px] text-muted-foreground uppercase font-medium">
+                                          {contact.latest_ad.source_app}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span
+                                      className="text-xs font-medium truncate mt-0.5"
+                                      title={contact.latest_ad.ad_title || "Anúncio sem título"}
+                                    >
+                                      {contact.latest_ad.ad_title || "Anúncio do Meta"}
+                                    </span>
+                                    {contact.latest_ad.source_url && (
+                                      <a
+                                        href={contact.latest_ad.source_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-[10px] text-primary flex items-center gap-1 hover:underline w-fit"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        Ver anúncio <ExternalLink className="h-2.5 w-2.5" />
+                                      </a>
                                     )}
                                   </div>
-                                  <span className="text-xs font-medium truncate mt-0.5" title={contact.latest_ad.ad_title || "Anúncio sem título"}>
-                                    {contact.latest_ad.ad_title || "Anúncio do Meta"}
-                                  </span>
-                                  {contact.latest_ad.source_url && (
-                                    <a 
-                                      href={contact.latest_ad.source_url} 
-                                      target="_blank" 
-                                      rel="noreferrer"
-                                      className="text-[10px] text-primary flex items-center gap-1 hover:underline w-fit"
-                                      onClick={(e) => e.stopPropagation()}
+                                </div>
+                              ) : contact.source ? (
+                                <div className="flex flex-col min-w-0">
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] gap-1 px-2 py-0.5 font-normal w-fit bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20"
+                                  >
+                                    <Sparkles className="h-3 w-3 text-purple-500" />
+                                    {contact.source}
+                                  </Badge>
+                                  {contact.source_details && (
+                                    <span
+                                      className="text-[11px] text-muted-foreground truncate max-w-[180px] mt-0.5"
+                                      title={contact.source_details}
                                     >
-                                      Ver anúncio <ExternalLink className="h-2.5 w-2.5" />
-                                    </a>
+                                      {contact.source_details}
+                                    </span>
                                   )}
                                 </div>
-                              </div>
-                            ) : contact.source ? (
-                              <div className="flex flex-col min-w-0">
-                                <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0.5 font-normal w-fit bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20">
-                                  <Sparkles className="h-3 w-3 text-purple-500" />
-                                  {contact.source}
+                              ) : contact.instagram_username || contact.instagram_id ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] gap-1 px-2 py-0.5 font-normal w-fit bg-pink-500/5 text-pink-600 dark:text-pink-400 border-pink-500/20"
+                                >
+                                  <User className="h-3 w-3 text-pink-500" />
+                                  Instagram Direct
                                 </Badge>
-                                {contact.source_details && (
-                                  <span className="text-[11px] text-muted-foreground truncate max-w-[180px] mt-0.5" title={contact.source_details}>
-                                    {contact.source_details}
-                                  </span>
-                                )}
-                              </div>
-                            ) : (contact.instagram_username || contact.instagram_id) ? (
-                              <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0.5 font-normal w-fit bg-pink-500/5 text-pink-600 dark:text-pink-400 border-pink-500/20">
-                                <User className="h-3 w-3 text-pink-500" />
-                                Instagram Direct
-                              </Badge>
-                            ) : contact.phone ? (
-                              <Badge variant="outline" className="text-[10px] gap-1 px-2 py-0.5 font-normal w-fit bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
-                                <Phone className="h-3 w-3 text-emerald-500" />
-                                WhatsApp Orgânico
-                              </Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">Direto / Manual</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="p-4 hidden md:table-cell">
-                            <div className="flex flex-wrap gap-1">
-                              {contact.contact_labels?.map((cl: any) => {
-                                const label = cl.labels;
-                                if (!label) return null;
-                                return (
-                                  <Badge 
-                                    key={label.id} 
-                                    variant="outline" 
-                                    className="text-[10px] gap-1 px-2 py-0 h-5 font-normal"
-                                    style={{
-                                      backgroundColor: `${label.color || '#6b7280'}15`,
-                                      color: label.color || '#6b7280',
-                                      borderColor: `${label.color || '#6b7280'}40`,
-                                    }}
-                                  >
-                                    <span 
-                                      className="h-1.5 w-1.5 rounded-full shrink-0" 
-                                      style={{ backgroundColor: label.color || '#6b7280' }} 
-                                    />
-                                    {label.name}
-                                  </Badge>
-                                );
-                              })}
-                              {contact.tags && contact.tags.length > 0 && contact.tags.map((tag: string) => (
-                                <Badge key={tag} variant="secondary" className="text-[10px]">
-                                  {tag}
+                              ) : contact.phone ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] gap-1 px-2 py-0.5 font-normal w-fit bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                >
+                                  <Phone className="h-3 w-3 text-emerald-500" />
+                                  WhatsApp Orgânico
                                 </Badge>
-                              ))}
-                              {!contact.contact_labels?.length && (!contact.tags || contact.tags.length === 0) && (
-                                <span className="text-muted-foreground text-xs">-</span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  Direto / Manual
+                                </span>
                               )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="p-4 hidden sm:table-cell text-muted-foreground text-xs">
-                            {format(new Date(contact.created_at), "dd/MM/yyyy", { locale: ptBR })}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+                            </TableCell>
+                            <TableCell className="p-4 hidden md:table-cell">
+                              <div className="flex flex-wrap gap-1">
+                                {contact.contact_labels?.map((cl: any) => {
+                                  const label = cl.labels;
+                                  if (!label) return null;
+                                  return (
+                                    <Badge
+                                      key={label.id}
+                                      variant="outline"
+                                      className="text-[10px] gap-1 px-2 py-0 h-5 font-normal"
+                                      style={{
+                                        backgroundColor: `${label.color || "#6b7280"}15`,
+                                        color: label.color || "#6b7280",
+                                        borderColor: `${label.color || "#6b7280"}40`,
+                                      }}
+                                    >
+                                      <span
+                                        className="h-1.5 w-1.5 rounded-full shrink-0"
+                                        style={{ backgroundColor: label.color || "#6b7280" }}
+                                      />
+                                      {label.name}
+                                    </Badge>
+                                  );
+                                })}
+                                {contact.tags &&
+                                  contact.tags.length > 0 &&
+                                  contact.tags.map((tag: string) => (
+                                    <Badge key={tag} variant="secondary" className="text-[10px]">
+                                      {tag}
+                                    </Badge>
+                                  ))}
+                                {!contact.contact_labels?.length &&
+                                  (!contact.tags || contact.tags.length === 0) && (
+                                    <span className="text-muted-foreground text-xs">-</span>
+                                  )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="p-4 hidden sm:table-cell text-muted-foreground text-xs">
+                              {format(new Date(contact.created_at), "dd/MM/yyyy", { locale: ptBR })}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
 
-              {/* Controles de Paginação */}
-              {currentTabTotalCount > 0 && (
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 px-1">
-                  <span className="text-xs text-muted-foreground">
-                    Mostrando <span className="font-medium text-foreground">{startItem}</span> a{" "}
-                    <span className="font-medium text-foreground">{endItem}</span> de{" "}
-                    <span className="font-medium text-foreground">{currentTabTotalCount}</span> contatos
-                  </span>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground mr-1">
-                      Página {page} de {totalPages}
+                {/* Controles de Paginação */}
+                {currentTabTotalCount > 0 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 px-1">
+                    <span className="text-xs text-muted-foreground">
+                      Mostrando <span className="font-medium text-foreground">{startItem}</span> a{" "}
+                      <span className="font-medium text-foreground">{endItem}</span> de{" "}
+                      <span className="font-medium text-foreground">{currentTabTotalCount}</span>{" "}
+                      contatos
                     </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 px-3 text-xs"
-                      disabled={page <= 1 || isLoading}
-                      onClick={() => {
-                        setPage((p) => Math.max(1, p - 1));
-                        setSelectedContactIds(new Set());
-                      }}
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Anterior
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 px-3 text-xs"
-                      disabled={page >= totalPages || isLoading}
-                      onClick={() => {
-                        setPage((p) => Math.min(totalPages, p + 1));
-                        setSelectedContactIds(new Set());
-                      }}
-                    >
-                      Próxima <ChevronRight className="h-3.5 w-3.5 ml-1" />
-                    </Button>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground mr-1">
+                        Página {page} de {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-3 text-xs"
+                        disabled={page <= 1 || isLoading}
+                        onClick={() => {
+                          setPage((p) => Math.max(1, p - 1));
+                          setSelectedContactIds(new Set());
+                        }}
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Anterior
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-3 text-xs"
+                        disabled={page >= totalPages || isLoading}
+                        onClick={() => {
+                          setPage((p) => Math.min(totalPages, p + 1));
+                          setSelectedContactIds(new Set());
+                        }}
+                      >
+                        Próxima <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -970,25 +1301,37 @@ function ContactsPage() {
                     <Link className="h-6 w-6 text-muted-foreground" />
                   ) : activeTab === "blocked" ? (
                     <ShieldAlert className="h-6 w-6 text-muted-foreground" />
+                  ) : activeTab === "clients" ? (
+                    <UserCheck className="h-6 w-6 text-emerald-500" />
+                  ) : activeTab === "leads" ? (
+                    <Sparkles className="h-6 w-6 text-amber-500" />
                   ) : (
                     <User className="h-6 w-6 text-muted-foreground" />
                   )}
                 </div>
                 <h3 className="text-lg font-medium">
-                  {activeTab === "ads" 
-                    ? "Nenhum lead de anúncio encontrado" 
+                  {activeTab === "ads"
+                    ? "Nenhum lead de anúncio encontrado"
                     : activeTab === "blocked"
-                    ? "Nenhum contato bloqueado"
-                    : "Nenhum contato encontrado"}
+                      ? "Nenhum contato bloqueado"
+                      : activeTab === "clients"
+                        ? "Nenhum cliente cadastrado ainda"
+                        : activeTab === "leads"
+                          ? "Nenhum lead encontrado"
+                          : "Nenhum contato encontrado"}
                 </h3>
                 <p className="text-sm text-muted-foreground max-w-sm mt-1">
-                  {searchTerm 
+                  {searchTerm
                     ? "Não encontramos resultados para a sua busca."
                     : activeTab === "ads"
-                    ? "Os contatos que chegarem através de anúncios do Meta/WhatsApp aparecerão aqui."
-                    : activeTab === "blocked"
-                    ? "Nenhum contato está bloqueado no momento."
-                    : "Os contatos aparecerão aqui automaticamente quando iniciarem uma conversa."}
+                      ? "Os contatos que chegarem através de anúncios do Meta/WhatsApp aparecerão aqui."
+                      : activeTab === "blocked"
+                        ? "Nenhum contato está bloqueado no momento."
+                        : activeTab === "clients"
+                          ? "Os contatos promovidos a cliente ou que fecharam vendas no CRM aparecerão aqui."
+                          : activeTab === "leads"
+                            ? "Os contatos em processo comercial aparecerão aqui."
+                            : "Os contatos aparecerão aqui automaticamente quando iniciarem uma conversa."}
                 </p>
               </div>
             )}
@@ -1001,7 +1344,9 @@ function ContactsPage() {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-card/95 backdrop-blur-md border border-border px-4 py-2.5 rounded-full shadow-2xl animate-in fade-in slide-in-from-bottom-3 duration-200">
           <div className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-primary/10 text-primary">
             <CheckSquare className="h-3.5 w-3.5" />
-            <span>{selectedContactIds.size} selecionado{selectedContactIds.size > 1 ? "s" : ""}</span>
+            <span>
+              {selectedContactIds.size} selecionado{selectedContactIds.size > 1 ? "s" : ""}
+            </span>
           </div>
 
           <div className="h-4 w-px bg-border" />
@@ -1018,6 +1363,28 @@ function ContactsPage() {
           >
             <Tag className="h-3.5 w-3.5" />
             Adicionar Etiqueta
+          </Button>
+
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 text-xs font-medium border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 shadow-xs"
+            onClick={() => bulkUpdateContactType.mutate("client")}
+            disabled={bulkUpdateContactType.isPending}
+          >
+            <UserCheck className="h-3.5 w-3.5" />
+            Marcar como Cliente
+          </Button>
+
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 text-xs font-medium border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 shadow-xs"
+            onClick={() => bulkUpdateContactType.mutate("lead")}
+            disabled={bulkUpdateContactType.isPending}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Marcar como Lead
           </Button>
 
           <Button
@@ -1040,14 +1407,17 @@ function ContactsPage() {
               Adicionar Etiqueta em Massa
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Selecione qual etiqueta será vinculada aos {selectedContactIds.size} contato{selectedContactIds.size > 1 ? "s" : ""} selecionado{selectedContactIds.size > 1 ? "s" : ""}.
+              Selecione qual etiqueta será vinculada aos {selectedContactIds.size} contato
+              {selectedContactIds.size > 1 ? "s" : ""} selecionado
+              {selectedContactIds.size > 1 ? "s" : ""}.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-3">
             {!labels?.length ? (
               <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-800 dark:text-amber-200">
-                Você ainda não possui etiquetas cadastradas. Crie suas etiquetas em <b>Configurações &gt; Etiquetas</b>.
+                Você ainda não possui etiquetas cadastradas. Crie suas etiquetas em{" "}
+                <b>Configurações &gt; Etiquetas</b>.
               </div>
             ) : (
               <div className="space-y-2">
@@ -1077,11 +1447,7 @@ function ContactsPage() {
           </div>
 
           <DialogFooter>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setIsAddLabelModalOpen(false)}
-            >
+            <Button variant="outline" size="sm" onClick={() => setIsAddLabelModalOpen(false)}>
               Cancelar
             </Button>
             <Button
@@ -1102,10 +1468,10 @@ function ContactsPage() {
         </DialogContent>
       </Dialog>
 
-      <ContactDetailsSheet 
-        contactId={selectedContactId} 
-        open={!!selectedContactId} 
-        onOpenChange={(open) => !open && setSelectedContactId(null)} 
+      <ContactDetailsSheet
+        contactId={selectedContactId}
+        open={!!selectedContactId}
+        onOpenChange={(open) => !open && setSelectedContactId(null)}
       />
     </div>
   );

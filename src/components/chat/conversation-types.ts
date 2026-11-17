@@ -25,6 +25,8 @@ export interface ConvRow {
     is_blocked?: boolean;
     source?: string | null;
     source_details?: string | null;
+    contact_type?: "lead" | "client" | null;
+    became_client_at?: string | null;
     contact_labels?: { labels: { id: string; name: string; color: string | null } }[];
   };
   department: { name: string } | null;

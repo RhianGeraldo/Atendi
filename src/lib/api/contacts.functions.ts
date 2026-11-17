@@ -99,3 +99,135 @@ export const updateContactUnitAction = createServerFn({ method: "POST" })
       unitId,
     };
   });
+
+/**
+ * Atualiza o status/tipo do contato (lead vs client).
+ * Registra became_client_at quando promovido a cliente.
+ */
+export const updateContactTypeAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      contactId: z.string().uuid(),
+      contactType: z.enum(["lead", "client"]),
+      companyId: z.string().uuid().optional(),
+    }),
+  )
+  .handler(async ({ data, context }: { data: any; context: any }) => {
+    const { contactId, contactType, companyId } = data;
+    const userId = context?.userId || context?.user?.id;
+
+    if (!userId) {
+      throw new Error("Não autenticado ou sessão expirada.");
+    }
+
+    const { data: profile, error: profileErr } = await supabaseAdmin
+      .from("profiles")
+      .select("id, role, company_id")
+      .eq("id", userId)
+      .single();
+
+    if (profileErr || !profile) {
+      throw new Error("Perfil de usuário não encontrado.");
+    }
+
+    const { data: contact, error: contactErr } = await supabaseAdmin
+      .from("contacts")
+      .select("id, company_id, contact_type, became_client_at")
+      .eq("id", contactId)
+      .single();
+
+    if (contactErr || !contact) {
+      throw new Error("Contato não encontrado.");
+    }
+
+    if (profile.role !== "super_admin" && profile.company_id !== contact.company_id) {
+      throw new Error("Acesso negado: você não pertence à empresa deste contato.");
+    }
+
+    const updates: Record<string, any> = {
+      contact_type: contactType,
+    };
+
+    if (contactType === "client") {
+      updates.became_client_at = contact.became_client_at || new Date().toISOString();
+    } else {
+      updates.became_client_at = null;
+    }
+
+    const { error: updateErr } = await supabaseAdmin
+      .from("contacts")
+      .update(updates)
+      .eq("id", contactId);
+
+    if (updateErr) {
+      throw new Error(`Erro ao atualizar tipo do contato: ${updateErr.message}`);
+    }
+
+    return {
+      success: true,
+      contactId,
+      contactType,
+    };
+  });
+
+/**
+ * Atualização em massa do tipo de contato (Lead ou Cliente).
+ */
+export const bulkUpdateContactTypeAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      contactIds: z.array(z.string().uuid()).min(1),
+      contactType: z.enum(["lead", "client"]),
+      companyId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data, context }: { data: any; context: any }) => {
+    const { contactIds, contactType, companyId } = data;
+    const userId = context?.userId || context?.user?.id;
+
+    if (!userId) {
+      throw new Error("Não autenticado ou sessão expirada.");
+    }
+
+    const { data: profile, error: profileErr } = await supabaseAdmin
+      .from("profiles")
+      .select("id, role, company_id")
+      .eq("id", userId)
+      .single();
+
+    if (profileErr || !profile) {
+      throw new Error("Perfil de usuário não encontrado.");
+    }
+
+    if (profile.role !== "super_admin" && profile.company_id !== companyId) {
+      throw new Error("Acesso negado: você não pertence a esta empresa.");
+    }
+
+    const updates: Record<string, any> = {
+      contact_type: contactType,
+    };
+
+    if (contactType === "client") {
+      updates.became_client_at = new Date().toISOString();
+    } else {
+      updates.became_client_at = null;
+    }
+
+    const { error: updateErr, count } = await supabaseAdmin
+      .from("contacts")
+      .update(updates, { count: "exact" })
+      .in("id", contactIds)
+      .eq("company_id", companyId);
+
+    if (updateErr) {
+      throw new Error(`Erro na atualização em massa: ${updateErr.message}`);
+    }
+
+    return {
+      success: true,
+      updatedCount: count || contactIds.length,
+      contactType,
+    };
+  });
