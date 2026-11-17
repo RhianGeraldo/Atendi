@@ -22,6 +22,9 @@ import {
   AlertTriangle,
   Layers,
   Sparkles,
+  Trash2,
+  Edit3,
+  Bookmark,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -51,6 +54,7 @@ import {
   pauseCampaignAction,
   resumeCampaignAction,
   cancelCampaignAction,
+  deleteCampaignDraftAction,
 } from "@/lib/api/campaigns.functions";
 import { CreateCampaignDialog } from "@/components/campaigns/create-campaign-dialog";
 import { CampaignDetailsSheet } from "@/components/campaigns/campaign-details-sheet";
@@ -75,6 +79,7 @@ function CampaignsPage() {
 
   // Modais
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [detailsCampaignId, setDetailsCampaignId] = useState<string | null>(null);
 
   // Consulta lista de campanhas
@@ -142,21 +147,89 @@ function CampaignsPage() {
     onError: (err: any) => toast.error(err.message || "Erro ao cancelar"),
   });
 
-  const getStatusBadge = (status: string) => {
+  const deleteDraftMutation = useMutation({
+    mutationFn: (campaignId: string) =>
+      deleteCampaignDraftAction({
+        data: { campaignId, companyId: activeCompanyId! },
+      }),
+    onSuccess: () => {
+      toast.success("Rascunho excluído com sucesso.");
+      qc.invalidateQueries({ queryKey: ["campaigns-list"] });
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao excluir rascunho"),
+  });
+
+  const renderStatusCell = (camp: any) => {
+    const status = camp.status;
+    const draftStep = camp.settings?.draft_step || 1;
+
     switch (status) {
       case "running":
         return (
-          <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 flex items-center gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            Em execução
-          </Badge>
+          <div className="flex items-center gap-1.5">
+            <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 flex items-center gap-1.5 py-0.5 text-xs">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Ligada
+            </Badge>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => pauseMutation.mutate(camp.id)}
+              disabled={pauseMutation.isPending}
+              className="h-6 px-2 text-[11px] text-amber-600 hover:text-amber-700 hover:bg-amber-500/10 border-amber-500/30 font-medium"
+              title="Pausar disparos"
+            >
+              <Pause className="h-3 w-3 mr-1" />
+              Pausar
+            </Button>
+          </div>
+        );
+      case "paused":
+        return (
+          <div className="flex items-center gap-1.5">
+            <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30 py-0.5 text-xs">
+              Pausada
+            </Badge>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => resumeMutation.mutate(camp.id)}
+              disabled={resumeMutation.isPending}
+              className="h-6 px-2 text-[11px] text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10 border-emerald-500/30 font-medium"
+              title="Ligar e retomar disparos"
+            >
+              <Play className="h-3 w-3 mr-1 fill-emerald-600" />
+              Ligar
+            </Button>
+          </div>
+        );
+      case "draft":
+        return (
+          <div className="flex items-center gap-1.5">
+            <Badge
+              variant="outline"
+              className="text-muted-foreground border-muted-foreground/30 py-0.5 text-[10px]"
+            >
+              <Bookmark className="h-3 w-3 mr-1" />
+              Rascunho ({draftStep}/5)
+            </Badge>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setEditingDraftId(camp.id);
+                setCreateDialogOpen(true);
+              }}
+              className="h-6 px-2 text-[11px] font-medium"
+              title="Continuar rascunho de onde parou"
+            >
+              <Edit3 className="h-3 w-3 mr-1 text-primary" />
+              Continuar
+            </Button>
+          </div>
         );
       case "scheduled":
         return <Badge className="bg-blue-500/15 text-blue-600 border-blue-500/30">Agendada</Badge>;
-      case "paused":
-        return (
-          <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30">Pausada</Badge>
-        );
       case "completed":
         return (
           <Badge className="bg-indigo-500/15 text-indigo-600 border-indigo-500/30">Concluída</Badge>
@@ -180,7 +253,10 @@ function CampaignsPage() {
         </p>
 
         <Button
-          onClick={() => setCreateDialogOpen(true)}
+          onClick={() => {
+            setEditingDraftId(null);
+            setCreateDialogOpen(true);
+          }}
           className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-sm shrink-0 cursor-pointer"
         >
           <Plus className="h-4 w-4 mr-2" />
@@ -273,9 +349,10 @@ function CampaignsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos os Status</SelectItem>
-                <SelectItem value="running">Em execução</SelectItem>
-                <SelectItem value="scheduled">Agendada</SelectItem>
+                <SelectItem value="running">Em execução (Ligada)</SelectItem>
                 <SelectItem value="paused">Pausada</SelectItem>
+                <SelectItem value="draft">Rascunhos</SelectItem>
+                <SelectItem value="scheduled">Agendada</SelectItem>
                 <SelectItem value="completed">Concluída</SelectItem>
                 <SelectItem value="cancelled">Cancelada</SelectItem>
               </SelectContent>
@@ -331,7 +408,12 @@ function CampaignsPage() {
             Crie sua primeira campanha para reativar clientes inativos ou enviar novidades para sua
             base.
           </p>
-          <Button onClick={() => setCreateDialogOpen(true)}>
+          <Button
+            onClick={() => {
+              setEditingDraftId(null);
+              setCreateDialogOpen(true);
+            }}
+          >
             <Plus className="h-4 w-4 mr-2" />
             Criar Campanha
           </Button>
@@ -391,7 +473,7 @@ function CampaignsPage() {
                       </Badge>
                     </TableCell>
 
-                    <TableCell>{getStatusBadge(camp.status)}</TableCell>
+                    <TableCell>{renderStatusCell(camp)}</TableCell>
 
                     {/* Quantidade a enviar (Pendente) */}
                     <TableCell>
@@ -464,6 +546,39 @@ function CampaignsPage() {
 
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {camp.status === "draft" && (
+                          <>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-primary"
+                              title="Continuar Rascunho"
+                              onClick={() => {
+                                setEditingDraftId(camp.id);
+                                setCreateDialogOpen(true);
+                              }}
+                            >
+                              <Edit3 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10"
+                              title="Excluir Rascunho"
+                              onClick={() => {
+                                if (
+                                  confirm(`Deseja realmente excluir o rascunho "${camp.name}"?`)
+                                ) {
+                                  deleteDraftMutation.mutate(camp.id);
+                                }
+                              }}
+                              disabled={deleteDraftMutation.isPending}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
+
                         {camp.status === "running" && (
                           <Button
                             size="icon"
@@ -530,9 +645,16 @@ function CampaignsPage() {
       {activeCompanyId && (
         <CreateCampaignDialog
           open={createDialogOpen}
-          onOpenChange={setCreateDialogOpen}
+          onOpenChange={(open) => {
+            setCreateDialogOpen(open);
+            if (!open) setEditingDraftId(null);
+          }}
           companyId={activeCompanyId}
-          onSuccess={() => refetch()}
+          draftCampaignId={editingDraftId}
+          onSuccess={() => {
+            refetch();
+            setEditingDraftId(null);
+          }}
         />
       )}
 
@@ -543,6 +665,10 @@ function CampaignsPage() {
           onOpenChange={(open) => !open && setDetailsCampaignId(null)}
           campaignId={detailsCampaignId}
           companyId={activeCompanyId}
+          onEditDraft={(id) => {
+            setEditingDraftId(id);
+            setCreateDialogOpen(true);
+          }}
         />
       )}
     </div>

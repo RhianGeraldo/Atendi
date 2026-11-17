@@ -319,6 +319,7 @@ export const createCampaignAction = createServerFn({ method: "POST" })
   .validator(
     z.object({
       companyId: z.string().uuid(),
+      draftCampaignId: z.string().uuid().optional().nullable(),
       unitId: z.string().uuid().nullable().optional(),
       name: z.string().min(2, "Nome da campanha muito curto"),
       description: z.string().optional(),
@@ -417,31 +418,69 @@ export const createCampaignAction = createServerFn({ method: "POST" })
 
     const primaryMessage = rawMessages[0];
 
-    // 1. Cria a campanha no banco
-    const { data: campaign, error: campErr } = await (supabaseAdmin.from("campaigns") as any)
-      .insert({
-        company_id: data.companyId,
-        unit_id: data.unitId || null,
-        created_by: context.userId,
-        name: data.name.trim(),
-        description: data.description?.trim() || null,
-        status: initialStatus,
-        audience_type: data.audienceType,
-        audience_filters: data.audienceFilters || {},
-        message_type: primaryMessage.messageType,
-        content: primaryMessage.content,
-        media_url: primaryMessage.mediaUrl || null,
-        media_name: primaryMessage.mediaName || null,
-        whatsapp_instance_ids: data.whatsappInstanceIds,
-        settings: data.settings,
-        scheduled_at: isScheduled ? new Date(data.scheduledAt!).toISOString() : null,
-        started_at: isScheduled ? null : nowIso,
-      })
-      .select()
-      .single();
+    // 1. Cria ou atualiza a campanha no banco
+    let campaign: any;
 
-    if (campErr || !campaign) {
-      throw new Error(`Falha ao criar campanha: ${campErr?.message}`);
+    if (data.draftCampaignId) {
+      const { data: updatedCamp, error: updateErr } = await (supabaseAdmin.from("campaigns") as any)
+        .update({
+          unit_id: data.unitId || null,
+          name: data.name.trim(),
+          description: data.description?.trim() || null,
+          status: initialStatus,
+          audience_type: data.audienceType,
+          audience_filters: data.audienceFilters || {},
+          message_type: primaryMessage.messageType,
+          content: primaryMessage.content,
+          media_url: primaryMessage.mediaUrl || null,
+          media_name: primaryMessage.mediaName || null,
+          whatsapp_instance_ids: data.whatsappInstanceIds,
+          settings: data.settings,
+          scheduled_at: isScheduled ? new Date(data.scheduledAt!).toISOString() : null,
+          started_at: isScheduled ? null : nowIso,
+          updated_at: nowIso,
+        })
+        .eq("id", data.draftCampaignId)
+        .eq("company_id", data.companyId)
+        .select()
+        .single();
+
+      if (updateErr || !updatedCamp) {
+        throw new Error(`Falha ao converter rascunho de campanha: ${updateErr?.message}`);
+      }
+      campaign = updatedCamp;
+
+      // Limpa variações antigas do rascunho para reinserir com os dados finais
+      await (supabaseAdmin.from("campaign_messages") as any)
+        .delete()
+        .eq("campaign_id", campaign.id);
+    } else {
+      const { data: newCamp, error: campErr } = await (supabaseAdmin.from("campaigns") as any)
+        .insert({
+          company_id: data.companyId,
+          unit_id: data.unitId || null,
+          created_by: context.userId,
+          name: data.name.trim(),
+          description: data.description?.trim() || null,
+          status: initialStatus,
+          audience_type: data.audienceType,
+          audience_filters: data.audienceFilters || {},
+          message_type: primaryMessage.messageType,
+          content: primaryMessage.content,
+          media_url: primaryMessage.mediaUrl || null,
+          media_name: primaryMessage.mediaName || null,
+          whatsapp_instance_ids: data.whatsappInstanceIds,
+          settings: data.settings,
+          scheduled_at: isScheduled ? new Date(data.scheduledAt!).toISOString() : null,
+          started_at: isScheduled ? null : nowIso,
+        })
+        .select()
+        .single();
+
+      if (campErr || !newCamp) {
+        throw new Error(`Falha ao criar campanha: ${campErr?.message}`);
+      }
+      campaign = newCamp;
     }
 
     // 1.1 Insere todas as variações em campaign_messages
@@ -725,6 +764,246 @@ export const cancelCampaignAction = createServerFn({ method: "POST" })
       .eq("status", "pending");
 
     await supabaseAdmin.rpc("recalculate_campaign_stats", { p_campaign_id: data.campaignId });
+
+    return { success: true };
+  });
+
+/**
+ * Salva ou atualiza um rascunho de campanha (status: 'draft') salvando a etapa exata onde parou
+ */
+export const saveCampaignDraftAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      companyId: z.string().uuid(),
+      draftCampaignId: z.string().uuid().optional().nullable(),
+      currentStep: z.number().min(1).max(5).default(1),
+      unitId: z.string().uuid().nullable().optional(),
+      name: z.string().optional(),
+      description: z.string().optional(),
+      audienceType: z.enum(["segment", "import"]).default("segment"),
+      audienceFilters: z
+        .object({
+          inactivity_days: z.number().optional().nullable(),
+          tags: z.array(z.string()).optional(),
+          excluded_tags: z.array(z.string()).optional(),
+          unit_ids: z.array(z.string().uuid()).optional(),
+          only_without_open_conversations: z.boolean().optional(),
+          contact_type: z.enum(["all", "lead", "client"]).optional().nullable(),
+          sources: z.array(z.string()).optional(),
+          ddds: z.array(z.string()).optional(),
+          created_after: z.string().optional().nullable(),
+          created_before: z.string().optional().nullable(),
+          // CRM
+          crm_enabled: z.boolean().optional(),
+          crm_mode: z.enum(["with", "without"]).optional(),
+          crm_pipeline_ids: z.array(z.string().uuid()).optional(),
+          crm_stage_ids: z.array(z.string().uuid()).optional(),
+          crm_statuses: z.array(z.string()).optional(),
+          // Todoo
+          todoo_enabled: z.boolean().optional(),
+          todoo_mode: z.enum(["with", "without"]).optional(),
+          todoo_campaign_ids: z.array(z.string().uuid()).optional(),
+          todoo_stage_ids: z.array(z.string().uuid()).optional(),
+          todoo_lead_statuses: z.array(z.string()).optional(),
+        })
+        .optional(),
+      importedRecipients: z
+        .array(
+          z.object({
+            phone: z.union([z.string(), z.number()]),
+            name: z.string().optional().nullable(),
+            unitId: z.string().uuid().optional().nullable(),
+            customVariables: z.record(z.any()).optional(),
+          }),
+        )
+        .optional(),
+      importFileName: z.string().optional().nullable(),
+      saveImportedToContacts: z.boolean().optional(),
+      messages: z
+        .array(
+          z.object({
+            name: z.string().default("Variação 1"),
+            messageType: z.enum(["text", "image", "video", "audio", "document"]).default("text"),
+            content: z.string().default(""),
+            mediaUrl: z.string().optional().nullable(),
+            mediaName: z.string().optional().nullable(),
+          }),
+        )
+        .optional(),
+      whatsappInstanceIds: z.array(z.string().uuid()).optional().default([]),
+      settings: z
+        .object({
+          min_delay_seconds: z.number().default(25),
+          max_delay_seconds: z.number().default(55),
+          batch_size: z.number().default(20),
+          batch_cooldown_seconds: z.number().default(180),
+          allowed_start_time: z.string().default("08:00"),
+          allowed_end_time: z.string().default("20:00"),
+          allowed_days: z.array(z.number()).default([1, 2, 3, 4, 5, 6]),
+          crm_scope: z.string().optional(),
+        })
+        .default({}),
+      scheduledAt: z.string().nullable().optional(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    await assertCompanyAccess(context.userId, data.companyId);
+
+    const nowIso = new Date().toISOString();
+    const draftName =
+      data.name?.trim() || `Rascunho de Campanha (${new Date().toLocaleDateString("pt-BR")})`;
+
+    const rawMessages =
+      data.messages && data.messages.length > 0
+        ? data.messages
+        : [
+            {
+              name: "Variação 1",
+              messageType: "text" as const,
+              content: "",
+              mediaUrl: null,
+              mediaName: null,
+            },
+          ];
+
+    const primaryMessage = rawMessages[0];
+    const settingsPayload = {
+      ...(data.settings || {}),
+      draft_step: data.currentStep,
+      import_file_name: data.importFileName || null,
+      imported_recipients: data.importedRecipients || null,
+      save_imported_to_contacts: data.saveImportedToContacts,
+    };
+
+    let draftId = data.draftCampaignId;
+
+    if (draftId) {
+      // Atualiza rascunho existente
+      const { error: updateErr } = await (supabaseAdmin.from("campaigns") as any)
+        .update({
+          unit_id: data.unitId || null,
+          name: draftName,
+          description: data.description?.trim() || null,
+          status: "draft",
+          audience_type: data.audienceType,
+          audience_filters: data.audienceFilters || {},
+          message_type: primaryMessage.messageType || "text",
+          content: primaryMessage.content || "",
+          media_url: primaryMessage.mediaUrl || null,
+          media_name: primaryMessage.mediaName || null,
+          whatsapp_instance_ids: data.whatsappInstanceIds || [],
+          settings: settingsPayload,
+          scheduled_at: data.scheduledAt ? new Date(data.scheduledAt).toISOString() : null,
+          updated_at: nowIso,
+        })
+        .eq("id", draftId)
+        .eq("company_id", data.companyId);
+
+      if (updateErr) {
+        throw new Error(`Erro ao atualizar rascunho: ${updateErr.message}`);
+      }
+
+      // Atualiza variações em campaign_messages
+      await (supabaseAdmin.from("campaign_messages") as any).delete().eq("campaign_id", draftId);
+    } else {
+      // Cria novo rascunho
+      const { data: inserted, error: insertErr } = await (supabaseAdmin.from("campaigns") as any)
+        .insert({
+          company_id: data.companyId,
+          unit_id: data.unitId || null,
+          created_by: context.userId,
+          name: draftName,
+          description: data.description?.trim() || null,
+          status: "draft",
+          audience_type: data.audienceType,
+          audience_filters: data.audienceFilters || {},
+          message_type: primaryMessage.messageType || "text",
+          content: primaryMessage.content || "",
+          media_url: primaryMessage.mediaUrl || null,
+          media_name: primaryMessage.mediaName || null,
+          whatsapp_instance_ids: data.whatsappInstanceIds || [],
+          settings: settingsPayload,
+          scheduled_at: data.scheduledAt ? new Date(data.scheduledAt).toISOString() : null,
+          created_at: nowIso,
+          updated_at: nowIso,
+        })
+        .select()
+        .single();
+
+      if (insertErr || !inserted) {
+        throw new Error(`Erro ao criar rascunho: ${insertErr?.message}`);
+      }
+      draftId = inserted.id;
+    }
+
+    // Insere variações em campaign_messages
+    if (draftId && rawMessages.length > 0) {
+      const variationRows = rawMessages.map((m, idx) => ({
+        campaign_id: draftId,
+        company_id: data.companyId,
+        name: m.name?.trim() || `Variação ${idx + 1}`,
+        message_type: m.messageType || "text",
+        content: m.content || "",
+        media_url: m.mediaUrl || null,
+        media_name: m.mediaName || null,
+        is_active: true,
+      }));
+
+      await (supabaseAdmin.from("campaign_messages") as any).insert(variationRows);
+    }
+
+    return {
+      success: true,
+      draftCampaignId: draftId,
+      draftStep: data.currentStep,
+    };
+  });
+
+/**
+ * Exclui um rascunho de campanha
+ */
+export const deleteCampaignDraftAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      campaignId: z.string().uuid(),
+      companyId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    await assertCompanyAccess(context.userId, data.companyId);
+
+    // Garante que só pode excluir se for de fato um rascunho
+    const { data: campaign, error: checkErr } = await supabaseAdmin
+      .from("campaigns")
+      .select("id, status")
+      .eq("id", data.campaignId)
+      .eq("company_id", data.companyId)
+      .single();
+
+    if (checkErr || !campaign) {
+      throw new Error("Campanha não encontrada.");
+    }
+
+    if (campaign.status !== "draft") {
+      throw new Error("Apenas campanhas em rascunho podem ser excluídas por esta ação.");
+    }
+
+    // Exclui mensagens e a campanha
+    await (supabaseAdmin.from("campaign_messages") as any)
+      .delete()
+      .eq("campaign_id", data.campaignId);
+
+    const { error: delErr } = await supabaseAdmin
+      .from("campaigns")
+      .delete()
+      .eq("id", data.campaignId)
+      .eq("company_id", data.companyId);
+
+    if (delErr) {
+      throw new Error(`Falha ao excluir rascunho: ${delErr.message}`);
+    }
 
     return { success: true };
   });

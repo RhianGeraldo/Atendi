@@ -38,6 +38,8 @@ import {
   Trophy,
   Sparkles,
   Layers,
+  Bookmark,
+  Edit3,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -53,9 +55,16 @@ interface Props {
   companyId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onEditDraft?: (campaignId: string) => void;
 }
 
-export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange }: Props) {
+export function CampaignDetailsSheet({
+  campaignId,
+  companyId,
+  open,
+  onOpenChange,
+  onEditDraft,
+}: Props) {
   const qc = useQueryClient();
   const [recipientStatusFilter, setRecipientStatusFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
@@ -185,6 +194,13 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
         return <Badge variant="destructive">Cancelada</Badge>;
       case "failed":
         return <Badge variant="destructive">Falha</Badge>;
+      case "draft":
+        return (
+          <Badge variant="outline" className="text-muted-foreground border-muted-foreground/30">
+            <Bookmark className="h-3 w-3 mr-1" />
+            Rascunho ({campaign?.settings?.draft_step || 1}/5)
+          </Badge>
+        );
       default:
         return <Badge variant="outline">Rascunho</Badge>;
     }
@@ -209,6 +225,20 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
                 <SheetTitle className="text-xl font-bold">{campaign.name}</SheetTitle>
                 <div className="flex items-center gap-2">
                   {getStatusBadge(campaign.status)}
+
+                  {campaign.status === "draft" && onEditDraft && (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        onOpenChange(false);
+                        onEditDraft(campaign.id);
+                      }}
+                    >
+                      <Edit3 className="h-3.5 w-3.5 mr-1" />
+                      Continuar Rascunho
+                    </Button>
+                  )}
+
                   {campaign.status === "running" && (
                     <Button
                       size="sm"
@@ -316,6 +346,39 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
                 </div>
               )}
             </SheetHeader>
+
+            {/* Banner de Rascunho */}
+            {campaign.status === "draft" && (
+              <Card className="border-amber-500/30 bg-amber-500/10">
+                <CardContent className="p-4 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <Bookmark className="h-5 w-5 text-amber-600 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                        Esta campanha está salva como rascunho (Etapa{" "}
+                        {campaign.settings?.draft_step || 1} de 5)
+                      </p>
+                      <p className="text-xs text-amber-700 dark:text-amber-300">
+                        Os destinatários ainda não foram processados e nenhum disparo foi iniciado.
+                      </p>
+                    </div>
+                  </div>
+                  {onEditDraft && (
+                    <Button
+                      size="sm"
+                      className="whitespace-nowrap"
+                      onClick={() => {
+                        onOpenChange(false);
+                        onEditDraft(campaign.id);
+                      }}
+                    >
+                      <Edit3 className="h-3.5 w-3.5 mr-1" />
+                      Continuar Edição
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* KPIs Grid Detalhado */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
@@ -563,7 +626,9 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
                 </div>
               ) : (recipientsData?.recipients || []).length === 0 ? (
                 <div className="py-8 text-center text-sm text-muted-foreground border rounded-lg">
-                  Nenhum destinatário encontrado neste filtro.
+                  {campaign.status === "draft"
+                    ? "Esta campanha é um rascunho. A lista de destinatários será gerada e enfileirada automaticamente no momento do disparo."
+                    : "Nenhum destinatário encontrado neste filtro."}
                 </div>
               ) : (
                 <div className="border rounded-lg overflow-hidden">
