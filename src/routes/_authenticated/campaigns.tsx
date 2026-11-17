@@ -154,9 +154,13 @@ function CampaignsPage() {
       case "scheduled":
         return <Badge className="bg-blue-500/15 text-blue-600 border-blue-500/30">Agendada</Badge>;
       case "paused":
-        return <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30">Pausada</Badge>;
+        return (
+          <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30">Pausada</Badge>
+        );
       case "completed":
-        return <Badge className="bg-indigo-500/15 text-indigo-600 border-indigo-500/30">Concluída</Badge>;
+        return (
+          <Badge className="bg-indigo-500/15 text-indigo-600 border-indigo-500/30">Concluída</Badge>
+        );
       case "cancelled":
         return <Badge variant="destructive">Cancelada</Badge>;
       case "failed":
@@ -171,7 +175,8 @@ function CampaignsPage() {
       {/* Top Action Bar */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <p className="text-sm text-muted-foreground">
-          Envios automatizados para clientes da base ou planilhas importadas com rotação anti-bloqueio.
+          Envios automatizados para clientes da base ou planilhas importadas com rotação
+          anti-bloqueio.
         </p>
 
         <Button
@@ -205,7 +210,8 @@ function CampaignsPage() {
             {kpis.totalSent.toLocaleString("pt-BR")}
           </div>
           <div className="text-[11px] text-muted-foreground mt-0.5">
-            {kpis.totalPending.toLocaleString("pt-BR")} a enviar (de {kpis.totalTarget.toLocaleString("pt-BR")} alvo)
+            {kpis.totalPending.toLocaleString("pt-BR")} a enviar (de{" "}
+            {kpis.totalTarget.toLocaleString("pt-BR")} alvo)
           </div>
         </Card>
 
@@ -224,7 +230,9 @@ function CampaignsPage() {
 
         <Card className="p-4 bg-indigo-500/5 border-indigo-500/20 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">Taxa de Resposta</span>
+            <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+              Taxa de Resposta
+            </span>
             <MessageCircle className="h-4 w-4 text-indigo-500" />
           </div>
           <div className="text-2xl font-bold mt-2 text-indigo-600 dark:text-indigo-400">
@@ -320,7 +328,8 @@ function CampaignsPage() {
           </div>
           <h3 className="font-semibold text-base">Nenhuma campanha encontrada</h3>
           <p className="max-w-md text-sm text-muted-foreground mt-1 mb-4">
-            Crie sua primeira campanha para reativar clientes inativos ou enviar novidades para sua base.
+            Crie sua primeira campanha para reativar clientes inativos ou enviar novidades para sua
+            base.
           </p>
           <Button onClick={() => setCreateDialogOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
@@ -338,6 +347,7 @@ function CampaignsPage() {
                 <TableHead>A Enviar</TableHead>
                 <TableHead>Enviadas</TableHead>
                 <TableHead>Erros</TableHead>
+                <TableHead>Taxa de Leitura</TableHead>
                 <TableHead>Taxa de Resposta</TableHead>
                 <TableHead>Data</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
@@ -348,10 +358,12 @@ function CampaignsPage() {
                 const stats = camp.stats || {};
                 const total = stats.total || 0;
                 const sent = stats.sent || 0;
+                const read = stats.read || 0;
                 const replied = stats.replied || 0;
                 const failed = stats.failed || 0;
                 const pending = stats.pending ?? Math.max(0, total - sent - failed);
                 const percent = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0;
+                const readRate = sent > 0 ? ((read / sent) * 100).toFixed(1) : "0.0";
                 const replyRate = sent > 0 ? ((replied / sent) * 100).toFixed(1) : "0.0";
 
                 return (
@@ -408,12 +420,25 @@ function CampaignsPage() {
                     {/* Quantidade com Erro */}
                     <TableCell>
                       {failed > 0 ? (
-                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0 font-semibold">
+                        <Badge
+                          variant="destructive"
+                          className="text-[10px] px-1.5 py-0 font-semibold"
+                        >
                           {failed.toLocaleString("pt-BR")} erro(s)
                         </Badge>
                       ) : (
                         <span className="text-xs text-muted-foreground">0</span>
                       )}
+                    </TableCell>
+
+                    {/* Taxa de Leitura */}
+                    <TableCell>
+                      <Badge className="bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30 text-xs font-bold">
+                        {readRate}%
+                      </Badge>
+                      <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">
+                        {read.toLocaleString("pt-BR")} confirmados
+                      </span>
                     </TableCell>
 
                     {/* Taxa de Resposta e Quantidade que respondeu */}

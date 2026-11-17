@@ -30,6 +30,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   MessageCircle,
+  Eye,
   Users,
   Send,
   Loader2,
@@ -135,11 +136,13 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
   const stats = campaign?.stats || {};
   const total = stats.total || 0;
   const sent = stats.sent || 0;
+  const read = stats.read || 0;
   const replied = stats.replied || 0;
   const failed = stats.failed || 0;
   const pending = stats.pending ?? Math.max(0, total - sent - failed);
   const progressPercent = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0;
   const replyRate = sent > 0 ? ((replied / sent) * 100).toFixed(1) : "0.0";
+  const readRate = sent > 0 ? ((read / sent) * 100).toFixed(1) : "0.0";
 
   const messages: any[] = useMemo(() => campaign?.messages || [], [campaign?.messages]);
   const winningVariationId = useMemo(() => {
@@ -315,7 +318,7 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
             </SheetHeader>
 
             {/* KPIs Grid Detalhado */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
               <Card className="p-3 bg-muted/30">
                 <div className="text-xs text-muted-foreground flex items-center gap-1.5">
                   <Users className="h-3.5 w-3.5" />
@@ -343,17 +346,20 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
                 </div>
               </Card>
 
-              <Card className="p-3 bg-muted/30">
-                <div className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
-                  Falhas / Erros
+              <Card className="p-3 bg-sky-500/10 border-sky-500/20">
+                <div className="text-xs text-sky-700 dark:text-sky-300 flex items-center gap-1.5">
+                  <Eye className="h-3.5 w-3.5 text-sky-500" />
+                  Taxa de Leitura
                 </div>
-                <div className="text-lg font-bold mt-1 text-rose-600">
-                  {failed.toLocaleString("pt-BR")}
+                <div className="text-lg font-bold mt-1 text-sky-600 dark:text-sky-400">
+                  {readRate}%
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  {read.toLocaleString("pt-BR")} confirmados
                 </div>
               </Card>
 
-              <Card className="p-3 bg-indigo-500/10 border-indigo-500/20 col-span-2 sm:col-span-1">
+              <Card className="p-3 bg-indigo-500/10 border-indigo-500/20">
                 <div className="text-xs text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
                   <MessageCircle className="h-3.5 w-3.5 text-indigo-500" />
                   Taxa de Resposta
@@ -362,7 +368,17 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
                   {replyRate}%
                 </div>
                 <div className="text-[10px] text-muted-foreground mt-0.5">
-                  {replied} responderam
+                  {replied.toLocaleString("pt-BR")} responderam
+                </div>
+              </Card>
+
+              <Card className="p-3 bg-muted/30">
+                <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
+                  Falhas / Erros
+                </div>
+                <div className="text-lg font-bold mt-1 text-rose-600">
+                  {failed.toLocaleString("pt-BR")}
                 </div>
               </Card>
             </div>
@@ -528,6 +544,9 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
                     <TabsTrigger value="sent" className="text-xs px-2.5">
                       Enviados
                     </TabsTrigger>
+                    <TabsTrigger value="read" className="text-xs px-2.5">
+                      Lidos
+                    </TabsTrigger>
                     <TabsTrigger value="replied" className="text-xs px-2.5">
                       Responderam
                     </TabsTrigger>
@@ -578,6 +597,16 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
                                 className="text-emerald-600 border-emerald-500/30"
                               >
                                 Enviado
+                              </Badge>
+                            )}
+                            {rec.status === "delivered" && (
+                              <Badge variant="outline" className="text-teal-600 border-teal-500/30">
+                                Entregue
+                              </Badge>
+                            )}
+                            {rec.status === "read" && (
+                              <Badge className="bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30">
+                                Lido
                               </Badge>
                             )}
                             {rec.status === "replied" && (

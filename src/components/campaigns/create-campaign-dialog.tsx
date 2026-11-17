@@ -59,6 +59,7 @@ import {
   Target,
   MapPin,
   Briefcase,
+  MessageSquare,
   Smartphone,
   Info,
   RefreshCw,
@@ -71,6 +72,12 @@ import {
   Video,
   X,
   Search,
+  ChevronDown,
+  ChevronUp,
+  Sliders,
+  Zap,
+  Check,
+  Shield,
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -107,29 +114,30 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
   // Audiência
   const [audienceType, setAudienceType] = useState<"segment" | "import">("segment");
 
-  // Aba ativa na etapa de segmentação (Passo 2)
-  const [segmentTab, setSegmentTab] = useState<"general" | "crm" | "todoo">("general");
+  // Módulo de Origem no Atendi (Passo 2): CRM, Atendimentos (chat), Base Geral ou Todoo
+  const [targetModule, setTargetModule] = useState<"crm" | "chat" | "general" | "todoo">("crm");
 
   // Critérios de Segmentação - Base Geral & Ciclo
-  const [inactivityDays, setInactivityDays] = useState<number>(30);
-  const [useInactivity, setUseInactivity] = useState<boolean>(true);
+  const [contactType, setContactType] = useState<"all" | "lead" | "client">("all");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [excludedTags, setExcludedTags] = useState<string[]>([]);
-  const [contactType, setContactType] = useState<"all" | "lead" | "client">("all");
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [selectedDdds, setSelectedDdds] = useState<string[]>([]);
   const [dddInput, setDddInput] = useState<string>("");
+
+  // Critérios de Segmentação - Atendimentos (Chat)
+  const [inactivityDays, setInactivityDays] = useState<number>(30);
+  const [useInactivity, setUseInactivity] = useState<boolean>(true);
   const [onlyWithoutOpenConvs, setOnlyWithoutOpenConvs] = useState<boolean>(true);
 
-  // Critérios de Segmentação - CRM (Funis & Oportunidades)
-  const [crmEnabled, setCrmEnabled] = useState<boolean>(false);
+  // Critérios de Segmentação - CRM (Funis & Etapas)
+  const [crmScope, setCrmScope] = useState<"all_funnel" | "specific_stages">("all_funnel");
   const [crmMode, setCrmMode] = useState<"with" | "without">("with");
-  const [selectedPipelineId, setSelectedPipelineId] = useState<string>("all");
+  const [selectedPipelineId, setSelectedPipelineId] = useState<string>("");
   const [selectedStageIds, setSelectedStageIds] = useState<string[]>([]);
-  const [selectedCrmStatuses, setSelectedCrmStatuses] = useState<string[]>([]);
+  const [selectedCrmStatuses, setSelectedCrmStatuses] = useState<string[]>(["open"]);
 
   // Critérios de Segmentação - Meu Todoo (Ações Comerciais & Cadência)
-  const [todooEnabled, setTodooEnabled] = useState<boolean>(false);
   const [todooMode, setTodooMode] = useState<"with" | "without">("with");
   const [selectedTodooCampaignIds, setSelectedTodooCampaignIds] = useState<string[]>([]);
   const [selectedTodooStageIds, setSelectedTodooStageIds] = useState<string[]>([]);
@@ -238,6 +246,27 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
   const [scheduleMode, setScheduleMode] = useState<"now" | "schedule">("now");
   const [scheduledDate, setScheduledDate] = useState<string>("");
 
+  // Estados para UI/UX aprimorada
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [enableAbTesting, setEnableAbTesting] = useState(false);
+  const [speedPreset, setSpeedPreset] = useState<"safe" | "moderate" | "custom">("safe");
+  const [showFullReviewList, setShowFullReviewList] = useState(false);
+
+  const applySpeedPreset = (preset: "safe" | "moderate" | "custom") => {
+    setSpeedPreset(preset);
+    if (preset === "safe") {
+      setMinDelay(15);
+      setMaxDelay(45);
+      setBatchSize(20);
+      setBatchCooldown(60);
+    } else if (preset === "moderate") {
+      setMinDelay(10);
+      setMaxDelay(25);
+      setBatchSize(30);
+      setBatchCooldown(45);
+    }
+  };
+
   // Busca tags/labels existentes
   const { data: labels = [] } = useQuery({
     queryKey: ["campaign-labels", companyId],
@@ -251,6 +280,10 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
       return data || [];
     },
   });
+
+  const availableTags = useMemo(() => {
+    return (labels || []).map((l: any) => l.name);
+  }, [labels]);
 
   // Busca instâncias de WhatsApp conectadas
   const { data: instances = [] } = useQuery({
@@ -276,12 +309,95 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     queryKey: ["campaign-pipelines", companyId],
     enabled: open && !!companyId,
     queryFn: async () => {
-      const { data } = await supabase
+      const { data: pipes, error: pErr } = await supabase
         .from("pipelines")
-        .select("id, name, is_default, is_active, pipeline_stages(id, name, color, order)")
+        .select("id, name")
         .eq("company_id", companyId)
-        .order("created_at");
-      return (data || []) as any[];
+        .order("created_at", { ascending: true });
+
+      if (pErr) {
+        console.error("[campaign-pipelines] Erro ao buscar funis:", pErr);
+        return [];
+      }
+      if (!pipes || pipes.length === 0) return [];
+
+      const pipeIds = pipes.map((p) => p.id);
+      const { data: stages, error: sErr } = await supabase
+        .from("pipeline_stages")
+        .select("id, name, color, order, pipeline_id")
+        .in("pipeline_id", pipeIds)
+        .order("order", { ascending: true });
+
+      if (sErr) {
+        console.error("[campaign-pipelines] Erro ao buscar etapas:", sErr);
+      }
+
+      return pipes.map((p: any) => ({
+        ...p,
+        pipeline_stages: (stages || []).filter((s: any) => s.pipeline_id === p.id),
+      }));
+    },
+  });
+
+  // Funis com etapas devidamente ordenadas por posição (order ASC)
+  const sortedPipelines = useMemo(() => {
+    return (pipelines || []).map((p: any) => ({
+      ...p,
+      pipeline_stages: [...(p.pipeline_stages || [])].sort(
+        (a: any, b: any) => (a.order ?? 0) - (b.order ?? 0),
+      ),
+    }));
+  }, [pipelines]);
+
+  // Pré-seleciona o primeiro funil assim que carregado se não houver um selecionado
+  useEffect(() => {
+    if (sortedPipelines.length > 0) {
+      const exists = sortedPipelines.some((p: any) => p.id === selectedPipelineId);
+      if (!exists) {
+        setSelectedPipelineId(sortedPipelines[0].id);
+      }
+    }
+  }, [sortedPipelines, selectedPipelineId]);
+
+  const currentPipeline = useMemo(() => {
+    if (!selectedPipelineId) return sortedPipelines[0] || null;
+    return (
+      sortedPipelines.find((p: any) => p.id === selectedPipelineId) || sortedPipelines[0] || null
+    );
+  }, [sortedPipelines, selectedPipelineId]);
+
+  // Etapas disponíveis conforme o funil selecionado
+  const availablePipelineStages = useMemo(() => {
+    if (currentPipeline) {
+      return currentPipeline.pipeline_stages || [];
+    }
+    return [];
+  }, [currentPipeline]);
+
+  // Busca contagem exata de oportunidades abertas por etapa para exibir na esteira do funil
+  const { data: stageOppCounts = {} } = useQuery({
+    queryKey: ["campaign-stage-opp-counts", companyId, selectedPipelineId],
+    enabled:
+      open && !!companyId && targetModule === "crm" && !!currentPipeline?.pipeline_stages?.length,
+    queryFn: async () => {
+      if (!currentPipeline?.pipeline_stages?.length) return {};
+      const stageIds = currentPipeline.pipeline_stages.map((s: any) => s.id);
+      const map: Record<string, { total: number; open: number }> = {};
+
+      await Promise.all(
+        stageIds.map(async (sId: string) => {
+          const { count } = await supabase
+            .from("opportunities")
+            .select("*", { count: "exact", head: true })
+            .eq("company_id", companyId)
+            .eq("stage_id", sId)
+            .eq("status", "open");
+
+          map[sId] = { total: count ?? 0, open: count ?? 0 };
+        }),
+      );
+
+      return map;
     },
   });
 
@@ -310,15 +426,6 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
       return (data || []) as any[];
     },
   });
-
-  // Etapas disponíveis conforme o funil selecionado
-  const availablePipelineStages = useMemo(() => {
-    if (selectedPipelineId === "all") {
-      return pipelines.flatMap((p: any) => p.pipeline_stages || []);
-    }
-    const found = pipelines.find((p: any) => p.id === selectedPipelineId);
-    return found?.pipeline_stages || [];
-  }, [pipelines, selectedPipelineId]);
 
   // Manipuladores de Filtros Avançados
   const handleAddDdd = (dddToAdd?: string) => {
@@ -392,35 +499,51 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
 
   // Helper centralizado para montar o payload de filtros da audiência
   const getAudienceFiltersPayload = () => {
+    const isCrm = targetModule === "crm";
+    const isChat = targetModule === "chat";
+    const isTodoo = targetModule === "todoo";
+
     return {
-      inactivity_days: useInactivity ? inactivityDays : null,
+      // Refinamento de perfil comum
+      contact_type: contactType,
       tags: selectedTags.length > 0 ? selectedTags : undefined,
       excluded_tags: excludedTags.length > 0 ? excludedTags : undefined,
-      contact_type: contactType,
       sources: selectedSources.length > 0 ? selectedSources : undefined,
       ddds: selectedDdds.length > 0 ? selectedDdds : undefined,
       unit_ids: unitId && unitId !== "all" ? [unitId] : undefined,
-      only_without_open_conversations: onlyWithoutOpenConvs,
 
-      // CRM
-      crm_enabled: crmEnabled,
-      crm_mode: crmEnabled ? crmMode : undefined,
-      crm_pipeline_ids:
-        crmEnabled && selectedPipelineId !== "all" ? [selectedPipelineId] : undefined,
-      crm_stage_ids: crmEnabled && selectedStageIds.length > 0 ? selectedStageIds : undefined,
-      crm_statuses: crmEnabled && selectedCrmStatuses.length > 0 ? selectedCrmStatuses : undefined,
+      // Módulo Atendimentos (Chat)
+      inactivity_days: isChat && useInactivity ? inactivityDays : null,
+      only_without_open_conversations: isChat ? onlyWithoutOpenConvs : false,
 
-      // Todoo
-      todoo_enabled: todooEnabled,
-      todoo_mode: todooEnabled ? todooMode : undefined,
-      todoo_campaign_ids:
-        todooEnabled && selectedTodooCampaignIds.length > 0 ? selectedTodooCampaignIds : undefined,
-      todoo_stage_ids:
-        todooEnabled && selectedTodooStageIds.length > 0 ? selectedTodooStageIds : undefined,
-      todoo_lead_statuses:
-        todooEnabled && selectedTodooLeadStatuses.length > 0
-          ? selectedTodooLeadStatuses
+      // Módulo CRM (Funis & Etapas)
+      crm_enabled: isCrm,
+      crm_mode: isCrm ? "with" : undefined,
+      crm_pipeline_ids: (() => {
+        if (!isCrm) return undefined;
+        const pId =
+          selectedPipelineId && selectedPipelineId !== "all"
+            ? selectedPipelineId
+            : currentPipeline?.id && currentPipeline.id !== "all"
+              ? currentPipeline.id
+              : undefined;
+        return pId ? [pId] : undefined;
+      })(),
+      crm_stage_ids:
+        isCrm && crmScope === "specific_stages" && selectedStageIds.length > 0
+          ? selectedStageIds
           : undefined,
+      crm_statuses: isCrm && selectedCrmStatuses.length > 0 ? selectedCrmStatuses : undefined,
+
+      // Módulo Meu Todoo
+      todoo_enabled: isTodoo,
+      todoo_mode: isTodoo ? "with" : undefined,
+      todoo_campaign_ids:
+        isTodoo && selectedTodooCampaignIds.length > 0 ? selectedTodooCampaignIds : undefined,
+      todoo_stage_ids:
+        isTodoo && selectedTodooStageIds.length > 0 ? selectedTodooStageIds : undefined,
+      todoo_lead_statuses:
+        isTodoo && selectedTodooLeadStatuses.length > 0 ? selectedTodooLeadStatuses : undefined,
     };
   };
 
@@ -434,22 +557,20 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
 
     return () => clearTimeout(timer);
   }, [
-    inactivityDays,
-    useInactivity,
-    selectedTags,
-    excludedTags,
-    contactType,
-    selectedSources,
-    selectedDdds,
-    unitId,
-    onlyWithoutOpenConvs,
-    crmEnabled,
-    crmMode,
+    targetModule,
+    crmScope,
     selectedPipelineId,
     selectedStageIds,
     selectedCrmStatuses,
-    todooEnabled,
-    todooMode,
+    inactivityDays,
+    useInactivity,
+    onlyWithoutOpenConvs,
+    contactType,
+    selectedTags,
+    excludedTags,
+    selectedSources,
+    selectedDdds,
+    unitId,
     selectedTodooCampaignIds,
     selectedTodooStageIds,
     selectedTodooLeadStatuses,
@@ -500,22 +621,20 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     step,
     audienceType,
     companyId,
-    inactivityDays,
-    useInactivity,
-    selectedTags,
-    excludedTags,
-    contactType,
-    selectedSources,
-    selectedDdds,
-    unitId,
-    onlyWithoutOpenConvs,
-    crmEnabled,
-    crmMode,
+    targetModule,
+    crmScope,
     selectedPipelineId,
     selectedStageIds,
     selectedCrmStatuses,
-    todooEnabled,
-    todooMode,
+    inactivityDays,
+    useInactivity,
+    onlyWithoutOpenConvs,
+    contactType,
+    selectedTags,
+    excludedTags,
+    selectedSources,
+    selectedDdds,
+    unitId,
     selectedTodooCampaignIds,
     selectedTodooStageIds,
     selectedTodooLeadStatuses,
@@ -854,16 +973,16 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     setInactivityDays(30);
     setUseInactivity(true);
     setOnlyWithoutOpenConvs(true);
+    setTargetModule("crm");
 
     // CRM
-    setCrmEnabled(false);
+    setCrmScope("all_funnel");
     setCrmMode("with");
-    setSelectedPipelineId("all");
+    setSelectedPipelineId("");
     setSelectedStageIds([]);
-    setSelectedCrmStatuses([]);
+    setSelectedCrmStatuses(["open"]);
 
     // Todoo
-    setTodooEnabled(false);
     setTodooMode("with");
     setSelectedTodooCampaignIds([]);
     setSelectedTodooStageIds([]);
@@ -872,6 +991,10 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     setSelectedInstanceIds([]);
     setScheduleMode("now");
     setScheduledDate("");
+    setShowAdvancedFilters(false);
+    setEnableAbTesting(false);
+    setSpeedPreset("safe");
+    setShowFullReviewList(false);
     setVariations([
       {
         id: "v-1",
@@ -893,28 +1016,34 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
         toast.error("Informe um nome para a campanha.");
         return;
       }
+      setStep(2);
+      return;
+    } else if (step === 2) {
       if (audienceType === "import") {
         if (parsedRows.length === 0 || !phoneCol) {
-          toast.error("Importe uma planilha e selecione a coluna de telefone.");
+          toast.error("Importe uma planilha e selecione a coluna do telefone.");
           return;
         }
         if (importSummary.valid === 0) {
-          toast.error("Nenhum número de telefone válido encontrado.");
+          toast.error("Nenhum número de telefone válido encontrado na planilha.");
           return;
         }
-        setStep(3); // Pula direto para a etapa de Mensagem
-        return;
       } else {
-        setStep(2); // Avança para a etapa dedicada de Segmentação
-        return;
-      }
-    } else if (step === 2) {
-      if (audienceCount === null) {
-        await calculateAudienceCount();
-      }
-      if (audienceCount === 0) {
-        toast.error("Nenhum contato encontrado com os critérios selecionados.");
-        return;
+        if (
+          targetModule === "crm" &&
+          crmScope === "specific_stages" &&
+          selectedStageIds.length === 0
+        ) {
+          toast.error("Selecione ao menos 1 etapa do funil ou marque 'O Funil Todo'.");
+          return;
+        }
+        if (audienceCount === null) {
+          await calculateAudienceCount();
+        }
+        if (audienceCount === 0) {
+          toast.error("Nenhum contato qualificado encontrado com os critérios selecionados.");
+          return;
+        }
       }
       setStep(3);
       return;
@@ -942,11 +1071,7 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
   };
 
   const handleBack = () => {
-    if (step === 3 && audienceType === "import") {
-      setStep(1);
-    } else {
-      setStep((s) => (s > 1 ? ((s - 1) as any) : s));
-    }
+    setStep((s) => (s > 1 ? ((s - 1) as any) : s));
   };
 
   return (
@@ -959,68 +1084,39 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
               Nova Campanha de Disparo em Massa
             </DialogTitle>
             <Badge variant="outline" className="text-xs">
-              Passo {step} de {audienceType === "segment" ? 5 : 4}
+              Passo {step} de 5
             </Badge>
           </div>
           <DialogDescription>
-            Configure público, segmentação avançada, mensagens e canais de envio.
+            Configure público, mensagens personalizadas e canais de envio da campanha.
           </DialogDescription>
         </DialogHeader>
 
-        {/* Barra de Progresso das Etapas */}
-        <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5 py-2 border-b">
-          <div
-            className={`text-xs font-medium pb-1 border-b-2 text-center ${
-              step >= 1
-                ? "border-primary text-primary font-bold"
-                : "border-muted text-muted-foreground"
-            }`}
-          >
-            1. Dados Básicos
-          </div>
-          {audienceType === "segment" && (
+        {/* Barra de Progresso das Etapas (Sempre 5 passos previsíveis) */}
+        <div className="grid grid-cols-5 gap-1.5 py-2 border-b">
+          {[
+            { num: 1, label: "1. Identificação" },
+            { num: 2, label: "2. Destinatários" },
+            { num: 3, label: "3. Mensagem" },
+            { num: 4, label: "4. Disparo" },
+            { num: 5, label: "5. Revisão" },
+          ].map((st) => (
             <div
-              className={`text-xs font-medium pb-1 border-b-2 text-center ${
-                step >= 2
+              key={st.num}
+              className={`text-xs pb-1.5 border-b-2 text-center transition-all ${
+                step >= st.num
                   ? "border-primary text-primary font-bold"
-                  : "border-muted text-muted-foreground"
+                  : "border-muted text-muted-foreground font-medium"
               }`}
             >
-              2. Segmentação
+              {st.label}
             </div>
-          )}
-          <div
-            className={`text-xs font-medium pb-1 border-b-2 text-center ${
-              step >= 3
-                ? "border-primary text-primary font-bold"
-                : "border-muted text-muted-foreground"
-            }`}
-          >
-            {audienceType === "segment" ? "3. Mensagem" : "2. Mensagem"}
-          </div>
-          <div
-            className={`text-xs font-medium pb-1 border-b-2 text-center ${
-              step >= 4
-                ? "border-primary text-primary font-bold"
-                : "border-muted text-muted-foreground"
-            }`}
-          >
-            {audienceType === "segment" ? "4. Canais & Anti-Ban" : "3. Canais & Anti-Ban"}
-          </div>
-          <div
-            className={`text-xs font-medium pb-1 border-b-2 text-center ${
-              step === 5
-                ? "border-primary text-primary font-bold"
-                : "border-muted text-muted-foreground"
-            }`}
-          >
-            {audienceType === "segment" ? "5. Revisão & Envio" : "4. Revisão & Envio"}
-          </div>
+          ))}
         </div>
 
-        {/* ===================== PASSO 1: DADOS BÁSICOS & FONTE ===================== */}
+        {/* ===================== PASSO 1: IDENTIFICAÇÃO & FONTE ===================== */}
         {step === 1 && (
-          <div className="space-y-5 pt-2">
+          <div className="space-y-6 pt-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="camp-name">Nome da Campanha *</Label>
@@ -1033,18 +1129,7 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="camp-unit" className="flex items-center justify-between">
-                  <span>Unidade da Campanha</span>
-                  {unitId !== "all" ? (
-                    <Badge variant="secondary" className="text-[10px] text-primary">
-                      Unidade Específica
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                      Empresa Geral (Todas)
-                    </Badge>
-                  )}
-                </Label>
+                <Label htmlFor="camp-unit">Unidade da Campanha</Label>
                 <Select value={unitId} onValueChange={setUnitId}>
                   <SelectTrigger id="camp-unit">
                     <SelectValue placeholder="Todas as Unidades (Geral da Empresa)" />
@@ -1061,43 +1146,35 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
               </div>
             </div>
 
-            {/* Banner de Contexto da Unidade */}
-            {unitId !== "all" ? (
-              <div className="bg-primary/5 border border-primary/20 rounded-md p-2.5 text-xs text-primary flex items-center gap-2">
-                <Info className="h-4 w-4 shrink-0" />
-                <span>
-                  <strong>Filtro por Unidade Ativo:</strong> Apenas contatos da unidade{" "}
-                  <strong>{selectedUnit?.name}</strong> serão incluídos na campanha.
-                </span>
-              </div>
-            ) : (
-              <div className="bg-muted/40 border border-border rounded-md p-2.5 text-xs text-muted-foreground flex items-center gap-2">
-                <Info className="h-4 w-4 shrink-0" />
-                <span>
-                  <strong>Empresa Geral (Todas as Unidades):</strong> Os contatos de todas as
-                  filiais serão considerados na segmentação.
-                </span>
-              </div>
-            )}
-
             {/* Seletor de Tipo de Audiência */}
-            <div className="space-y-2">
-              <Label>Fonte dos Destinatários</Label>
-              <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2 pt-1">
+              <Label className="text-sm font-semibold">
+                De onde virão os destinatários desta campanha?
+              </Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <Card
                   onClick={() => setAudienceType("segment")}
                   className={`p-4 cursor-pointer transition-all border-2 ${
                     audienceType === "segment"
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:border-primary/50"
+                      ? "border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20"
+                      : "border-border hover:border-primary/40 bg-background"
                   }`}
                 >
-                  <div className="flex items-center gap-2.5">
-                    <Filter className="h-5 w-5 text-primary" />
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`p-2.5 rounded-lg shrink-0 ${
+                        audienceType === "segment"
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      <Filter className="h-5 w-5" />
+                    </div>
                     <div>
-                      <div className="font-semibold text-sm">Segmentar Base Atendi</div>
-                      <div className="text-xs text-muted-foreground">
-                        Por CRM, Todoo, ciclo de vida e tags inteligentes
+                      <div className="font-semibold text-sm">Base de Clientes & CRM Atendi</div>
+                      <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                        Filtre por funis e etapas do CRM, inatividade em atendimentos, Meu Todoo ou
+                        base geral de contatos.
                       </div>
                     </div>
                   </div>
@@ -1107,159 +1184,163 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                   onClick={() => setAudienceType("import")}
                   className={`p-4 cursor-pointer transition-all border-2 ${
                     audienceType === "import"
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:border-primary/50"
+                      ? "border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20"
+                      : "border-border hover:border-primary/40 bg-background"
                   }`}
                 >
-                  <div className="flex items-center gap-2.5">
-                    <Upload className="h-5 w-5 text-primary" />
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={`p-2.5 rounded-lg shrink-0 ${
+                        audienceType === "import"
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      <Upload className="h-5 w-5" />
+                    </div>
                     <div>
-                      <div className="font-semibold text-sm">Importar Planilha</div>
-                      <div className="text-xs text-muted-foreground">
-                        Carregar lista de contatos (.csv, .xlsx)
+                      <div className="font-semibold text-sm">Importar Planilha Externa</div>
+                      <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                        Faça upload de uma lista de contatos em formato Excel (.xlsx) ou CSV de
+                        outro sistema.
                       </div>
                     </div>
                   </div>
                 </Card>
               </div>
             </div>
-
-            {/* Seção 1A: Aviso de Segmentação em Etapa Dedicada */}
-            {audienceType === "segment" && (
-              <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 flex items-start gap-3">
-                <div className="p-2 rounded-full bg-primary/10 text-primary shrink-0 mt-0.5">
-                  <Sparkles className="h-4 w-4" />
-                </div>
-                <div className="space-y-1">
-                  <h4 className="text-sm font-semibold text-foreground">
-                    Segmentação Avançada em Etapa Dedicada
-                  </h4>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Ao clicar em <strong>Avançar</strong>, você poderá combinar filtros da base
-                    geral (leads vs clientes, inatividade, DDDs e tags), funis e etapas do{" "}
-                    <strong>CRM</strong> e ações comerciais do <strong>Meu Todoo</strong> com
-                    cálculo em tempo real.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Seção 1B: Importação de Planilha */}
-            {audienceType === "import" && (
-              <Card className="p-4 bg-muted/20 border-dashed space-y-4">
-                <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-lg bg-background hover:bg-muted/30 transition-colors">
-                  <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-                  <p className="text-sm font-medium">
-                    {importFileName || "Arraste ou selecione seu arquivo .CSV ou .XLSX"}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Planilhas do Excel ou CSV exportadas de outros CRMs
-                  </p>
-                  <label className="mt-3 cursor-pointer">
-                    <Button size="sm" variant="secondary" asChild>
-                      <span>Selecionar Arquivo</span>
-                    </Button>
-                    <input
-                      type="file"
-                      accept=".csv, .xlsx, .xls"
-                      className="hidden"
-                      onChange={handleFileUpload}
-                    />
-                  </label>
-                </div>
-
-                {columnHeaders.length > 0 && (
-                  <div className="space-y-3 pt-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Coluna do Telefone *</Label>
-                        <Select value={phoneCol} onValueChange={setPhoneCol}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione a coluna" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {columnHeaders.map((h) => (
-                              <SelectItem key={h} value={h}>
-                                {h}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <Label className="text-xs">Coluna do Nome (opcional)</Label>
-                        <Select value={nameCol} onValueChange={setNameCol}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Nenhuma / Padrão" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="">Nenhuma (usar 'Cliente')</SelectItem>
-                            {columnHeaders.map((h) => (
-                              <SelectItem key={h} value={h}>
-                                {h}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <Label className="text-xs">Coluna da Unidade (opcional)</Label>
-                        <Select value={unitCol} onValueChange={setUnitCol}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Nenhuma / Padrão" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="">
-                              {unitId !== "all"
-                                ? `Padrão: ${selectedUnit?.name || "Unidade"}`
-                                : "Nenhuma (Geral da Empresa)"}
-                            </SelectItem>
-                            {columnHeaders.map((h) => (
-                              <SelectItem key={h} value={h}>
-                                {h}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-2 pt-1">
-                      <Checkbox
-                        id="save-contacts"
-                        checked={saveImportedToContacts}
-                        onCheckedChange={(c) => setSaveImportedToContacts(!!c)}
-                      />
-                      <Label htmlFor="save-contacts" className="text-xs cursor-pointer">
-                        Salvar novos contatos automaticamente na base de contatos do Atendi
-                      </Label>
-                    </div>
-
-                    {importSummary.total > 0 && (
-                      <div className="bg-background border rounded-lg p-3 text-xs flex items-center justify-between">
-                        <div>
-                          <span className="font-semibold text-emerald-600">
-                            {importSummary.valid} números válidos
-                          </span>{" "}
-                          de {importSummary.total} linhas encontradas.
-                        </div>
-                        {importSummary.total - importSummary.valid > 0 && (
-                          <span className="text-rose-500">
-                            {importSummary.total - importSummary.valid} inválidos ignorados
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Card>
-            )}
           </div>
         )}
 
-        {/* ===================== PASSO 2: SEGMENTAÇÃO AVANÇADA (DEDICADA) ===================== */}
+        {/* ===================== PASSO 2: DESTINATÁRIOS (PLANILHA) ===================== */}
+        {step === 2 && audienceType === "import" && (
+          <div className="space-y-4 pt-2">
+            <div>
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <Upload className="h-4 w-4 text-primary" />
+                Importar Lista de Contatos
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Carregue um arquivo Excel (.xlsx) ou CSV com os telefones dos destinatários.
+              </p>
+            </div>
+
+            <Card className="p-4 bg-muted/20 border-dashed space-y-4">
+              <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-lg bg-background hover:bg-muted/30 transition-colors">
+                <Upload className="h-8 w-8 text-muted-foreground mb-2" />
+                <p className="text-sm font-medium">
+                  {importFileName || "Arraste ou selecione seu arquivo .CSV ou .XLSX"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Planilhas do Excel ou CSV exportadas de outros CRMs
+                </p>
+                <label className="mt-3 cursor-pointer">
+                  <Button size="sm" variant="secondary" asChild>
+                    <span>Selecionar Arquivo</span>
+                  </Button>
+                  <input
+                    type="file"
+                    accept=".csv, .xlsx, .xls"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+                </label>
+              </div>
+
+              {columnHeaders.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Coluna do Telefone *</Label>
+                      <Select value={phoneCol} onValueChange={setPhoneCol}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a coluna" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {columnHeaders.map((h) => (
+                            <SelectItem key={h} value={h}>
+                              {h}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs">Coluna do Nome (opcional)</Label>
+                      <Select value={nameCol} onValueChange={setNameCol}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Nenhuma / Padrão" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">Nenhuma (usar 'Cliente')</SelectItem>
+                          {columnHeaders.map((h) => (
+                            <SelectItem key={h} value={h}>
+                              {h}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs">Coluna da Unidade (opcional)</Label>
+                      <Select value={unitCol} onValueChange={setUnitCol}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Nenhuma / Padrão" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">
+                            {unitId !== "all"
+                              ? `Padrão: ${selectedUnit?.name || "Unidade"}`
+                              : "Nenhuma (Geral da Empresa)"}
+                          </SelectItem>
+                          {columnHeaders.map((h) => (
+                            <SelectItem key={h} value={h}>
+                              {h}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 pt-1">
+                    <Checkbox
+                      id="save-contacts"
+                      checked={saveImportedToContacts}
+                      onCheckedChange={(c) => setSaveImportedToContacts(!!c)}
+                    />
+                    <Label htmlFor="save-contacts" className="text-xs cursor-pointer">
+                      Salvar novos contatos automaticamente na base de contatos do Atendi
+                    </Label>
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            {/* Barra de Contatos Válidos da Planilha */}
+            <div className="p-3 bg-muted/40 border rounded-lg flex items-center justify-between">
+              <div className="text-xs text-muted-foreground">
+                {importSummary.total > 0 ? (
+                  <span>
+                    Arquivo: <strong>{importFileName}</strong> &bull; {importSummary.valid} válidos
+                    de {importSummary.total} linhas
+                  </span>
+                ) : (
+                  <span>Faça o upload do arquivo acima para continuar</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 text-sm font-bold text-emerald-600 bg-emerald-500/10 px-3.5 py-1 rounded-md border border-emerald-500/20">
+                <Users className="h-4 w-4" />
+                <span>{importSummary.valid.toLocaleString("pt-BR")} contatos válidos</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===================== PASSO 2: DESTINATÁRIOS (BASE ATENDI) ===================== */}
         {step === 2 && audienceType === "segment" && (
           <div className="space-y-4 pt-2">
             <div className="flex items-center justify-between">
@@ -1287,11 +1368,11 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                   setSelectedDdds([]);
                   setUseInactivity(true);
                   setInactivityDays(30);
-                  setCrmEnabled(false);
-                  setSelectedPipelineId("all");
+                  setTargetModule("crm");
+                  setCrmScope("all_funnel");
+                  setSelectedPipelineId(sortedPipelines[0]?.id || "");
                   setSelectedStageIds([]);
-                  setSelectedCrmStatuses([]);
-                  setTodooEnabled(false);
+                  setSelectedCrmStatuses(["open"]);
                   setSelectedTodooCampaignIds([]);
                   setSelectedTodooStageIds([]);
                   setSelectedTodooLeadStatuses([]);
@@ -1301,121 +1382,407 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
               </Button>
             </div>
 
-            <Tabs
-              value={segmentTab}
-              onValueChange={(v) => setSegmentTab(v as any)}
-              className="w-full"
-            >
-              <TabsList className="grid grid-cols-3 w-full h-10 p-1">
-                <TabsTrigger value="general" className="flex items-center gap-1.5 text-xs">
-                  <Users className="h-3.5 w-3.5" />
-                  <span>Base Geral</span>
-                  {(selectedTags.length > 0 ||
-                    excludedTags.length > 0 ||
-                    contactType !== "all" ||
-                    selectedSources.length > 0 ||
-                    selectedDdds.length > 0) && (
-                    <Badge variant="secondary" className="h-4 px-1 text-[9px] font-mono">
-                      Ativo
-                    </Badge>
-                  )}
-                </TabsTrigger>
+            {/* SELETOR PRINCIPAL DE MÓDULO DE ORIGEM (4 GRANDES OPÇÕES) */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                1. De onde você deseja extrair o público no Atendi?
+              </Label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {/* 1. Funis do CRM */}
+                <button
+                  type="button"
+                  onClick={() => setTargetModule("crm")}
+                  className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-1.5 ${
+                    targetModule === "crm"
+                      ? "bg-blue-500/10 border-blue-600 text-blue-950 dark:text-blue-100 ring-1 ring-blue-500 shadow-sm"
+                      : "bg-background border-border hover:border-border/80 text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <Briefcase
+                      className={`h-4 w-4 ${targetModule === "crm" ? "text-blue-600" : "text-muted-foreground"}`}
+                    />
+                    {targetModule === "crm" && (
+                      <Badge className="bg-blue-600 text-white text-[9px] h-4 px-1.5 font-mono">
+                        Ativo
+                      </Badge>
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-bold text-xs">Funis do CRM</div>
+                    <div className="text-[10px] text-muted-foreground line-clamp-2">
+                      Funil completo ou etapa específica (Etapa X)
+                    </div>
+                  </div>
+                </button>
 
-                <TabsTrigger value="crm" className="flex items-center gap-1.5 text-xs">
-                  <Briefcase className="h-3.5 w-3.5" />
-                  <span>Funis CRM</span>
-                  {crmEnabled && (
-                    <Badge variant="default" className="h-4 px-1 text-[9px] bg-blue-600 font-mono">
-                      ON
-                    </Badge>
-                  )}
-                </TabsTrigger>
+                {/* 2. Atendimentos */}
+                <button
+                  type="button"
+                  onClick={() => setTargetModule("chat")}
+                  className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-1.5 ${
+                    targetModule === "chat"
+                      ? "bg-amber-500/10 border-amber-600 text-amber-950 dark:text-amber-100 ring-1 ring-amber-500 shadow-sm"
+                      : "bg-background border-border hover:border-border/80 text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <MessageSquare
+                      className={`h-4 w-4 ${targetModule === "chat" ? "text-amber-600" : "text-muted-foreground"}`}
+                    />
+                    {targetModule === "chat" && (
+                      <Badge className="bg-amber-600 text-white text-[9px] h-4 px-1.5 font-mono">
+                        Ativo
+                      </Badge>
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-bold text-xs">Atendimentos</div>
+                    <div className="text-[10px] text-muted-foreground line-clamp-2">
+                      Inativos no chat e histórico de conversas
+                    </div>
+                  </div>
+                </button>
 
-                <TabsTrigger value="todoo" className="flex items-center gap-1.5 text-xs">
-                  <Target className="h-3.5 w-3.5" />
-                  <span>Meu Todoo</span>
-                  {todooEnabled && (
-                    <Badge
-                      variant="default"
-                      className="h-4 px-1 text-[9px] bg-emerald-600 font-mono"
-                    >
-                      ON
-                    </Badge>
-                  )}
-                </TabsTrigger>
-              </TabsList>
+                {/* 3. Base Geral */}
+                <button
+                  type="button"
+                  onClick={() => setTargetModule("general")}
+                  className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-1.5 ${
+                    targetModule === "general"
+                      ? "bg-primary/10 border-primary text-foreground ring-1 ring-primary shadow-sm"
+                      : "bg-background border-border hover:border-border/80 text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <Users
+                      className={`h-4 w-4 ${targetModule === "general" ? "text-primary" : "text-muted-foreground"}`}
+                    />
+                    {targetModule === "general" && (
+                      <Badge className="bg-primary text-primary-foreground text-[9px] h-4 px-1.5 font-mono">
+                        Ativo
+                      </Badge>
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-bold text-xs">Base Geral</div>
+                    <div className="text-[10px] text-muted-foreground line-clamp-2">
+                      Todos os contatos cadastrados da empresa
+                    </div>
+                  </div>
+                </button>
 
-              {/* ABA 1: BASE GERAL & CICLO */}
-              <TabsContent value="general" className="pt-2 space-y-4">
-                <Card className="p-4 bg-muted/20 border-dashed space-y-4">
-                  {/* 1. Tipo de Contato (Lead vs Cliente) */}
-                  <div className="space-y-2">
+                {/* 4. Meu Todoo */}
+                <button
+                  type="button"
+                  onClick={() => setTargetModule("todoo")}
+                  className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between gap-1.5 ${
+                    targetModule === "todoo"
+                      ? "bg-emerald-500/10 border-emerald-600 text-emerald-950 dark:text-emerald-100 ring-1 ring-emerald-500 shadow-sm"
+                      : "bg-background border-border hover:border-border/80 text-foreground"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <Target
+                      className={`h-4 w-4 ${targetModule === "todoo" ? "text-emerald-600" : "text-muted-foreground"}`}
+                    />
+                    {targetModule === "todoo" && (
+                      <Badge className="bg-emerald-600 text-white text-[9px] h-4 px-1.5 font-mono">
+                        Ativo
+                      </Badge>
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-bold text-xs">Meu Todoo</div>
+                    <div className="text-[10px] text-muted-foreground line-clamp-2">
+                      Ações comerciais e cadências ativas
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* PAINEL ESPECÍFICO DO MÓDULO SELECIONADO */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                2. Configurações da Origem (
+                {targetModule === "crm"
+                  ? "CRM"
+                  : targetModule === "chat"
+                    ? "Atendimentos"
+                    : targetModule === "general"
+                      ? "Base Geral"
+                      : "Meu Todoo"}
+                )
+              </Label>
+
+              {/* OPÇÃO 1: CRM (FUNIS & ETAPAS) */}
+              {targetModule === "crm" && (
+                <Card className="p-4 bg-muted/20 border-blue-500/30 space-y-4">
+                  {/* Seleção de Funil */}
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <Label className="text-xs font-semibold flex items-center gap-1.5">
-                        <Users className="h-3.5 w-3.5 text-primary" />
-                        Perfil do Contato
+                        <Briefcase className="h-3.5 w-3.5 text-blue-600" />
+                        Funil de Vendas
                       </Label>
-                      <Badge variant="outline" className="text-[10px] uppercase font-mono">
-                        {contactType === "all"
-                          ? "Todos os Contatos"
-                          : contactType === "lead"
-                            ? "Apenas Leads"
-                            : "Apenas Clientes"}
-                      </Badge>
+                      {currentPipeline && (
+                        <span className="text-[11px] text-muted-foreground">
+                          {currentPipeline.pipeline_stages?.length || 0} etapa(s) no funil
+                        </span>
+                      )}
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setContactType("all")}
-                        className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs font-medium transition-all ${
-                          contactType === "all"
-                            ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                            : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
-                        }`}
-                      >
-                        <Users className="h-3.5 w-3.5" />
-                        <span>Todos</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setContactType("lead")}
-                        className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs font-medium transition-all ${
-                          contactType === "lead"
-                            ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                            : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
-                        }`}
-                      >
-                        <UserPlus className="h-3.5 w-3.5" />
-                        <span>Apenas Leads</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setContactType("client")}
-                        className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs font-medium transition-all ${
-                          contactType === "client"
-                            ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                            : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
-                        }`}
-                      >
-                        <UserCheck className="h-3.5 w-3.5" />
-                        <span>Apenas Clientes</span>
-                      </button>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      {contactType === "all" &&
-                        "Envia para toda a sua base qualificada, independentemente de já terem comprado."}
-                      {contactType === "lead" &&
-                        "Foca em prospectos e oportunidades que ainda não converteram em clientes."}
-                      {contactType === "client" &&
-                        "Foca em clientes com histórico de compra confirmada (pós-venda, recompra, fidelização)."}
-                    </p>
+                    <Select
+                      value={selectedPipelineId || currentPipeline?.id || ""}
+                      onValueChange={(val) => {
+                        setSelectedPipelineId(val);
+                        setSelectedStageIds([]);
+                      }}
+                    >
+                      <SelectTrigger className="text-xs bg-background">
+                        <SelectValue placeholder="Selecione o Funil de Vendas" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sortedPipelines.length === 0 && (
+                          <SelectItem value="none" disabled>
+                            Nenhum funil cadastrado
+                          </SelectItem>
+                        )}
+                        {sortedPipelines.map((p: any) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
-                  {/* 2. Critério de Inatividade */}
-                  <div className="pt-2 border-t border-border/50 space-y-3">
+                  {/* Escopo do Disparo neste Funil: Funil Todo vs Etapa X */}
+                  <div className="space-y-1.5 pt-2 border-t border-border/50">
+                    <Label className="text-xs font-semibold">
+                      O que você deseja enviar deste funil?
+                    </Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCrmScope("all_funnel");
+                          setSelectedStageIds([]);
+                        }}
+                        className={`p-2.5 rounded-lg border text-xs font-medium transition-all text-left flex items-start gap-2.5 ${
+                          crmScope === "all_funnel"
+                            ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                            : "bg-background hover:bg-muted/50 border-border text-foreground"
+                        }`}
+                      >
+                        <div
+                          className={`mt-0.5 rounded-full p-1 shrink-0 ${
+                            crmScope === "all_funnel" ? "bg-white/20" : "bg-muted"
+                          }`}
+                        >
+                          <Users className="h-3.5 w-3.5" />
+                        </div>
+                        <div>
+                          <div className="font-bold">O Funil Todo</div>
+                          <div
+                            className={`text-[10px] ${
+                              crmScope === "all_funnel" ? "text-blue-100" : "text-muted-foreground"
+                            }`}
+                          >
+                            Dispara para todas as oportunidades deste funil, independentemente da
+                            etapa.
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setCrmScope("specific_stages")}
+                        className={`p-2.5 rounded-lg border text-xs font-medium transition-all text-left flex items-start gap-2.5 ${
+                          crmScope === "specific_stages"
+                            ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                            : "bg-background hover:bg-muted/50 border-border text-foreground"
+                        }`}
+                      >
+                        <div
+                          className={`mt-0.5 rounded-full p-1 shrink-0 ${
+                            crmScope === "specific_stages" ? "bg-white/20" : "bg-muted"
+                          }`}
+                        >
+                          <Target className="h-3.5 w-3.5" />
+                        </div>
+                        <div>
+                          <div className="font-bold">Etapas Específicas (Etapa X)</div>
+                          <div
+                            className={`text-[10px] ${
+                              crmScope === "specific_stages"
+                                ? "text-blue-100"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            Dispara exclusivamente para quem está na(s) etapa(s) selecionada(s).
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Se escolheu Etapas Específicas: Esteira Kanban Visual */}
+                  {crmScope === "specific_stages" && (
+                    <div className="space-y-2 pt-2 border-t border-border/50">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-xs font-semibold flex items-center gap-1.5">
+                            <Layers className="h-3.5 w-3.5 text-blue-600" />
+                            Selecione a(s) Etapa(s) do Funil:
+                          </Label>
+                          <p className="text-[11px] text-muted-foreground">
+                            Clique na etapa desejada na esteira abaixo para direcionar o disparo
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedStageIds(availablePipelineStages.map((s: any) => s.id))
+                            }
+                            className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+                          >
+                            Selecionar Todas
+                          </button>
+                          {selectedStageIds.length > 0 && (
+                            <>
+                              <span className="text-muted-foreground text-xs">•</span>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedStageIds([])}
+                                className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                              >
+                                Limpar ({selectedStageIds.length})
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Esteira de Cards das Etapas */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-1 max-h-52 overflow-y-auto pr-1">
+                        {availablePipelineStages.map((stage: any, idx: number) => {
+                          const isSelected = selectedStageIds.includes(stage.id);
+                          const oppCount = stageOppCounts[stage.id]?.open ?? 0;
+                          return (
+                            <div
+                              key={stage.id}
+                              onClick={() => toggleStageId(stage.id)}
+                              className={`p-2.5 rounded-lg border cursor-pointer transition-all flex flex-col justify-between gap-1.5 text-left ${
+                                isSelected
+                                  ? "bg-blue-600 text-white border-blue-600 shadow-sm ring-1 ring-blue-500"
+                                  : "bg-background hover:bg-muted/50 border-border text-foreground"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span
+                                  className={`text-[9px] font-mono px-1 py-0.2 rounded font-semibold ${
+                                    isSelected
+                                      ? "bg-white/20 text-white"
+                                      : "bg-muted text-muted-foreground"
+                                  }`}
+                                >
+                                  Etapa {idx + 1}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <span
+                                    className="w-2 h-2 rounded-full ring-1 ring-white/50"
+                                    style={{ backgroundColor: stage.color || "#3b82f6" }}
+                                  />
+                                  {isSelected && <CheckCircle2 className="h-3 w-3 text-white" />}
+                                </div>
+                              </div>
+
+                              <div className="font-semibold text-xs line-clamp-2">{stage.name}</div>
+
+                              <div
+                                className={`flex items-center justify-between text-[10px] pt-1 border-t ${
+                                  isSelected
+                                    ? "border-white/20 text-blue-100"
+                                    : "border-border/50 text-muted-foreground"
+                                }`}
+                              >
+                                <span>No Kanban:</span>
+                                <span className="font-bold font-mono">
+                                  {oppCount} {oppCount === 1 ? "oportunidade" : "oportunidades"}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {selectedStageIds.length === 0 ? (
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                          ⚠️ Nenhuma etapa selecionada. Clique em uma ou mais etapas acima para
+                          definir o público.
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">
+                          ✓ {selectedStageIds.length} etapa(s) selecionada(s) para o disparo.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Status das Oportunidades no CRM */}
+                  <div className="space-y-1.5 pt-2 border-t border-border/50">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold">
+                        Status das Oportunidades no CRM
+                      </Label>
+                      <span className="text-[10px] text-muted-foreground">
+                        (Padrão: Apenas Em Aberto)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { key: "open", label: "Em Aberto (Ativas)" },
+                        { key: "won", label: "Ganhas (Vendas)" },
+                        { key: "lost", label: "Perdidas" },
+                      ].map((st) => {
+                        const isSelected = selectedCrmStatuses.includes(st.key);
+                        return (
+                          <button
+                            key={st.key}
+                            type="button"
+                            onClick={() => toggleCrmStatus(st.key)}
+                            className={`p-2 rounded-lg border text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
+                              isSelected
+                                ? st.key === "won"
+                                  ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                                  : st.key === "lost"
+                                    ? "bg-rose-600 text-white border-rose-600 shadow-sm"
+                                    : "bg-blue-600 text-white border-blue-600 shadow-sm"
+                                : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
+                            }`}
+                          >
+                            {isSelected && <CheckCircle2 className="h-3 w-3" />}
+                            <span>{st.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* OPÇÃO 2: ATENDIMENTOS (CHAT & CONVERSAS) */}
+              {targetModule === "chat" && (
+                <Card className="p-4 bg-muted/20 border-amber-500/30 space-y-4">
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
-                        <Label className="text-sm font-semibold">Critério de Inatividade</Label>
+                        <Label className="text-sm font-semibold flex items-center gap-1.5">
+                          <Clock className="h-4 w-4 text-amber-600" />
+                          Critério de Inatividade no Atendimento
+                        </Label>
                         <p className="text-xs text-muted-foreground">
                           Contatar clientes sem interação com a empresa há um determinado número de
                           dias
@@ -1439,7 +1806,7 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                               onChange={(e) =>
                                 setInactivityDays(Math.max(1, Number(e.target.value)))
                               }
-                              className="w-20 h-8 text-sm font-bold text-center"
+                              className="w-20 h-8 text-sm font-bold text-center bg-background"
                             />
                             <span className="text-xs font-semibold text-muted-foreground">
                               dias
@@ -1455,157 +1822,359 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                           onValueChange={(vals) => setInactivityDays(vals[0])}
                         />
 
-                        {/* Botões Rápidos de Dias (Presets) */}
+                        {/* Presets Rápidos */}
                         <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                          <span className="text-[11px] text-muted-foreground mr-1">
-                            Atalhos rápidos:
-                          </span>
+                          <span className="text-[11px] text-muted-foreground mr-1">Atalhos:</span>
                           {INACTIVITY_PRESETS.map((days) => (
-                            <Button
+                            <button
                               key={days}
                               type="button"
-                              size="sm"
-                              variant={inactivityDays === days ? "default" : "outline"}
-                              className="h-6 px-2 text-xs rounded-full"
                               onClick={() => setInactivityDays(days)}
+                              className={`text-[10px] px-2 py-0.5 rounded border transition-all ${
+                                inactivityDays === days
+                                  ? "bg-amber-600 text-white border-amber-600 font-bold"
+                                  : "bg-background hover:bg-muted border-border text-muted-foreground"
+                              }`}
                             >
                               {days} dias
-                            </Button>
+                            </button>
                           ))}
                         </div>
                       </div>
                     )}
                   </div>
 
-                  {/* 3. Origem dos Contatos */}
-                  {contactSources.length > 0 && (
-                    <div className="space-y-2 pt-2 border-t border-border/50">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs font-semibold flex items-center gap-1.5">
-                          <Target className="h-3.5 w-3.5 text-primary" />
-                          Origem do Contato (opcional)
-                        </Label>
-                        {selectedSources.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedSources([])}
-                            className="text-[10px] text-muted-foreground hover:text-foreground underline"
-                          >
-                            Limpar filtro ({selectedSources.length})
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 border rounded-md bg-background">
-                        {contactSources.map((src) => {
-                          const isSelected = selectedSources.includes(src);
+                  {/* Proteção de conversas em andamento */}
+                  <div className="flex items-center space-x-2 pt-2 border-t border-border/50">
+                    <Checkbox
+                      id="no-open"
+                      checked={onlyWithoutOpenConvs}
+                      onCheckedChange={(c) => setOnlyWithoutOpenConvs(!!c)}
+                    />
+                    <Label htmlFor="no-open" className="text-xs cursor-pointer">
+                      Apenas contatos sem conversas ativas ou aguardando no momento (evita duplicar
+                      com atendente)
+                    </Label>
+                  </div>
+                </Card>
+              )}
+
+              {/* OPÇÃO 3: BASE GERAL DE CONTATOS */}
+              {targetModule === "general" && (
+                <Card className="p-4 bg-muted/20 border-primary/30 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-primary" />
+                    <Label className="text-sm font-semibold">Toda a Base de Contatos</Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    O disparo será direcionado a todos os contatos cadastrados da sua empresa na
+                    base do Atendi. Você pode refinar por perfil (Leads vs Clientes), Tags ou DDDs
+                    logo abaixo.
+                  </p>
+                </Card>
+              )}
+
+              {/* OPÇÃO 4: MEU TODOO */}
+              {targetModule === "todoo" && (
+                <Card className="p-4 bg-muted/20 border-emerald-500/30 space-y-4">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold flex items-center gap-1.5">
+                        <Target className="h-3.5 w-3.5 text-emerald-600" />
+                        Ações Comerciais / Campanhas do Todoo
+                      </Label>
+                      {selectedTodooCampaignIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTodooCampaignIds([])}
+                          className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                        >
+                          Limpar ações ({selectedTodooCampaignIds.length})
+                        </button>
+                      )}
+                    </div>
+                    {todooCampaigns.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1.5 border rounded-md bg-background">
+                        {todooCampaigns.map((camp: any) => {
+                          const isSelected = selectedTodooCampaignIds.includes(camp.id);
                           return (
                             <Badge
-                              key={src}
+                              key={camp.id}
                               variant={isSelected ? "default" : "outline"}
-                              className="cursor-pointer text-xs flex items-center gap-1 py-1"
-                              onClick={() => toggleSource(src)}
+                              className="cursor-pointer text-xs flex items-center gap-1.5"
+                              onClick={() => toggleTodooCampaign(camp.id)}
                             >
-                              {getSourceIcon(src, "h-3 w-3")}
-                              <span>{src}</span>
+                              <span>{camp.title}</span>
+                              {camp.status && (
+                                <span className="text-[10px] opacity-75 font-mono">
+                                  ({camp.status})
+                                </span>
+                              )}
                             </Badge>
                           );
                         })}
                       </div>
+                    ) : (
                       <p className="text-[11px] text-muted-foreground">
-                        {selectedSources.length === 0
-                          ? "Todas as origens incluídas (Meta Ads, WhatsApp, Indicação, etc.)."
-                          : `Filtrando apenas contatos com origem: ${selectedSources.join(", ")}.`}
+                        Nenhuma ação comercial encontrada no Meu Todoo.
                       </p>
+                    )}
+                  </div>
+
+                  {/* Etapas do Todoo */}
+                  {todooStages.length > 0 && (
+                    <div className="space-y-1.5 pt-1 border-t border-border/50">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold">
+                          Etapas da Cadência (opcional)
+                        </Label>
+                        {selectedTodooStageIds.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTodooStageIds([])}
+                            className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                          >
+                            Limpar etapas ({selectedTodooStageIds.length})
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1.5 border rounded-md bg-background">
+                        {todooStages.map((st: any) => {
+                          const isSelected = selectedTodooStageIds.includes(st.id);
+                          return (
+                            <Badge
+                              key={st.id}
+                              variant={isSelected ? "default" : "outline"}
+                              className="cursor-pointer text-xs flex items-center gap-1.5"
+                              style={{
+                                backgroundColor: isSelected ? st.color || undefined : undefined,
+                              }}
+                              onClick={() => toggleTodooStage(st.id)}
+                            >
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: st.color || "#10b981" }}
+                              />
+                              <span>{st.name}</span>
+                            </Badge>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
 
-                  {/* 4. Tags de Inclusão e Exclusão */}
-                  {labels.length > 0 && (
-                    <div className="space-y-3 pt-2 border-t border-border/50">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-xs font-semibold flex items-center gap-1.5">
-                            <Tag className="h-3.5 w-3.5 text-primary" />
-                            Incluir contatos com as tags:
-                          </Label>
-                          {selectedTags.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedTags([])}
-                              className="text-[10px] text-muted-foreground hover:text-foreground underline"
-                            >
-                              Limpar ({selectedTags.length})
-                            </button>
-                          )}
-                        </div>
+                  {/* Status do Lead no Todoo */}
+                  <div className="space-y-1.5 pt-1 border-t border-border/50">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold">Status do Lead no Todoo</Label>
+                      {selectedTodooLeadStatuses.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTodooLeadStatuses([])}
+                          className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                        >
+                          Limpar status ({selectedTodooLeadStatuses.length})
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { key: "pending", label: "Aguardando Contato" },
+                        { key: "contacted", label: "Em Contato / Cadência" },
+                        { key: "scheduled", label: "Agendou Avaliação" },
+                        { key: "quoted", label: "Enviou Orçamento" },
+                        { key: "won", label: "Fechou Contrato" },
+                        { key: "lost", label: "Sem Interesse / Perdido" },
+                        { key: "callback", label: "Pediu Retorno" },
+                      ].map((st) => {
+                        const isSelected = selectedTodooLeadStatuses.includes(st.key);
+                        return (
+                          <Badge
+                            key={st.key}
+                            variant={isSelected ? "default" : "outline"}
+                            className="cursor-pointer text-xs"
+                            onClick={() => toggleTodooStatus(st.key)}
+                          >
+                            {st.label}
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </Card>
+              )}
+            </div>
+
+            {/* SEÇÃO 3: PERFIL DO CONTATO (LEAD VS CLIENTE) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  3. Perfil do Contato
+                </Label>
+                <span className="text-[10px] text-muted-foreground">
+                  {contactType === "all"
+                    ? "Toda a base qualificada"
+                    : contactType === "lead"
+                      ? "Apenas prospectos que ainda não converteram"
+                      : "Apenas clientes com histórico de compra"}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setContactType("all")}
+                  className={`flex items-center justify-center gap-1.5 p-2.5 rounded-lg border text-xs font-semibold transition-all ${
+                    contactType === "all"
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm ring-1 ring-primary"
+                      : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
+                  }`}
+                >
+                  <Users className="h-4 w-4" />
+                  <span>Todos os Contatos</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setContactType("lead")}
+                  className={`flex items-center justify-center gap-1.5 p-2.5 rounded-lg border text-xs font-semibold transition-all ${
+                    contactType === "lead"
+                      ? "bg-blue-600 text-white border-blue-600 shadow-sm ring-1 ring-blue-500"
+                      : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
+                  }`}
+                >
+                  <UserPlus className="h-4 w-4" />
+                  <span>Apenas Leads</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setContactType("client")}
+                  className={`flex items-center justify-center gap-1.5 p-2.5 rounded-lg border text-xs font-semibold transition-all ${
+                    contactType === "client"
+                      ? "bg-emerald-600 text-white border-emerald-600 shadow-sm ring-1 ring-emerald-500"
+                      : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
+                  }`}
+                >
+                  <UserCheck className="h-4 w-4" />
+                  <span>Apenas Clientes</span>
+                </button>
+              </div>
+            </div>
+
+            {/* SEÇÃO 4: FILTROS ADICIONAIS OPCIONAIS (TAGS E REGIÃO) EM ACORDEÃO */}
+            <div className="border rounded-lg bg-card overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                className="w-full p-3 flex items-center justify-between text-xs font-semibold hover:bg-muted/40 transition-colors text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <Sliders className="h-4 w-4 text-muted-foreground" />
+                  <span>Filtros Adicionais: Tags e Região (Opcional)</span>
+                  {(selectedTags.length > 0 ||
+                    excludedTags.length > 0 ||
+                    selectedDdds.length > 0) && (
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
+                      {[
+                        selectedTags.length > 0 && `${selectedTags.length} tag(s)`,
+                        excludedTags.length > 0 && `${excludedTags.length} excluída(s)`,
+                        selectedDdds.length > 0 && `${selectedDdds.length} DDD(s)`,
+                      ]
+                        .filter(Boolean)
+                        .join(" • ")}
+                    </Badge>
+                  )}
+                </div>
+                {showAdvancedFilters ? (
+                  <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                )}
+              </button>
+
+              {showAdvancedFilters && (
+                <div className="p-4 border-t space-y-4 bg-muted/10">
+                  {/* Tags de Inclusão e Exclusão */}
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold flex items-center gap-1.5">
+                          <Tag className="h-3.5 w-3.5 text-primary" />
+                          Incluir Tags (Contato precisa ter ao menos uma)
+                        </Label>
+                        {selectedTags.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTags([])}
+                            className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                          >
+                            Limpar ({selectedTags.length})
+                          </button>
+                        )}
+                      </div>
+                      {availableTags.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 border rounded-md bg-background">
-                          {labels.map((lbl) => {
-                            const isSelected = selectedTags.includes(lbl.name);
-                            const isExcluded = excludedTags.includes(lbl.name);
+                          {availableTags.map((tag) => {
+                            const isSelected = selectedTags.includes(tag);
                             return (
                               <Badge
-                                key={lbl.id}
+                                key={tag}
                                 variant={isSelected ? "default" : "outline"}
-                                className={`cursor-pointer text-xs ${
-                                  isExcluded ? "opacity-30 pointer-events-none line-through" : ""
-                                }`}
-                                onClick={() => toggleTag(lbl.name)}
+                                className="cursor-pointer text-xs"
+                                onClick={() => toggleTag(tag)}
                               >
-                                {lbl.name}
+                                {tag}
                               </Badge>
                             );
                           })}
                         </div>
-                      </div>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground">
+                          Nenhuma etiqueta cadastrada nos contatos.
+                        </p>
+                      )}
+                    </div>
 
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-xs font-semibold flex items-center gap-1.5 text-destructive">
-                            <Ban className="h-3.5 w-3.5" />
-                            Excluir contatos com as tags (Anti-Spam / Blacklist):
-                          </Label>
-                          {excludedTags.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => setExcludedTags([])}
-                              className="text-[10px] text-muted-foreground hover:text-destructive underline"
-                            >
-                              Limpar ({excludedTags.length})
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 border border-destructive/20 rounded-md bg-background">
-                          {labels.map((lbl) => {
-                            const isExcluded = excludedTags.includes(lbl.name);
-                            const isSelected = selectedTags.includes(lbl.name);
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold flex items-center gap-1.5 text-rose-600">
+                          <Ban className="h-3.5 w-3.5" />
+                          Excluir Tags (Contatos com essas tags NUNCA receberão)
+                        </Label>
+                        {excludedTags.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExcludedTags([])}
+                            className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                          >
+                            Limpar ({excludedTags.length})
+                          </button>
+                        )}
+                      </div>
+                      {availableTags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 border rounded-md bg-background">
+                          {availableTags.map((tag) => {
+                            const isExcluded = excludedTags.includes(tag);
                             return (
                               <Badge
-                                key={`ex-${lbl.id}`}
+                                key={tag}
                                 variant={isExcluded ? "destructive" : "outline"}
-                                className={`cursor-pointer text-xs ${
-                                  isSelected ? "opacity-30 pointer-events-none" : ""
-                                } ${!isExcluded ? "hover:border-destructive/50 text-muted-foreground" : ""}`}
-                                onClick={() => toggleExcludedTag(lbl.name)}
+                                className="cursor-pointer text-xs"
+                                onClick={() => toggleExcludedTag(tag)}
                               >
-                                {lbl.name}
+                                {tag}
                               </Badge>
                             );
                           })}
                         </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          Contatos com tags excluídas serão desconsiderados do disparo mesmo que
-                          atendam a outros critérios.
-                        </p>
-                      </div>
+                      )}
                     </div>
-                  )}
+                  </div>
 
-                  {/* 5. Filtro Regional por DDD */}
-                  <div className="space-y-2 pt-2 border-t border-border/50">
+                  {/* DDDs */}
+                  <div className="pt-2 border-t border-border/50 space-y-2">
                     <div className="flex items-center justify-between">
                       <Label className="text-xs font-semibold flex items-center gap-1.5">
                         <MapPin className="h-3.5 w-3.5 text-primary" />
-                        Filtro Regional por DDD (opcional)
+                        Filtro Regional por DDDs Telefônicos
                       </Label>
                       {selectedDdds.length > 0 && (
                         <button
@@ -1613,37 +2182,35 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                           onClick={() => setSelectedDdds([])}
                           className="text-[10px] text-muted-foreground hover:text-foreground underline"
                         >
-                          Limpar DDDs ({selectedDdds.length})
+                          Limpar ({selectedDdds.length})
                         </button>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="relative flex-1 max-w-[200px]">
-                        <Input
-                          placeholder="Ex: 27, 33, 11..."
-                          value={dddInput}
-                          onChange={(e) => setDddInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              handleAddDdd();
-                            }
-                          }}
-                          className="h-8 text-xs font-mono"
-                        />
-                      </div>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Ex: 11, 21, 31 ou digite e aperte Enter"
+                        value={dddInput}
+                        onChange={(e) => setDddInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAddDdd();
+                          }
+                        }}
+                        className="text-xs h-8 bg-background"
+                      />
                       <Button
                         type="button"
                         size="sm"
                         variant="secondary"
-                        className="h-8 text-xs px-3"
                         onClick={() => handleAddDdd()}
-                        disabled={!dddInput.trim()}
+                        className="h-8 text-xs shrink-0"
                       >
+                        <Plus className="h-3.5 w-3.5 mr-1" />
                         Adicionar DDD
                       </Button>
                     </div>
-                    {selectedDdds.length > 0 ? (
+                    {selectedDdds.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 pt-1">
                         {selectedDdds.map((ddd) => (
                           <Badge
@@ -1662,383 +2229,11 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                           </Badge>
                         ))}
                       </div>
-                    ) : (
-                      <p className="text-[11px] text-muted-foreground">
-                        Nenhum DDD específico selecionado (disparará para todos os estados/regiões).
-                      </p>
                     )}
                   </div>
-
-                  {/* 6. Filtro de conversa aberta */}
-                  <div className="flex items-center space-x-2 pt-2 border-t border-border/50">
-                    <Checkbox
-                      id="no-open"
-                      checked={onlyWithoutOpenConvs}
-                      onCheckedChange={(c) => setOnlyWithoutOpenConvs(!!c)}
-                    />
-                    <Label htmlFor="no-open" className="text-xs cursor-pointer">
-                      Apenas contatos sem conversas ativas ou aguardando no momento (evita duplicar
-                      com atendente)
-                    </Label>
-                  </div>
-                </Card>
-              </TabsContent>
-
-              {/* ABA 2: FUNIS DO CRM */}
-              <TabsContent value="crm" className="pt-2 space-y-4">
-                <div className="flex items-center justify-between p-3.5 rounded-lg border bg-background">
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <Briefcase className="h-4 w-4 text-blue-600" />
-                      <Label className="text-sm font-semibold">
-                        Filtrar por Oportunidades do CRM
-                      </Label>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Segmente contatos com base no funil de vendas, etapas do pipeline e status de
-                      negociação.
-                    </p>
-                  </div>
-                  <Switch checked={crmEnabled} onCheckedChange={setCrmEnabled} />
                 </div>
-
-                {crmEnabled && (
-                  <Card className="p-4 bg-muted/20 border-dashed space-y-4">
-                    {/* Modo: Com vs Sem oportunidade */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold">Condição do CRM</Label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setCrmMode("with")}
-                          className={`p-2 rounded-lg border text-xs font-medium transition-all text-left ${
-                            crmMode === "with"
-                              ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                              : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
-                          }`}
-                        >
-                          <div className="font-semibold">✓ Com Oportunidade</div>
-                          <div
-                            className={`text-[10px] ${crmMode === "with" ? "text-blue-100" : "text-muted-foreground"}`}
-                          >
-                            Enviar apenas para contatos que possuem oportunidade nos critérios
-                            abaixo.
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setCrmMode("without")}
-                          className={`p-2 rounded-lg border text-xs font-medium transition-all text-left ${
-                            crmMode === "without"
-                              ? "bg-rose-600 text-white border-rose-600 shadow-sm"
-                              : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
-                          }`}
-                        >
-                          <div className="font-semibold">✕ Sem Oportunidade</div>
-                          <div
-                            className={`text-[10px] ${crmMode === "without" ? "text-rose-100" : "text-muted-foreground"}`}
-                          >
-                            Excluir contatos que possuem oportunidade (ideal para prospecção fria).
-                          </div>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Seleção de Funil */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold">Funil de Vendas</Label>
-                      <Select
-                        value={selectedPipelineId}
-                        onValueChange={(val) => {
-                          setSelectedPipelineId(val);
-                          setSelectedStageIds([]);
-                        }}
-                      >
-                        <SelectTrigger className="text-xs">
-                          <SelectValue placeholder="Todos os Funis" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Todos os Funis de Vendas</SelectItem>
-                          {pipelines.map((p: any) => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.name} {p.is_default ? "(Padrão)" : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Etapas do Funil */}
-                    {availablePipelineStages.length > 0 && (
-                      <div className="space-y-1.5 pt-1 border-t border-border/50">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-xs font-semibold">
-                            Etapas do Funil (opcional)
-                          </Label>
-                          {selectedStageIds.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedStageIds([])}
-                              className="text-[10px] text-muted-foreground hover:text-foreground underline"
-                            >
-                              Limpar etapas ({selectedStageIds.length})
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1.5 border rounded-md bg-background">
-                          {availablePipelineStages.map((stage: any) => {
-                            const isSelected = selectedStageIds.includes(stage.id);
-                            return (
-                              <Badge
-                                key={stage.id}
-                                variant={isSelected ? "default" : "outline"}
-                                className="cursor-pointer text-xs flex items-center gap-1.5"
-                                style={{
-                                  backgroundColor: isSelected
-                                    ? stage.color || undefined
-                                    : undefined,
-                                }}
-                                onClick={() => toggleStageId(stage.id)}
-                              >
-                                <span
-                                  className="w-2 h-2 rounded-full shrink-0"
-                                  style={{ backgroundColor: stage.color || "#3b82f6" }}
-                                />
-                                <span>{stage.name}</span>
-                              </Badge>
-                            );
-                          })}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          {selectedStageIds.length === 0
-                            ? "Qualquer etapa do funil."
-                            : `${selectedStageIds.length} etapa(s) selecionada(s).`}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Status da Oportunidade */}
-                    <div className="space-y-1.5 pt-1 border-t border-border/50">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs font-semibold">Status da Oportunidade</Label>
-                        {selectedCrmStatuses.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedCrmStatuses([])}
-                            className="text-[10px] text-muted-foreground hover:text-foreground underline"
-                          >
-                            Limpar status ({selectedCrmStatuses.length})
-                          </button>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {[
-                          { key: "open", label: "Em Aberto" },
-                          { key: "won", label: "Ganha (Venda)" },
-                          { key: "lost", label: "Perdida" },
-                        ].map((st) => {
-                          const isSelected = selectedCrmStatuses.includes(st.key);
-                          return (
-                            <button
-                              key={st.key}
-                              type="button"
-                              onClick={() => toggleCrmStatus(st.key)}
-                              className={`p-2 rounded-lg border text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
-                                isSelected
-                                  ? st.key === "won"
-                                    ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                                    : st.key === "lost"
-                                      ? "bg-rose-600 text-white border-rose-600 shadow-sm"
-                                      : "bg-blue-600 text-white border-blue-600 shadow-sm"
-                                  : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
-                              }`}
-                            >
-                              <span>{st.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </Card>
-                )}
-              </TabsContent>
-
-              {/* ABA 3: MEU TODOO */}
-              <TabsContent value="todoo" className="pt-2 space-y-4">
-                <div className="flex items-center justify-between p-3.5 rounded-lg border bg-background">
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <Target className="h-4 w-4 text-emerald-600" />
-                      <Label className="text-sm font-semibold">
-                        Filtrar por Leads do Meu Todoo
-                      </Label>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Segmente contatos que participam ou participaram das cadências e ações
-                      comerciais do Todoo.
-                    </p>
-                  </div>
-                  <Switch checked={todooEnabled} onCheckedChange={setTodooEnabled} />
-                </div>
-
-                {todooEnabled && (
-                  <Card className="p-4 bg-muted/20 border-dashed space-y-4">
-                    {/* Modo: Presente vs Fora do Todoo */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold">Condição do Todoo</Label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setTodooMode("with")}
-                          className={`p-2 rounded-lg border text-xs font-medium transition-all text-left ${
-                            todooMode === "with"
-                              ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                              : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
-                          }`}
-                        >
-                          <div className="font-semibold">✓ Presente no Todoo</div>
-                          <div
-                            className={`text-[10px] ${todooMode === "with" ? "text-emerald-100" : "text-muted-foreground"}`}
-                          >
-                            Enviar para contatos inseridos nas ações comerciais do Todoo.
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setTodooMode("without")}
-                          className={`p-2 rounded-lg border text-xs font-medium transition-all text-left ${
-                            todooMode === "without"
-                              ? "bg-rose-600 text-white border-rose-600 shadow-sm"
-                              : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
-                          }`}
-                        >
-                          <div className="font-semibold">✕ Fora do Todoo</div>
-                          <div
-                            className={`text-[10px] ${todooMode === "without" ? "text-rose-100" : "text-muted-foreground"}`}
-                          >
-                            Excluir contatos já trabalhados nas ações do Todoo.
-                          </div>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Ações Comerciais do Todoo */}
-                    {todooCampaigns.length > 0 && (
-                      <div className="space-y-1.5 pt-1 border-t border-border/50">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-xs font-semibold">Ação Comercial do Todoo</Label>
-                          {selectedTodooCampaignIds.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedTodooCampaignIds([])}
-                              className="text-[10px] text-muted-foreground hover:text-foreground underline"
-                            >
-                              Limpar ações ({selectedTodooCampaignIds.length})
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1.5 border rounded-md bg-background">
-                          {todooCampaigns.map((camp: any) => {
-                            const isSelected = selectedTodooCampaignIds.includes(camp.id);
-                            return (
-                              <Badge
-                                key={camp.id}
-                                variant={isSelected ? "default" : "outline"}
-                                className="cursor-pointer text-xs"
-                                onClick={() => toggleTodooCampaign(camp.id)}
-                              >
-                                {camp.title}
-                              </Badge>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Etapas da Cadência do Todoo */}
-                    {todooStages.length > 0 && (
-                      <div className="space-y-1.5 pt-1 border-t border-border/50">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-xs font-semibold">
-                            Etapa da Cadência (Todoo Stages)
-                          </Label>
-                          {selectedTodooStageIds.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedTodooStageIds([])}
-                              className="text-[10px] text-muted-foreground hover:text-foreground underline"
-                            >
-                              Limpar etapas ({selectedTodooStageIds.length})
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1.5 border rounded-md bg-background">
-                          {todooStages.map((st: any) => {
-                            const isSelected = selectedTodooStageIds.includes(st.id);
-                            return (
-                              <Badge
-                                key={st.id}
-                                variant={isSelected ? "default" : "outline"}
-                                className="cursor-pointer text-xs flex items-center gap-1.5"
-                                style={{
-                                  backgroundColor: isSelected ? st.color || undefined : undefined,
-                                }}
-                                onClick={() => toggleTodooStage(st.id)}
-                              >
-                                <span
-                                  className="w-2 h-2 rounded-full shrink-0"
-                                  style={{ backgroundColor: st.color || "#10b981" }}
-                                />
-                                <span>{st.name}</span>
-                              </Badge>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Status do Lead no Todoo */}
-                    <div className="space-y-1.5 pt-1 border-t border-border/50">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs font-semibold">Status do Lead no Todoo</Label>
-                        {selectedTodooLeadStatuses.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedTodooLeadStatuses([])}
-                            className="text-[10px] text-muted-foreground hover:text-foreground underline"
-                          >
-                            Limpar status ({selectedTodooLeadStatuses.length})
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {[
-                          { key: "pending", label: "Aguardando Contato" },
-                          { key: "contacted", label: "Em Contato / Cadência" },
-                          { key: "scheduled", label: "Agendou Avaliação" },
-                          { key: "quoted", label: "Enviou Orçamento" },
-                          { key: "won", label: "Fechou Contrato" },
-                          { key: "lost", label: "Sem Interesse / Perdido" },
-                          { key: "callback", label: "Pediu Retorno" },
-                        ].map((st) => {
-                          const isSelected = selectedTodooLeadStatuses.includes(st.key);
-                          return (
-                            <Badge
-                              key={st.key}
-                              variant={isSelected ? "default" : "outline"}
-                              className="cursor-pointer text-xs"
-                              onClick={() => toggleTodooStatus(st.key)}
-                            >
-                              {st.label}
-                            </Badge>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </Card>
-                )}
-              </TabsContent>
-            </Tabs>
+              )}
+            </div>
 
             {/* BARRA INFERIOR DE CÁLCULO EM TEMPO REAL */}
             <div className="p-3 bg-muted/40 border rounded-lg flex items-center justify-between">
@@ -2048,7 +2243,7 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                 variant="outline"
                 onClick={calculateAudienceCount}
                 disabled={isCalculatingCount}
-                className="h-8 text-xs"
+                className="h-8 text-xs bg-background"
               >
                 {isCalculatingCount ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
@@ -2058,14 +2253,40 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                 Recalcular
               </Button>
 
-              <div className="flex items-center gap-2 text-sm font-semibold text-emerald-600 bg-emerald-500/10 px-3.5 py-1.5 rounded-md border border-emerald-500/20">
-                <Users className="h-4 w-4" />
-                {isCalculatingCount ? (
-                  <span className="text-xs text-muted-foreground animate-pulse">
-                    Calculando audiência...
-                  </span>
-                ) : (
-                  <span>{(audienceCount ?? 0).toLocaleString("pt-BR")} contatos qualificados</span>
+              <div className="text-right">
+                <div className="flex items-center gap-2 text-sm font-bold text-emerald-600 bg-emerald-500/10 px-3.5 py-1 rounded-md border border-emerald-500/20">
+                  <Users className="h-4 w-4" />
+                  {isCalculatingCount ? (
+                    <span className="text-xs text-muted-foreground animate-pulse">
+                      Calculando audiência...
+                    </span>
+                  ) : (
+                    <span>
+                      {(audienceCount ?? 0).toLocaleString("pt-BR")} contatos qualificados
+                    </span>
+                  )}
+                </div>
+                {!isCalculatingCount && (
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    {targetModule === "crm" && (
+                      <span>
+                        CRM: {currentPipeline?.name || "Funil"} &bull;{" "}
+                        {crmScope === "specific_stages"
+                          ? `${selectedStageIds.length} etapa(s) selecionada(s)`
+                          : "Funil Completo"}
+                      </span>
+                    )}
+                    {targetModule === "chat" && (
+                      <span>
+                        Atendimentos &bull;{" "}
+                        {useInactivity
+                          ? `Sem falar há ${inactivityDays}+ dias`
+                          : "Sem filtro de dias"}
+                      </span>
+                    )}
+                    {targetModule === "general" && <span>Base Geral de Contatos</span>}
+                    {targetModule === "todoo" && <span>Meu Todoo (Ações Comerciais)</span>}
+                  </div>
                 )}
               </div>
             </div>
@@ -2075,84 +2296,86 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
         {/* ===================== PASSO 3: MENSAGEM & MÍDIA ===================== */}
         {step === 3 && (
           <div className="space-y-4 pt-2">
-            {/* Gerenciador de Variações de Mensagem (Teste A/B) */}
-            <div className="space-y-3 pb-3 border-b">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h4 className="text-sm font-semibold flex items-center gap-2">
-                    <Layers className="h-4 w-4 text-primary" />
-                    Variações da Mensagem (Teste A/B)
-                  </h4>
-                  <p className="text-xs text-muted-foreground">
-                    Cadastre mensagens ou mídias diferentes. Os disparos serão distribuídos
-                    igualmente entre as variações.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={addVariation}
-                  className="h-8 text-xs shrink-0"
-                >
-                  <Plus className="h-3.5 w-3.5 mr-1" />
-                  Adicionar Variação
-                </Button>
+            {/* Toggle Opcional de Teste A/B */}
+            <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/20">
+              <div className="space-y-0.5">
+                <Label className="text-xs font-semibold flex items-center gap-1.5">
+                  <Layers className="h-3.5 w-3.5 text-primary" />
+                  Teste A/B de Mensagem (Opcional)
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Crie variações de texto ou mídias diferentes para avaliar qual tem maior
+                  engajamento.
+                </p>
               </div>
-
-              {/* Lista de Abas de Variações */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                {variations.map((v, idx) => {
-                  const isCurrent = v.id === activeVariation.id;
-                  return (
-                    <div
-                      key={v.id}
-                      onClick={() => setActiveVariationId(v.id)}
-                      className={`cursor-pointer px-3 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-2 transition-all shrink-0 ${
-                        isCurrent
-                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                          : "bg-muted/40 hover:bg-muted text-muted-foreground border-border"
-                      }`}
-                    >
-                      {v.messageType === "image" && <ImageIcon className="h-3.5 w-3.5 shrink-0" />}
-                      {v.messageType === "video" && <Video className="h-3.5 w-3.5 shrink-0" />}
-                      {v.messageType === "audio" && <Music className="h-3.5 w-3.5 shrink-0" />}
-                      {v.messageType === "document" && (
-                        <FileText className="h-3.5 w-3.5 shrink-0" />
-                      )}
-                      {v.messageType === "text" && (
-                        <FileText className="h-3.5 w-3.5 opacity-50 shrink-0" />
-                      )}
-                      <span>{v.name || `Variação ${idx + 1}`}</span>
-                      {variations.length > 1 && (
-                        <span
-                          role="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeVariation(v.id);
-                          }}
-                          className="hover:text-rose-300 ml-1 p-0.5 rounded"
-                          title="Remover esta variação"
-                        >
-                          <X className="h-3 w-3" />
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {variations.length > 1 && (
-                <div className="bg-primary/5 border border-primary/20 rounded-md p-2.5 text-xs text-primary flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 shrink-0" />
-                  <span>
-                    <strong>Teste A/B Ativado!</strong> Cada contato receberá aleatoriamente uma das{" "}
-                    {variations.length} variações. Ao final, você poderá comparar as taxas de
-                    abertura e resposta de cada uma.
-                  </span>
-                </div>
-              )}
+              <Switch
+                checked={enableAbTesting}
+                onCheckedChange={(checked) => {
+                  setEnableAbTesting(checked);
+                  if (!checked && variations.length > 1) {
+                    setVariations([variations[0]]);
+                    setActiveVariationId(variations[0].id);
+                  }
+                }}
+              />
             </div>
+
+            {/* Gerenciador de Variações de Mensagem (Aparece somente com Teste A/B ativo) */}
+            {enableAbTesting && (
+              <div className="space-y-2 p-3 border rounded-lg bg-primary/5 border-primary/20">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-primary">
+                    Variações Ativas ({variations.length})
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={addVariation}
+                    className="h-7 text-xs bg-background"
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    Nova Variação
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {variations.map((v, idx) => {
+                    const isCurrent = v.id === activeVariation.id;
+                    return (
+                      <div
+                        key={v.id}
+                        onClick={() => setActiveVariationId(v.id)}
+                        className={`cursor-pointer px-3 py-1 rounded-md text-xs font-medium border flex items-center gap-2 transition-all shrink-0 ${
+                          isCurrent
+                            ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                            : "bg-background hover:bg-muted text-muted-foreground border-border"
+                        }`}
+                      >
+                        {v.messageType === "image" && <ImageIcon className="h-3 w-3 shrink-0" />}
+                        {v.messageType === "video" && <Video className="h-3 w-3 shrink-0" />}
+                        {v.messageType === "audio" && <Music className="h-3 w-3 shrink-0" />}
+                        {v.messageType === "document" && <FileText className="h-3 w-3 shrink-0" />}
+                        <span>{v.name || `Variação ${idx + 1}`}</span>
+                        {variations.length > 1 && (
+                          <span
+                            role="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeVariation(v.id);
+                            }}
+                            className="hover:text-rose-300 ml-1 p-0.5 rounded"
+                            title="Remover esta variação"
+                          >
+                            <X className="h-3 w-3" />
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Editor de Texto & Anexos da Variação Ativa */}
@@ -2581,94 +2804,157 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
               )}
             </div>
 
-            {/* Delays Aleatórios & Proteção Anti-Bloqueio */}
-            <Card className="p-4 bg-muted/20 border-dashed space-y-4">
-              <div className="space-y-1">
-                <Label className="text-sm font-semibold flex items-center gap-1.5">
-                  <Clock className="h-4 w-4 text-primary" />
-                  Intervalo Humano Aleatório (Jitter Anti-Ban)
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  Simula pausas humanas irregulares entre uma mensagem e outra para não ser
-                  bloqueado pela Meta.
-                </p>
+            {/* Presets de Velocidade & Proteção Anti-Ban */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Velocidade do Disparo (Proteção Anti-Ban)
+              </Label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <Card
+                  onClick={() => applySpeedPreset("safe")}
+                  className={`p-3 cursor-pointer border-2 transition-all ${
+                    speedPreset === "safe"
+                      ? "border-emerald-600 bg-emerald-500/10 shadow-sm ring-1 ring-emerald-500/30"
+                      : "border-border hover:border-emerald-500/40 bg-background"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-xs flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300">
+                      <ShieldCheck className="h-4 w-4" />
+                      Modo Seguro
+                    </span>
+                    <Badge className="bg-emerald-600 text-white text-[9px] h-4 px-1.5 font-mono">
+                      Recomendado
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    15s a 45s entre mensagens. Pausas humanas regulares para proteger seus números
+                    contra bloqueios.
+                  </p>
+                </Card>
+
+                <Card
+                  onClick={() => applySpeedPreset("moderate")}
+                  className={`p-3 cursor-pointer border-2 transition-all ${
+                    speedPreset === "moderate"
+                      ? "border-blue-600 bg-blue-500/10 shadow-sm ring-1 ring-blue-500/30"
+                      : "border-border hover:border-blue-500/40 bg-background"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-xs flex items-center gap-1.5 text-blue-700 dark:text-blue-300">
+                      <Zap className="h-4 w-4" />
+                      Modo Moderado
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    10s a 25s entre mensagens. Recomendado para listas ativas que já conversam
+                    frequentemente.
+                  </p>
+                </Card>
+
+                <Card
+                  onClick={() => setSpeedPreset("custom")}
+                  className={`p-3 cursor-pointer border-2 transition-all ${
+                    speedPreset === "custom"
+                      ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30"
+                      : "border-border hover:border-primary/40 bg-background"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-bold text-xs flex items-center gap-1.5">
+                      <Sliders className="h-4 w-4" />
+                      Personalizado
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Ajuste fino manual dos tempos de intervalo, tamanho dos lotes e tempo de
+                    cooldown.
+                  </p>
+                </Card>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Label className="text-xs">Intervalo Mínimo (segundos)</Label>
-                  <Input
-                    type="number"
-                    min={10}
-                    max={120}
-                    value={minDelay}
-                    onChange={(e) => setMinDelay(Math.max(1, Number(e.target.value)))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Intervalo Máximo (segundos)</Label>
-                  <Input
-                    type="number"
-                    min={20}
-                    max={300}
-                    value={maxDelay}
-                    onChange={(e) => setMaxDelay(Math.max(minDelay, Number(e.target.value)))}
-                  />
-                </div>
-              </div>
+              {/* Ajuste Fino Manual (Aparece somente no modo Personalizado) */}
+              {speedPreset === "custom" && (
+                <Card className="p-4 bg-muted/20 border-dashed space-y-3 mt-2">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Intervalo Mínimo (segundos)</Label>
+                      <Input
+                        type="number"
+                        min={10}
+                        max={120}
+                        value={minDelay}
+                        onChange={(e) => setMinDelay(Math.max(1, Number(e.target.value)))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Intervalo Máximo (segundos)</Label>
+                      <Input
+                        type="number"
+                        min={20}
+                        max={300}
+                        value={maxDelay}
+                        onChange={(e) => setMaxDelay(Math.max(minDelay, Number(e.target.value)))}
+                      />
+                    </div>
+                  </div>
 
-              <div className="grid grid-cols-2 gap-4 pt-1">
-                <div className="space-y-1">
-                  <Label className="text-xs">Enviar em lotes de (mensagens)</Label>
-                  <Input
-                    type="number"
-                    min={5}
-                    max={50}
-                    value={batchSize}
-                    onChange={(e) => setBatchSize(Number(e.target.value))}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Pausa de respiro entre lotes (segundos)</Label>
-                  <Input
-                    type="number"
-                    min={30}
-                    max={600}
-                    value={batchCooldown}
-                    onChange={(e) => setBatchCooldown(Number(e.target.value))}
-                  />
-                </div>
-              </div>
+                  <div className="grid grid-cols-2 gap-4 pt-1">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Enviar em lotes de (mensagens)</Label>
+                      <Input
+                        type="number"
+                        min={5}
+                        max={50}
+                        value={batchSize}
+                        onChange={(e) => setBatchSize(Number(e.target.value))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Pausa de respiro entre lotes (segundos)</Label>
+                      <Input
+                        type="number"
+                        min={30}
+                        max={600}
+                        value={batchCooldown}
+                        onChange={(e) => setBatchCooldown(Number(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                </Card>
+              )}
 
               {/* Janela de Horário */}
-              <div className="pt-2 border-t space-y-2">
-                <Label className="text-xs font-semibold">
-                  Janela de Horário Permitido (Brasília)
+              <div className="p-3 bg-muted/20 border rounded-lg space-y-2 mt-2">
+                <Label className="text-xs font-semibold flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5 text-primary" />
+                  Janela de Horário Comercial Permitido (Horário de Brasília)
                 </Label>
                 <div className="flex items-center gap-3">
                   <Input
                     type="time"
                     value={allowedStart}
                     onChange={(e) => setAllowedStart(e.target.value)}
-                    className="w-32 text-xs"
+                    className="w-32 text-xs bg-background"
                   />
                   <span className="text-xs text-muted-foreground">até</span>
                   <Input
                     type="time"
                     value={allowedEnd}
                     onChange={(e) => setAllowedEnd(e.target.value)}
-                    className="w-32 text-xs"
+                    className="w-32 text-xs bg-background"
                   />
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Se a campanha não terminar até o horário limite, ela pausa sozinha e retoma no dia
+                  Se a campanha não concluir até o horário limite, ela pausa sozinha e retoma no dia
                   seguinte.
                 </p>
               </div>
-            </Card>
+            </div>
 
             {/* Agendamento */}
-            <div className="space-y-2">
+            <div className="space-y-2 pt-1 border-t">
               <Label className="text-xs font-semibold">Momento do Disparo</Label>
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 cursor-pointer text-xs">
@@ -2705,283 +2991,155 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
           </div>
         )}
 
-        {/* ===================== PASSO 5: REVISÃO & LISTA COMPLETA ===================== */}
+        {/* ===================== PASSO 5: REVISÃO & CONFIRMAÇÃO ===================== */}
         {step === 5 && (
           <div className="space-y-4 pt-2">
-            {/* Cards de Resumo */}
-            <Card className="p-4 bg-muted/20 space-y-3">
-              <div className="flex items-center justify-between border-b pb-2">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold">{campaignName}</h3>
-                    {unitId !== "all" ? (
-                      <Badge variant="secondary" className="text-xs">
-                        📍 {selectedUnit?.name}
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-xs text-muted-foreground">
-                        🏢 Empresa Geral
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {audienceType === "segment"
-                      ? "Segmentação da Base Atendi"
-                      : "Importação de Planilha"}
-                  </p>
-                </div>
-                <Badge variant="outline" className="text-xs">
-                  {scheduleMode === "now" ? "Disparo Imediato" : "Agendada"}
-                </Badge>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                <div>
-                  <span className="text-muted-foreground block">Destinatários:</span>
-                  <span className="font-bold text-sm text-foreground">
-                    {audienceType === "import"
-                      ? `${importSummary.valid} contatos`
-                      : `${audienceCount || 0} contatos`}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="text-muted-foreground block">Instâncias WhatsApp:</span>
-                  <span className="font-bold text-sm text-foreground">
-                    {selectedInstanceIds.length} chip(s)
-                  </span>
-                </div>
-
-                <div>
-                  <span className="text-muted-foreground block">Delays Anti-Ban:</span>
-                  <span className="font-bold text-sm text-foreground">
-                    {minDelay}s a {maxDelay}s
-                  </span>
-                </div>
-
-                <div>
-                  <span className="text-muted-foreground block">Tempo Estimado:</span>
-                  <span className="font-bold text-sm text-emerald-600 font-mono">
-                    {estimatedTime}
-                  </span>
-                </div>
-
-                {audienceType === "segment" && (
-                  <div className="col-span-2 sm:col-span-4 pt-2 border-t flex flex-wrap items-center gap-1.5 text-xs">
-                    <span className="text-muted-foreground mr-1">Filtros:</span>
-                    <Badge variant="secondary" className="text-[10px]">
-                      {contactType === "all"
-                        ? "Todos os Contatos"
-                        : contactType === "lead"
-                          ? "Apenas Leads"
-                          : "Apenas Clientes"}
-                    </Badge>
-                    {useInactivity && (
-                      <Badge variant="outline" className="text-[10px]">
-                        Inatividade: &ge; {inactivityDays} dias
-                      </Badge>
-                    )}
-                    {selectedSources.length > 0 && (
-                      <Badge variant="outline" className="text-[10px]">
-                        Origens: {selectedSources.join(", ")}
-                      </Badge>
-                    )}
-                    {selectedTags.length > 0 && (
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] text-primary border-primary/30"
-                      >
-                        Tags: {selectedTags.join(", ")}
-                      </Badge>
-                    )}
-                    {excludedTags.length > 0 && (
-                      <Badge variant="destructive" className="text-[10px]">
-                        Excluindo: {excludedTags.join(", ")}
-                      </Badge>
-                    )}
-                    {selectedDdds.length > 0 && (
-                      <Badge variant="outline" className="text-[10px] font-mono">
-                        DDDs: {selectedDdds.join(", ")}
-                      </Badge>
-                    )}
-
-                    {/* Resumo de CRM */}
-                    {crmEnabled && (
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] text-blue-600 border-blue-500/30 bg-blue-500/10"
-                      >
-                        CRM: {crmMode === "with" ? "Com Oportunidade" : "Sem Oportunidade"}
-                        {selectedPipelineId !== "all" &&
-                          ` (${pipelines.find((p: any) => p.id === selectedPipelineId)?.name || "Funil"})`}
-                        {selectedCrmStatuses.length > 0 && ` [${selectedCrmStatuses.join(", ")}]`}
-                      </Badge>
-                    )}
-
-                    {/* Resumo de Todoo */}
-                    {todooEnabled && (
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] text-emerald-600 border-emerald-500/30 bg-emerald-500/10"
-                      >
-                        Todoo: {todooMode === "with" ? "Presente no Todoo" : "Fora do Todoo"}
-                        {selectedTodooLeadStatuses.length > 0 &&
-                          ` [${selectedTodooLeadStatuses.join(", ")}]`}
-                      </Badge>
-                    )}
-                  </div>
-                )}
-              </div>
-            </Card>
-
-            {/* TABELA COM TODOS OS CONTATOS DA LISTA */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <Label className="text-xs font-semibold flex items-center gap-1.5">
-                  <Users className="h-4 w-4 text-primary" />
-                  Lista de Destinatários ({filteredReviewContacts.length}{" "}
-                  {audienceType === "segment" &&
-                    previewContacts.length > 0 &&
-                    `de ${previewContacts.length}`}{" "}
-                  contatos)
-                </Label>
-
-                <div className="relative w-48">
-                  <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    placeholder="Buscar contato..."
-                    value={reviewSearchTerm}
-                    onChange={(e) => setReviewSearchTerm(e.target.value)}
-                    className="h-7 text-xs pl-7"
-                  />
-                </div>
-              </div>
-
-              {isLoadingPreviewContacts ? (
-                <div className="py-8 text-center text-xs text-muted-foreground border rounded-lg flex items-center justify-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  Carregando lista completa de contatos da audiência...
-                </div>
-              ) : filteredReviewContacts.length === 0 ? (
-                <div className="py-8 text-center text-xs text-muted-foreground border rounded-lg">
-                  Nenhum contato encontrado.
-                </div>
-              ) : (
-                <div className="border rounded-lg max-h-56 overflow-y-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="h-8">
-                        <TableHead className="text-xs py-1">Contato</TableHead>
-                        <TableHead className="text-xs py-1">Telefone</TableHead>
-                        {audienceType === "segment" ? (
-                          <>
-                            <TableHead className="text-xs py-1">Tipo</TableHead>
-                            <TableHead className="text-xs py-1">Origem</TableHead>
-                            <TableHead className="text-xs py-1">Última Interação</TableHead>
-                            <TableHead className="text-xs py-1">Tags</TableHead>
-                          </>
-                        ) : (
-                          <TableHead className="text-xs py-1">Dados Extras</TableHead>
-                        )}
-                        <TableHead className="text-xs py-1 text-right">Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredReviewContacts.slice(0, 150).map((c: any, idx: number) => {
-                        const name = c.name || "Sem nome";
-                        const phone = c.phone || "";
-                        const isValid = audienceType === "import" ? c.isValid !== false : true;
-
-                        return (
-                          <TableRow key={idx} className="h-8 text-xs">
-                            <TableCell className="py-1 font-medium">{name}</TableCell>
-                            <TableCell className="py-1 font-mono text-[11px]">{phone}</TableCell>
-                            {audienceType === "segment" ? (
-                              <>
-                                <TableCell className="py-1">
-                                  {c.contact_type === "client" ? (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[10px] text-emerald-600 border-emerald-500/30 bg-emerald-500/10"
-                                    >
-                                      Cliente
-                                    </Badge>
-                                  ) : (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[10px] text-blue-600 border-blue-500/30 bg-blue-500/10"
-                                    >
-                                      Lead
-                                    </Badge>
-                                  )}
-                                </TableCell>
-                                <TableCell className="py-1 text-[11px] text-muted-foreground">
-                                  {c.source || "-"}
-                                </TableCell>
-                                <TableCell className="py-1 text-muted-foreground text-[11px]">
-                                  {c.last_interaction
-                                    ? formatDistanceToNow(new Date(c.last_interaction), {
-                                        addSuffix: true,
-                                        locale: ptBR,
-                                      })
-                                    : "-"}
-                                </TableCell>
-                                <TableCell className="py-1">
-                                  <div className="flex gap-1 overflow-hidden">
-                                    {(c.tags || []).slice(0, 2).map((t: string) => (
-                                      <Badge
-                                        key={t}
-                                        variant="secondary"
-                                        className="text-[9px] px-1 py-0"
-                                      >
-                                        {t}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                </TableCell>
-                              </>
-                            ) : (
-                              <TableCell className="py-1 text-[11px] text-muted-foreground truncate max-w-[140px]">
-                                {Object.entries(c.extras || {})
-                                  .filter(([k]) => k !== phoneCol && k !== nameCol)
-                                  .slice(0, 2)
-                                  .map(([k, v]) => `${k}: ${v}`)
-                                  .join(", ") || "-"}
-                              </TableCell>
-                            )}
-                            <TableCell className="py-1 text-right">
-                              {isValid ? (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px] text-emerald-600 border-emerald-500/30"
-                                >
-                                  Pronto
-                                </Badge>
-                              ) : (
-                                <Badge variant="destructive" className="text-[10px]">
-                                  Inválido
-                                </Badge>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-              {filteredReviewContacts.length > 150 && (
-                <p className="text-[10px] text-muted-foreground text-center">
-                  Exibindo os primeiros 150 contatos de {filteredReviewContacts.length}. Todos os{" "}
-                  {filteredReviewContacts.length} serão disparados.
-                </p>
-              )}
+            <div>
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                Checklist de Pré-Voo da Campanha
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Confira os parâmetros antes de iniciar os disparos.
+              </p>
             </div>
 
-            {/* Variações de Mensagem (Teste A/B) */}
+            {/* 4 Cards de Resumo Executivo */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Card className="p-3.5 bg-background border flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 shrink-0">
+                  <Users className="h-5 w-5" />
+                </div>
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
+                    Público-Alvo
+                  </div>
+                  <div className="text-base font-bold text-foreground">
+                    {audienceType === "import"
+                      ? `${importSummary.valid.toLocaleString("pt-BR")} contatos`
+                      : `${(audienceCount ?? 0).toLocaleString("pt-BR")} contatos`}
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {audienceType === "import"
+                      ? `Planilha: ${importFileName}`
+                      : targetModule === "crm"
+                        ? `CRM: ${currentPipeline?.name || "Funil"} • ${
+                            crmScope === "specific_stages"
+                              ? `${selectedStageIds.length} etapa(s)`
+                              : "Funil Todo"
+                          }`
+                        : targetModule === "chat"
+                          ? `Atendimentos • ${
+                              useInactivity ? `${inactivityDays}+ dias` : "Sem inatividade"
+                            }`
+                          : targetModule === "general"
+                            ? "Base Geral de Contatos"
+                            : "Meu Todoo (Ações Comerciais)"}
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="p-3.5 bg-background border flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 shrink-0">
+                  <Smartphone className="h-5 w-5" />
+                </div>
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
+                    Canais de Envio
+                  </div>
+                  <div className="text-base font-bold text-foreground">
+                    {selectedInstanceIds.length} chip(s) de WhatsApp
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {selectedInstanceIds.length > 1
+                      ? "Rotação Round-Robin ativada"
+                      : "Envio por canal único"}
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="p-3.5 bg-background border flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600 shrink-0">
+                  <Clock className="h-5 w-5" />
+                </div>
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
+                    Velocidade Anti-Ban
+                  </div>
+                  <div className="text-base font-bold text-foreground">
+                    {speedPreset === "safe"
+                      ? "Modo Seguro"
+                      : speedPreset === "moderate"
+                        ? "Modo Moderado"
+                        : "Personalizado"}{" "}
+                    ({minDelay}s a {maxDelay}s)
+                  </div>
+                  <div className="text-xs text-emerald-600 font-semibold truncate">
+                    Tempo estimado: {estimatedTime}
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="p-3.5 bg-background border flex items-start gap-3">
+                <div className="p-2 rounded-lg bg-purple-500/10 text-purple-600 shrink-0">
+                  <Calendar className="h-5 w-5" />
+                </div>
+                <div className="space-y-0.5 min-w-0">
+                  <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
+                    Agendamento
+                  </div>
+                  <div className="text-base font-bold text-foreground">
+                    {scheduleMode === "now" ? "Disparo Imediato" : "Disparo Agendado"}
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {scheduleMode === "now"
+                      ? "Inicia logo após confirmação"
+                      : scheduledDate || "Data agendada"}
+                  </div>
+                </div>
+              </Card>
+            </div>
+
+            {/* Badges de Filtros Detalhados */}
+            {audienceType === "segment" && (
+              <div className="p-2.5 bg-muted/20 border rounded-lg flex flex-wrap items-center gap-1.5 text-xs">
+                <span className="text-muted-foreground text-[11px] font-semibold mr-1">
+                  Critérios:
+                </span>
+                <Badge variant="outline" className="text-[10px]">
+                  {contactType === "all"
+                    ? "Todos os Contatos"
+                    : contactType === "lead"
+                      ? "Apenas Leads"
+                      : "Apenas Clientes"}
+                </Badge>
+                {unitId !== "all" && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    📍 {selectedUnit?.name}
+                  </Badge>
+                )}
+                {selectedTags.length > 0 && (
+                  <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
+                    Tags: {selectedTags.join(", ")}
+                  </Badge>
+                )}
+                {excludedTags.length > 0 && (
+                  <Badge variant="destructive" className="text-[10px]">
+                    Excluindo: {excludedTags.join(", ")}
+                  </Badge>
+                )}
+                {selectedDdds.length > 0 && (
+                  <Badge variant="outline" className="text-[10px] font-mono">
+                    DDDs: {selectedDdds.join(", ")}
+                  </Badge>
+                )}
+              </div>
+            )}
+
+            {/* Variações de Mensagem */}
             <div className="space-y-2">
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
-                <span>Variações de Mensagem ({variations.length})</span>
+                <span>Mensagem da Campanha ({variations.length})</span>
                 {variations.length > 1 && (
                   <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
                     Teste A/B Ativado
@@ -3009,6 +3167,131 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                   </Card>
                 ))}
               </div>
+            </div>
+
+            {/* Amostra dos Destinatários */}
+            <div className="space-y-2 pt-1 border-t">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <Label className="text-xs font-semibold flex items-center gap-1.5">
+                    <Users className="h-4 w-4 text-primary" />
+                    Amostra de Destinatários ({filteredReviewContacts.length} contatos qualificados)
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Confira uma prévia dos primeiros contatos da fila de envio.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="relative w-40">
+                    <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Filtrar prévia..."
+                      value={reviewSearchTerm}
+                      onChange={(e) => setReviewSearchTerm(e.target.value)}
+                      className="h-7 text-xs pl-7"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-primary"
+                    onClick={() => setShowFullReviewList(!showFullReviewList)}
+                  >
+                    {showFullReviewList ? "Recolher Lista" : "Ver Lista Completa"}
+                  </Button>
+                </div>
+              </div>
+
+              {isLoadingPreviewContacts ? (
+                <div className="py-6 text-center text-xs text-muted-foreground border rounded-lg flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  Carregando lista de destinatários...
+                </div>
+              ) : filteredReviewContacts.length === 0 ? (
+                <div className="py-6 text-center text-xs text-muted-foreground border rounded-lg">
+                  Nenhum contato encontrado para esta prévia.
+                </div>
+              ) : (
+                <div className="border rounded-lg max-h-52 overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="h-8">
+                        <TableHead className="text-xs py-1">Contato</TableHead>
+                        <TableHead className="text-xs py-1">Telefone</TableHead>
+                        {audienceType === "segment" && (
+                          <>
+                            <TableHead className="text-xs py-1">Perfil</TableHead>
+                            <TableHead className="text-xs py-1">Origem</TableHead>
+                          </>
+                        )}
+                        <TableHead className="text-xs py-1 text-right">Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredReviewContacts
+                        .slice(0, showFullReviewList ? 150 : 5)
+                        .map((c: any, idx: number) => {
+                          const name = c.name || "Sem nome";
+                          const phone = c.phone || "";
+                          const isValid = audienceType === "import" ? c.isValid !== false : true;
+
+                          return (
+                            <TableRow key={idx} className="h-8 text-xs">
+                              <TableCell className="py-1 font-medium">{name}</TableCell>
+                              <TableCell className="py-1 font-mono text-[11px]">{phone}</TableCell>
+                              {audienceType === "segment" && (
+                                <>
+                                  <TableCell className="py-1">
+                                    {c.contact_type === "client" ? (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] text-emerald-600 border-emerald-500/30 bg-emerald-500/10"
+                                      >
+                                        Cliente
+                                      </Badge>
+                                    ) : (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] text-blue-600 border-blue-500/30 bg-blue-500/10"
+                                      >
+                                        Lead
+                                      </Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="py-1 text-[11px] text-muted-foreground">
+                                    {c.source || "-"}
+                                  </TableCell>
+                                </>
+                              )}
+                              <TableCell className="py-1 text-right">
+                                {isValid ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] text-emerald-600 border-emerald-500/30"
+                                  >
+                                    Pronto
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="destructive" className="text-[10px]">
+                                    Inválido
+                                  </Badge>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              {!showFullReviewList && filteredReviewContacts.length > 5 && (
+                <p className="text-[10px] text-muted-foreground text-center">
+                  Exibindo 5 contatos de amostra. Clique em <strong>Ver Lista Completa</strong>{" "}
+                  acima para auditar mais contatos.
+                </p>
+              )}
             </div>
           </div>
         )}

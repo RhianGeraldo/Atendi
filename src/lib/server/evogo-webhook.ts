@@ -84,7 +84,13 @@ export async function handleEvogoWebhook(request: Request): Promise<Response> {
 import * as fs from "fs";
 
 // Eventos que geram/alteram dados e por isso passam pela caixa de entrada
-const INBOX_EVENTS = new Set(["Message", "SendMessage", "messages.upsert", "messages.update", "PushName"]);
+const INBOX_EVENTS = new Set([
+  "Message",
+  "SendMessage",
+  "messages.upsert",
+  "messages.update",
+  "PushName",
+]);
 
 // Reprocessamento: não aciona a IA para mensagens mais antigas que isso
 const RETRY_AI_MAX_AGE_MS = 10 * 60 * 1000;
@@ -166,6 +172,39 @@ export async function processEvogoWebhookBody(
       return;
     }
 
+    // --- Handle Receipt (Confirmação de leitura do WhatsApp) para taxa de leitura das campanhas ---
+    if (body.event === "Receipt" || body.event === "receipt") {
+      const receiptType = String(body.data?.Type || body.state || "").toLowerCase();
+      const isReadReceipt =
+        receiptType === "read" || receiptType === "read-self" || receiptType === "played";
+
+      if (isReadReceipt) {
+        const rawIds =
+          body.data?.MessageIDs ||
+          body.data?.messageIds ||
+          body.data?.MessageID ||
+          body.data?.id ||
+          body.data?.key?.id;
+
+        const messageIds: string[] = Array.isArray(rawIds)
+          ? rawIds
+          : typeof rawIds === "string"
+            ? [rawIds]
+            : [];
+
+        if (messageIds.length > 0) {
+          const timestamp = body.data?.Timestamp || null;
+          try {
+            const { markCampaignRecipientsRead } = await import("./campaign-processor");
+            await markCampaignRecipientsRead(messageIds, timestamp);
+          } catch (e) {
+            console.error("[evogo-webhook] Error updating campaign read receipts:", e);
+          }
+        }
+      }
+      return;
+    }
+
     // Handle message.upsert (Baileys/Evolution API format) or Message/SendMessage (WhatsMeow/EvoGo format)
     if (
       body.event === "messages.upsert" ||
@@ -229,7 +268,9 @@ export async function processEvogoWebhookBody(
         }
 
         isFromMe = info.IsFromMe;
-        const isGroupMsg = Boolean(info.IsGroup || info.Chat?.includes("@g.us") || destinationJid?.includes("@g.us"));
+        const isGroupMsg = Boolean(
+          info.IsGroup || info.Chat?.includes("@g.us") || destinationJid?.includes("@g.us"),
+        );
 
         const getPhone = (jids: (string | undefined)[]) => {
           if (isGroupMsg) {
@@ -270,7 +311,9 @@ export async function processEvogoWebhookBody(
           // 2. Se info.Chat é o próprio número da instância (ou do remetente), prioriza RecipientAlt ou destinationJid
           const targetJid =
             destinationJid ||
-            (info.RecipientAlt && !info.RecipientAlt.includes("@broadcast") ? info.RecipientAlt : null) ||
+            (info.RecipientAlt && !info.RecipientAlt.includes("@broadcast")
+              ? info.RecipientAlt
+              : null) ||
             info.Chat;
 
           remoteJid = targetJid || "";
@@ -289,7 +332,12 @@ export async function processEvogoWebhookBody(
         pushName = info.PushName || "Desconhecido";
         remoteMsgId = info.ID;
 
-        if (body.data?.groupData?.Name || body.data?.groupName || body.data?.chatName || body.data?.name) {
+        if (
+          body.data?.groupData?.Name ||
+          body.data?.groupName ||
+          body.data?.chatName ||
+          body.data?.name
+        ) {
           actualGroupName =
             body.data?.groupData?.Name ||
             body.data?.groupName ||
@@ -661,10 +709,7 @@ export async function processEvogoWebhookBody(
         }
 
         // Ignorar broadcasts e newsletters
-        if (
-          remoteJid.includes("@broadcast") ||
-          remoteJid.includes("@newsletter")
-        ) {
+        if (remoteJid.includes("@broadcast") || remoteJid.includes("@newsletter")) {
           console.log(`[evogo-webhook] Ignorando broadcast/newsletter (${remoteJid})`);
           return;
         }
@@ -904,7 +949,12 @@ export async function processEvogoWebhookBody(
               Sender: messageData.key?.participant || messageData.participant || remoteJid,
               PushName: pushName,
             };
-            await handlePollUpdate(msgType.pollUpdateMessage, voterInfo, messageData, "evogo-webhook");
+            await handlePollUpdate(
+              msgType.pollUpdateMessage,
+              voterInfo,
+              messageData,
+              "evogo-webhook",
+            );
             return;
           } else if (msgType.reactionMessage) {
             const targetId = msgType.reactionMessage?.key?.id || msgType.reactionMessage?.key?.ID;
@@ -990,18 +1040,32 @@ export async function processEvogoWebhookBody(
       if (remoteMsgId && !isGroup) {
         const { data: existingMsg } = await supabaseAdmin
           .from("messages")
-          .select("id, conversation_id, conversations(id, contact_id, company_id, whatsapp_instance_id, contacts(id, phone, whatsapp_lid))")
+          .select(
+            "id, conversation_id, conversations(id, contact_id, company_id, whatsapp_instance_id, contacts(id, phone, whatsapp_lid))",
+          )
           .eq("remote_msg_id", remoteMsgId)
           .maybeSingle();
 
-        if (existingMsg && (existingMsg as any).conversations?.whatsapp_instance_id === instance_id) {
+        if (
+          existingMsg &&
+          (existingMsg as any).conversations?.whatsapp_instance_id === instance_id
+        ) {
           console.log(
             `[evogo-webhook] Mensagem ${remoteMsgId} já gravada nesta instância na conversa real ${existingMsg.conversation_id}. Ignorando duplicata/eco.`,
           );
           if (extractedLid && (existingMsg as any).conversations?.contacts) {
             const realContact = (existingMsg as any).conversations.contacts;
-            if (realContact?.id && realContact.phone && !isProvisionalPhone(realContact.phone, extractedLid)) {
-              await rememberLid(company_id, extractedLid, realContact.phone, "webhook_echo_matched");
+            if (
+              realContact?.id &&
+              realContact.phone &&
+              !isProvisionalPhone(realContact.phone, extractedLid)
+            ) {
+              await rememberLid(
+                company_id,
+                extractedLid,
+                realContact.phone,
+                "webhook_echo_matched",
+              );
               if (!realContact.whatsapp_lid || realContact.whatsapp_lid !== extractedLid) {
                 await supabaseAdmin
                   .from("contacts")
@@ -1030,8 +1094,9 @@ export async function processEvogoWebhookBody(
           .eq("whatsapp_lid", extractedLid)
           .limit(5);
         const contactByLid =
-          (contactsByLid || []).find((c) => c.phone && !isProvisionalPhone(c.phone, extractedLid)) ||
-          (contactsByLid || [])[0];
+          (contactsByLid || []).find(
+            (c) => c.phone && !isProvisionalPhone(c.phone, extractedLid),
+          ) || (contactsByLid || [])[0];
         const knownPhone =
           contactByLid?.phone && !isProvisionalPhone(contactByLid.phone, extractedLid)
             ? contactByLid.phone
@@ -1058,10 +1123,7 @@ export async function processEvogoWebhookBody(
       }
 
       // Trava de segurança: status/broadcasts e canais/newsletters jamais abrem atendimento
-      if (
-        remoteJid.includes("@broadcast") ||
-        remoteJid.includes("@newsletter")
-      ) {
+      if (remoteJid.includes("@broadcast") || remoteJid.includes("@newsletter")) {
         console.log(
           `[evogo-webhook] Trava de segurança: ignorando broadcast/newsletter (${remoteJid || phoneNumber})`,
         );
@@ -1081,7 +1143,9 @@ export async function processEvogoWebhookBody(
         const senderDisplayName =
           (pushName && pushName !== "Desconhecido" ? pushName : null) ||
           (body.data?.Info?.Sender ? body.data.Info.Sender.split("@")[0] : null) ||
-          (body.data?.message?.key?.participant ? body.data.message.key.participant.split("@")[0] : null) ||
+          (body.data?.message?.key?.participant
+            ? body.data.message.key.participant.split("@")[0]
+            : null) ||
           "Participante";
         if (!textContent.startsWith(`${senderDisplayName}:\n`)) {
           textContent = `${senderDisplayName}:\n${textContent}`;
@@ -1159,9 +1223,7 @@ export async function processEvogoWebhookBody(
         let targetContact = realPrimaryContact;
         if (convs && convs.length > 0) {
           // Prioriza conversa pertencente diretamente ao contato real
-          activeConv =
-            convs.find((cv) => cv.contact_id === realPrimaryContact.id) ||
-            convs[0];
+          activeConv = convs.find((cv) => cv.contact_id === realPrimaryContact.id) || convs[0];
           targetContact =
             existingContacts.find((c) => (c.merged_into_id || c.id) === activeConv.contact_id) ||
             realPrimaryContact;
@@ -1174,10 +1236,7 @@ export async function processEvogoWebhookBody(
         // Update contact name
         if (remoteJid.includes("@g.us")) {
           // If it's a group and we got the actual name, update it if it differs
-          if (
-            actualGroupName &&
-            targetContact.name !== actualGroupName
-          ) {
+          if (actualGroupName && targetContact.name !== actualGroupName) {
             updates.name = actualGroupName;
           }
         } else {
@@ -1328,7 +1387,7 @@ export async function processEvogoWebhookBody(
         const updatePayload: any = {
           last_message_at: new Date().toISOString(),
           last_message_preview: textContent ? textContent.slice(0, 150) : null,
-          remote_id: isGroup ? remoteJid : (extractedLid || phoneNumber),
+          remote_id: isGroup ? remoteJid : extractedLid || phoneNumber,
         };
         if (!isFromMe) {
           updatePayload.ai_followup_count = 0;
@@ -1468,8 +1527,14 @@ export async function processEvogoWebhookBody(
             department_id: instanceDepartmentId || null,
             contact_id: contactId,
             channel: "whatsapp",
-            remote_id: isGroup ? remoteJid : (extractedLid || phoneNumber),
-            status: isGroup ? "active" : isFromMe ? "resolved" : isActiveByDefault ? "active" : "waiting",
+            remote_id: isGroup ? remoteJid : extractedLid || phoneNumber,
+            status: isGroup
+              ? "active"
+              : isFromMe
+                ? "resolved"
+                : isActiveByDefault
+                  ? "active"
+                  : "waiting",
             last_message_at: new Date().toISOString(),
             last_message_preview: textContent ? textContent.slice(0, 150) : null,
             unread_count: isFromMe ? 0 : 1,
@@ -1616,8 +1681,12 @@ export async function processEvogoWebhookBody(
       if (isGroup) {
         participantJid =
           (isFromMe
-            ? body.data?.message?.key?.participant || messageData?.key?.participant || body.data?.Info?.Sender
-            : messageData?.key?.participant || body.data?.Info?.Sender || body.data?.Info?.SenderAlt) || null;
+            ? body.data?.message?.key?.participant ||
+              messageData?.key?.participant ||
+              body.data?.Info?.Sender
+            : messageData?.key?.participant ||
+              body.data?.Info?.Sender ||
+              body.data?.Info?.SenderAlt) || null;
       } else if (isFromMe && body.data?.message?.key?.participant) {
         participantJid = body.data.message.key.participant;
       } else if (isFromMe && messageData?.key?.participant) {
@@ -1712,7 +1781,9 @@ export async function processEvogoWebhookBody(
             .from("messages")
             .select("id, metadata")
             .eq("conversation_id", conversationId)
-            .or(`remote_msg_id.eq.${remoteMsgId},remote_msg_id.eq.${remoteMsgId}_${conversationId.slice(0, 8)}`)
+            .or(
+              `remote_msg_id.eq.${remoteMsgId},remote_msg_id.eq.${remoteMsgId}_${conversationId.slice(0, 8)}`,
+            )
             .maybeSingle();
 
           if (existingInSameConv) {
@@ -1721,7 +1792,8 @@ export async function processEvogoWebhookBody(
             );
             if (Object.keys(metadata).length > 0) {
               const currentMeta =
-                typeof existingInSameConv.metadata === "object" && existingInSameConv.metadata !== null
+                typeof existingInSameConv.metadata === "object" &&
+                existingInSameConv.metadata !== null
                   ? existingInSameConv.metadata
                   : {};
               const newMetadata = { ...currentMeta, ...metadata };
@@ -1743,7 +1815,10 @@ export async function processEvogoWebhookBody(
             .single();
 
           if (retryErr) {
-            console.error("[evogo-webhook] Falha ao gravar mensagem para segunda instância:", retryErr);
+            console.error(
+              "[evogo-webhook] Falha ao gravar mensagem para segunda instância:",
+              retryErr,
+            );
           } else {
             console.log(
               `[evogo-webhook] Mensagem de grupo gravada com sucesso para a 2ª instância com ID ${fallbackRemoteId}`,
@@ -1861,7 +1936,7 @@ export async function processEvogoWebhookBody(
                 unitId: instance.unit_id || null,
                 content: textContent,
                 senderType: "contact",
-              })
+              }),
             )
             .catch((e) => console.error("[evogo-webhook] Erro no radar de conversas:", e));
         }

@@ -436,7 +436,7 @@ export async function markCampaignRecipientReplied(conversationId: string): Prom
     // Busca o destinatário mais recente desta conversa que ainda não foi marcado como respondido
     const { data: recipient } = await supabaseAdmin
       .from("campaign_recipients")
-      .select("id, campaign_id, replied_at, status")
+      .select("id, campaign_id, replied_at, read_at, status")
       .eq("conversation_id", conversationId)
       .in("status", ["sent", "delivered", "read"])
       .is("replied_at", null)
@@ -446,14 +446,18 @@ export async function markCampaignRecipientReplied(conversationId: string): Prom
 
     if (recipient) {
       const now = new Date().toISOString();
-      await supabaseAdmin
-        .from("campaign_recipients")
-        .update({
-          status: "replied",
-          replied_at: now,
-          updated_at: now,
-        })
-        .eq("id", recipient.id);
+      const updateData: any = {
+        status: "replied",
+        replied_at: now,
+        updated_at: now,
+      };
+
+      // Se respondeu mas não tinha recebido o evento de read (ex: privacidade do WhatsApp desativada), infere a leitura
+      if (!recipient.read_at) {
+        updateData.read_at = now;
+      }
+
+      await supabaseAdmin.from("campaign_recipients").update(updateData).eq("id", recipient.id);
 
       // Recalcula estatísticas da campanha
       await supabaseAdmin.rpc("recalculate_campaign_stats", {
@@ -465,5 +469,118 @@ export async function markCampaignRecipientReplied(conversationId: string): Prom
     }
   } catch (e) {
     console.error("[campaigns] Erro ao marcar resposta do destinatário da campanha:", e);
+  }
+}
+
+/**
+ * Marca destinatários de campanha como lidos a partir de evento de Receipt do WhatsApp
+ */
+export async function markCampaignRecipientsRead(
+  remoteMessageIds: string[],
+  readTimestamp?: string | null,
+): Promise<void> {
+  try {
+    if (!remoteMessageIds || !remoteMessageIds.length) return;
+
+    const uniqueRemoteIds = Array.from(new Set(remoteMessageIds.filter(Boolean)));
+    if (!uniqueRemoteIds.length) return;
+
+    // 1. Encontra as mensagens enviadas correspondentes no banco
+    const { data: messages, error: msgErr } = await supabaseAdmin
+      .from("messages")
+      .select("id, remote_msg_id")
+      .in("remote_msg_id", uniqueRemoteIds);
+
+    if (msgErr) {
+      console.error("[campaigns] Erro ao buscar messages por remote_msg_id:", msgErr);
+      return;
+    }
+    if (!messages || !messages.length) return;
+
+    const messageIds = messages.map((m) => m.id);
+
+    // 2. Busca destinatários de campanha vinculados a essas mensagens
+    const { data: recipients, error: recErr } = await supabaseAdmin
+      .from("campaign_recipients")
+      .select("id, campaign_id, status, read_at")
+      .in("message_id", messageIds);
+
+    if (recErr) {
+      console.error("[campaigns] Erro ao buscar campaign_recipients por message_id:", recErr);
+      return;
+    }
+    if (!recipients || !recipients.length) return;
+
+    // Normalização segura do timestamp (suporta ISO, epoch em segundos e epoch em ms)
+    let timestampIso: string;
+    try {
+      if (readTimestamp) {
+        const rawNum = Number(readTimestamp);
+        const timeVal =
+          !isNaN(rawNum) && rawNum > 0 && rawNum < 10000000000 ? rawNum * 1000 : readTimestamp;
+        const d = new Date(timeVal);
+        timestampIso = isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+      } else {
+        timestampIso = new Date().toISOString();
+      }
+    } catch {
+      timestampIso = new Date().toISOString();
+    }
+
+    const affectedCampaignIds = new Set<string>();
+
+    // Separa destinatários que de fato precisam ser atualizados (evita escrita e recálculo em duplicatas)
+    const toMarkRead = recipients.filter(
+      (r) => r.status !== "replied" && !(r.status === "read" && r.read_at),
+    );
+    const toMarkRepliedRead = recipients.filter((r) => r.status === "replied" && !r.read_at);
+
+    if (toMarkRead.length === 0 && toMarkRepliedRead.length === 0) {
+      // Todos já estavam processados como lidos
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+
+    // Atualização em lote para quem avança para status 'read'
+    if (toMarkRead.length > 0) {
+      const readIds = toMarkRead.map((r) => r.id);
+      toMarkRead.forEach((r) => affectedCampaignIds.add(r.campaign_id));
+
+      await supabaseAdmin
+        .from("campaign_recipients")
+        .update({
+          status: "read",
+          read_at: timestampIso,
+          updated_at: nowIso,
+        })
+        .in("id", readIds);
+    }
+
+    // Atualização em lote para quem já tinha respondido mas ainda não tinha 'read_at'
+    if (toMarkRepliedRead.length > 0) {
+      const repliedIds = toMarkRepliedRead.map((r) => r.id);
+      toMarkRepliedRead.forEach((r) => affectedCampaignIds.add(r.campaign_id));
+
+      await supabaseAdmin
+        .from("campaign_recipients")
+        .update({
+          read_at: timestampIso,
+          updated_at: nowIso,
+        })
+        .in("id", repliedIds);
+    }
+
+    // 3. Recalcula as estatísticas de cada campanha afetada
+    for (const campaignId of affectedCampaignIds) {
+      await supabaseAdmin.rpc("recalculate_campaign_stats", {
+        p_campaign_id: campaignId,
+      });
+      console.log(
+        `[campaigns] Taxa de leitura atualizada para a campanha ${campaignId} (${toMarkRead.length + toMarkRepliedRead.length} destinatário(s))`,
+      );
+    }
+  } catch (e) {
+    console.error("[campaigns] Erro ao processar leitura de destinatários da campanha:", e);
   }
 }
