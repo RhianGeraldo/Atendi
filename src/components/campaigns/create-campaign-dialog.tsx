@@ -904,10 +904,14 @@ export function CreateCampaignDialog({
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
-          if (results.meta.fields && results.meta.fields.length > 0) {
-            setColumnHeaders(results.meta.fields);
+          const rawFields = (results.meta.fields || [])
+            .map((f) => String(f).trim())
+            .filter(Boolean);
+          const fields = Array.from(new Set(rawFields));
+          if (fields.length > 0) {
+            setColumnHeaders(fields);
             setParsedRows(results.data);
-            autoDetectColumns(results.meta.fields);
+            autoDetectColumns(fields);
             toast.success(`${results.data.length} linhas carregadas do CSV!`);
           }
         },
@@ -928,7 +932,8 @@ export function CreateCampaignDialog({
           });
 
           if (data && data.length > 1) {
-            const headers = (data[0] as string[]).map((h) => String(h).trim()).filter(Boolean);
+            const rawHeaders = (data[0] as string[]).map((h) => String(h).trim()).filter(Boolean);
+            const headers = Array.from(new Set(rawHeaders));
             const rows = data.slice(1).map((rowArr) => {
               const obj: Record<string, any> = {};
               headers.forEach((h, idx) => {
@@ -1474,7 +1479,7 @@ export function CreateCampaignDialog({
                               <SelectValue placeholder="Selecione a coluna" />
                             </SelectTrigger>
                             <SelectContent>
-                              {columnHeaders.map((h) => (
+                              {columnHeaders.filter(Boolean).map((h) => (
                                 <SelectItem key={h} value={h}>
                                   {h}
                                 </SelectItem>
@@ -1485,13 +1490,16 @@ export function CreateCampaignDialog({
 
                         <div className="space-y-1">
                           <Label className="text-xs">Coluna do Nome (opcional)</Label>
-                          <Select value={nameCol} onValueChange={setNameCol}>
+                          <Select
+                            value={nameCol || "none"}
+                            onValueChange={(val) => setNameCol(val === "none" ? "" : val)}
+                          >
                             <SelectTrigger>
                               <SelectValue placeholder="Nenhuma / Padrão" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="">Nenhuma (usar 'Cliente')</SelectItem>
-                              {columnHeaders.map((h) => (
+                              <SelectItem value="none">Nenhuma (usar 'Cliente')</SelectItem>
+                              {columnHeaders.filter(Boolean).map((h) => (
                                 <SelectItem key={h} value={h}>
                                   {h}
                                 </SelectItem>
@@ -1502,17 +1510,20 @@ export function CreateCampaignDialog({
 
                         <div className="space-y-1">
                           <Label className="text-xs">Coluna da Unidade (opcional)</Label>
-                          <Select value={unitCol} onValueChange={setUnitCol}>
+                          <Select
+                            value={unitCol || "none"}
+                            onValueChange={(val) => setUnitCol(val === "none" ? "" : val)}
+                          >
                             <SelectTrigger>
                               <SelectValue placeholder="Nenhuma / Padrão" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="">
+                              <SelectItem value="none">
                                 {unitId !== "all"
                                   ? `Padrão: ${selectedUnit?.name || "Unidade"}`
                                   : "Nenhuma (Geral da Empresa)"}
                               </SelectItem>
-                              {columnHeaders.map((h) => (
+                              {columnHeaders.filter(Boolean).map((h) => (
                                 <SelectItem key={h} value={h}>
                                   {h}
                                 </SelectItem>
@@ -2675,6 +2686,7 @@ export function CreateCampaignDialog({
                         ))}
                         {audienceType === "import" &&
                           columnHeaders
+                            .filter(Boolean)
                             .filter((h) => h !== phoneCol && h !== nameCol)
                             .slice(0, 5)
                             .map((h) => (
