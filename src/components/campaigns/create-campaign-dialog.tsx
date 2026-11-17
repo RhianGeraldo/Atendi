@@ -51,6 +51,12 @@ import {
   Layers,
   Filter,
   Users,
+  UserCheck,
+  UserPlus,
+  Ban,
+  Tag,
+  Target,
+  MapPin,
   Smartphone,
   Info,
   RefreshCw,
@@ -67,6 +73,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
+import { useContactSources, getSourceIcon } from "@/lib/use-contact-sources";
 import {
   createCampaignAction,
   previewAudienceCountAction,
@@ -102,9 +109,17 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
   const [inactivityDays, setInactivityDays] = useState<number>(30);
   const [useInactivity, setUseInactivity] = useState<boolean>(true);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [excludedTags, setExcludedTags] = useState<string[]>([]);
+  const [contactType, setContactType] = useState<"all" | "lead" | "client">("all");
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [selectedDdds, setSelectedDdds] = useState<string[]>([]);
+  const [dddInput, setDddInput] = useState<string>("");
   const [onlyWithoutOpenConvs, setOnlyWithoutOpenConvs] = useState<boolean>(true);
   const [audienceCount, setAudienceCount] = useState<number | null>(null);
   const [isCalculatingCount, setIsCalculatingCount] = useState(false);
+
+  // Consulta origens configuradas da empresa
+  const { data: contactSources = [] } = useContactSources();
 
   // Destinatários para prévia na Revisão
   const [previewContacts, setPreviewContacts] = useState<any[]>([]);
@@ -236,6 +251,46 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     [instances],
   );
 
+  // Manipuladores de Filtros Avançados
+  const handleAddDdd = (dddToAdd?: string) => {
+    const raw = dddToAdd || dddInput;
+    if (!raw.trim()) return;
+    const chunks = raw
+      .split(/[\s,;-]+/)
+      .map((s) => s.replace(/\D/g, ""))
+      .filter((s) => s.length >= 2 && s.length <= 3);
+    if (chunks.length === 0) {
+      const cleaned = raw.replace(/\D/g, "");
+      if (cleaned.length >= 2) chunks.push(cleaned.slice(0, 2));
+    }
+    if (chunks.length > 0) {
+      setSelectedDdds((prev) => Array.from(new Set([...prev, ...chunks])));
+      setDddInput("");
+    }
+  };
+
+  const handleRemoveDdd = (ddd: string) => {
+    setSelectedDdds((prev) => prev.filter((d) => d !== ddd));
+  };
+
+  const toggleTag = (tagName: string) => {
+    setSelectedTags((prev) =>
+      prev.includes(tagName) ? prev.filter((t) => t !== tagName) : [...prev, tagName],
+    );
+  };
+
+  const toggleExcludedTag = (tagName: string) => {
+    setExcludedTags((prev) =>
+      prev.includes(tagName) ? prev.filter((t) => t !== tagName) : [...prev, tagName],
+    );
+  };
+
+  const toggleSource = (sourceName: string) => {
+    setSelectedSources((prev) =>
+      prev.includes(sourceName) ? prev.filter((s) => s !== sourceName) : [...prev, sourceName],
+    );
+  };
+
   // Cálculo automático da audiência com debounce quando os filtros mudam
   useEffect(() => {
     if (!open || audienceType !== "segment" || !companyId) return;
@@ -249,6 +304,10 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     inactivityDays,
     useInactivity,
     selectedTags,
+    excludedTags,
+    contactType,
+    selectedSources,
+    selectedDdds,
     unitId,
     onlyWithoutOpenConvs,
     open,
@@ -265,6 +324,10 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
           filters: {
             inactivity_days: useInactivity ? inactivityDays : null,
             tags: selectedTags.length > 0 ? selectedTags : undefined,
+            excluded_tags: excludedTags.length > 0 ? excludedTags : undefined,
+            contact_type: contactType,
+            sources: selectedSources.length > 0 ? selectedSources : undefined,
+            ddds: selectedDdds.length > 0 ? selectedDdds : undefined,
             unit_ids: unitId && unitId !== "all" ? [unitId] : undefined,
             only_without_open_conversations: onlyWithoutOpenConvs,
           },
@@ -288,6 +351,10 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
           filters: {
             inactivity_days: useInactivity ? inactivityDays : null,
             tags: selectedTags.length > 0 ? selectedTags : undefined,
+            excluded_tags: excludedTags.length > 0 ? excludedTags : undefined,
+            contact_type: contactType,
+            sources: selectedSources.length > 0 ? selectedSources : undefined,
+            ddds: selectedDdds.length > 0 ? selectedDdds : undefined,
             unit_ids: unitId && unitId !== "all" ? [unitId] : undefined,
             only_without_open_conversations: onlyWithoutOpenConvs,
           },
@@ -311,6 +378,10 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     inactivityDays,
     useInactivity,
     selectedTags,
+    excludedTags,
+    contactType,
+    selectedSources,
+    selectedDdds,
     unitId,
     onlyWithoutOpenConvs,
   ]);
@@ -592,7 +663,11 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
             audienceType === "segment"
               ? {
                   inactivity_days: useInactivity ? inactivityDays : null,
-                  tags: selectedTags,
+                  tags: selectedTags.length > 0 ? selectedTags : undefined,
+                  excluded_tags: excludedTags.length > 0 ? excludedTags : undefined,
+                  contact_type: contactType,
+                  sources: selectedSources.length > 0 ? selectedSources : undefined,
+                  ddds: selectedDdds.length > 0 ? selectedDdds : undefined,
                   unit_ids: unitId === "all" ? undefined : [unitId],
                   only_without_open_conversations: onlyWithoutOpenConvs,
                 }
@@ -647,6 +722,15 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     setPreviewContacts([]);
     setUnitId("all");
     setUnitCol("");
+    setSelectedTags([]);
+    setExcludedTags([]);
+    setContactType("all");
+    setSelectedSources([]);
+    setSelectedDdds([]);
+    setDddInput("");
+    setInactivityDays(30);
+    setUseInactivity(true);
+    setOnlyWithoutOpenConvs(true);
     setSelectedInstanceIds([]);
     setScheduleMode("now");
     setScheduledDate("");
@@ -878,94 +962,325 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
             {/* Seção 1A: Segmentação Dinâmica da Base */}
             {audienceType === "segment" && (
               <Card className="p-4 bg-muted/20 border-dashed space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-semibold">Critério de Inatividade</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Contatar clientes sem interação com a empresa há um determinado número de dias
-                    </p>
+                {/* 1. Tipo de Contato (Lead vs Cliente) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5 text-primary" />
+                      Perfil do Contato
+                    </Label>
+                    <Badge variant="outline" className="text-[10px] uppercase font-mono">
+                      {contactType === "all"
+                        ? "Todos os Contatos"
+                        : contactType === "lead"
+                          ? "Apenas Leads"
+                          : "Apenas Clientes"}
+                    </Badge>
                   </div>
-                  <Switch checked={useInactivity} onCheckedChange={setUseInactivity} />
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setContactType("all")}
+                      className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs font-medium transition-all ${
+                        contactType === "all"
+                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                          : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
+                      }`}
+                    >
+                      <Users className="h-3.5 w-3.5" />
+                      <span>Todos</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setContactType("lead")}
+                      className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs font-medium transition-all ${
+                        contactType === "lead"
+                          ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                          : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
+                      }`}
+                    >
+                      <UserPlus className="h-3.5 w-3.5" />
+                      <span>Apenas Leads</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setContactType("client")}
+                      className={`flex items-center justify-center gap-1.5 p-2 rounded-lg border text-xs font-medium transition-all ${
+                        contactType === "client"
+                          ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                          : "bg-background hover:bg-muted/50 border-border text-muted-foreground"
+                      }`}
+                    >
+                      <UserCheck className="h-3.5 w-3.5" />
+                      <span>Apenas Clientes</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {contactType === "all" &&
+                      "Envia para toda a sua base qualificada, independentemente de já terem comprado."}
+                    {contactType === "lead" &&
+                      "Foca em prospectos e oportunidades que ainda não converteram em clientes."}
+                    {contactType === "client" &&
+                      "Foca em clientes com histórico de compra confirmada (pós-venda, recompra, fidelização)."}
+                  </p>
                 </div>
 
-                {useInactivity && (
-                  <div className="space-y-3 pt-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium">
-                        Sem falar com a empresa há pelo menos:
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <Input
-                          type="number"
-                          min={1}
-                          max={365}
-                          value={inactivityDays}
-                          onChange={(e) => setInactivityDays(Math.max(1, Number(e.target.value)))}
-                          className="w-20 h-8 text-sm font-bold text-center"
-                        />
-                        <span className="text-xs font-semibold text-muted-foreground">dias</span>
+                {/* 2. Critério de Inatividade */}
+                <div className="pt-2 border-t border-border/50 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-semibold">Critério de Inatividade</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Contatar clientes sem interação com a empresa há um determinado número de
+                        dias
+                      </p>
+                    </div>
+                    <Switch checked={useInactivity} onCheckedChange={setUseInactivity} />
+                  </div>
+
+                  {useInactivity && (
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium">
+                          Sem falar com a empresa há pelo menos:
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <Input
+                            type="number"
+                            min={1}
+                            max={365}
+                            value={inactivityDays}
+                            onChange={(e) => setInactivityDays(Math.max(1, Number(e.target.value)))}
+                            className="w-20 h-8 text-sm font-bold text-center"
+                          />
+                          <span className="text-xs font-semibold text-muted-foreground">dias</span>
+                        </div>
+                      </div>
+
+                      <Slider
+                        value={[inactivityDays]}
+                        min={1}
+                        max={180}
+                        step={1}
+                        onValueChange={(vals) => setInactivityDays(vals[0])}
+                      />
+
+                      {/* Botões Rápidos de Dias (Presets) */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-[11px] text-muted-foreground mr-1">
+                          Atalhos rápidos:
+                        </span>
+                        {INACTIVITY_PRESETS.map((days) => (
+                          <Button
+                            key={days}
+                            type="button"
+                            size="sm"
+                            variant={inactivityDays === days ? "default" : "outline"}
+                            className="h-6 px-2 text-xs rounded-full"
+                            onClick={() => setInactivityDays(days)}
+                          >
+                            {days} dias
+                          </Button>
+                        ))}
                       </div>
                     </div>
+                  )}
+                </div>
 
-                    <Slider
-                      value={[inactivityDays]}
-                      min={1}
-                      max={180}
-                      step={1}
-                      onValueChange={(vals) => setInactivityDays(vals[0])}
-                    />
-
-                    {/* Botões Rápidos de Dias (Presets) */}
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <span className="text-[11px] text-muted-foreground mr-1">
-                        Atalhos rápidos:
-                      </span>
-                      {INACTIVITY_PRESETS.map((days) => (
-                        <Button
-                          key={days}
+                {/* 3. Origem dos Contatos */}
+                {contactSources.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-border/50">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold flex items-center gap-1.5">
+                        <Target className="h-3.5 w-3.5 text-primary" />
+                        Origem do Contato (opcional)
+                      </Label>
+                      {selectedSources.length > 0 && (
+                        <button
                           type="button"
-                          size="sm"
-                          variant={inactivityDays === days ? "default" : "outline"}
-                          className="h-6 px-2 text-xs rounded-full"
-                          onClick={() => setInactivityDays(days)}
+                          onClick={() => setSelectedSources([])}
+                          className="text-[10px] text-muted-foreground hover:text-foreground underline"
                         >
-                          {days} dias
-                        </Button>
-                      ))}
+                          Limpar filtro ({selectedSources.length})
+                        </button>
+                      )}
                     </div>
-                  </div>
-                )}
-
-                {/* Filtro por Tags */}
-                {labels.length > 0 && (
-                  <div className="space-y-2 pt-2">
-                    <Label className="text-xs">Filtrar por Tags da Base (opcional)</Label>
-                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1 border rounded-md bg-background">
-                      {labels.map((lbl) => {
-                        const isSelected = selectedTags.includes(lbl.name);
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 border rounded-md bg-background">
+                      {contactSources.map((src) => {
+                        const isSelected = selectedSources.includes(src);
                         return (
                           <Badge
-                            key={lbl.id}
+                            key={src}
                             variant={isSelected ? "default" : "outline"}
-                            className="cursor-pointer text-xs"
-                            onClick={() => {
-                              setSelectedTags((prev) =>
-                                isSelected
-                                  ? prev.filter((t) => t !== lbl.name)
-                                  : [...prev, lbl.name],
-                              );
-                            }}
+                            className="cursor-pointer text-xs flex items-center gap-1 py-1"
+                            onClick={() => toggleSource(src)}
                           >
-                            {lbl.name}
+                            {getSourceIcon(src, "h-3 w-3")}
+                            <span>{src}</span>
                           </Badge>
                         );
                       })}
                     </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {selectedSources.length === 0
+                        ? "Todas as origens incluídas (Meta Ads, WhatsApp, Indicação, etc.)."
+                        : `Filtrando apenas contatos com origem: ${selectedSources.join(", ")}.`}
+                    </p>
                   </div>
                 )}
 
-                {/* Filtro de conversa aberta */}
-                <div className="flex items-center space-x-2 pt-1">
+                {/* 4. Tags de Inclusão e Exclusão */}
+                {labels.length > 0 && (
+                  <div className="space-y-3 pt-2 border-t border-border/50">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold flex items-center gap-1.5">
+                          <Tag className="h-3.5 w-3.5 text-primary" />
+                          Incluir contatos com as tags:
+                        </Label>
+                        {selectedTags.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTags([])}
+                            className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                          >
+                            Limpar ({selectedTags.length})
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 border rounded-md bg-background">
+                        {labels.map((lbl) => {
+                          const isSelected = selectedTags.includes(lbl.name);
+                          const isExcluded = excludedTags.includes(lbl.name);
+                          return (
+                            <Badge
+                              key={lbl.id}
+                              variant={isSelected ? "default" : "outline"}
+                              className={`cursor-pointer text-xs ${
+                                isExcluded ? "opacity-30 pointer-events-none line-through" : ""
+                              }`}
+                              onClick={() => toggleTag(lbl.name)}
+                            >
+                              {lbl.name}
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold flex items-center gap-1.5 text-destructive">
+                          <Ban className="h-3.5 w-3.5" />
+                          Excluir contatos com as tags (Anti-Spam / Blacklist):
+                        </Label>
+                        {excludedTags.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setExcludedTags([])}
+                            className="text-[10px] text-muted-foreground hover:text-destructive underline"
+                          >
+                            Limpar ({excludedTags.length})
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 border border-destructive/20 rounded-md bg-background">
+                        {labels.map((lbl) => {
+                          const isExcluded = excludedTags.includes(lbl.name);
+                          const isSelected = selectedTags.includes(lbl.name);
+                          return (
+                            <Badge
+                              key={`ex-${lbl.id}`}
+                              variant={isExcluded ? "destructive" : "outline"}
+                              className={`cursor-pointer text-xs ${
+                                isSelected ? "opacity-30 pointer-events-none" : ""
+                              } ${!isExcluded ? "hover:border-destructive/50 text-muted-foreground" : ""}`}
+                              onClick={() => toggleExcludedTag(lbl.name)}
+                            >
+                              {lbl.name}
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Contatos marcados com tags excluídas serão desconsiderados do disparo mesmo
+                        que atendam a outros critérios.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. Filtro Regional por DDD */}
+                <div className="space-y-2 pt-2 border-t border-border/50">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5 text-primary" />
+                      Filtro Regional por DDD (opcional)
+                    </Label>
+                    {selectedDdds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDdds([])}
+                        className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                      >
+                        Limpar DDDs ({selectedDdds.length})
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1 max-w-[200px]">
+                      <Input
+                        placeholder="Ex: 27, 33, 11..."
+                        value={dddInput}
+                        onChange={(e) => setDddInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAddDdd();
+                          }
+                        }}
+                        className="h-8 text-xs font-mono"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="h-8 text-xs px-3"
+                      onClick={() => handleAddDdd()}
+                      disabled={!dddInput.trim()}
+                    >
+                      Adicionar DDD
+                    </Button>
+                  </div>
+                  {selectedDdds.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {selectedDdds.map((ddd) => (
+                        <Badge
+                          key={ddd}
+                          variant="secondary"
+                          className="text-xs font-mono flex items-center gap-1 pl-2 pr-1 py-0.5"
+                        >
+                          <span>DDD ({ddd})</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDdd(ddd)}
+                            className="hover:bg-muted rounded p-0.5"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Nenhum DDD específico selecionado (disparará para todos os estados/regiões).
+                    </p>
+                  )}
+                </div>
+
+                {/* 6. Filtro de conversa aberta */}
+                <div className="flex items-center space-x-2 pt-2 border-t border-border/50">
                   <Checkbox
                     id="no-open"
                     checked={onlyWithoutOpenConvs}
@@ -1818,6 +2133,47 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                     {estimatedTime}
                   </span>
                 </div>
+
+                {audienceType === "segment" && (
+                  <div className="col-span-2 sm:col-span-4 pt-2 border-t flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="text-muted-foreground mr-1">Segmentação:</span>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {contactType === "all"
+                        ? "Todos os Contatos"
+                        : contactType === "lead"
+                          ? "Apenas Leads"
+                          : "Apenas Clientes"}
+                    </Badge>
+                    {useInactivity && (
+                      <Badge variant="outline" className="text-[10px]">
+                        Inatividade: &ge; {inactivityDays} dias
+                      </Badge>
+                    )}
+                    {selectedSources.length > 0 && (
+                      <Badge variant="outline" className="text-[10px]">
+                        Origens: {selectedSources.join(", ")}
+                      </Badge>
+                    )}
+                    {selectedTags.length > 0 && (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] text-primary border-primary/30"
+                      >
+                        Tags: {selectedTags.join(", ")}
+                      </Badge>
+                    )}
+                    {excludedTags.length > 0 && (
+                      <Badge variant="destructive" className="text-[10px]">
+                        Excluindo: {excludedTags.join(", ")}
+                      </Badge>
+                    )}
+                    {selectedDdds.length > 0 && (
+                      <Badge variant="outline" className="text-[10px] font-mono">
+                        DDDs: {selectedDdds.join(", ")}
+                      </Badge>
+                    )}
+                  </div>
+                )}
               </div>
             </Card>
 
@@ -1862,6 +2218,8 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                         <TableHead className="text-xs py-1">Telefone</TableHead>
                         {audienceType === "segment" ? (
                           <>
+                            <TableHead className="text-xs py-1">Tipo</TableHead>
+                            <TableHead className="text-xs py-1">Origem</TableHead>
                             <TableHead className="text-xs py-1">Última Interação</TableHead>
                             <TableHead className="text-xs py-1">Tags</TableHead>
                           </>
@@ -1883,6 +2241,26 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                             <TableCell className="py-1 font-mono text-[11px]">{phone}</TableCell>
                             {audienceType === "segment" ? (
                               <>
+                                <TableCell className="py-1">
+                                  {c.contact_type === "client" ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] text-emerald-600 border-emerald-500/30 bg-emerald-500/10"
+                                    >
+                                      Cliente
+                                    </Badge>
+                                  ) : (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] text-blue-600 border-blue-500/30 bg-blue-500/10"
+                                    >
+                                      Lead
+                                    </Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell className="py-1 text-[11px] text-muted-foreground">
+                                  {c.source || "-"}
+                                </TableCell>
                                 <TableCell className="py-1 text-muted-foreground text-[11px]">
                                   {c.last_interaction
                                     ? formatDistanceToNow(new Date(c.last_interaction), {

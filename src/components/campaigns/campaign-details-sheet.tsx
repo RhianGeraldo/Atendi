@@ -250,6 +250,42 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
                 {format(new Date(campaign.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                 {campaign.profiles?.name && ` por ${campaign.profiles.name}`}
               </SheetDescription>
+              {campaign.audience_type === "segment" && campaign.audience_filters && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
+                  <Badge variant="secondary" className="text-[10px]">
+                    {campaign.audience_filters.contact_type === "client"
+                      ? "Apenas Clientes"
+                      : campaign.audience_filters.contact_type === "lead"
+                        ? "Apenas Leads"
+                        : "Todos os Contatos"}
+                  </Badge>
+                  {campaign.audience_filters.inactivity_days && (
+                    <Badge variant="outline" className="text-[10px]">
+                      Inatividade &ge; {campaign.audience_filters.inactivity_days} dias
+                    </Badge>
+                  )}
+                  {campaign.audience_filters.sources?.length > 0 && (
+                    <Badge variant="outline" className="text-[10px]">
+                      Origens: {campaign.audience_filters.sources.join(", ")}
+                    </Badge>
+                  )}
+                  {campaign.audience_filters.tags?.length > 0 && (
+                    <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
+                      Tags: {campaign.audience_filters.tags.join(", ")}
+                    </Badge>
+                  )}
+                  {campaign.audience_filters.excluded_tags?.length > 0 && (
+                    <Badge variant="destructive" className="text-[10px]">
+                      Excluindo: {campaign.audience_filters.excluded_tags.join(", ")}
+                    </Badge>
+                  )}
+                  {campaign.audience_filters.ddds?.length > 0 && (
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      DDDs: {campaign.audience_filters.ddds.join(", ")}
+                    </Badge>
+                  )}
+                </div>
+              )}
             </SheetHeader>
 
             {/* KPIs Grid Detalhado */}
