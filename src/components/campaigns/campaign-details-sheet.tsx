@@ -284,6 +284,32 @@ export function CampaignDetailsSheet({ campaignId, companyId, open, onOpenChange
                       DDDs: {campaign.audience_filters.ddds.join(", ")}
                     </Badge>
                   )}
+                  {campaign.audience_filters.crm_enabled && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] text-blue-600 border-blue-500/30 bg-blue-500/10"
+                    >
+                      CRM:{" "}
+                      {campaign.audience_filters.crm_mode === "without"
+                        ? "Sem Oportunidade"
+                        : "Com Oportunidade"}
+                      {campaign.audience_filters.crm_statuses?.length > 0 &&
+                        ` [${campaign.audience_filters.crm_statuses.join(", ")}]`}
+                    </Badge>
+                  )}
+                  {campaign.audience_filters.todoo_enabled && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] text-emerald-600 border-emerald-500/30 bg-emerald-500/10"
+                    >
+                      Todoo:{" "}
+                      {campaign.audience_filters.todoo_mode === "without"
+                        ? "Fora do Todoo"
+                        : "No Todoo"}
+                      {campaign.audience_filters.todoo_lead_statuses?.length > 0 &&
+                        ` [${campaign.audience_filters.todoo_lead_statuses.join(", ")}]`}
+                    </Badge>
+                  )}
                 </div>
               )}
             </SheetHeader>

@@ -226,6 +226,18 @@ export const previewAudienceCountAction = createServerFn({ method: "POST" })
         ddds: z.array(z.string()).optional(),
         created_after: z.string().optional().nullable(),
         created_before: z.string().optional().nullable(),
+        // CRM
+        crm_enabled: z.boolean().optional(),
+        crm_mode: z.enum(["with", "without"]).optional(),
+        crm_pipeline_ids: z.array(z.string().uuid()).optional(),
+        crm_stage_ids: z.array(z.string().uuid()).optional(),
+        crm_statuses: z.array(z.string()).optional(),
+        // Todoo
+        todoo_enabled: z.boolean().optional(),
+        todoo_mode: z.enum(["with", "without"]).optional(),
+        todoo_campaign_ids: z.array(z.string().uuid()).optional(),
+        todoo_stage_ids: z.array(z.string().uuid()).optional(),
+        todoo_lead_statuses: z.array(z.string()).optional(),
       }),
     }),
   )
@@ -264,6 +276,18 @@ export const previewAudienceContactsAction = createServerFn({ method: "POST" })
         ddds: z.array(z.string()).optional(),
         created_after: z.string().optional().nullable(),
         created_before: z.string().optional().nullable(),
+        // CRM
+        crm_enabled: z.boolean().optional(),
+        crm_mode: z.enum(["with", "without"]).optional(),
+        crm_pipeline_ids: z.array(z.string().uuid()).optional(),
+        crm_stage_ids: z.array(z.string().uuid()).optional(),
+        crm_statuses: z.array(z.string()).optional(),
+        // Todoo
+        todoo_enabled: z.boolean().optional(),
+        todoo_mode: z.enum(["with", "without"]).optional(),
+        todoo_campaign_ids: z.array(z.string().uuid()).optional(),
+        todoo_stage_ids: z.array(z.string().uuid()).optional(),
+        todoo_lead_statuses: z.array(z.string()).optional(),
       }),
       limit: z.number().default(500),
       offset: z.number().default(0),
@@ -311,6 +335,18 @@ export const createCampaignAction = createServerFn({ method: "POST" })
           ddds: z.array(z.string()).optional(),
           created_after: z.string().optional().nullable(),
           created_before: z.string().optional().nullable(),
+          // CRM
+          crm_enabled: z.boolean().optional(),
+          crm_mode: z.enum(["with", "without"]).optional(),
+          crm_pipeline_ids: z.array(z.string().uuid()).optional(),
+          crm_stage_ids: z.array(z.string().uuid()).optional(),
+          crm_statuses: z.array(z.string()).optional(),
+          // Todoo
+          todoo_enabled: z.boolean().optional(),
+          todoo_mode: z.enum(["with", "without"]).optional(),
+          todoo_campaign_ids: z.array(z.string().uuid()).optional(),
+          todoo_stage_ids: z.array(z.string().uuid()).optional(),
+          todoo_lead_statuses: z.array(z.string()).optional(),
         })
         .optional(),
       importedRecipients: z
