@@ -38,6 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Plus,
   Upload,
   Sparkles,
   AlertCircle,
@@ -71,10 +72,7 @@ import {
   previewAudienceCountAction,
   previewAudienceContactsAction,
 } from "@/lib/api/campaigns.functions";
-import {
-  renderCampaignMessage,
-  sanitizeCampaignPhone,
-} from "@/lib/campaign-template";
+import { renderCampaignMessage, sanitizeCampaignPhone } from "@/lib/campaign-template";
 
 interface Props {
   open: boolean;
@@ -119,18 +117,78 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
   const [columnHeaders, setColumnHeaders] = useState<string[]>([]);
   const [phoneCol, setPhoneCol] = useState<string>("");
   const [nameCol, setNameCol] = useState<string>("");
+  const [unitCol, setUnitCol] = useState<string>("");
   const [saveImportedToContacts, setSaveImportedToContacts] = useState(true);
 
-  // Mensagem
-  const [messageType, setMessageType] = useState<"text" | "image" | "video" | "audio" | "document">("text");
-  const [messageContent, setMessageContent] = useState(
-    "{Olá|Oi|Oie} {{primeiro_nome}}, tudo bem? Estamos com condições especiais na {{unidade}} este mês para você!"
+  const selectedUnit = useMemo(
+    () => accessibleUnits.find((u) => u.id === unitId),
+    [accessibleUnits, unitId],
   );
-  const [mediaUrl, setMediaUrl] = useState<string>("");
-  const [mediaName, setMediaName] = useState<string>("");
-  const [mediaMode, setMediaMode] = useState<"upload" | "url">("upload");
+
+  // Mensagens & Variações (Teste A/B)
+  interface CampaignVariationDraft {
+    id: string;
+    name: string;
+    messageType: "text" | "image" | "video" | "audio" | "document";
+    content: string;
+    mediaUrl: string;
+    mediaName: string;
+    mediaMode: "upload" | "url";
+  }
+
+  const [variations, setVariations] = useState<CampaignVariationDraft[]>([
+    {
+      id: "v-1",
+      name: "Variação 1",
+      messageType: "text",
+      content:
+        "{Olá|Oi|Oie} {{primeiro_nome}}, tudo bem? Estamos com condições especiais na {{unidade}} este mês para você!",
+      mediaUrl: "",
+      mediaName: "",
+      mediaMode: "upload",
+    },
+  ]);
+  const [activeVariationId, setActiveVariationId] = useState<string>("v-1");
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [testSeed, setTestSeed] = useState(0);
+
+  const activeVariation = useMemo(
+    () => variations.find((v) => v.id === activeVariationId) || variations[0],
+    [variations, activeVariationId],
+  );
+
+  const updateActiveVariation = (updates: Partial<CampaignVariationDraft>) => {
+    setVariations((prev) =>
+      prev.map((v) => (v.id === activeVariation.id ? { ...v, ...updates } : v)),
+    );
+  };
+
+  const addVariation = () => {
+    const nextIdx = variations.length + 1;
+    const newId = `v-${Date.now()}`;
+    setVariations((prev) => [
+      ...prev,
+      {
+        id: newId,
+        name: `Variação ${nextIdx}`,
+        messageType: "text",
+        content: `Oi {{primeiro_nome}}! Confira nossa novidade na {{unidade}}.`,
+        mediaUrl: "",
+        mediaName: "",
+        mediaMode: "upload",
+      },
+    ]);
+    setActiveVariationId(newId);
+  };
+
+  const removeVariation = (idToRemove: string) => {
+    if (variations.length <= 1) return;
+    const updated = variations.filter((v) => v.id !== idToRemove);
+    setVariations(updated);
+    if (activeVariationId === idToRemove) {
+      setActiveVariationId(updated[0].id);
+    }
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -175,7 +233,7 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
 
   const connectedInstances = useMemo(
     () => instances.filter((i) => i.status === "connected" || i.status === "open"),
-    [instances]
+    [instances],
   );
 
   // Cálculo automático da audiência com debounce quando os filtros mudam
@@ -187,7 +245,16 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [inactivityDays, useInactivity, selectedTags, unitId, onlyWithoutOpenConvs, open, audienceType, companyId]);
+  }, [
+    inactivityDays,
+    useInactivity,
+    selectedTags,
+    unitId,
+    onlyWithoutOpenConvs,
+    open,
+    audienceType,
+    companyId,
+  ]);
 
   const calculateAudienceCount = async () => {
     setIsCalculatingCount(true);
@@ -237,7 +304,16 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
           setIsLoadingPreviewContacts(false);
         });
     }
-  }, [step, audienceType, companyId, inactivityDays, useInactivity, selectedTags, unitId, onlyWithoutOpenConvs]);
+  }, [
+    step,
+    audienceType,
+    companyId,
+    inactivityDays,
+    useInactivity,
+    selectedTags,
+    unitId,
+    onlyWithoutOpenConvs,
+  ]);
 
   // Upload direto de arquivo de mídia para o Supabase Storage
   const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -262,10 +338,12 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
 
       const { data: publicData } = supabase.storage.from("media").getPublicUrl(filePath);
 
-      setMediaUrl(publicData.publicUrl);
-      setMediaName(file.name);
-      setMessageType(detectedType);
-      toast.success(`Arquivo "${file.name}" anexado com sucesso!`);
+      updateActiveVariation({
+        mediaUrl: publicData.publicUrl,
+        mediaName: file.name,
+        messageType: detectedType,
+      });
+      toast.success(`Arquivo "${file.name}" anexado à ${activeVariation.name}!`);
     } catch (err: any) {
       toast.error("Falha ao enviar arquivo: " + (err.message || "Erro desconhecido"));
     } finally {
@@ -275,9 +353,11 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
   };
 
   const handleRemoveMedia = () => {
-    setMediaUrl("");
-    setMediaName("");
-    setMessageType("text");
+    updateActiveVariation({
+      mediaUrl: "",
+      mediaName: "",
+      messageType: "text",
+    });
   };
 
   // Processamento do Arquivo Importado (CSV ou XLSX)
@@ -343,13 +423,19 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
 
   const autoDetectColumns = (headers: string[]) => {
     const lower = headers.map((h) => h.toLowerCase());
-    const phoneIdx = lower.findIndex((h) =>
-      h.includes("tel") || h.includes("cel") || h.includes("phone") || h.includes("whatsapp") || h.includes("contato")
+    const phoneIdx = lower.findIndex(
+      (h) =>
+        h.includes("tel") ||
+        h.includes("cel") ||
+        h.includes("phone") ||
+        h.includes("whatsapp") ||
+        h.includes("contato"),
     );
     if (phoneIdx !== -1) setPhoneCol(headers[phoneIdx]);
 
-    const nameIdx = lower.findIndex((h) =>
-      h.includes("nome") || h.includes("name") || h.includes("cliente") || h.includes("lead")
+    const nameIdx = lower.findIndex(
+      (h) =>
+        h.includes("nome") || h.includes("name") || h.includes("cliente") || h.includes("lead"),
     );
     if (nameIdx !== -1) setNameCol(headers[nameIdx]);
   };
@@ -394,7 +480,7 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
         : previewContacts[0]?.phone || "5511999998888";
 
     return renderCampaignMessage(
-      messageContent,
+      activeVariation?.content || "",
       {
         clientName: dummyClient,
         phone: dummyPhone,
@@ -402,13 +488,13 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
         unitName: "Unidade Central",
         customVariables: importSummary.rows[0]?.extras || {},
       },
-      true
+      true,
     );
-  }, [messageContent, audienceType, importSummary, previewContacts, testSeed]);
+  }, [activeVariation?.content, audienceType, importSummary, previewContacts, testSeed]);
 
   // Tempo estimado de disparo
   const estimatedTime = useMemo(() => {
-    const totalRecipients = audienceType === "import" ? importSummary.valid : (audienceCount || 0);
+    const totalRecipients = audienceType === "import" ? importSummary.valid : audienceCount || 0;
     const avgDelaySec = (minDelay + maxDelay) / 2;
     const numInstances = Math.max(selectedInstanceIds.length, 1);
 
@@ -419,7 +505,14 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     const hours = Math.floor(minutes / 60);
     const remMin = minutes % 60;
     return `~${hours}h ${remMin}min`;
-  }, [audienceType, importSummary.valid, audienceCount, minDelay, maxDelay, selectedInstanceIds.length]);
+  }, [
+    audienceType,
+    importSummary.valid,
+    audienceCount,
+    minDelay,
+    maxDelay,
+    selectedInstanceIds.length,
+  ]);
 
   // Filtro de busca na tabela de revisão
   const filteredReviewContacts = useMemo(() => {
@@ -428,15 +521,23 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
       if (!term) return importSummary.rows;
       return importSummary.rows.filter(
         (r) =>
-          String(r.name || "").toLowerCase().includes(term) ||
-          String(r.phone || "").toLowerCase().includes(term)
+          String(r.name || "")
+            .toLowerCase()
+            .includes(term) ||
+          String(r.phone || "")
+            .toLowerCase()
+            .includes(term),
       );
     } else {
       if (!term) return previewContacts;
       return previewContacts.filter(
         (c) =>
-          String(c.name || "").toLowerCase().includes(term) ||
-          String(c.phone || "").toLowerCase().includes(term)
+          String(c.name || "")
+            .toLowerCase()
+            .includes(term) ||
+          String(c.phone || "")
+            .toLowerCase()
+            .includes(term),
       );
     }
   }, [audienceType, importSummary.rows, previewContacts, reviewSearchTerm]);
@@ -449,10 +550,32 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
         importedRecipientsList = parsedRows.map((r) => {
           const rawPhone = r[phoneCol];
           const rawName = nameCol ? r[nameCol] : undefined;
-          const { [phoneCol]: _, [nameCol]: __, ...rest } = r;
+
+          let matchedUnitId: string | null = null;
+          if (unitCol && r[unitCol]) {
+            const rawUnitStr = String(r[unitCol])
+              .trim()
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "");
+            const found = accessibleUnits.find((u) => {
+              const uNorm = u.name
+                .toLowerCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "");
+              return rawUnitStr.includes(uNorm) || uNorm.includes(rawUnitStr);
+            });
+            if (found) matchedUnitId = found.id;
+          }
+          if (!matchedUnitId && unitId !== "all") {
+            matchedUnitId = unitId;
+          }
+
+          const { [phoneCol]: _, [nameCol]: __, [unitCol]: ___, ...rest } = r;
           return {
             phone: rawPhone,
             name: rawName,
+            unitId: matchedUnitId,
             customVariables: rest,
           };
         });
@@ -476,10 +599,17 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
               : undefined,
           importedRecipients: importedRecipientsList,
           saveImportedToContacts,
-          messageType,
-          content: messageContent,
-          mediaUrl: mediaUrl.trim() || null,
-          mediaName: mediaName.trim() || null,
+          messages: variations.map((v) => ({
+            name: v.name.trim() || "Variação",
+            messageType: v.messageType,
+            content: v.content,
+            mediaUrl: v.mediaUrl.trim() || null,
+            mediaName: v.mediaName.trim() || null,
+          })),
+          messageType: variations[0]?.messageType || "text",
+          content: variations[0]?.content || "",
+          mediaUrl: variations[0]?.mediaUrl.trim() || null,
+          mediaName: variations[0]?.mediaName.trim() || null,
           whatsappInstanceIds: selectedInstanceIds,
           settings: {
             min_delay_seconds: minDelay,
@@ -515,9 +645,24 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
     setImportFileName(null);
     setAudienceCount(null);
     setPreviewContacts([]);
-    setMediaUrl("");
-    setMediaName("");
-    setMessageType("text");
+    setUnitId("all");
+    setUnitCol("");
+    setSelectedInstanceIds([]);
+    setScheduleMode("now");
+    setScheduledDate("");
+    setVariations([
+      {
+        id: "v-1",
+        name: "Variação 1",
+        messageType: "text",
+        content:
+          "{Olá|Oi|Oie} {{primeiro_nome}}, tudo bem? Estamos com condições especiais na {{unidade}} este mês para você!",
+        mediaUrl: "",
+        mediaName: "",
+        mediaMode: "upload",
+      },
+    ]);
+    setActiveVariationId("v-1");
   };
 
   const handleNext = async () => {
@@ -545,8 +690,10 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
         }
       }
     } else if (step === 2) {
-      if (!messageContent.trim()) {
-        toast.error("Escreva o texto da mensagem.");
+      const emptyVariation = variations.find((v) => !v.content.trim());
+      if (emptyVariation) {
+        toast.error(`A "${emptyVariation.name}" não possui texto configurado.`);
+        setActiveVariationId(emptyVariation.id);
         return;
       }
     } else if (step === 3) {
@@ -584,28 +731,36 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
         <div className="grid grid-cols-4 gap-2 py-2 border-b">
           <div
             className={`text-xs font-medium pb-1 border-b-2 text-center ${
-              step >= 1 ? "border-primary text-primary font-bold" : "border-muted text-muted-foreground"
+              step >= 1
+                ? "border-primary text-primary font-bold"
+                : "border-muted text-muted-foreground"
             }`}
           >
             1. Público-Alvo
           </div>
           <div
             className={`text-xs font-medium pb-1 border-b-2 text-center ${
-              step >= 2 ? "border-primary text-primary font-bold" : "border-muted text-muted-foreground"
+              step >= 2
+                ? "border-primary text-primary font-bold"
+                : "border-muted text-muted-foreground"
             }`}
           >
             2. Mensagem & Mídia
           </div>
           <div
             className={`text-xs font-medium pb-1 border-b-2 text-center ${
-              step >= 3 ? "border-primary text-primary font-bold" : "border-muted text-muted-foreground"
+              step >= 3
+                ? "border-primary text-primary font-bold"
+                : "border-muted text-muted-foreground"
             }`}
           >
             3. Canais & Anti-Ban
           </div>
           <div
             className={`text-xs font-medium pb-1 border-b-2 text-center ${
-              step === 4 ? "border-primary text-primary font-bold" : "border-muted text-muted-foreground"
+              step === 4
+                ? "border-primary text-primary font-bold"
+                : "border-muted text-muted-foreground"
             }`}
           >
             4. Revisão da Lista
@@ -627,13 +782,24 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="camp-unit">Unidade Associada</Label>
+                <Label htmlFor="camp-unit" className="flex items-center justify-between">
+                  <span>Unidade da Campanha</span>
+                  {unitId !== "all" ? (
+                    <Badge variant="secondary" className="text-[10px] text-primary">
+                      Unidade Específica
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                      Empresa Geral (Todas)
+                    </Badge>
+                  )}
+                </Label>
                 <Select value={unitId} onValueChange={setUnitId}>
                   <SelectTrigger id="camp-unit">
-                    <SelectValue placeholder="Todas as Unidades" />
+                    <SelectValue placeholder="Todas as Unidades (Geral da Empresa)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todas as Unidades</SelectItem>
+                    <SelectItem value="all">Todas as Unidades (Geral da Empresa)</SelectItem>
                     {accessibleUnits.map((u) => (
                       <SelectItem key={u.id} value={u.id}>
                         {u.name}
@@ -643,6 +809,27 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                 </Select>
               </div>
             </div>
+
+            {/* Banner de Contexto da Unidade */}
+            {unitId !== "all" ? (
+              <div className="bg-primary/5 border border-primary/20 rounded-md p-2.5 text-xs text-primary flex items-center gap-2">
+                <Info className="h-4 w-4 shrink-0" />
+                <span>
+                  <strong>Filtro por Unidade Ativo:</strong> Apenas contatos da unidade{" "}
+                  <strong>{selectedUnit?.name}</strong> serão incluídos na campanha. Se você
+                  importar uma planilha, os contatos serão atribuídos a esta unidade.
+                </span>
+              </div>
+            ) : (
+              <div className="bg-muted/40 border border-border rounded-md p-2.5 text-xs text-muted-foreground flex items-center gap-2">
+                <Info className="h-4 w-4 shrink-0" />
+                <span>
+                  <strong>Empresa Geral (Todas as Unidades):</strong> Os contatos de todas as
+                  filiais serão considerados. Na importação de planilha, você pode mapear a coluna
+                  de unidade de cada linha.
+                </span>
+              </div>
+            )}
 
             {/* Seletor de Tipo de Audiência */}
             <div className="space-y-2">
@@ -704,7 +891,9 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                 {useInactivity && (
                   <div className="space-y-3 pt-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium">Sem falar com a empresa há pelo menos:</span>
+                      <span className="text-xs font-medium">
+                        Sem falar com a empresa há pelo menos:
+                      </span>
                       <div className="flex items-center gap-1.5">
                         <Input
                           type="number"
@@ -728,7 +917,9 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
 
                     {/* Botões Rápidos de Dias (Presets) */}
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <span className="text-[11px] text-muted-foreground mr-1">Atalhos rápidos:</span>
+                      <span className="text-[11px] text-muted-foreground mr-1">
+                        Atalhos rápidos:
+                      </span>
                       {INACTIVITY_PRESETS.map((days) => (
                         <Button
                           key={days}
@@ -759,7 +950,9 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                             className="cursor-pointer text-xs"
                             onClick={() => {
                               setSelectedTags((prev) =>
-                                isSelected ? prev.filter((t) => t !== lbl.name) : [...prev, lbl.name]
+                                isSelected
+                                  ? prev.filter((t) => t !== lbl.name)
+                                  : [...prev, lbl.name],
                               );
                             }}
                           >
@@ -779,7 +972,8 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                     onCheckedChange={(c) => setOnlyWithoutOpenConvs(!!c)}
                   />
                   <Label htmlFor="no-open" className="text-xs cursor-pointer">
-                    Apenas contatos sem conversas ativas ou aguardando no momento (evita duplicar com atendente)
+                    Apenas contatos sem conversas ativas ou aguardando no momento (evita duplicar
+                    com atendente)
                   </Label>
                 </div>
 
@@ -803,9 +997,13 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                   <div className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600 bg-emerald-500/10 px-3 py-1 rounded-md">
                     <Users className="h-4 w-4" />
                     {isCalculatingCount ? (
-                      <span className="text-xs text-muted-foreground animate-pulse">Calculando...</span>
+                      <span className="text-xs text-muted-foreground animate-pulse">
+                        Calculando...
+                      </span>
                     ) : (
-                      <span>{(audienceCount ?? 0).toLocaleString("pt-BR")} contatos selecionados</span>
+                      <span>
+                        {(audienceCount ?? 0).toLocaleString("pt-BR")} contatos selecionados
+                      </span>
                     )}
                   </div>
                 </div>
@@ -838,7 +1036,7 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
 
                 {columnHeaders.length > 0 && (
                   <div className="space-y-3 pt-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="space-y-1">
                         <Label className="text-xs">Coluna do Telefone *</Label>
                         <Select value={phoneCol} onValueChange={setPhoneCol}>
@@ -863,6 +1061,27 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="">Nenhuma (usar 'Cliente')</SelectItem>
+                            {columnHeaders.map((h) => (
+                              <SelectItem key={h} value={h}>
+                                {h}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-xs">Coluna da Unidade (opcional)</Label>
+                        <Select value={unitCol} onValueChange={setUnitCol}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Nenhuma / Padrão" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">
+                              {unitId !== "all"
+                                ? `Padrão: ${selectedUnit?.name || "Unidade"}`
+                                : "Nenhuma (Geral da Empresa)"}
+                            </SelectItem>
                             {columnHeaders.map((h) => (
                               <SelectItem key={h} value={h}>
                                 {h}
@@ -909,34 +1128,129 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
         {/* ===================== PASSO 2: MENSAGEM & MÍDIA ===================== */}
         {step === 2 && (
           <div className="space-y-4 pt-2">
+            {/* Gerenciador de Variações de Mensagem (Teste A/B) */}
+            <div className="space-y-3 pb-3 border-b">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-semibold flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-primary" />
+                    Variações da Mensagem (Teste A/B)
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Cadastre mensagens ou mídias diferentes. Os disparos serão distribuídos
+                    igualmente entre as variações.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={addVariation}
+                  className="h-8 text-xs shrink-0"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Adicionar Variação
+                </Button>
+              </div>
+
+              {/* Lista de Abas de Variações */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                {variations.map((v, idx) => {
+                  const isCurrent = v.id === activeVariation.id;
+                  return (
+                    <div
+                      key={v.id}
+                      onClick={() => setActiveVariationId(v.id)}
+                      className={`cursor-pointer px-3 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-2 transition-all shrink-0 ${
+                        isCurrent
+                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                          : "bg-muted/40 hover:bg-muted text-muted-foreground border-border"
+                      }`}
+                    >
+                      {v.messageType === "image" && <ImageIcon className="h-3.5 w-3.5 shrink-0" />}
+                      {v.messageType === "video" && <Video className="h-3.5 w-3.5 shrink-0" />}
+                      {v.messageType === "audio" && <Music className="h-3.5 w-3.5 shrink-0" />}
+                      {v.messageType === "document" && (
+                        <FileText className="h-3.5 w-3.5 shrink-0" />
+                      )}
+                      {v.messageType === "text" && (
+                        <FileText className="h-3.5 w-3.5 opacity-50 shrink-0" />
+                      )}
+                      <span>{v.name || `Variação ${idx + 1}`}</span>
+                      {variations.length > 1 && (
+                        <span
+                          role="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeVariation(v.id);
+                          }}
+                          className="hover:text-rose-300 ml-1 p-0.5 rounded"
+                          title="Remover esta variação"
+                        >
+                          <X className="h-3 w-3" />
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {variations.length > 1 && (
+                <div className="bg-primary/5 border border-primary/20 rounded-md p-2.5 text-xs text-primary flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 shrink-0" />
+                  <span>
+                    <strong>Teste A/B Ativado!</strong> Cada contato receberá aleatoriamente uma das{" "}
+                    {variations.length} variações. Ao final, você poderá comparar as taxas de
+                    abertura e resposta de cada uma.
+                  </span>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Editor de Texto & Anexos */}
+              {/* Editor de Texto & Anexos da Variação Ativa */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Texto da Mensagem</Label>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-xs text-primary"
-                    onClick={() => setTestSeed((s) => s + 1)}
-                  >
-                    <RefreshCw className="h-3 w-3 mr-1" />
-                    Testar Spintax
-                  </Button>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs font-semibold">Nome da Variação</Label>
+                    <Input
+                      value={activeVariation.name}
+                      onChange={(e) => updateActiveVariation({ name: e.target.value })}
+                      placeholder="Ex: Variação 1 (Vídeo Curto)"
+                      className="h-8 text-xs font-medium"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">&nbsp;</Label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-xs text-primary"
+                      onClick={() => setTestSeed((s) => s + 1)}
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      Testar Spintax
+                    </Button>
+                  </div>
                 </div>
 
-                <Textarea
-                  rows={7}
-                  value={messageContent}
-                  onChange={(e) => setMessageContent(e.target.value)}
-                  placeholder="Escreva sua mensagem aqui..."
-                  className="font-sans text-sm resize-none"
-                />
+                <div className="space-y-1">
+                  <Label className="text-xs">Texto / Legenda</Label>
+                  <Textarea
+                    rows={6}
+                    value={activeVariation.content}
+                    onChange={(e) => updateActiveVariation({ content: e.target.value })}
+                    placeholder="Escreva sua mensagem aqui..."
+                    className="font-sans text-sm resize-none"
+                  />
+                </div>
 
                 {/* Variáveis Clicáveis */}
                 <div className="space-y-1.5">
-                  <span className="text-xs font-semibold text-muted-foreground">Inserir Variáveis:</span>
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    Inserir Variáveis:
+                  </span>
                   <div className="flex flex-wrap gap-1">
                     {[
                       { label: "Primeiro Nome", tag: "{{primeiro_nome}}" },
@@ -949,7 +1263,13 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                         key={v.tag}
                         variant="secondary"
                         className="cursor-pointer hover:bg-primary/20 text-xs"
-                        onClick={() => setMessageContent((prev) => prev + " " + v.tag)}
+                        onClick={() =>
+                          updateActiveVariation({
+                            content:
+                              (activeVariation.content ? activeVariation.content + " " : "") +
+                              v.tag,
+                          })
+                        }
                       >
                         {v.label}
                       </Badge>
@@ -963,7 +1283,13 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                             key={h}
                             variant="outline"
                             className="cursor-pointer hover:bg-primary/20 text-xs"
-                            onClick={() => setMessageContent((prev) => `${prev} {{${h}}}`)}
+                            onClick={() =>
+                              updateActiveVariation({
+                                content:
+                                  (activeVariation.content ? activeVariation.content + " " : "") +
+                                  `{{${h}}}`,
+                              })
+                            }
                           >
                             coluna: {h}
                           </Badge>
@@ -972,38 +1298,41 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                 </div>
 
                 {/* Dica de Spintax Anti-Bloqueio */}
-                <div className="bg-blue-500/10 border border-blue-500/20 rounded-md p-2.5 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-md p-2 text-xs text-blue-700 dark:text-blue-300 flex items-start gap-2">
                   <Info className="h-4 w-4 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-bold">Dica Anti-Bloqueio (Spintax):</span> Use chaves e barras para
-                    variar o texto automaticamente, ex: <br />
-                    <code>{"{Olá|Oi|Oie} {{primeiro_nome}}, {tudo bem?|como vai?}"}</code>
+                    <span className="font-bold">Spintax Suportado:</span> Use chaves e barras para
+                    variações no texto, ex: <code>{"{Olá|Oi|Oie} {{primeiro_nome}}"}</code>
                   </div>
                 </div>
 
-                {/* ANEXAR MÍDIA (UPLOAD DIRETO DE ARQUIVO) */}
+                {/* ANEXAR MÍDIA DA VARIAÇÃO ATIVA */}
                 <Card className="p-3 bg-muted/20 border space-y-3">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs font-semibold flex items-center gap-1.5">
                       <Paperclip className="h-3.5 w-3.5 text-primary" />
-                      Anexar Arquivo de Mídia
+                      Mídia desta Variação (Opcional)
                     </Label>
 
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => setMediaMode("upload")}
+                        onClick={() => updateActiveVariation({ mediaMode: "upload" })}
                         className={`text-[11px] px-2 py-0.5 rounded ${
-                          mediaMode === "upload" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground"
+                          activeVariation.mediaMode === "upload"
+                            ? "bg-primary text-primary-foreground font-semibold"
+                            : "text-muted-foreground"
                         }`}
                       >
                         Enviar Arquivo
                       </button>
                       <button
                         type="button"
-                        onClick={() => setMediaMode("url")}
+                        onClick={() => updateActiveVariation({ mediaMode: "url" })}
                         className={`text-[11px] px-2 py-0.5 rounded ${
-                          mediaMode === "url" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground"
+                          activeVariation.mediaMode === "url"
+                            ? "bg-primary text-primary-foreground font-semibold"
+                            : "text-muted-foreground"
                         }`}
                       >
                         Por Link/URL
@@ -1011,17 +1340,27 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                     </div>
                   </div>
 
-                  {mediaUrl ? (
+                  {activeVariation.mediaUrl ? (
                     <div className="flex items-center justify-between p-2.5 bg-background border rounded-lg">
                       <div className="flex items-center gap-2 overflow-hidden">
-                        {messageType === "image" && <ImageIcon className="h-4 w-4 text-emerald-500 shrink-0" />}
-                        {messageType === "video" && <Video className="h-4 w-4 text-purple-500 shrink-0" />}
-                        {messageType === "audio" && <Music className="h-4 w-4 text-amber-500 shrink-0" />}
-                        {messageType === "document" && <FileText className="h-4 w-4 text-blue-500 shrink-0" />}
+                        {activeVariation.messageType === "image" && (
+                          <ImageIcon className="h-4 w-4 text-emerald-500 shrink-0" />
+                        )}
+                        {activeVariation.messageType === "video" && (
+                          <Video className="h-4 w-4 text-purple-500 shrink-0" />
+                        )}
+                        {activeVariation.messageType === "audio" && (
+                          <Music className="h-4 w-4 text-amber-500 shrink-0" />
+                        )}
+                        {activeVariation.messageType === "document" && (
+                          <FileText className="h-4 w-4 text-blue-500 shrink-0" />
+                        )}
                         <div className="truncate text-xs">
-                          <span className="font-semibold">{mediaName || "Arquivo Anexado"}</span>
+                          <span className="font-semibold block truncate">
+                            {activeVariation.mediaName || "Arquivo Anexado"}
+                          </span>
                           <span className="text-[10px] text-muted-foreground block uppercase font-mono">
-                            {messageType}
+                            {activeVariation.messageType}
                           </span>
                         </div>
                       </div>
@@ -1037,7 +1376,7 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
-                  ) : mediaMode === "upload" ? (
+                  ) : activeVariation.mediaMode === "upload" ? (
                     <div className="flex flex-col items-center justify-center p-4 border border-dashed rounded-lg bg-background hover:bg-muted/30 transition-colors">
                       {isUploadingMedia ? (
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1052,7 +1391,9 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                             <Music className="h-4 w-4" />
                             <FileText className="h-4 w-4" />
                           </div>
-                          <p className="text-xs font-medium">Selecione uma Imagem, Vídeo, Áudio ou PDF</p>
+                          <p className="text-xs font-medium">
+                            Selecione uma Imagem, Vídeo, Áudio ou PDF
+                          </p>
                           <label className="mt-2 cursor-pointer">
                             <Button size="sm" variant="outline" className="h-7 text-xs" asChild>
                               <span>Escolher do Computador</span>
@@ -1073,13 +1414,13 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                       <div className="flex gap-2">
                         <Input
                           placeholder="Cole a URL pública da imagem, vídeo ou PDF"
-                          value={mediaUrl}
-                          onChange={(e) => setMediaUrl(e.target.value)}
+                          value={activeVariation.mediaUrl}
+                          onChange={(e) => updateActiveVariation({ mediaUrl: e.target.value })}
                           className="text-xs flex-1"
                         />
                         <Select
-                          value={messageType}
-                          onValueChange={(val: any) => setMessageType(val)}
+                          value={activeVariation.messageType}
+                          onValueChange={(val: any) => updateActiveVariation({ messageType: val })}
                         >
                           <SelectTrigger className="w-28 text-xs">
                             <SelectValue />
@@ -1097,30 +1438,35 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                 </Card>
               </div>
 
-              {/* Preview WhatsApp */}
+              {/* Preview WhatsApp da Variação Ativa */}
               <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
-                  <Smartphone className="h-4 w-4" />
-                  Pré-visualização no WhatsApp
+                <Label className="text-xs text-muted-foreground flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Smartphone className="h-4 w-4" />
+                    Pré-visualização: {activeVariation.name}
+                  </span>
+                  <Badge variant="outline" className="text-[10px] uppercase font-mono">
+                    {activeVariation.messageType}
+                  </Badge>
                 </Label>
 
                 <div className="bg-[#0b141a] dark:bg-[#111b21] rounded-xl p-4 min-h-[300px] flex flex-col justify-end border shadow-inner">
                   <div className="bg-[#005c4b] text-white p-3.5 rounded-lg max-w-[92%] self-end shadow-sm text-sm whitespace-pre-wrap font-sans relative">
                     {/* Renderizador de Mídia no Mockup */}
-                    {mediaUrl && (
+                    {activeVariation.mediaUrl && (
                       <div className="mb-2 rounded overflow-hidden">
-                        {messageType === "image" ? (
+                        {activeVariation.messageType === "image" ? (
                           <img
-                            src={mediaUrl}
+                            src={activeVariation.mediaUrl}
                             alt="Mídia"
                             className="max-h-48 w-full object-cover rounded"
                           />
-                        ) : messageType === "audio" ? (
+                        ) : activeVariation.messageType === "audio" ? (
                           <div className="bg-black/30 rounded p-2 flex items-center gap-2 text-xs">
                             <Music className="h-4 w-4 text-emerald-300 shrink-0" />
                             <span>Mensagem de Voz (Áudio)</span>
                           </div>
-                        ) : messageType === "video" ? (
+                        ) : activeVariation.messageType === "video" ? (
                           <div className="bg-black/40 rounded p-4 flex flex-col items-center justify-center text-xs">
                             <Video className="h-6 w-6 text-emerald-300 mb-1" />
                             <span>Vídeo anexado</span>
@@ -1129,7 +1475,9 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                           <div className="bg-black/30 rounded p-2.5 flex items-center gap-2 text-xs">
                             <FileText className="h-5 w-5 text-blue-300 shrink-0" />
                             <div className="truncate">
-                              <span className="font-semibold block truncate">{mediaName || "documento.pdf"}</span>
+                              <span className="font-semibold block truncate">
+                                {activeVariation.mediaName || "documento.pdf"}
+                              </span>
                               <span className="text-[10px] text-emerald-200">PDF</span>
                             </div>
                           </div>
@@ -1138,13 +1486,12 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                     )}
 
                     {messagePreview || "Digite seu texto ao lado..."}
-                    <div className="text-[10px] text-emerald-200 text-right mt-1.5">
-                      14:32 ✓✓
-                    </div>
+                    <div className="text-[10px] text-emerald-200 text-right mt-1.5">14:32 ✓✓</div>
                   </div>
                 </div>
                 <p className="text-[11px] text-muted-foreground text-center">
-                  Variáveis e Spintax são resolvidos dinamicamente para cada destinatário.
+                  Variáveis e Spintax desta variação são resolvidos dinamicamente no momento do
+                  envio.
                 </p>
               </div>
             </div>
@@ -1156,28 +1503,80 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
           <div className="space-y-5 pt-2">
             {/* Seleção de Conexões */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm font-semibold">Instâncias de WhatsApp (Canais de Envio)</Label>
-                <span className="text-xs text-muted-foreground">
-                  {selectedInstanceIds.length} selecionada(s)
-                </span>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <Label className="text-sm font-semibold">
+                    Instâncias de WhatsApp (Canais de Envio da Empresa)
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Selecione as instâncias que farão os disparos. Estão listadas todas as
+                    instâncias da empresa.
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs px-2 text-primary"
+                    onClick={() => setSelectedInstanceIds(connectedInstances.map((i) => i.id))}
+                  >
+                    Marcar Todas
+                  </Button>
+                  {unitId !== "all" && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs px-2 text-primary"
+                      onClick={() => {
+                        const unitInstances = connectedInstances.filter(
+                          (i) => i.unit_id === unitId,
+                        );
+                        if (unitInstances.length > 0) {
+                          setSelectedInstanceIds(unitInstances.map((i) => i.id));
+                        } else {
+                          toast.info(
+                            `Nenhum chip conectado diretamente à "${selectedUnit?.name}". Você pode selecionar qualquer outro chip da empresa.`,
+                          );
+                        }
+                      }}
+                    >
+                      Desta Unidade
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs px-2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setSelectedInstanceIds([])}
+                  >
+                    Limpar
+                  </Button>
+                  <span className="text-xs font-semibold px-2 py-0.5 bg-muted rounded">
+                    {selectedInstanceIds.length} selecionada(s)
+                  </span>
+                </div>
               </div>
 
               {connectedInstances.length === 0 ? (
                 <div className="p-4 border rounded-lg bg-amber-500/10 border-amber-500/20 text-xs text-amber-700 dark:text-amber-300 flex items-center gap-2">
                   <AlertCircle className="h-4 w-4 shrink-0" />
-                  Nenhuma instância de WhatsApp conectada no momento. Conecte um canal no menu de Configurações antes de disparar.
+                  Nenhuma instância de WhatsApp conectada no momento. Conecte um canal no menu de
+                  Configurações antes de disparar.
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-48 overflow-y-auto p-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto p-1">
                   {connectedInstances.map((inst) => {
                     const isChecked = selectedInstanceIds.includes(inst.id);
+                    const instUnit = accessibleUnits.find((u) => u.id === inst.unit_id);
                     return (
                       <Card
                         key={inst.id}
                         onClick={() => {
                           setSelectedInstanceIds((prev) =>
-                            isChecked ? prev.filter((id) => id !== inst.id) : [...prev, inst.id]
+                            isChecked ? prev.filter((id) => id !== inst.id) : [...prev, inst.id],
                           );
                         }}
                         className={`p-3 cursor-pointer border transition-all flex items-center justify-between ${
@@ -1190,12 +1589,32 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                           <Checkbox checked={isChecked} />
                           <div>
                             <div className="text-sm font-semibold">{inst.name}</div>
-                            <div className="text-xs text-muted-foreground font-mono">
-                              {inst.instance_name}
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-xs text-muted-foreground font-mono">
+                                {inst.instance_name}
+                              </span>
+                              {instUnit ? (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px] px-1.5 py-0 font-normal"
+                                >
+                                  📍 {instUnit.name}
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] px-1.5 py-0 font-normal text-muted-foreground"
+                                >
+                                  🏢 Geral / Matriz
+                                </Badge>
+                              )}
                             </div>
                           </div>
                         </div>
-                        <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] text-emerald-600 border-emerald-500/30"
+                        >
                           Conectado
                         </Badge>
                       </Card>
@@ -1208,8 +1627,8 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                 <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-md p-2.5 text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
                   <ShieldCheck className="h-4 w-4 shrink-0" />
                   <span>
-                    <strong>Rotação de Chips Ativada!</strong> Os envios serão distribuídos igualmente entre as{" "}
-                    {selectedInstanceIds.length} instâncias em modo Round-Robin.
+                    <strong>Rotação de Chips Ativada!</strong> Os envios serão distribuídos
+                    igualmente entre as {selectedInstanceIds.length} instâncias em modo Round-Robin.
                   </span>
                 </div>
               )}
@@ -1223,7 +1642,8 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                   Intervalo Humano Aleatório (Jitter Anti-Ban)
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  Simula pausas humanas irregulares entre uma mensagem e outra para não ser bloqueado pela Meta.
+                  Simula pausas humanas irregulares entre uma mensagem e outra para não ser
+                  bloqueado pela Meta.
                 </p>
               </div>
 
@@ -1275,7 +1695,9 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
 
               {/* Janela de Horário */}
               <div className="pt-2 border-t space-y-2">
-                <Label className="text-xs font-semibold">Janela de Horário Permitido (Brasília)</Label>
+                <Label className="text-xs font-semibold">
+                  Janela de Horário Permitido (Brasília)
+                </Label>
                 <div className="flex items-center gap-3">
                   <Input
                     type="time"
@@ -1292,7 +1714,8 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                   />
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Se a campanha não terminar até o horário limite, ela pausa sozinha e retoma no dia seguinte.
+                  Se a campanha não terminar até o horário limite, ela pausa sozinha e retoma no dia
+                  seguinte.
                 </p>
               </div>
             </Card>
@@ -1342,9 +1765,22 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
             <Card className="p-4 bg-muted/20 space-y-3">
               <div className="flex items-center justify-between border-b pb-2">
                 <div>
-                  <h3 className="text-base font-bold">{campaignName}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold">{campaignName}</h3>
+                    {unitId !== "all" ? (
+                      <Badge variant="secondary" className="text-xs">
+                        📍 {selectedUnit?.name}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs text-muted-foreground">
+                        🏢 Empresa Geral
+                      </Badge>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    {audienceType === "segment" ? "Segmentação da Base Atendi" : "Importação de Planilha"}
+                    {audienceType === "segment"
+                      ? "Segmentação da Base Atendi"
+                      : "Importação de Planilha"}
                   </p>
                 </div>
                 <Badge variant="outline" className="text-xs">
@@ -1391,7 +1827,10 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                 <Label className="text-xs font-semibold flex items-center gap-1.5">
                   <Users className="h-4 w-4 text-primary" />
                   Lista de Destinatários ({filteredReviewContacts.length}{" "}
-                  {audienceType === "segment" && previewContacts.length > 0 && `de ${previewContacts.length}`} contatos)
+                  {audienceType === "segment" &&
+                    previewContacts.length > 0 &&
+                    `de ${previewContacts.length}`}{" "}
+                  contatos)
                 </Label>
 
                 <div className="relative w-48">
@@ -1445,19 +1884,21 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                             {audienceType === "segment" ? (
                               <>
                                 <TableCell className="py-1 text-muted-foreground text-[11px]">
-                                  {c.last_interaction ? (
-                                    formatDistanceToNow(new Date(c.last_interaction), {
-                                      addSuffix: true,
-                                      locale: ptBR,
-                                    })
-                                  ) : (
-                                    "-"
-                                  )}
+                                  {c.last_interaction
+                                    ? formatDistanceToNow(new Date(c.last_interaction), {
+                                        addSuffix: true,
+                                        locale: ptBR,
+                                      })
+                                    : "-"}
                                 </TableCell>
                                 <TableCell className="py-1">
                                   <div className="flex gap-1 overflow-hidden">
                                     {(c.tags || []).slice(0, 2).map((t: string) => (
-                                      <Badge key={t} variant="secondary" className="text-[9px] px-1 py-0">
+                                      <Badge
+                                        key={t}
+                                        variant="secondary"
+                                        className="text-[9px] px-1 py-0"
+                                      >
                                         {t}
                                       </Badge>
                                     ))}
@@ -1475,7 +1916,10 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
                             )}
                             <TableCell className="py-1 text-right">
                               {isValid ? (
-                                <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] text-emerald-600 border-emerald-500/30"
+                                >
                                   Pronto
                                 </Badge>
                               ) : (
@@ -1493,16 +1937,42 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
               )}
               {filteredReviewContacts.length > 150 && (
                 <p className="text-[10px] text-muted-foreground text-center">
-                  Exibindo os primeiros 150 contatos de {filteredReviewContacts.length}. Todos os {filteredReviewContacts.length} serão disparados.
+                  Exibindo os primeiros 150 contatos de {filteredReviewContacts.length}. Todos os{" "}
+                  {filteredReviewContacts.length} serão disparados.
                 </p>
               )}
             </div>
 
-            {/* Amostra da Mensagem */}
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Amostra do Texto:</Label>
-              <div className="bg-background border rounded-lg p-3 text-xs whitespace-pre-wrap">
-                {messagePreview}
+            {/* Variações de Mensagem (Teste A/B) */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                <span>Variações de Mensagem ({variations.length})</span>
+                {variations.length > 1 && (
+                  <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
+                    Teste A/B Ativado
+                  </Badge>
+                )}
+              </Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {variations.map((v, i) => (
+                  <Card key={v.id} className="p-3 bg-background border space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-xs flex items-center gap-1.5">
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          #{i + 1}
+                        </Badge>
+                        {v.name}
+                      </span>
+                      <Badge variant="outline" className="text-[10px] capitalize">
+                        {v.messageType}
+                        {v.mediaUrl ? " + mídia" : ""}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap font-sans bg-muted/30 p-2 rounded border">
+                      {v.content}
+                    </p>
+                  </Card>
+                ))}
               </div>
             </div>
           </div>
@@ -1510,11 +1980,7 @@ export function CreateCampaignDialog({ open, onOpenChange, companyId, onSuccess 
 
         <DialogFooter className="flex items-center justify-between sm:justify-between pt-4 border-t">
           {step > 1 ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setStep((s) => ((s - 1) as any))}
-            >
+            <Button type="button" variant="outline" onClick={() => setStep((s) => (s - 1) as any)}>
               <ChevronLeft className="h-4 w-4 mr-1" />
               Voltar
             </Button>

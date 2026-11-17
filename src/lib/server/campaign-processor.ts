@@ -88,13 +88,16 @@ async function ensureCampaignConversation({
   const phoneVariants = getPhoneVariants(cleanPhone);
   const { data: existingContacts } = await supabaseAdmin
     .from("contacts")
-    .select("id, merged_into_id")
+    .select("id, merged_into_id, unit_id")
     .eq("company_id", companyId)
     .in("phone", phoneVariants);
 
   let contactId: string;
   if (existingContacts && existingContacts.length > 0) {
     contactId = existingContacts[0].merged_into_id || existingContacts[0].id;
+    if (!existingContacts[0].unit_id && unitId) {
+      await supabaseAdmin.from("contacts").update({ unit_id: unitId }).eq("id", contactId);
+    }
   } else {
     const { data: newContact, error: createContactErr } = await supabaseAdmin
       .from("contacts")
@@ -202,7 +205,9 @@ export async function processCampaignsQueue(): Promise<void> {
     // 2. Busca campanhas ativas em execução
     const { data: activeCampaigns, error: campErr } = await supabaseAdmin
       .from("campaigns")
-      .select("id, company_id, unit_id, name, content, message_type, media_url, whatsapp_instance_ids, settings, stats")
+      .select(
+        "id, company_id, unit_id, name, content, message_type, media_url, whatsapp_instance_ids, settings, stats",
+      )
       .eq("status", "running")
       .order("created_at", { ascending: true })
       .limit(5);
@@ -217,14 +222,18 @@ export async function processCampaignsQueue(): Promise<void> {
 
         // Valida se está no horário/dias permitidos
         if (!isWithinAllowedSchedule(settings)) {
-          console.log(`[campaigns] Campanha "${campaign.name}" (${campaign.id}) aguardando janela de horário comercial.`);
+          console.log(
+            `[campaigns] Campanha "${campaign.name}" (${campaign.id}) aguardando janela de horário comercial.`,
+          );
           continue;
         }
 
         // Valida instâncias disponíveis
         const instanceIds: string[] = campaign.whatsapp_instance_ids || [];
         if (instanceIds.length === 0) {
-          console.error(`[campaigns] Campanha ${campaign.id} não possui instâncias de WhatsApp configuradas.`);
+          console.error(
+            `[campaigns] Campanha ${campaign.id} não possui instâncias de WhatsApp configuradas.`,
+          );
           await supabaseAdmin
             .from("campaigns")
             .update({ status: "failed", updated_at: nowIso })
@@ -239,27 +248,42 @@ export async function processCampaignsQueue(): Promise<void> {
           .in("id", instanceIds);
 
         const connectedInstances = (instances || []).filter(
-          (inst) => inst.status === "connected" || inst.status === "open"
+          (inst) => inst.status === "connected" || inst.status === "open",
         );
 
         if (connectedInstances.length === 0) {
-          console.warn(`[campaigns] Nenhuma das instâncias da campanha ${campaign.id} está conectada no momento.`);
+          console.warn(
+            `[campaigns] Nenhuma das instâncias da campanha ${campaign.id} está conectada no momento.`,
+          );
           continue;
         }
 
         // Busca lote de destinatários pendentes
         const batchSize = Math.min(Math.max(Number(settings.batch_size) || 15, 1), 50);
 
-        const { data: pendingRecipients, error: recipErr } = await supabaseAdmin
-          .from("campaign_recipients")
-          .select("id, phone, name, custom_variables, contact_id")
+        // Busca variações cadastradas da campanha
+        const { data: campaignVariations } = await (supabaseAdmin.from("campaign_messages") as any)
+          .select("id, name, message_type, content, media_url, media_name, is_active")
+          .eq("campaign_id", campaign.id)
+          .eq("is_active", true)
+          .order("created_at", { ascending: true });
+
+        const activeVariations = campaignVariations || [];
+
+        const { data: pendingRecipients, error: recipErr } = await (
+          supabaseAdmin.from("campaign_recipients") as any
+        )
+          .select("id, phone, name, custom_variables, contact_id, campaign_message_id, unit_id")
           .eq("campaign_id", campaign.id)
           .eq("status", "pending")
           .order("created_at", { ascending: true })
           .limit(batchSize);
 
         if (recipErr) {
-          console.error(`[campaigns] Erro ao buscar destinatários da campanha ${campaign.id}:`, recipErr);
+          console.error(
+            `[campaigns] Erro ao buscar destinatários da campanha ${campaign.id}:`,
+            recipErr,
+          );
           continue;
         }
 
@@ -269,18 +293,20 @@ export async function processCampaignsQueue(): Promise<void> {
           continue;
         }
 
-        // Busca dados da empresa e unidade para variáveis
-        const [{ data: companyData }, { data: unitData }] = await Promise.all([
-          supabaseAdmin.from("companies").select("name").eq("id", campaign.company_id).maybeSingle(),
-          campaign.unit_id
-            ? supabaseAdmin.from("units").select("name").eq("id", campaign.unit_id).maybeSingle()
-            : Promise.resolve({ data: null }),
+        // Busca dados da empresa e de todas as unidades para interpolação dinâmica
+        const [{ data: companyData }, { data: companyUnits }] = await Promise.all([
+          supabaseAdmin
+            .from("companies")
+            .select("name")
+            .eq("id", campaign.company_id)
+            .maybeSingle(),
+          supabaseAdmin.from("units").select("id, name").eq("company_id", campaign.company_id),
         ]);
 
         const companyName = companyData?.name || "Empresa";
-        const unitName = unitData?.name || "Unidade";
+        const unitsMap = new Map((companyUnits || []).map((u: any) => [u.id, u.name]));
 
-        // Processa cada destinatário do lote com rotação de instâncias (Round-Robin)
+        // Processa cada destinatário do lote com rotação de instâncias (Round-Robin) e variações
         for (let i = 0; i < pendingRecipients.length; i++) {
           const recipient = pendingRecipients[i];
           const instance = connectedInstances[i % connectedInstances.length];
@@ -292,9 +318,28 @@ export async function processCampaignsQueue(): Promise<void> {
               .update({ status: "processing", updated_at: new Date().toISOString() })
               .eq("id", recipient.id);
 
-            // Gera texto da mensagem com Spintax e Variáveis dinâmicas
+            // Determina a variação de mensagem a ser enviada
+            let chosenVariation = activeVariations.find(
+              (v: any) => v.id === recipient.campaign_message_id,
+            );
+            if (!chosenVariation && activeVariations.length > 0) {
+              chosenVariation = activeVariations[i % activeVariations.length];
+            }
+
+            const messageText = chosenVariation ? chosenVariation.content : campaign.content;
+            const messageType = chosenVariation
+              ? chosenVariation.message_type
+              : campaign.message_type || "text";
+            const mediaUrl = chosenVariation ? chosenVariation.media_url : campaign.media_url;
+            const variationId = chosenVariation?.id || recipient.campaign_message_id || null;
+
+            // Determina a unidade deste destinatário específico
+            const targetUnitId = recipient.unit_id || campaign.unit_id || instance.unit_id || null;
+            const unitName = targetUnitId ? unitsMap.get(targetUnitId) || "Unidade" : "Unidade";
+
+            // Gera texto da mensagem com Spintax e Variáveis dinâmicas da unidade real
             const renderedText = renderCampaignMessage(
-              campaign.content,
+              messageText,
               {
                 clientName: recipient.name,
                 phone: recipient.phone,
@@ -302,30 +347,31 @@ export async function processCampaignsQueue(): Promise<void> {
                 unitName,
                 customVariables: recipient.custom_variables as Record<string, unknown>,
               },
-              true // Habilita Spintax
+              true, // Habilita Spintax
             );
 
-            // Garante conversa silenciosa no Atendi
+            // Garante conversa silenciosa no Atendi na unidade correta
             const { conversationId, contactId } = await ensureCampaignConversation({
               companyId: campaign.company_id,
-              unitId: instance.unit_id || campaign.unit_id || null,
+              unitId: targetUnitId,
               instanceId: instance.id,
               phone: recipient.phone,
               name: recipient.name,
             });
 
             // Dispara a mensagem através do motor unificado do Atendi
-            const isMedia = campaign.message_type && campaign.message_type !== "text";
+            const isMedia = messageType && messageType !== "text";
             const sentMsg = await sendPlatformMessage({
               conversationId,
               text: renderedText,
-              mediaType: isMedia ? campaign.message_type : "text",
-              mediaBase64: isMedia ? campaign.media_url || undefined : undefined,
+              mediaType: isMedia ? messageType : "text",
+              mediaBase64: isMedia ? mediaUrl || undefined : undefined,
               senderType: "agent",
               keepStatus: true, // Mantém conversa em 'resolved' para não poluir atendimento
               metadata: {
                 campaign_id: campaign.id,
                 recipient_id: recipient.id,
+                variation_id: variationId,
                 is_campaign: true,
               },
             });
@@ -340,6 +386,7 @@ export async function processCampaignsQueue(): Promise<void> {
                 whatsapp_instance_id: instance.id,
                 conversation_id: conversationId,
                 contact_id: contactId,
+                campaign_message_id: variationId,
                 message_id: (sentMsg as any)?.id || null,
                 updated_at: new Date().toISOString(),
               })
@@ -409,8 +456,12 @@ export async function markCampaignRecipientReplied(conversationId: string): Prom
         .eq("id", recipient.id);
 
       // Recalcula estatísticas da campanha
-      await supabaseAdmin.rpc("recalculate_campaign_stats", { p_campaign_id: recipient.campaign_id });
-      console.log(`[campaigns] Destinatário ${recipient.id} marcado como 'replied' na campanha ${recipient.campaign_id}`);
+      await supabaseAdmin.rpc("recalculate_campaign_stats", {
+        p_campaign_id: recipient.campaign_id,
+      });
+      console.log(
+        `[campaigns] Destinatário ${recipient.id} marcado como 'replied' na campanha ${recipient.campaign_id}`,
+      );
     }
   } catch (e) {
     console.error("[campaigns] Erro ao marcar resposta do destinatário da campanha:", e);

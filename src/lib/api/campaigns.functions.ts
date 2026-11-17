@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sanitizeCampaignPhone } from "../campaign-template";
+import { getPhoneVariants } from "../utils";
 import { processCampaignsQueue } from "../server/campaign-processor";
 
 /**
@@ -34,7 +35,7 @@ export const listCampaignsAction = createServerFn({ method: "GET" })
       search: z.string().optional(),
       page: z.number().default(1),
       pageSize: z.number().default(20),
-    })
+    }),
   )
   .handler(async ({ data, context }) => {
     await assertCompanyAccess(context.userId, data.companyId);
@@ -67,7 +68,7 @@ export const listCampaignsAction = createServerFn({ method: "GET" })
         units(id, name),
         profiles:created_by(id, name)
       `,
-        { count: "exact" }
+        { count: "exact" },
       )
       .eq("company_id", data.companyId)
       .order("created_at", { ascending: false })
@@ -108,7 +109,7 @@ export const getCampaignDetailsAction = createServerFn({ method: "GET" })
     z.object({
       campaignId: z.string().uuid(),
       companyId: z.string().uuid(),
-    })
+    }),
   )
   .handler(async ({ data, context }) => {
     await assertCompanyAccess(context.userId, data.companyId);
@@ -120,7 +121,7 @@ export const getCampaignDetailsAction = createServerFn({ method: "GET" })
         *,
         units(id, name),
         profiles:created_by(id, name)
-      `
+      `,
       )
       .eq("id", data.campaignId)
       .eq("company_id", data.companyId)
@@ -140,7 +141,19 @@ export const getCampaignDetailsAction = createServerFn({ method: "GET" })
       instances = instData || [];
     }
 
-    return { campaign, instances };
+    // Busca variações cadastradas de mensagens da campanha
+    const { data: messages } = await (supabaseAdmin.from("campaign_messages") as any)
+      .select("*")
+      .eq("campaign_id", data.campaignId)
+      .order("created_at", { ascending: true });
+
+    return {
+      campaign: {
+        ...campaign,
+        messages: messages || [],
+      },
+      instances,
+    };
   });
 
 /**
@@ -154,15 +167,24 @@ export const listCampaignRecipientsAction = createServerFn({ method: "GET" })
       status: z.string().optional(),
       page: z.number().default(1),
       pageSize: z.number().default(50),
-    })
+    }),
   )
   .handler(async ({ data }) => {
     const from = (data.page - 1) * data.pageSize;
     const to = from + data.pageSize - 1;
 
-    let query = supabaseAdmin
-      .from("campaign_recipients")
-      .select("*", { count: "exact" })
+    let query = (supabaseAdmin.from("campaign_recipients") as any)
+      .select(
+        `
+        *,
+        campaign_messages (
+          id,
+          name,
+          message_type
+        )
+      `,
+        { count: "exact" },
+      )
       .eq("campaign_id", data.campaignId)
       .order("created_at", { ascending: true })
       .range(from, to);
@@ -200,7 +222,7 @@ export const previewAudienceCountAction = createServerFn({ method: "POST" })
         unit_ids: z.array(z.string().uuid()).optional(),
         only_without_open_conversations: z.boolean().optional(),
       }),
-    })
+    }),
   )
   .handler(async ({ data, context }) => {
     await assertCompanyAccess(context.userId, data.companyId);
@@ -235,20 +257,17 @@ export const previewAudienceContactsAction = createServerFn({ method: "POST" })
       }),
       limit: z.number().default(500),
       offset: z.number().default(0),
-    })
+    }),
   )
   .handler(async ({ data, context }) => {
     await assertCompanyAccess(context.userId, data.companyId);
 
-    const { data: contacts, error } = await supabaseAdmin.rpc(
-      "get_campaign_audience_contacts",
-      {
-        p_company_id: data.companyId,
-        p_filters: data.filters,
-        p_limit: data.limit,
-        p_offset: data.offset,
-      }
-    );
+    const { data: contacts, error } = await supabaseAdmin.rpc("get_campaign_audience_contacts", {
+      p_company_id: data.companyId,
+      p_filters: data.filters,
+      p_limit: data.limit,
+      p_offset: data.offset,
+    });
 
     if (error) {
       console.error("[campaigns] Erro ao buscar contatos da audiência:", error);
@@ -284,13 +303,28 @@ export const createCampaignAction = createServerFn({ method: "POST" })
           z.object({
             phone: z.union([z.string(), z.number()]),
             name: z.string().optional().nullable(),
+            unitId: z.string().uuid().optional().nullable(),
             customVariables: z.record(z.any()).optional(),
-          })
+          }),
         )
         .optional(),
       saveImportedToContacts: z.boolean().optional(),
-      messageType: z.enum(["text", "image", "video", "audio", "document"]).default("text"),
-      content: z.string().min(1, "Mensagem não pode ser vazia"),
+      messages: z
+        .array(
+          z.object({
+            name: z.string().default("Variação 1"),
+            messageType: z.enum(["text", "image", "video", "audio", "document"]).default("text"),
+            content: z.string().min(1, "Mensagem não pode ser vazia"),
+            mediaUrl: z.string().optional().nullable(),
+            mediaName: z.string().optional().nullable(),
+          }),
+        )
+        .optional(),
+      messageType: z
+        .enum(["text", "image", "video", "audio", "document"])
+        .default("text")
+        .optional(),
+      content: z.string().optional(),
       mediaUrl: z.string().optional().nullable(),
       mediaName: z.string().optional().nullable(),
       whatsappInstanceIds: z.array(z.string().uuid()).min(1, "Selecione ao menos 1 instância"),
@@ -307,7 +341,7 @@ export const createCampaignAction = createServerFn({ method: "POST" })
         .default({}),
       scheduledAt: z.string().nullable().optional(),
       startImmediately: z.boolean().default(true),
-    })
+    }),
   )
   .handler(async ({ data, context }) => {
     await assertCompanyAccess(context.userId, data.companyId);
@@ -316,9 +350,24 @@ export const createCampaignAction = createServerFn({ method: "POST" })
     const initialStatus = isScheduled ? "scheduled" : "running";
     const nowIso = new Date().toISOString();
 
+    // Determina variações de mensagens
+    const rawMessages =
+      data.messages && data.messages.length > 0
+        ? data.messages
+        : [
+            {
+              name: "Variação 1",
+              messageType: data.messageType || "text",
+              content: data.content || "Olá!",
+              mediaUrl: data.mediaUrl || null,
+              mediaName: data.mediaName || null,
+            },
+          ];
+
+    const primaryMessage = rawMessages[0];
+
     // 1. Cria a campanha no banco
-    const { data: campaign, error: campErr } = await supabaseAdmin
-      .from("campaigns")
+    const { data: campaign, error: campErr } = await (supabaseAdmin.from("campaigns") as any)
       .insert({
         company_id: data.companyId,
         unit_id: data.unitId || null,
@@ -328,10 +377,10 @@ export const createCampaignAction = createServerFn({ method: "POST" })
         status: initialStatus,
         audience_type: data.audienceType,
         audience_filters: data.audienceFilters || {},
-        message_type: data.messageType,
-        content: data.content,
-        media_url: data.mediaUrl || null,
-        media_name: data.mediaName || null,
+        message_type: primaryMessage.messageType,
+        content: primaryMessage.content,
+        media_url: primaryMessage.mediaUrl || null,
+        media_name: primaryMessage.mediaName || null,
         whatsapp_instance_ids: data.whatsappInstanceIds,
         settings: data.settings,
         scheduled_at: isScheduled ? new Date(data.scheduledAt!).toISOString() : null,
@@ -344,7 +393,32 @@ export const createCampaignAction = createServerFn({ method: "POST" })
       throw new Error(`Falha ao criar campanha: ${campErr?.message}`);
     }
 
-    // 2. Popula os destinatários
+    // 1.1 Insere todas as variações em campaign_messages
+    const variationRows = rawMessages.map((m, idx) => ({
+      campaign_id: campaign.id,
+      company_id: data.companyId,
+      name: m.name?.trim() || `Variação ${idx + 1}`,
+      message_type: m.messageType,
+      content: m.content,
+      media_url: m.mediaUrl || null,
+      media_name: m.mediaName || null,
+      is_active: true,
+    }));
+
+    const { data: insertedMessages, error: msgErr } = await (
+      supabaseAdmin.from("campaign_messages") as any
+    )
+      .insert(variationRows)
+      .select("id, name, message_type");
+
+    if (msgErr) {
+      console.error("[campaigns] Erro ao cadastrar variações de mensagens:", msgErr);
+    }
+
+    const availableVariations: Array<{ id: string; name: string }> = insertedMessages || [];
+    const variationCount = availableVariations.length;
+
+    // 2. Popula os destinatários distribuindo entre as variações
     let totalAdded = 0;
 
     if (data.audienceType === "import") {
@@ -356,13 +430,23 @@ export const createCampaignAction = createServerFn({ method: "POST" })
         const sanitized = sanitizeCampaignPhone(row.phone);
         if (sanitized.valid && !seenPhones.has(sanitized.phone)) {
           seenPhones.add(sanitized.phone);
+          const assignedVariation =
+            variationCount > 0
+              ? availableVariations[cleanRecipients.length % variationCount]
+              : null;
+
+          const targetUnitId =
+            row.unitId || (data.unitId && data.unitId !== "all" ? data.unitId : null);
+
           cleanRecipients.push({
             campaign_id: campaign.id,
             company_id: data.companyId,
+            unit_id: targetUnitId,
             phone: sanitized.phone,
             name: row.name?.trim() || null,
             custom_variables: row.customVariables || {},
             status: "pending",
+            campaign_message_id: assignedVariation?.id || null,
           });
         }
       }
@@ -371,6 +455,50 @@ export const createCampaignAction = createServerFn({ method: "POST" })
         // Se nenhum número foi válido, remove a campanha criada
         await supabaseAdmin.from("campaigns").delete().eq("id", campaign.id);
         throw new Error("Nenhum telefone válido encontrado na lista importada.");
+      }
+
+      // Se saveImportedToContacts = true, vincula e salva os contatos na base com a unidade
+      if (data.saveImportedToContacts && cleanRecipients.length > 0) {
+        for (const rec of cleanRecipients) {
+          try {
+            const phoneVariants = getPhoneVariants(rec.phone);
+            const { data: existing } = await supabaseAdmin
+              .from("contacts")
+              .select("id, unit_id")
+              .eq("company_id", data.companyId)
+              .in("phone", phoneVariants)
+              .limit(1)
+              .maybeSingle();
+
+            if (existing) {
+              if (!existing.unit_id && rec.unit_id) {
+                await supabaseAdmin
+                  .from("contacts")
+                  .update({ unit_id: rec.unit_id })
+                  .eq("id", existing.id);
+              }
+              rec.contact_id = existing.id;
+            } else {
+              const { data: newCt } = await supabaseAdmin
+                .from("contacts")
+                .insert({
+                  company_id: data.companyId,
+                  unit_id: rec.unit_id,
+                  name: rec.name || rec.phone,
+                  phone: rec.phone,
+                  tags: ["campanha", "importado"],
+                })
+                .select("id")
+                .single();
+
+              if (newCt) {
+                rec.contact_id = newCt.id;
+              }
+            }
+          } catch (ctErr) {
+            console.error("[campaigns] Erro ao sincronizar contato importado com unidade:", ctErr);
+          }
+        }
       }
 
       // Inserção em lotes de 500 no banco
@@ -392,7 +520,7 @@ export const createCampaignAction = createServerFn({ method: "POST" })
           p_filters: data.audienceFilters || {},
           p_limit: 10000,
           p_offset: 0,
-        }
+        },
       );
 
       if (segErr || !contacts || contacts.length === 0) {
@@ -407,14 +535,24 @@ export const createCampaignAction = createServerFn({ method: "POST" })
         const sanitized = sanitizeCampaignPhone(ct.phone);
         if (sanitized.valid && !seenPhones.has(sanitized.phone)) {
           seenPhones.add(sanitized.phone);
+          const assignedVariation =
+            variationCount > 0
+              ? availableVariations[segmentRecipients.length % variationCount]
+              : null;
+
+          const targetUnitId =
+            ct.unit_id || (data.unitId && data.unitId !== "all" ? data.unitId : null);
+
           segmentRecipients.push({
             campaign_id: campaign.id,
             company_id: data.companyId,
+            unit_id: targetUnitId,
             contact_id: ct.id,
             phone: sanitized.phone,
             name: ct.name?.trim() || null,
             custom_variables: {},
             status: "pending",
+            campaign_message_id: assignedVariation?.id || null,
           });
         }
       }
@@ -433,7 +571,7 @@ export const createCampaignAction = createServerFn({ method: "POST" })
     // 4. Se configurado para iniciar imediatamente, engatilha o worker
     if (!isScheduled) {
       processCampaignsQueue().catch((e) =>
-        console.error("[campaigns] Erro no processamento inicial da campanha:", e)
+        console.error("[campaigns] Erro no processamento inicial da campanha:", e),
       );
     }
 
@@ -453,7 +591,7 @@ export const pauseCampaignAction = createServerFn({ method: "POST" })
     z.object({
       campaignId: z.string().uuid(),
       companyId: z.string().uuid(),
-    })
+    }),
   )
   .handler(async ({ data, context }) => {
     await assertCompanyAccess(context.userId, data.companyId);
@@ -480,7 +618,7 @@ export const resumeCampaignAction = createServerFn({ method: "POST" })
     z.object({
       campaignId: z.string().uuid(),
       companyId: z.string().uuid(),
-    })
+    }),
   )
   .handler(async ({ data, context }) => {
     await assertCompanyAccess(context.userId, data.companyId);
@@ -496,7 +634,7 @@ export const resumeCampaignAction = createServerFn({ method: "POST" })
     }
 
     processCampaignsQueue().catch((e) =>
-      console.error("[campaigns] Erro ao retomar fila da campanha:", e)
+      console.error("[campaigns] Erro ao retomar fila da campanha:", e),
     );
 
     return { success: true };
@@ -511,7 +649,7 @@ export const cancelCampaignAction = createServerFn({ method: "POST" })
     z.object({
       campaignId: z.string().uuid(),
       companyId: z.string().uuid(),
-    })
+    }),
   )
   .handler(async ({ data, context }) => {
     await assertCompanyAccess(context.userId, data.companyId);
