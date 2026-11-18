@@ -781,12 +781,13 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
   * Agendamento: Escolhe datas, horários e orienta o comparecimento. Não vende tratamentos nem negocia valores; se o cliente pedir novos procedimentos, passa para Vendas.
 - Quando a necessidade for de competência de outro colega, acione IMEDIATAMENTE 'delegar_para_outro_agente_ia'.
 9. FLUXO ESPECIAL DE MIGRAÇÃO PARA O WHATSAPP (INSTAGRAM DIRECT):
-- Quando estiver atendendo no Instagram Direct, o objetivo é acolher, qualificar e migrar o cliente para o WhatsApp da unidade mais próxima:
+- Quando estiver atendendo no Instagram Direct, o seu papel é EXCLUSIVO de triagem e acolhimento. Você NÃO atende no WhatsApp e NÃO vende tratamentos nem passa valores no Direct:
   1) Descubra com simpatia o primeiro nome (se ainda não souber) e o procedimento/região de interesse.
   2) Pergunte qual cidade/unidade física fica mais próxima para ela (Aracruz, Linhares, Mantena, São Mateus ou Serra).
-  3) Assim que ela indicar a cidade, use 'definir_unidade' e convide para o WhatsApp: explique que vai enviar fotos dos resultados, detalhes do protocolo e as condições especiais com valores direto no WhatsApp, pedindo o número com DDD.
-  4) Assim que o cliente fornecer o número de WhatsApp, chame IMEDIATAMENTE a ferramenta nativa 'chamar_no_whatsapp' informando o telefone, unidade e a mensagem inicial de acolhimento.
-  5) No texto enviado no Instagram, avise calorosamente que você já enviou uma mensagem para ela no WhatsApp pelo número oficial da unidade.
+  3) Assim que ela indicar a cidade, use 'definir_unidade' e convide para o WhatsApp: explique com carinho que vai passar o contato para as consultoras especialistas da unidade física no WhatsApp para enviar fotos de resultados, detalhes e condições especiais, pedindo o número com DDD.
+  4) REGRA INEGOCIÁVEL: NUNCA passe valores, preços numéricos, parcelas ou orçamentos no Direct do Instagram.
+  5) Assim que o cliente fornecer o número de WhatsApp, chame IMEDIATAMENTE a ferramenta nativa 'chamar_no_whatsapp' informando o telefone, a unidade, o procedimento de interesse e o nome.
+  6) No texto enviado no Instagram, avise calorosamente que você já passou o atendimento para a consultora da unidade de {{unidade}} e que ela já vai chamar a cliente no WhatsApp. O seu papel na conversa encerra aqui.
 ================================================`);
 
     if (agent.prompt_personality)
@@ -1149,7 +1150,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       function: {
         name: "chamar_no_whatsapp",
         description:
-          "Inicia o atendimento ativo no WhatsApp do cliente através da instância oficial da unidade física mais próxima (Aracruz, Linhares, Mantena, São Mateus ou Serra). Acione imediatamente assim que o cliente fornecer o número de WhatsApp no Instagram/Direct.",
+          "Transfere o lead do Instagram para o WhatsApp da unidade física (Aracruz, Linhares, Mantena, São Mateus ou Serra), onde a consultora especialista de vendas da filial assumirá o atendimento comercial. Acione imediatamente assim que o cliente fornecer o número de WhatsApp no Direct.",
         parameters: {
           type: "object",
           properties: {
@@ -1163,10 +1164,20 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
               description:
                 "Nome da cidade ou unidade física desejada pelo cliente ('Aracruz', 'Linhares', 'Mantena', 'São Mateus' ou 'Serra').",
             },
+            procedimento_interesse: {
+              type: "string",
+              description:
+                "Procedimento ou área de interesse identificada na triagem do Instagram (ex: 'Depilação a Laser - Contorno da barba', 'Clareamento íntimo').",
+            },
+            nome_cliente: {
+              type: "string",
+              description:
+                "Nome informado pelo cliente na conversa (ex: 'Rhian', 'Mariana').",
+            },
             mensagem_whatsapp: {
               type: "string",
               description:
-                "Primeira mensagem calorosa, personalizada e acolhedora que será enviada para o WhatsApp do cliente pelo número da unidade.",
+                "Mensagem de abertura enviada pela consultora de vendas da unidade no WhatsApp, acolhendo o cliente e referenciando o interesse do Instagram.",
             },
           },
           required: ["telefone"],
@@ -1376,6 +1387,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           chamarNoWhatsappData = {
             telefone: args.telefone || "",
             unidade_nome: args.unidade_nome || null,
+            procedimento_interesse: args.procedimento_interesse || null,
+            nome_cliente: args.nome_cliente || null,
             mensagem_whatsapp: args.mensagem_whatsapp || "",
           };
         } else if (fnName === "criar_oportunidade" && agent.allow_opportunities) {
@@ -1649,14 +1662,33 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             if (fallbackUnit) targetUnitName = fallbackUnit.name;
           }
 
-          // 2. Atualizar o telefone e unidade no contato
+          // 2. Atualizar o telefone, nome, unidade e origem no contato
+          const contactUpdates: Record<string, any> = {
+            phone: rawPhone,
+            source: "Instagram Direct",
+            source_details: "Instagram @esteticaelaser.rede",
+          };
+          if (targetUnitId) {
+            contactUpdates.unit_id = targetUnitId;
+          }
+          if (
+            chamarNoWhatsappData.nome_cliente &&
+            (!clientFirstName || clientFirstName === "Desconhecido")
+          ) {
+            contactUpdates.name = chamarNoWhatsappData.nome_cliente.trim();
+          }
           await supabaseAdmin
             .from("contacts")
-            .update({
-              phone: rawPhone,
-              ...(targetUnitId ? { unit_id: targetUnitId } : {}),
-            })
+            .update(contactUpdates)
             .eq("id", conv.contact_id);
+
+          // Atualizar unidade na conversa do Instagram também
+          if (targetUnitId && (!conv.unit_id || conv.unit_id !== targetUnitId)) {
+            await supabaseAdmin
+              .from("conversations")
+              .update({ unit_id: targetUnitId })
+              .eq("id", conversationId);
+          }
 
           // 3. Buscar as instâncias de WhatsApp da empresa
           let targetInstanceId: string | null = null;
@@ -1702,7 +1734,94 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             throw new Error("Nenhuma instância de WhatsApp disponível para envio.");
           }
 
-          // 4. Buscar ou criar conversa de WhatsApp para este contato
+          // 4. Resolver o Agente de Vendas do WhatsApp (especialista de WhatsApp, nunca a IA de triagem do Direct)
+          let whatsAppAgentId: string | null = null;
+          let whatsAppAgentName = "Helena";
+
+          // Prioridade 1: Agente dedicado à instância de WhatsApp de destino (se houver)
+          const { data: instAgent } = await supabaseAdmin
+            .from("ai_agents")
+            .select("id, name")
+            .eq("company_id", effectiveCompanyId)
+            .eq("instance_id", targetInstanceId)
+            .eq("is_active", true)
+            .maybeSingle();
+
+          if (instAgent && instAgent.id !== agent.id) {
+            whatsAppAgentId = instAgent.id;
+            whatsAppAgentName = instAgent.name;
+          }
+
+          // Prioridade 2: Agente dedicado à unidade de destino (se houver)
+          if (!whatsAppAgentId && targetUnitId) {
+            const { data: unitAgent } = await supabaseAdmin
+              .from("ai_agents")
+              .select("id, name")
+              .eq("company_id", effectiveCompanyId)
+              .eq("unit_id", targetUnitId)
+              .eq("is_active", true)
+              .maybeSingle();
+            if (unitAgent && unitAgent.id !== agent.id) {
+              whatsAppAgentId = unitAgent.id;
+              whatsAppAgentName = unitAgent.name;
+            }
+          }
+
+          // Prioridade 3: Agente especialista em Vendas no WhatsApp (ex: "Helena - Consultora de Vendas")
+          if (!whatsAppAgentId) {
+            const { data: salesAgent } = await supabaseAdmin
+              .from("ai_agents")
+              .select("id, name")
+              .eq("company_id", effectiveCompanyId)
+              .neq("id", agent.id)
+              .eq("is_active", true)
+              .ilike("ai_type", "%Vendas%")
+              .maybeSingle();
+            if (salesAgent) {
+              whatsAppAgentId = salesAgent.id;
+              whatsAppAgentName = salesAgent.name;
+            }
+          }
+
+          // Prioridade 4: Agente principal da empresa (excluindo o agente do Instagram)
+          if (!whatsAppAgentId) {
+            const { data: mainAgent } = await supabaseAdmin
+              .from("ai_agents")
+              .select("id, name")
+              .eq("company_id", effectiveCompanyId)
+              .neq("id", agent.id)
+              .eq("is_active", true)
+              .eq("is_main_agent", true)
+              .maybeSingle();
+            if (mainAgent) {
+              whatsAppAgentId = mainAgent.id;
+              whatsAppAgentName = mainAgent.name;
+            }
+          }
+
+          // Prioridade 5: Qualquer outro agente ativo diferente do Instagram
+          if (!whatsAppAgentId) {
+            const { data: fallbackAgent } = await supabaseAdmin
+              .from("ai_agents")
+              .select("id, name")
+              .eq("company_id", effectiveCompanyId)
+              .neq("id", agent.id)
+              .eq("is_active", true)
+              .limit(1)
+              .maybeSingle();
+            if (fallbackAgent) {
+              whatsAppAgentId = fallbackAgent.id;
+              whatsAppAgentName = fallbackAgent.name;
+            }
+          }
+
+          // Se não houver nenhum outro agente cadastrado, mantém o agente atual como fallback extremo
+          if (!whatsAppAgentId) {
+            whatsAppAgentId = agent.id;
+            whatsAppAgentName = agent.name;
+          }
+
+          // 5. Buscar ou criar conversa de WhatsApp para este contato
           let whatsappConvId: string | null = null;
           const { data: existingWaConvs } = await supabaseAdmin
             .from("conversations")
@@ -1719,7 +1838,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
               .update({
                 status: "active",
                 ai_active: true,
-                ai_agent_id: agent.id,
+                ai_agent_id: whatsAppAgentId,
+                unit_id: targetUnitId,
                 remote_id: rawPhone,
                 last_message_at: new Date().toISOString(),
               })
@@ -1736,7 +1856,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
                 remote_id: rawPhone,
                 status: "active",
                 ai_active: true,
-                ai_agent_id: agent.id,
+                ai_agent_id: whatsAppAgentId,
                 started_at: new Date().toISOString(),
                 last_message_at: new Date().toISOString(),
                 last_message_preview: (
@@ -1769,27 +1889,42 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             }
           }
 
-          // 5. Preparar mensagem de abertura no WhatsApp
-          const firstName = clientFirstName || "";
-          const defaultWaMsg = `Olá${firstName ? `, ${firstName}` : ""}! Aqui é a ${agent.name} da Estética & Laser${targetUnitName ? ` de ${targetUnitName}` : ""} ✨ Conforme combinamos lá no Instagram, vim aqui te atender com todo carinho! Como posso te ajudar hoje?`;
+          // 6. Preparar mensagem de abertura no WhatsApp (em nome da consultora especialista do WhatsApp)
+          const cleanConsultantName = whatsAppAgentName.split(" - ")[0].trim();
+          const firstName =
+            chamarNoWhatsappData.nome_cliente || clientFirstName || "";
+          const interestText = chamarNoWhatsappData.procedimento_interesse
+            ? ` sobre ${chamarNoWhatsappData.procedimento_interesse}`
+            : "";
+
+          const defaultWaMsg = `Olá${firstName ? `, ${firstName}` : ""}! Aqui é a ${cleanConsultantName}, consultora da Estética & Laser${targetUnitName ? ` de ${targetUnitName}` : ""} ✨ Nossa equipe me passou o seu contato do Instagram${interestText} e estou aqui para te passar as informações e condições especiais! Como posso te ajudar hoje?`;
           const finalWaMsg = (chamarNoWhatsappData.mensagem_whatsapp || defaultWaMsg).trim();
 
-          // 6. Enviar a mensagem para o cliente no WhatsApp através da instância da filial
+          // 7. Enviar a mensagem para o cliente no WhatsApp através da instância da filial
           console.log(
-            `[ai-generator] Calling customer on WhatsApp (${rawPhone}) via instance ${targetInstanceName} (${targetUnitName})...`,
+            `[ai-generator] Calling customer on WhatsApp (${rawPhone}) via instance ${targetInstanceName} (${targetUnitName}) with agent ${cleanConsultantName}...`,
           );
           await sendPlatformMessage({
             conversationId: whatsappConvId,
-            text: `*${agent.name}*:\n${finalWaMsg}`,
+            text: `*${cleanConsultantName}*:\n${finalWaMsg}`,
             senderType: "agent",
-            aiAgentId: agent.id,
+            aiAgentId: whatsAppAgentId,
           });
 
-          // 7. Inserir nota de auditoria no histórico da conversa do Instagram
+          // 8. Inserir nota de transferência na conversa do WhatsApp
+          await supabaseAdmin.from("messages").insert({
+            conversation_id: whatsappConvId,
+            sender_type: "system",
+            content: `📱 Atendimento iniciado via transferência do Instagram Direct.\nLead qualificado com interesse${interestText || " em tratamentos a laser"} na unidade de ${targetUnitName || "Central"}.\nConsultora designada: ${cleanConsultantName} (${whatsAppAgentName}).`,
+            is_internal: true,
+            created_at: new Date().toISOString(),
+          });
+
+          // 9. Inserir nota de auditoria no histórico da conversa do Instagram
           await supabaseAdmin.from("messages").insert({
             conversation_id: conversationId,
             sender_type: "system",
-            content: `📱 Atendimento migrado para o WhatsApp com sucesso!\nNúmero: +${rawPhone}\nUnidade: ${targetUnitName || "Central"}\nInstância: ${targetInstanceName}`,
+            content: `📱 Atendimento migrado para o WhatsApp com sucesso!\nNúmero: +${rawPhone}\nUnidade: ${targetUnitName || "Central"}\nConsultora no WhatsApp: ${cleanConsultantName}\nInstância: ${targetInstanceName}`,
             is_internal: true,
             created_at: new Date().toISOString(),
           });
@@ -1798,7 +1933,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             if (call.function?.name === "chamar_no_whatsapp") {
               toolExecutionResults[call.id] = {
                 status: "success",
-                message: `Mensagem enviada com sucesso no WhatsApp (+${rawPhone}) pela filial de ${targetUnitName || "sua região"} através da instância '${targetInstanceName}'. Avise a cliente no Instagram com simpatia que você já chamou ela no WhatsApp para ela dar uma olhada!`,
+                message: `Lead transferido com sucesso para a consultora ${cleanConsultantName} no WhatsApp (+${rawPhone}) na filial de ${targetUnitName || "sua região"}. Avise a cliente no Instagram com simpatia que você já passou o atendimento para a consultora da unidade e que ela já vai chamar a cliente no WhatsApp agora mesmo!`,
               };
             }
           }
