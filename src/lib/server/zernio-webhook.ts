@@ -92,15 +92,11 @@ export async function handleZernioWebhook(request: Request): Promise<Response> {
     });
   }
 
-  // 3. RETORNAR 200 IMEDIATO (§7.2, §7.3)
-  // O Zernio aborta requisições após ~5 segundos; processamos em background
-  const processPromise = processarPayloadZernio(body, company, request).catch((err) => {
-    console.error("[zernio:webhook] Erro no processamento assíncrono:", err);
-  });
-
-  const waitUntilFn = (request as any).waitUntil || (request as any).ctx?.waitUntil;
-  if (typeof waitUntilFn === "function") {
-    waitUntilFn(processPromise);
+  // 3. Processar payload de forma garantida para não ser congelado pelo runtime serverless
+  try {
+    await processarPayloadZernio(body, company, request);
+  } catch (err) {
+    console.error("[zernio:webhook] Erro no processamento:", err);
   }
 
   return new Response(JSON.stringify({ ok: true, status: "received" }), {

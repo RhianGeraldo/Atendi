@@ -942,6 +942,14 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         if (msg.sender_type === "agent") {
           const match = content.match(/^\*?.+?\*?:\s*([\s\S]*)$/);
           if (match) content = match[1];
+
+          // Evita que o modelo leia usernames antigos em mensagens passadas do histórico
+          if (instagramUsername) {
+            const cleanIg = instagramUsername.replace(/^@/, "").trim();
+            if (cleanIg) {
+              content = content.replace(new RegExp(`@?${cleanIg}\\b`, "gi"), clientFirstName || "");
+            }
+          }
         }
 
         let role = msg.sender_type === "contact" ? "user" : "assistant";
@@ -2648,6 +2656,19 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
     // Sanitização final rigorosa: NENHUMA tag ou comando em colchetes chega ao cliente
     cleanResponse = sanitizeCustomerFacingText(cleanResponse);
+
+    // Substitui qualquer vazamento residual de username pelo nome real do cliente
+    if (instagramUsername) {
+      const cleanIg = instagramUsername.replace(/^@/, "").trim();
+      if (cleanIg) {
+        const replacementName = clientFirstName || "";
+        cleanResponse = cleanResponse.replace(
+          new RegExp(`@?${cleanIg}\\b`, "gi"),
+          replacementName,
+        );
+        cleanResponse = cleanResponse.replace(/\s{2,}/g, " ").replace(/,\s*,/g, ",");
+      }
+    }
 
     // 10. Enviar mensagem limpa para o cliente via Plataforma
     if (cleanResponse.length > 0) {

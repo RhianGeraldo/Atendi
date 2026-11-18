@@ -1,8 +1,8 @@
 import { generateAndSendAiResponse } from "./ai-generator";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
-// Janela de silêncio de 7 segundos para agrupar mensagens consecutivas do cliente
-const BUFFER_MS = 7000;
+// Janela de silêncio de 2 segundos para agrupar mensagens consecutivas do cliente
+const BUFFER_MS = 2000;
 
 /**
  * Despacha uma tarefa assíncrona em background.
