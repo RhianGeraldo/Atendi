@@ -25,7 +25,15 @@ import {
   Trash2,
   Edit3,
   Bookmark,
+  Building2,
+  Calendar,
+  BarChart2,
+  FileSpreadsheet,
+  Activity,
+  Pencil,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +59,7 @@ import { useActiveCompany } from "@/lib/active-company-context";
 import { useAccessibleUnits } from "@/lib/hooks/use-accessible-units";
 import {
   listCampaignsAction,
+  startCampaignAction,
   pauseCampaignAction,
   resumeCampaignAction,
   cancelCampaignAction,
@@ -58,6 +67,59 @@ import {
 } from "@/lib/api/campaigns.functions";
 import { CreateCampaignDialog } from "@/components/campaigns/create-campaign-dialog";
 import { CampaignDetailsSheet } from "@/components/campaigns/campaign-details-sheet";
+
+const STATUS_MAP: Record<
+  string,
+  {
+    label: string;
+    variant: "default" | "outline" | "secondary" | "destructive";
+    icon: any;
+    color: string;
+  }
+> = {
+  draft: {
+    label: "Rascunho",
+    variant: "outline",
+    icon: Clock,
+    color: "text-amber-500 border-amber-500/50 bg-amber-500/10",
+  },
+  running: {
+    label: "Rodando",
+    variant: "secondary",
+    icon: Activity,
+    color: "text-primary border-primary/50 bg-primary/10",
+  },
+  completed: {
+    label: "Concluída",
+    variant: "secondary",
+    icon: CheckCircle2,
+    color: "text-emerald-500 border-emerald-500/50 bg-emerald-500/10",
+  },
+  paused: {
+    label: "Pausada",
+    variant: "outline",
+    icon: Pause,
+    color: "text-amber-500 border-amber-500/50 bg-amber-500/10",
+  },
+  scheduled: {
+    label: "Agendada",
+    variant: "outline",
+    icon: Clock,
+    color: "text-blue-500 border-blue-500/50 bg-blue-500/10",
+  },
+  cancelled: {
+    label: "Cancelada",
+    variant: "destructive",
+    icon: XCircle,
+    color: "text-destructive border-destructive/50 bg-destructive/10",
+  },
+  failed: {
+    label: "Falha",
+    variant: "destructive",
+    icon: AlertTriangle,
+    color: "text-destructive border-destructive/50 bg-destructive/10",
+  },
+};
 
 export const Route = createFileRoute("/_authenticated/campaigns")({
   component: () => (
@@ -110,7 +172,19 @@ function CampaignsPage() {
   // KPIs calculados
   const kpis = useMemoKpis(campaigns);
 
-  // Ações de Pausar / Retomar / Cancelar
+  // Ações de Iniciar / Pausar / Retomar / Cancelar
+  const startMutation = useMutation({
+    mutationFn: (campaignId: string) =>
+      startCampaignAction({
+        data: { campaignId, companyId: activeCompanyId! },
+      }),
+    onSuccess: (res: any) => {
+      toast.success(`Campanha iniciada com sucesso! (${res?.pendingCount || 0} contatos na fila)`);
+      qc.invalidateQueries({ queryKey: ["campaigns-list"] });
+    },
+    onError: (err: any) => toast.error(err.message || "Erro ao iniciar campanha"),
+  });
+
   const pauseMutation = useMutation({
     mutationFn: (campaignId: string) =>
       pauseCampaignAction({
@@ -159,165 +233,45 @@ function CampaignsPage() {
     onError: (err: any) => toast.error(err.message || "Erro ao excluir rascunho"),
   });
 
-  const renderStatusCell = (camp: any) => {
-    const status = camp.status;
+  const renderStatusBadge = (camp: any) => {
+    const status = STATUS_MAP[camp.status] || STATUS_MAP.draft;
+    const StatusIcon = status.icon;
     const draftStep = camp.settings?.draft_step || 1;
 
-    switch (status) {
-      case "running":
-        return (
-          <div className="flex items-center gap-1.5">
-            <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 flex items-center gap-1.5 py-0.5 text-xs">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Ligada
-            </Badge>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => pauseMutation.mutate(camp.id)}
-              disabled={pauseMutation.isPending}
-              className="h-6 px-2 text-[11px] text-amber-600 hover:text-amber-700 hover:bg-amber-500/10 border-amber-500/30 font-medium"
-              title="Pausar disparos"
-            >
-              <Pause className="h-3 w-3 mr-1" />
-              Pausar
-            </Button>
-          </div>
-        );
-      case "paused":
-        return (
-          <div className="flex items-center gap-1.5">
-            <Badge className="bg-amber-500/15 text-amber-600 border-amber-500/30 py-0.5 text-xs">
-              Pausada
-            </Badge>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => resumeMutation.mutate(camp.id)}
-              disabled={resumeMutation.isPending}
-              className="h-6 px-2 text-[11px] text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10 border-emerald-500/30 font-medium"
-              title="Ligar e retomar disparos"
-            >
-              <Play className="h-3 w-3 mr-1 fill-emerald-600" />
-              Ligar
-            </Button>
-          </div>
-        );
-      case "draft":
-        return (
-          <div className="flex items-center gap-1.5">
-            <Badge
-              variant="outline"
-              className="text-muted-foreground border-muted-foreground/30 py-0.5 text-[10px]"
-            >
-              <Bookmark className="h-3 w-3 mr-1" />
-              Rascunho ({draftStep}/5)
-            </Badge>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                setEditingDraftId(camp.id);
-                setCreateDialogOpen(true);
-              }}
-              className="h-6 px-2 text-[11px] font-medium"
-              title="Continuar rascunho de onde parou"
-            >
-              <Edit3 className="h-3 w-3 mr-1 text-primary" />
-              Continuar
-            </Button>
-          </div>
-        );
-      case "scheduled":
-        return <Badge className="bg-blue-500/15 text-blue-600 border-blue-500/30">Agendada</Badge>;
-      case "completed":
-        return (
-          <Badge className="bg-indigo-500/15 text-indigo-600 border-indigo-500/30">Concluída</Badge>
-        );
-      case "cancelled":
-        return <Badge variant="destructive">Cancelada</Badge>;
-      case "failed":
-        return <Badge variant="destructive">Falha</Badge>;
-      default:
-        return <Badge variant="outline">Rascunho</Badge>;
-    }
+    return (
+      <Badge
+        variant="outline"
+        className={cn("gap-1.5 py-1 px-2.5 font-bold border whitespace-nowrap", status.color)}
+      >
+        <StatusIcon className={cn("h-3.5 w-3.5", camp.status === "running" && "animate-pulse")} />
+        <span className="uppercase tracking-tight text-[11px]">
+          {camp.status === "draft" ? `Rascunho (${draftStep}/5)` : status.label}
+        </span>
+      </Badge>
+    );
   };
 
   return (
     <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 pb-20">
-      {/* Top Action Bar */}
+      {/* Header Estilo Avisei */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <p className="text-sm text-muted-foreground">
-          Envios automatizados para clientes da base ou planilhas importadas com rotação
-          anti-bloqueio.
-        </p>
+        <div className="space-y-1">
+          <h2 className="text-2xl font-bold tracking-tight">Campanhas</h2>
+          <p className="text-sm text-muted-foreground">
+            Envio em massa para listas de contatos e segmentações da base.
+          </p>
+        </div>
 
         <Button
           onClick={() => {
             setEditingDraftId(null);
             setCreateDialogOpen(true);
           }}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-sm shrink-0 cursor-pointer"
+          className="gap-2 font-semibold shadow-sm shrink-0 cursor-pointer"
         >
-          <Plus className="h-4 w-4 mr-2" />
+          <Plus className="h-4 w-4" />
           Nova Campanha
         </Button>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="p-4 bg-card border shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">Total de Campanhas</span>
-            <Layers className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="text-2xl font-bold mt-2">{totalCount}</div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            {kpis.running} em andamento
-          </div>
-        </Card>
-
-        <Card className="p-4 bg-card border shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">Enviadas & A Enviar</span>
-            <Send className="h-4 w-4 text-emerald-500" />
-          </div>
-          <div className="text-2xl font-bold mt-2 text-emerald-600">
-            {kpis.totalSent.toLocaleString("pt-BR")}
-          </div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            {kpis.totalPending.toLocaleString("pt-BR")} a enviar (de{" "}
-            {kpis.totalTarget.toLocaleString("pt-BR")} alvo)
-          </div>
-        </Card>
-
-        <Card className="p-4 bg-card border shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">Erros / Falhas</span>
-            <AlertTriangle className="h-4 w-4 text-rose-500" />
-          </div>
-          <div className="text-2xl font-bold mt-2 text-rose-600">
-            {kpis.totalFailed.toLocaleString("pt-BR")}
-          </div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            Números sem WhatsApp ou falha de conexão
-          </div>
-        </Card>
-
-        <Card className="p-4 bg-indigo-500/5 border-indigo-500/20 shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-              Taxa de Resposta
-            </span>
-            <MessageCircle className="h-4 w-4 text-indigo-500" />
-          </div>
-          <div className="text-2xl font-bold mt-2 text-indigo-600 dark:text-indigo-400">
-            {kpis.avgReplyRate}%
-          </div>
-          <div className="text-[11px] text-muted-foreground mt-0.5">
-            {kpis.totalReplied.toLocaleString("pt-BR")} contatos responderam
-          </div>
-        </Card>
       </div>
 
       {/* Barra de Filtros */}
@@ -349,12 +303,12 @@ function CampaignsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos os Status</SelectItem>
-                <SelectItem value="running">Em execução (Ligada)</SelectItem>
+                <SelectItem value="running">Rodando</SelectItem>
                 <SelectItem value="paused">Pausada</SelectItem>
                 <SelectItem value="draft">Rascunhos</SelectItem>
-                <SelectItem value="scheduled">Agendada</SelectItem>
-                <SelectItem value="completed">Concluída</SelectItem>
-                <SelectItem value="cancelled">Cancelada</SelectItem>
+                <SelectItem value="scheduled">Agendadas</SelectItem>
+                <SelectItem value="completed">Concluídas</SelectItem>
+                <SelectItem value="cancelled">Canceladas</SelectItem>
               </SelectContent>
             </Select>
 
@@ -384,186 +338,226 @@ function CampaignsPage() {
             variant="outline"
             onClick={() => refetch()}
             disabled={isFetching}
-            className="text-xs shrink-0"
+            className="text-xs shrink-0 cursor-pointer"
           >
-            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
+            <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", isFetching && "animate-spin")} />
             Atualizar
           </Button>
         </div>
       </Card>
 
-      {/* Listagem de Campanhas */}
+      {/* Listagem de Campanhas - Tabela Estilo Avisei */}
       {isLoading ? (
         <Card className="p-12 text-center text-sm text-muted-foreground border">
           <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2 text-primary" />
           Carregando campanhas...
         </Card>
       ) : campaigns.length === 0 ? (
-        <Card className="flex flex-col items-center justify-center p-12 text-center border-dashed border-2">
+        <Card className="flex flex-col items-center justify-center p-16 text-center border-dashed border-2">
           <div className="grid h-14 w-14 place-items-center rounded-full bg-primary/10 text-primary mb-3">
             <Megaphone className="h-6 w-6" />
           </div>
-          <h3 className="font-semibold text-base">Nenhuma campanha encontrada</h3>
+          <h3 className="font-semibold text-base">Nenhuma campanha cadastrada</h3>
           <p className="max-w-md text-sm text-muted-foreground mt-1 mb-4">
-            Crie sua primeira campanha para reativar clientes inativos ou enviar novidades para sua
-            base.
+            Crie sua primeira campanha para reativar clientes ou enviar novidades para sua base.
           </p>
           <Button
             onClick={() => {
               setEditingDraftId(null);
               setCreateDialogOpen(true);
             }}
+            className="gap-2"
           >
-            <Plus className="h-4 w-4 mr-2" />
-            Criar Campanha
+            <Plus className="h-4 w-4" />
+            Nova Campanha
           </Button>
         </Card>
       ) : (
-        <div className="border rounded-xl bg-card overflow-hidden shadow-sm">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Campanha</TableHead>
-                <TableHead>Público</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>A Enviar</TableHead>
-                <TableHead>Enviadas</TableHead>
-                <TableHead>Erros</TableHead>
-                <TableHead>Taxa de Leitura</TableHead>
-                <TableHead>Taxa de Resposta</TableHead>
-                <TableHead>Data</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {campaigns.map((camp: any) => {
-                const stats = camp.stats || {};
-                const total = stats.total || 0;
-                const sent = stats.sent || 0;
-                const read = stats.read || 0;
-                const replied = stats.replied || 0;
-                const failed = stats.failed || 0;
-                const pending = stats.pending ?? Math.max(0, total - sent - failed);
-                const percent = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0;
-                const readRate = sent > 0 ? ((read / sent) * 100).toFixed(1) : "0.0";
-                const replyRate = sent > 0 ? ((replied / sent) * 100).toFixed(1) : "0.0";
+        <Card className="overflow-hidden border shadow-sm">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="px-6 py-4">Campanha</TableHead>
+                  <TableHead>Público / Unidade</TableHead>
+                  <TableHead className="min-w-[200px]">Progresso</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="w-36 text-right px-6">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {campaigns.map((camp: any) => {
+                  const stats = camp.stats || {};
+                  const total = stats.total || 0;
+                  const sent = stats.sent || 0;
+                  const failed = stats.failed || 0;
+                  const processed = sent + failed;
+                  const pending = stats.pending ?? Math.max(0, total - sent - failed);
+                  const progress = total > 0 ? (processed / total) * 100 : 0;
+                  const isDraft = camp.status === "draft";
 
-                return (
-                  <TableRow key={camp.id} className="hover:bg-muted/30">
-                    <TableCell>
-                      <div className="font-semibold text-sm">{camp.name}</div>
-                      {camp.units?.name && (
-                        <div className="text-[11px] text-muted-foreground">{camp.units.name}</div>
-                      )}
-                    </TableCell>
-
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {camp.audience_type === "segment" ? (
-                          <>
-                            <Filter className="h-3 w-3 mr-1 text-primary" />
-                            Segmentação
-                          </>
-                        ) : (
-                          <>
-                            <Users className="h-3 w-3 mr-1 text-primary" />
-                            Planilha
-                          </>
-                        )}
-                      </Badge>
-                    </TableCell>
-
-                    <TableCell>{renderStatusCell(camp)}</TableCell>
-
-                    {/* Quantidade a enviar (Pendente) */}
-                    <TableCell>
-                      <span className="font-semibold text-xs text-blue-600 block">
-                        {pending.toLocaleString("pt-BR")}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground block">
-                        de {total.toLocaleString("pt-BR")} alvo
-                      </span>
-                    </TableCell>
-
-                    {/* Quantidade Enviadas com sucesso */}
-                    <TableCell className="min-w-[110px]">
-                      <span className="font-semibold text-xs text-emerald-600 block">
-                        {sent.toLocaleString("pt-BR")}
-                        <span className="text-[10px] text-muted-foreground ml-1">({percent}%)</span>
-                      </span>
-                      <div className="w-20 bg-muted rounded-full h-1 mt-1 overflow-hidden">
-                        <div
-                          className="bg-emerald-500 h-1 rounded-full transition-all"
-                          style={{ width: `${percent}%` }}
-                        />
-                      </div>
-                    </TableCell>
-
-                    {/* Quantidade com Erro */}
-                    <TableCell>
-                      {failed > 0 ? (
-                        <Badge
-                          variant="destructive"
-                          className="text-[10px] px-1.5 py-0 font-semibold"
-                        >
-                          {failed.toLocaleString("pt-BR")} erro(s)
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">0</span>
-                      )}
-                    </TableCell>
-
-                    {/* Taxa de Leitura */}
-                    <TableCell>
-                      <Badge className="bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/30 text-xs font-bold">
-                        {readRate}%
-                      </Badge>
-                      <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">
-                        {read.toLocaleString("pt-BR")} confirmados
-                      </span>
-                    </TableCell>
-
-                    {/* Taxa de Resposta e Quantidade que respondeu */}
-                    <TableCell>
-                      <Badge className="bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30 text-xs font-bold">
-                        {replyRate}%
-                      </Badge>
-                      <span className="text-[10px] text-muted-foreground block mt-0.5 font-medium">
-                        {replied} responderam
-                      </span>
-                    </TableCell>
-
-                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                      {camp.scheduled_at ? (
-                        <div title="Agendada para">
-                          <Clock className="h-3 w-3 inline mr-1 text-blue-500" />
-                          {format(new Date(camp.scheduled_at), "dd/MM HH:mm", { locale: ptBR })}
+                  return (
+                    <TableRow
+                      key={camp.id}
+                      className="group hover:bg-muted/30 transition-colors cursor-pointer"
+                      onClick={() => setDetailsCampaignId(camp.id)}
+                    >
+                      {/* Campanha */}
+                      <TableCell className="px-6 py-4">
+                        <div className="flex flex-col">
+                          <span className="font-semibold text-sm text-foreground group-hover:text-primary transition-colors">
+                            {camp.name}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                            <Clock className="h-3 w-3" />
+                            {camp.scheduled_at
+                              ? `Agendada para ${format(new Date(camp.scheduled_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}`
+                              : format(new Date(camp.created_at), "dd/MM/yyyy HH:mm", {
+                                  locale: ptBR,
+                                })}
+                          </span>
                         </div>
-                      ) : (
-                        format(new Date(camp.created_at), "dd/MM/yy", { locale: ptBR })
-                      )}
-                    </TableCell>
+                      </TableCell>
 
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {camp.status === "draft" && (
-                          <>
+                      {/* Público / Unidade */}
+                      <TableCell>
+                        <div className="text-xs space-y-1">
+                          <div className="flex items-center gap-1.5 font-medium text-foreground">
+                            {camp.audience_type === "segment" ? (
+                              <>
+                                <Filter className="h-3.5 w-3.5 text-primary/70" />
+                                <span>Segmentação da Base</span>
+                              </>
+                            ) : (
+                              <>
+                                <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-500" />
+                                <span>Planilha Importada</span>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 text-muted-foreground text-[11px]">
+                            <Building2 className="h-3 w-3" />
+                            <span>{camp.units?.name || "Todas as unidades"}</span>
+                          </div>
+                        </div>
+                      </TableCell>
+
+                      {/* Progresso */}
+                      <TableCell className="min-w-[200px]">
+                        {isDraft ? (
+                          <span className="text-xs text-muted-foreground italic">
+                            Rascunho não iniciado
+                          </span>
+                        ) : (
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between text-[11px]">
+                              <span className="font-medium text-foreground">
+                                {processed}/{total} processados
+                              </span>
+                              <span className="text-muted-foreground font-semibold">
+                                {Math.round(progress)}%
+                              </span>
+                            </div>
+                            <Progress value={progress} className="h-1.5" />
+                            <div className="flex justify-between text-[10px] text-muted-foreground">
+                              <span>{pending} a enviar</span>
+                              {failed > 0 && (
+                                <span className="text-destructive font-semibold">
+                                  {failed} falhas
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </TableCell>
+
+                      {/* Status */}
+                      <TableCell>{renderStatusBadge(camp)}</TableCell>
+
+                      {/* Ações */}
+                      <TableCell
+                        className="text-right px-6 min-w-[160px]"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10 cursor-pointer"
+                            title="Ver detalhes e métricas"
+                            onClick={() => setDetailsCampaignId(camp.id)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+
+                          {/* Iniciar / Disparar Agora (para rascunhos e agendadas) */}
+                          {(isDraft || camp.status === "scheduled") && (
                             <Button
-                              size="icon"
                               variant="ghost"
-                              className="h-8 w-8 text-primary"
-                              title="Continuar Rascunho"
+                              size="icon"
+                              className="h-8 w-8 text-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+                              title="Iniciar Disparos Agora"
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    `Deseja iniciar os disparos da campanha "${camp.name}" agora?`,
+                                  )
+                                ) {
+                                  startMutation.mutate(camp.id);
+                                }
+                              }}
+                              disabled={startMutation.isPending}
+                            >
+                              <Play className="h-4 w-4 fill-emerald-500" />
+                            </Button>
+                          )}
+
+                          {isDraft && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10 cursor-pointer"
+                              title="Continuar / Editar rascunho"
                               onClick={() => {
                                 setEditingDraftId(camp.id);
                                 setCreateDialogOpen(true);
                               }}
                             >
-                              <Edit3 className="h-4 w-4" />
+                              <Pencil className="h-4 w-4" />
                             </Button>
+                          )}
+
+                          {camp.status === "running" && (
                             <Button
-                              size="icon"
                               variant="ghost"
-                              className="h-8 w-8 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10"
+                              size="icon"
+                              className="h-8 w-8 text-amber-500 hover:text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+                              title="Pausar Disparos"
+                              onClick={() => pauseMutation.mutate(camp.id)}
+                              disabled={pauseMutation.isPending}
+                            >
+                              <Pause className="h-4 w-4" />
+                            </Button>
+                          )}
+
+                          {camp.status === "paused" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+                              title="Retomar Disparos"
+                              onClick={() => resumeMutation.mutate(camp.id)}
+                              disabled={resumeMutation.isPending}
+                            >
+                              <Play className="h-4 w-4 fill-emerald-500" />
+                            </Button>
+                          )}
+
+                          {isDraft && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer"
                               title="Excluir Rascunho"
                               onClick={() => {
                                 if (
@@ -576,69 +570,62 @@ function CampaignsPage() {
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
-                          </>
-                        )}
+                          )}
 
-                        {camp.status === "running" && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-amber-500"
-                            title="Pausar Campanha"
-                            onClick={() => pauseMutation.mutate(camp.id)}
-                            disabled={pauseMutation.isPending}
-                          >
-                            <Pause className="h-4 w-4" />
-                          </Button>
-                        )}
+                          {["running", "paused", "scheduled"].includes(camp.status) && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer"
+                              title="Cancelar Campanha"
+                              onClick={() => {
+                                if (confirm(`Cancelar a campanha "${camp.name}"?`)) {
+                                  cancelMutation.mutate(camp.id);
+                                }
+                              }}
+                              disabled={cancelMutation.isPending}
+                            >
+                              <XCircle className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
 
-                        {camp.status === "paused" && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-emerald-500"
-                            title="Retomar Campanha"
-                            onClick={() => resumeMutation.mutate(camp.id)}
-                            disabled={resumeMutation.isPending}
-                          >
-                            <Play className="h-4 w-4" />
-                          </Button>
-                        )}
-
-                        {["running", "paused", "scheduled"].includes(camp.status) && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-rose-500"
-                            title="Cancelar Campanha"
-                            onClick={() => {
-                              if (confirm(`Cancelar a campanha "${camp.name}"?`)) {
-                                cancelMutation.mutate(camp.id);
-                              }
-                            }}
-                            disabled={cancelMutation.isPending}
-                          >
-                            <XCircle className="h-4 w-4" />
-                          </Button>
-                        )}
-
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                          title="Ver Detalhes e Fila"
-                          onClick={() => setDetailsCampaignId(camp.id)}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+          {/* Paginação */}
+          {totalCount > 20 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/20 text-xs text-muted-foreground">
+              <span>
+                Página {page} de {Math.ceil(totalCount / 20)} ({totalCount} campanhas no total)
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  className="h-7 text-xs"
+                >
+                  Anterior
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={page >= Math.ceil(totalCount / 20)}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="h-7 text-xs"
+                >
+                  Próxima
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
       )}
 
       {/* Modal de Criação de Campanha */}

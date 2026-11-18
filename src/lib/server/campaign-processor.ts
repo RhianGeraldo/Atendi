@@ -171,14 +171,47 @@ async function ensureCampaignConversation({
 let isCampaignProcessorRunning = false;
 
 /**
+ * Delay interruptível no padrão Avisei: dorme em fatias curtas (500ms)
+ * e verifica se a campanha foi pausada, cancelada ou excluída.
+ * Retorna false se o envio deve ser interrompido imediatamente.
+ */
+async function interruptibleDelay(delayMs: number, campaignId: string): Promise<boolean> {
+  const sliceMs = 500;
+  const slices = Math.max(1, Math.ceil(delayMs / sliceMs));
+
+  for (let s = 0; s < slices; s++) {
+    const currentWait = Math.min(sliceMs, delayMs - s * sliceMs);
+    if (currentWait > 0) {
+      await new Promise((resolve) => setTimeout(resolve, currentWait));
+    }
+
+    const { data: campCheck } = await supabaseAdmin
+      .from("campaigns")
+      .select("status")
+      .eq("id", campaignId)
+      .maybeSingle();
+
+    if (!campCheck || campCheck.status !== "running") {
+      console.log(
+        `[campaigns] Campanha ${campaignId} interrompida durante o delay (status atual: ${campCheck?.status ?? "excluída"}).`,
+      );
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * Processador principal da fila de campanhas em massa.
- * Chamado ciclicamente pelo cron do Atendi (`cron.ts`).
+ * Chamado ciclicamente pelo cron do Atendi (`cron.ts`) e por gatilhos de ação.
  */
 export async function processCampaignsQueue(): Promise<void> {
   if (isCampaignProcessorRunning) {
     return;
   }
   isCampaignProcessorRunning = true;
+  let hasMorePending = false;
 
   try {
     const nowIso = new Date().toISOString();
@@ -308,6 +341,26 @@ export async function processCampaignsQueue(): Promise<void> {
 
         // Processa cada destinatário do lote com rotação de instâncias (Round-Robin) e variações
         for (let i = 0; i < pendingRecipients.length; i++) {
+          // Checagem no padrão Avisei: se a campanha foi pausada ou cancelada, interrompe imediatamente
+          const { data: currentCamp } = await supabaseAdmin
+            .from("campaigns")
+            .select("status")
+            .eq("id", campaign.id)
+            .maybeSingle();
+
+          if (!currentCamp || currentCamp.status !== "running") {
+            console.log(
+              `[campaigns] Campanha ${campaign.id} não está mais 'running' (${currentCamp?.status ?? "excluída"}). Interrompendo envio do lote imediatamente.`,
+            );
+            // Reverte quaisquer destinatários em 'processing' para 'pending'
+            await supabaseAdmin
+              .from("campaign_recipients")
+              .update({ status: "pending", updated_at: new Date().toISOString() })
+              .eq("campaign_id", campaign.id)
+              .eq("status", "processing");
+            break;
+          }
+
           const recipient = pendingRecipients[i];
           const instance = connectedInstances[i % connectedInstances.length];
 
@@ -392,14 +445,20 @@ export async function processCampaignsQueue(): Promise<void> {
               })
               .eq("id", recipient.id);
 
-            // Delay suave entre envios dentro do lote (simulação humana)
+            // Delay suave entre envios dentro do lote (simulação humana e respeito ao anti-ban)
             const minDelay = Math.max(Number(settings.min_delay_seconds) || 1, 1);
             const maxDelay = Math.max(Number(settings.max_delay_seconds) || 3, minDelay);
             const jitterMs = Math.floor((Math.random() * (maxDelay - minDelay) + minDelay) * 1000);
+            const stepDelayMs = Math.min(jitterMs, 5000);
 
-            // Limita o delay síncrono para no máximo 3.5 segundos por iteração dentro do cron
-            const stepDelayMs = Math.min(jitterMs, 3500);
-            await new Promise((resolve) => setTimeout(resolve, stepDelayMs));
+            // Sleep interruptível: verifica se a campanha foi pausada durante a espera
+            const canContinue = await interruptibleDelay(stepDelayMs, campaign.id);
+            if (!canContinue) {
+              console.log(
+                `[campaigns] Campanha ${campaign.id} pausada durante o intervalo. Encerrando lote.`,
+              );
+              break;
+            }
           } catch (recipErr: any) {
             console.error(`[campaigns] Erro no envio para destinatário ${recipient.id}:`, recipErr);
             await supabaseAdmin
@@ -419,10 +478,41 @@ export async function processCampaignsQueue(): Promise<void> {
         console.error(`[campaigns] Erro ao processar campanha ${campaign.id}:`, campLoopErr);
       }
     }
+
+    // Verifica se ainda existem destinatários pendentes em campanhas em execução
+    for (const campaign of activeCampaigns) {
+      const { data: checkCamp } = await supabaseAdmin
+        .from("campaigns")
+        .select("status")
+        .eq("id", campaign.id)
+        .maybeSingle();
+
+      if (checkCamp?.status === "running") {
+        const { count: remCount } = await supabaseAdmin
+          .from("campaign_recipients")
+          .select("id", { count: "exact", head: true })
+          .eq("campaign_id", campaign.id)
+          .eq("status", "pending");
+
+        if (remCount && remCount > 0) {
+          hasMorePending = true;
+          break;
+        }
+      }
+    }
   } catch (err) {
     console.error("[campaigns] Erro no loop de campanhas:", err);
   } finally {
     isCampaignProcessorRunning = false;
+
+    // Se houver mais contatos para disparar em campanhas ativas, agenda o próximo lote
+    if (hasMorePending) {
+      setTimeout(() => {
+        processCampaignsQueue().catch((e) =>
+          console.error("[campaigns] Erro no ciclo contínuo da fila:", e),
+        );
+      }, 1000);
+    }
   }
 }
 

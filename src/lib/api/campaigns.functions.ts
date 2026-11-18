@@ -199,6 +199,42 @@ export const listCampaignRecipientsAction = createServerFn({ method: "GET" })
       throw new Error(`Erro ao listar destinatários: ${error.message}`);
     }
 
+    // Se o banco retornou 0 recipientes, mas a campanha tiver imported_recipients salvos no settings
+    if (
+      (!count || count === 0) &&
+      (!data.status || data.status === "all" || data.status === "pending")
+    ) {
+      const { data: camp } = await (supabaseAdmin.from("campaigns") as any)
+        .select("id, status, settings")
+        .eq("id", data.campaignId)
+        .maybeSingle();
+
+      const imported = camp?.settings?.imported_recipients || [];
+      if (imported.length > 0) {
+        const paged = imported.slice(from, to + 1).map((item: any, idx: number) => ({
+          id: `draft-${from + idx}`,
+          campaign_id: data.campaignId,
+          phone: String(item.phone || item.number || ""),
+          name: item.name || item.customVariables?.Nome || null,
+          status: "pending",
+          custom_variables: item.customVariables || {},
+          campaign_messages: null,
+          sent_at: null,
+          delivered_at: null,
+          read_at: null,
+          replied_at: null,
+          created_at: new Date().toISOString(),
+        }));
+
+        return {
+          recipients: paged,
+          total: imported.length,
+          page: data.page,
+          pageSize: data.pageSize,
+        };
+      }
+    }
+
     return {
       recipients: recipients || [],
       total: count || 0,
@@ -673,6 +709,144 @@ export const createCampaignAction = createServerFn({ method: "POST" })
   });
 
 /**
+ * Inicia os disparos de uma campanha (de 'draft' ou 'scheduled' para 'running')
+ * Valida destinatários e instâncias e acorda o motor de envio no padrão Avisei.
+ */
+export const startCampaignAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      campaignId: z.string().uuid(),
+      companyId: z.string().uuid(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    await assertCompanyAccess(context.userId, data.companyId);
+
+    // 1. Busca dados da campanha
+    const { data: campaign, error: campErr } = await supabaseAdmin
+      .from("campaigns")
+      .select("id, status, whatsapp_instance_ids, content, settings, unit_id")
+      .eq("id", data.campaignId)
+      .eq("company_id", data.companyId)
+      .single();
+
+    if (campErr || !campaign) {
+      throw new Error("Campanha não encontrada.");
+    }
+
+    if (campaign.status === "completed") {
+      throw new Error("Esta campanha já foi concluída.");
+    }
+
+    // 2. Valida instâncias configuradas
+    const instanceIds = campaign.whatsapp_instance_ids || [];
+    if (instanceIds.length === 0) {
+      throw new Error("Selecione ao menos uma instância de WhatsApp conectada para iniciar.");
+    }
+
+    // Valida se há ao menos uma instância conectada
+    const { data: instances } = await supabaseAdmin
+      .from("whatsapp_instances")
+      .select("id, name, status")
+      .in("id", instanceIds);
+
+    const connectedInstances = (instances || []).filter(
+      (inst) => inst.status === "connected" || inst.status === "open",
+    );
+
+    if (connectedInstances.length === 0) {
+      throw new Error(
+        "Nenhuma das instâncias de WhatsApp configuradas nesta campanha está conectada no momento.",
+      );
+    }
+
+    // 3. Valida e sincroniza destinatários
+    let { count: pendingCount } = await supabaseAdmin
+      .from("campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", data.campaignId)
+      .eq("status", "pending");
+
+    // Fallback: se não houver destinatários gravados na tabela mas houver importados no settings
+    if (!pendingCount || pendingCount === 0) {
+      const settings = (campaign.settings || {}) as Record<string, any>;
+      const importedList = settings.imported_recipients;
+
+      if (Array.isArray(importedList) && importedList.length > 0) {
+        console.log(
+          `[campaigns] Sincronizando ${importedList.length} contatos do settings para campaign_recipients antes do start...`,
+        );
+        const BATCH_SIZE = 1000;
+        const nowIso = new Date().toISOString();
+
+        for (let i = 0; i < importedList.length; i += BATCH_SIZE) {
+          const slice = importedList.slice(i, i + BATCH_SIZE);
+          const rowsToInsert = slice.map((item: any) => ({
+            campaign_id: data.campaignId,
+            phone: item.phone,
+            name: item.name || null,
+            unit_id: item.unit_id || campaign.unit_id || null,
+            custom_variables: item.custom_variables || {},
+            status: "pending",
+            created_at: nowIso,
+            updated_at: nowIso,
+          }));
+
+          const { error: insErr } = await (supabaseAdmin.from("campaign_recipients") as any).insert(
+            rowsToInsert,
+          );
+          if (insErr) {
+            console.error("[campaigns] Erro ao sincronizar contatos antes do start:", insErr);
+            throw new Error(`Falha ao carregar contatos da campanha: ${insErr.message}`);
+          }
+        }
+
+        const { count: recount } = await supabaseAdmin
+          .from("campaign_recipients")
+          .select("id", { count: "exact", head: true })
+          .eq("campaign_id", data.campaignId)
+          .eq("status", "pending");
+
+        pendingCount = recount || 0;
+      }
+    }
+
+    if (!pendingCount || pendingCount === 0) {
+      throw new Error("Nenhum contato pendente encontrado nesta campanha.");
+    }
+
+    // 4. Atualiza status para 'running'
+    const nowIso = new Date().toISOString();
+    const { error: updateErr } = await supabaseAdmin
+      .from("campaigns")
+      .update({
+        status: "running",
+        started_at: nowIso,
+        updated_at: nowIso,
+      })
+      .eq("id", data.campaignId)
+      .eq("company_id", data.companyId);
+
+    if (updateErr) {
+      throw new Error(`Falha ao iniciar campanha: ${updateErr.message}`);
+    }
+
+    // 5. Recalcula métricas
+    await supabaseAdmin.rpc("recalculate_campaign_stats", { p_campaign_id: data.campaignId });
+
+    // 6. Acorda o processador imediatamente
+    processCampaignsQueue().catch((e) =>
+      console.error("[campaigns] Erro ao acionar processador após start:", e),
+    );
+
+    return {
+      success: true,
+      pendingCount,
+    };
+  });
+
+/**
  * Pausa uma campanha em execução
  */
 export const pauseCampaignAction = createServerFn({ method: "POST" })
@@ -686,15 +860,26 @@ export const pauseCampaignAction = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertCompanyAccess(context.userId, data.companyId);
 
+    const nowIso = new Date().toISOString();
+
     const { error } = await supabaseAdmin
       .from("campaigns")
-      .update({ status: "paused", updated_at: new Date().toISOString() })
+      .update({ status: "paused", updated_at: nowIso })
       .eq("id", data.campaignId)
       .eq("company_id", data.companyId);
 
     if (error) {
       throw new Error(`Falha ao pausar campanha: ${error.message}`);
     }
+
+    // Reverte destinatários que estavam em 'processing' para 'pending' para que nada se perca
+    await supabaseAdmin
+      .from("campaign_recipients")
+      .update({ status: "pending", updated_at: nowIso })
+      .eq("campaign_id", data.campaignId)
+      .eq("status", "processing");
+
+    await supabaseAdmin.rpc("recalculate_campaign_stats", { p_campaign_id: data.campaignId });
 
     return { success: true };
   });
@@ -713,15 +898,26 @@ export const resumeCampaignAction = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertCompanyAccess(context.userId, data.companyId);
 
+    const nowIso = new Date().toISOString();
+
+    // Reverte destinatários travados em 'processing' para 'pending'
+    await supabaseAdmin
+      .from("campaign_recipients")
+      .update({ status: "pending", updated_at: nowIso })
+      .eq("campaign_id", data.campaignId)
+      .eq("status", "processing");
+
     const { error } = await supabaseAdmin
       .from("campaigns")
-      .update({ status: "running", updated_at: new Date().toISOString() })
+      .update({ status: "running", updated_at: nowIso })
       .eq("id", data.campaignId)
       .eq("company_id", data.companyId);
 
     if (error) {
       throw new Error(`Falha ao retomar campanha: ${error.message}`);
     }
+
+    await supabaseAdmin.rpc("recalculate_campaign_stats", { p_campaign_id: data.campaignId });
 
     processCampaignsQueue().catch((e) =>
       console.error("[campaigns] Erro ao retomar fila da campanha:", e),
@@ -756,12 +952,12 @@ export const cancelCampaignAction = createServerFn({ method: "POST" })
       throw new Error(`Falha ao cancelar campanha: ${error.message}`);
     }
 
-    // Cancela os pendentes
+    // Cancela os pendentes e os que estavam em processamento
     await supabaseAdmin
       .from("campaign_recipients")
       .update({ status: "cancelled", updated_at: nowIso })
       .eq("campaign_id", data.campaignId)
-      .eq("status", "pending");
+      .in("status", ["pending", "processing"]);
 
     await supabaseAdmin.rpc("recalculate_campaign_stats", { p_campaign_id: data.campaignId });
 
@@ -951,6 +1147,62 @@ export const saveCampaignDraftAction = createServerFn({ method: "POST" })
       }));
 
       await (supabaseAdmin.from("campaign_messages") as any).insert(variationRows);
+    }
+
+    // Se houver contatos importados de planilha, sincroniza para campaign_recipients (como no Avisei)
+    if (draftId && data.importedRecipients && data.importedRecipients.length > 0) {
+      try {
+        await supabaseAdmin.from("campaign_recipients").delete().eq("campaign_id", draftId);
+
+        const { data: messages } = await supabaseAdmin
+          .from("campaign_messages")
+          .select("id")
+          .eq("campaign_id", draftId);
+        const variationId = messages?.[0]?.id || null;
+
+        const recipientRows: any[] = [];
+        const seenPhones = new Set<string>();
+
+        for (const row of data.importedRecipients) {
+          const sanitized = sanitizeCampaignPhone(row.phone);
+          if (sanitized.valid && !seenPhones.has(sanitized.phone)) {
+            seenPhones.add(sanitized.phone);
+            recipientRows.push({
+              campaign_id: draftId,
+              company_id: data.companyId,
+              unit_id: row.unitId || data.unitId || null,
+              phone: sanitized.phone,
+              name: row.name?.trim() || (row.customVariables as any)?.Nome || null,
+              custom_variables: row.customVariables || {},
+              status: "pending",
+              campaign_message_id: variationId,
+            });
+          }
+        }
+
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < recipientRows.length; i += CHUNK_SIZE) {
+          const chunk = recipientRows.slice(i, i + CHUNK_SIZE);
+          await supabaseAdmin.from("campaign_recipients").insert(chunk);
+        }
+
+        await supabaseAdmin
+          .from("campaigns")
+          .update({
+            stats: {
+              total: recipientRows.length,
+              pending: recipientRows.length,
+              sent: 0,
+              failed: 0,
+              read: 0,
+              replied: 0,
+              delivered: 0,
+            },
+          })
+          .eq("id", draftId);
+      } catch (syncErr) {
+        console.error("[campaigns] Erro ao sincronizar destinatários do rascunho:", syncErr);
+      }
     }
 
     return {
