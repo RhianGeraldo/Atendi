@@ -1961,6 +1961,10 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             created_at: new Date().toISOString(),
           });
 
+          // 10. Marcar a conversa do Instagram para encerramento automático, pois o atendimento continuará no WhatsApp
+          isResolve = true;
+          resolveNote = `Atendimento transferido para o WhatsApp da unidade de ${targetUnitName || "sua região"} com a consultora ${cleanConsultantName}.`;
+
           for (const call of toolCalls) {
             if (call.function?.name === "chamar_no_whatsapp") {
               toolExecutionResults[call.id] = {
@@ -2472,13 +2476,14 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       }
     }
 
-    // 9. Se o modelo chamou ferramentas de CRM mas não gerou o texto do cliente, executar Turn 2
+    // 9. Se o modelo chamou ferramentas de CRM ou migração mas não gerou o texto do cliente, executar Turn 2
+    const hasTransferToWa = toolCalls?.some((tc) => tc.function?.name === "chamar_no_whatsapp");
     if (
       toolCalls &&
       toolCalls.length > 0 &&
       !isHandoff &&
       !transferAgentInput &&
-      !isResolve &&
+      (!isResolve || hasTransferToWa) &&
       (!cleanResponse || cleanResponse.trim().length === 0)
     ) {
       console.log(
@@ -2763,22 +2768,25 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         );
       }
 
+      const defaultTransferReasonId = "9b1524ff-4f07-423f-b164-5077e9fa46cc"; // Transferido para Outro Setor / Canal
+      const resolvedReasonId = isInactivityClose
+        ? agent.followup_resolution_reason_id || agent.resolution_reason_id || null
+        : agent.resolution_reason_id || (hasTransferToWa ? defaultTransferReasonId : null);
+
       await supabaseAdmin
         .from("conversations")
         .update({
           status: "resolved",
           resolved_at: new Date().toISOString(),
           current_session_id: null,
+          resolution_reason_id: resolvedReasonId,
+          resolution_observation: resolveNote,
           cadence_step: cadenceStep,
           cadence_next_at: cadenceNextAt,
         } as any)
         .eq("id", conversationId);
 
       if (sessionId) {
-        const resolvedReasonId = isInactivityClose
-          ? agent.followup_resolution_reason_id || agent.resolution_reason_id || null
-          : agent.resolution_reason_id || null;
-
         await supabaseAdmin
           .from("conversation_sessions")
           .update({
