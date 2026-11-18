@@ -719,6 +719,29 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     const unitName = unitData?.name || "Matriz";
     const companyName = company.name || "";
 
+    // Gerador de Link Inteligente de Avaliação Pré-Preenchido
+    const normalizeSlug = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, "-")
+        .replace(/[^a-z0-9-]/g, "");
+
+    const unitSlug = normalizeSlug(unitName || "mantena");
+    const clientPhoneDigits = (conv.contacts?.phone || "").replace(/\D/g, "");
+    const cleanCellPhone =
+      clientPhoneDigits.startsWith("55") && clientPhoneDigits.length >= 12
+        ? clientPhoneDigits.slice(2)
+        : clientPhoneDigits;
+
+    const encodedClientName = encodeURIComponent(rawClientName || clientFirstName || "").replace(/%20/g, "+");
+    const encodedClientEmail = encodeURIComponent(conv.contacts?.email || "");
+    const defaultTreatment = "Depilação a Laser";
+    const encodedTreatment = encodeURIComponent(defaultTreatment).replace(/%20/g, "+");
+
+    const linkAvaliacao = `https://agenda.esteticaelaser.com.br/avaliacao?unidade=${unitSlug}&nome=${encodedClientName}&email=${encodedClientEmail}&celular=${cleanCellPhone}&tratamento=${encodedTreatment}`;
+
     const applyVars = (text: string | null | undefined) => {
       if (!text) return "";
       let t = text;
@@ -745,6 +768,10 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         t = t.replace(/\{\{telefone\}\}/g, conv.contacts.phone);
         t = t.replace(/\{\{telefone_cliente\}\}/g, conv.contacts.phone);
       }
+
+      // Link Inteligente de Avaliação
+      t = t.replace(/\{\{link_avaliacao\}\}/g, linkAvaliacao);
+      t = t.replace(/\{\{link_agendamento\}\}/g, linkAvaliacao);
 
       // Unidade e Empresa
       t = t.replace(/\{\{unidade\}\}/g, unitName);
@@ -821,6 +848,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         : company.business_hours
           ? `HORÁRIOS DA REDE: ${company.business_hours}`
           : null,
+      `LINK INTELIGENTE DE AVALIAÇÃO (PRÉ-PREENCHIDO): ${linkAvaliacao}`,
       `--- DIRETRIZES CRÍTICAS DE CONTEXTO E LOCALIZAÇÃO ---`,
       hasSpecificUnit
         ? `1. O cliente está em contato direto com a unidade '${unitName}'. Você está respondendo exclusivamente por esta filial. Não pergunte qual cidade ele prefere, pois a unidade já está definida como '${unitName}'.`
@@ -858,8 +886,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 8. DIVISÃO CLARA DE RESPONSABILIDADES (CADA IA FAZ APENAS UMA COISA):
 - Cada IA da empresa possui uma especialidade restrita. NUNCA tente abraçar o trabalho de outra IA:
   * SDR (Triagem): Descobre rapidamente o interesse e intenção. Assim que souber o que o lead quer, passa para a especialista (Vendas ou Agendamento). Não vende nem agenda.
-  * Vendas (Consultora / Closer): Conduz a proposta comercial, valores e fecha a oportunidade no CRM. Assim que o cliente aceitar e for agendar dia/horário, passa para a especialista de Agendamento. Não gerencia a grade de agendamentos.
-  * Agendamento: Escolhe datas, horários e orienta o comparecimento. Não vende tratamentos nem negocia valores; se o cliente pedir novos procedimentos, passa para Vendas.
+  * Vendas (Consultora / Closer): Conduz a proposta comercial, valores e fecha a oportunidade no CRM. Assim que o cliente aceitar e for agendar dia/horário da avaliação, passe para a especialista de Agendamento (Alice) com 'delegar_para_outro_agente_ia' ou envie o Link Inteligente de Avaliação (${linkAvaliacao}). NUNCA afirme que o horário foi marcado no sistema sem o envio do link.
+  * Agendamento (Alice): Conduz o agendamento de avaliações enviando o Link Inteligente de Avaliação (${linkAvaliacao}), onde o cliente escolhe com total comodidade o dia/horário oficial na grade da unidade. Para sessões de pacotes já adquiridos, envia o portal https://agenda.esteticaelaser.com.br. Não vende tratamentos nem negocia valores; se o cliente pedir novos procedimentos, passa para Vendas.
 - Quando a necessidade for de competência de outro colega, acione IMEDIATAMENTE 'delegar_para_outro_agente_ia'.
 9. FLUXO ESPECIAL DE MIGRAÇÃO PARA O WHATSAPP (INSTAGRAM DIRECT):
 - Quando estiver atendendo no Instagram Direct, o seu papel é EXCLUSIVO de triagem e acolhimento. Você NÃO atende no WhatsApp e NÃO vende tratamentos nem passa valores no Direct:
