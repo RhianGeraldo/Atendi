@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { enqueueAiMessage, scheduleAiMessage } from "./ai-queue";
+import { resolveAiAgentForConversation } from "./ai-generator";
 import { syncCloudTemplates } from "./whatsapp-cloud-api";
 import { v4 as uuidv4 } from "uuid";
 import { getPhoneVariants } from "@/lib/utils";
@@ -571,20 +572,17 @@ async function processIncomingMessage(params: any) {
       .limit(1)
       .maybeSingle();
 
-    // Check for default AI agent
-    const { data: defaultAgents } = await supabaseAdmin
-      .from("ai_agents")
-      .select("id, is_main_agent, active_by_default, name")
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .eq("is_main_agent", true)
-      .limit(1);
+    // Resolução inteligente e hierárquica do agente de IA
+    const resolution = await resolveAiAgentForConversation({
+      companyId,
+      instanceId: instance.id,
+      unitId: instance.unit_id,
+      currentAgentId: resolvedConv?.ai_agent_id,
+    });
 
-    const defaultAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
-    const defaultAgentName =
-      defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].name : "IA";
-    const isActiveByDefault =
-      defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
+    const defaultAgentId = resolution.agent?.id ?? null;
+    const defaultAgentName = resolution.agent?.name ?? "IA";
+    const isActiveByDefault = resolution.aiActive;
 
     let targetAgentId = null;
     let targetDepartmentId = null;

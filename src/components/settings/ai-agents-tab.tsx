@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -15,6 +15,9 @@ import {
   Ticket,
   Wrench,
   UserCheck,
+  Building2,
+  MapPin,
+  Globe,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -24,10 +27,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ProviderIcon } from "@/components/common/provider-icon";
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
@@ -101,7 +108,7 @@ export function AiAgentsTab() {
         .select(
           `
           *,
-          whatsapp_instances(name),
+          whatsapp_instances(name, provider, network, units(name, color)),
           departments!ai_agents_department_id_fkey(name)
         `,
         )
@@ -118,12 +125,41 @@ export function AiAgentsTab() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("whatsapp_instances")
-        .select("id, name")
+        .select("id, name, instance_name, provider, network, unit_id, units(id, name, color)")
         .eq("company_id", activeCompanyId!);
       if (error) throw error;
       return data;
     },
   });
+
+  // Agrupa as instâncias: Sede (Empresa Mãe) e por Unidade
+  const groupedInstances = useMemo(() => {
+    if (!instances) return { matriz: [], byUnit: {} };
+
+    const matriz: any[] = [];
+    const byUnit: Record<string, { unitName: string; unitColor?: string; items: any[] }> = {};
+
+    for (const inst of instances as any[]) {
+      if (!inst.unit_id) {
+        matriz.push(inst);
+      } else {
+        const uId = inst.unit_id;
+        const uName = (inst.units as any)?.name || "Unidade";
+        const uColor = (inst.units as any)?.color;
+        if (!byUnit[uId]) {
+          byUnit[uId] = { unitName: uName, unitColor: uColor, items: [] };
+        }
+        byUnit[uId].items.push(inst);
+      }
+    }
+
+    return { matriz, byUnit };
+  }, [instances]);
+
+  const selectedInstance = useMemo(() => {
+    if (!instances || instanceId === "all") return null;
+    return (instances as any[]).find((i: any) => i.id === instanceId) || null;
+  }, [instances, instanceId]);
 
   const { data: departments } = useQuery({
     queryKey: ["departments_list", activeCompanyId],
@@ -482,17 +518,138 @@ export function AiAgentsTab() {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">Instância do WhatsApp</label>
+                      <label className="text-sm font-medium flex items-center justify-between">
+                        <span>Canal de Atendimento / Instância</span>
+                        <span className="text-xs text-muted-foreground font-normal">
+                          Onde a IA irá responder
+                        </span>
+                      </label>
                       <Select value={instanceId} onValueChange={setInstanceId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Todas as instâncias" />
+                        <SelectTrigger className="h-10">
+                          <SelectValue placeholder="Todos os Canais (Atende qualquer canal)">
+                            {instanceId === "all" || !selectedInstance ? (
+                              <div className="flex items-center gap-2 truncate">
+                                <Globe className="h-4 w-4 text-primary shrink-0" />
+                                <span className="font-medium text-xs sm:text-sm truncate">
+                                  Todos os Canais (Atende qualquer canal/instância)
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between w-full gap-2 pr-1">
+                                <div className="flex items-center gap-2 truncate">
+                                  <ProviderIcon
+                                    provider={selectedInstance.provider}
+                                    network={selectedInstance.network}
+                                    className="h-4 w-4 shrink-0"
+                                  />
+                                  <span className="font-medium text-xs sm:text-sm truncate">
+                                    {selectedInstance.name || selectedInstance.instance_name}
+                                  </span>
+                                </div>
+                                {selectedInstance.units?.name ? (
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-[10px] shrink-0 font-normal px-1.5 py-0 h-4"
+                                    style={
+                                      selectedInstance.units.color
+                                        ? { borderColor: `${selectedInstance.units.color}40` }
+                                        : undefined
+                                    }
+                                  >
+                                    {selectedInstance.units.name}
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] shrink-0 font-normal px-1.5 py-0 h-4 bg-muted/40 text-muted-foreground"
+                                  >
+                                    Empresa Mãe
+                                  </Badge>
+                                )}
+                              </div>
+                            )}
+                          </SelectValue>
                         </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Todas as Instâncias</SelectItem>
-                          {instances?.map((inst: any) => (
-                            <SelectItem key={inst.id} value={inst.id}>
-                              {inst.name}
-                            </SelectItem>
+                        <SelectContent className="z-[100] max-h-[320px]">
+                          <SelectItem value="all">
+                            <div className="flex items-center gap-2">
+                              <Globe className="h-4 w-4 text-primary shrink-0" />
+                              <span className="font-medium">Todos os Canais (Atende Geral)</span>
+                            </div>
+                          </SelectItem>
+                          <SelectSeparator />
+
+                          {groupedInstances.matriz.length > 0 && (
+                            <SelectGroup>
+                              <SelectLabel className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium py-1">
+                                <Building2 className="h-3.5 w-3.5 text-primary/70" />
+                                <span>Sede / Empresa Mãe</span>
+                              </SelectLabel>
+                              {groupedInstances.matriz.map((inst: any) => (
+                                <SelectItem key={inst.id} value={inst.id}>
+                                  <div className="flex items-center justify-between w-full gap-2 pr-2">
+                                    <div className="flex items-center gap-2 truncate">
+                                      <ProviderIcon
+                                        provider={inst.provider}
+                                        network={inst.network}
+                                        className="h-4 w-4 shrink-0"
+                                      />
+                                      <span className="font-medium truncate">
+                                        {inst.name || inst.instance_name}
+                                      </span>
+                                    </div>
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] shrink-0 font-normal px-1.5 py-0 h-4 bg-muted/40 text-muted-foreground"
+                                    >
+                                      Empresa Mãe
+                                    </Badge>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          )}
+
+                          {Object.entries(groupedInstances.byUnit).map(([uId, group], index) => (
+                            <SelectGroup key={uId}>
+                              {(groupedInstances.matriz.length > 0 || index > 0) && (
+                                <SelectSeparator />
+                              )}
+                              <SelectLabel className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium py-1">
+                                <MapPin
+                                  className="h-3.5 w-3.5 shrink-0"
+                                  style={{ color: group.unitColor || "#6366f1" }}
+                                />
+                                <span>{group.unitName}</span>
+                              </SelectLabel>
+                              {group.items.map((inst: any) => (
+                                <SelectItem key={inst.id} value={inst.id}>
+                                  <div className="flex items-center justify-between w-full gap-2 pr-2">
+                                    <div className="flex items-center gap-2 truncate">
+                                      <ProviderIcon
+                                        provider={inst.provider}
+                                        network={inst.network}
+                                        className="h-4 w-4 shrink-0"
+                                      />
+                                      <span className="font-medium truncate">
+                                        {inst.name || inst.instance_name}
+                                      </span>
+                                    </div>
+                                    <Badge
+                                      variant="secondary"
+                                      className="text-[10px] shrink-0 font-normal px-1.5 py-0 h-4"
+                                      style={
+                                        group.unitColor
+                                          ? { borderColor: `${group.unitColor}40` }
+                                          : undefined
+                                      }
+                                    >
+                                      {group.unitName}
+                                    </Badge>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
                           ))}
                         </SelectContent>
                       </Select>
@@ -1171,11 +1328,41 @@ export function AiAgentsTab() {
               </CardHeader>
               <CardContent className="flex-1 space-y-3 pb-4">
                 <div className="text-xs space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Instância:</span>
-                    <span className="font-medium truncate max-w-[120px]">
-                      {agent.whatsapp_instances?.name || "Todas"}
-                    </span>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className="text-muted-foreground">Canal / Instância:</span>
+                    {agent.whatsapp_instances ? (
+                      <span className="font-medium inline-flex items-center gap-1.5 truncate max-w-[150px]">
+                        <ProviderIcon
+                          provider={agent.whatsapp_instances.provider}
+                          network={agent.whatsapp_instances.network}
+                          className="h-3.5 w-3.5 shrink-0"
+                        />
+                        <span className="truncate">{agent.whatsapp_instances.name}</span>
+                        {agent.whatsapp_instances.units?.name && (
+                          <span
+                            className="text-[10px] px-1 py-0 rounded font-normal shrink-0"
+                            style={{
+                              backgroundColor: agent.whatsapp_instances.units.color
+                                ? `${agent.whatsapp_instances.units.color}20`
+                                : undefined,
+                              color: agent.whatsapp_instances.units.color || undefined,
+                              border: `1px solid ${
+                                agent.whatsapp_instances.units.color
+                                  ? `${agent.whatsapp_instances.units.color}40`
+                                  : "currentColor"
+                              }`,
+                            }}
+                          >
+                            {agent.whatsapp_instances.units.name}
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="font-medium inline-flex items-center gap-1.5 text-muted-foreground">
+                        <Globe className="h-3.5 w-3.5 shrink-0" />
+                        <span>Todos os Canais</span>
+                      </span>
+                    )}
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Departamento:</span>

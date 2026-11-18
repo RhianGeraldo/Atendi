@@ -302,6 +302,137 @@ async function resolveDepartmentId(
   return matchedDept?.id || null;
 }
 
+/**
+ * Resolução inteligente e hierárquica do Agente de IA para uma conversa:
+ * 1. Prioridade 1: Agente ativo vinculado diretamente à instância/canal (instance_id)
+ * 2. Prioridade 2: Agente atual da conversa (se ainda estiver ativo e válido)
+ * 3. Prioridade 3: Agente ativo vinculado à unidade física (unit_id)
+ * 4. Prioridade 4: Agente Principal ativo da empresa (is_main_agent = true)
+ * 5. Prioridade 5: Agente ativo por padrão (active_by_default = true)
+ * 6. Fallback final: Primeiro agente ativo disponível na empresa
+ */
+export async function resolveAiAgentForConversation({
+  companyId,
+  instanceId,
+  unitId,
+  currentAgentId,
+}: {
+  companyId: string;
+  instanceId?: string | null;
+  unitId?: string | null;
+  currentAgentId?: string | null;
+}): Promise<{
+  agent: { id: string; name: string; is_main_agent: boolean; active_by_default: boolean } | null;
+  aiActive: boolean;
+}> {
+  // 1. Prioridade 1: Agente ativo vinculado especificamente a este canal/instância
+  if (instanceId) {
+    const { data: instanceAgent } = await supabaseAdmin
+      .from("ai_agents")
+      .select("id, name, is_main_agent, active_by_default, is_active")
+      .eq("company_id", companyId)
+      .eq("instance_id", instanceId)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+
+    if (instanceAgent) {
+      return {
+        agent: instanceAgent,
+        aiActive: true, // Se há um agente dedicado para este canal, ele deve atender ativamente!
+      };
+    }
+  }
+
+  // 2. Prioridade 2: Se a conversa já possui um agente (ex: delegação multi-agente em andamento), verificar se ainda está ativo
+  if (currentAgentId) {
+    const { data: currentAgent } = await supabaseAdmin
+      .from("ai_agents")
+      .select("id, name, is_main_agent, active_by_default, is_active")
+      .eq("id", currentAgentId)
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (currentAgent) {
+      return {
+        agent: currentAgent,
+        aiActive: true,
+      };
+    }
+  }
+
+  // 3. Prioridade 3: Agente ativo vinculado à unidade física
+  if (unitId) {
+    const { data: unitAgent } = await supabaseAdmin
+      .from("ai_agents")
+      .select("id, name, is_main_agent, active_by_default, is_active")
+      .eq("company_id", companyId)
+      .eq("unit_id", unitId)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+
+    if (unitAgent) {
+      return {
+        agent: unitAgent,
+        aiActive: unitAgent.active_by_default ?? true,
+      };
+    }
+  }
+
+  // 4. Prioridade 4: Agente Principal ativo da empresa (is_main_agent = true)
+  const { data: mainAgents } = await supabaseAdmin
+    .from("ai_agents")
+    .select("id, name, is_main_agent, active_by_default, is_active")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .eq("is_main_agent", true)
+    .limit(1);
+
+  if (mainAgents && mainAgents.length > 0) {
+    const mainAgent = mainAgents[0];
+    return {
+      agent: mainAgent,
+      aiActive: mainAgent.active_by_default ?? false,
+    };
+  }
+
+  // 5. Prioridade 5: Agente ativo por padrão (active_by_default = true)
+  const { data: defaultAgents } = await supabaseAdmin
+    .from("ai_agents")
+    .select("id, name, is_main_agent, active_by_default, is_active")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .eq("active_by_default", true)
+    .limit(1);
+
+  if (defaultAgents && defaultAgents.length > 0) {
+    return {
+      agent: defaultAgents[0],
+      aiActive: true,
+    };
+  }
+
+  // 6. Fallback final: Primeiro agente ativo da empresa
+  const { data: anyActiveAgent } = await supabaseAdmin
+    .from("ai_agents")
+    .select("id, name, is_main_agent, active_by_default, is_active")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+
+  if (anyActiveAgent) {
+    return {
+      agent: anyActiveAgent,
+      aiActive: anyActiveAgent.active_by_default ?? false,
+    };
+  }
+
+  return { agent: null, aiActive: false };
+}
+
 export async function generateAndSendAiResponse(conversationId: string, companyId: string) {
   try {
     // 1. Buscar detalhes da conversa com garantia estrita de Empresa e Unidade
@@ -360,43 +491,59 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         .eq("id", conversationId);
     }
 
-    let agentIdToUse = conv.ai_agent_id;
+    // 2. Buscar ou Re-resolver o Agente Ativo para este atendimento
+    let agent: any = null;
 
-    if (!agentIdToUse) {
-      console.log(
-        `[ai-generator] No AI agent assigned to conversation ${conversationId}. Auto-assigning best available agent...`,
-      );
-      const { data: defaultAgents } = await supabaseAdmin
+    // Se já tinha um agentId, verifica se ele existe e continua ativo
+    if (conv.ai_agent_id) {
+      const { data: foundAgent } = await supabaseAdmin
         .from("ai_agents")
-        .select("id")
-        .eq("company_id", effectiveCompanyId)
+        .select("*")
+        .eq("id", conv.ai_agent_id)
         .eq("is_active", true)
-        .eq("is_main_agent", true)
-        .limit(1);
+        .maybeSingle();
 
-      if (defaultAgents && defaultAgents.length > 0) {
-        agentIdToUse = defaultAgents[0].id;
-        await supabaseAdmin
-          .from("conversations")
-          .update({ ai_agent_id: agentIdToUse })
-          .eq("id", conversationId);
-      } else {
-        console.log(
-          `[ai-generator] No active AI agents found in company ${effectiveCompanyId}. Aborting.`,
-        );
-        return;
+      // Só aceitamos o agente anterior se a instância NÃO tiver um agente dedicado diferente
+      if (foundAgent) {
+        if (!conv.whatsapp_instance_id || !foundAgent.instance_id || foundAgent.instance_id === conv.whatsapp_instance_id) {
+          agent = foundAgent;
+        }
       }
     }
 
-    // 2. Buscar detalhes do Agente de IA
-    const { data: agent, error: agentErr } = await supabaseAdmin
-      .from("ai_agents")
-      .select("*")
-      .eq("id", agentIdToUse)
-      .single();
+    // Se não há agente ou o anterior está inativo ou há um agente dedicado para a instância:
+    if (!agent) {
+      console.log(
+        `[ai-generator] Resolving best active AI agent for conversation ${conversationId} (instance: ${conv.whatsapp_instance_id})...`,
+      );
+      const resolution = await resolveAiAgentForConversation({
+        companyId: effectiveCompanyId,
+        instanceId: conv.whatsapp_instance_id,
+        unitId: effectiveUnitId,
+      });
 
-    if (agentErr || !agent || !agent.is_active) {
-      console.error(`[ai-generator] AI Agent not found or inactive: ${conv.ai_agent_id}`);
+      if (resolution.agent) {
+        const { data: resolvedAgent } = await supabaseAdmin
+          .from("ai_agents")
+          .select("*")
+          .eq("id", resolution.agent.id)
+          .single();
+
+        agent = resolvedAgent;
+        await supabaseAdmin
+          .from("conversations")
+          .update({ ai_agent_id: resolution.agent.id, ai_active: true })
+          .eq("id", conversationId);
+        console.log(
+          `[ai-generator] Conversation ${conversationId} updated to AI Agent: ${agent.name} (${agent.id})`,
+        );
+      }
+    }
+
+    if (!agent) {
+      console.error(
+        `[ai-generator] AI Agent not found or no active agent in company for conversation ${conversationId}. Aborting.`,
+      );
       return;
     }
 

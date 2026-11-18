@@ -3,6 +3,7 @@ import { conferirPorta } from "./webhook-auth";
 import { responderVerificacaoMeta } from "./meta-webhook-verify";
 
 import { enqueueAiMessage, scheduleAiMessage } from "./ai-queue";
+import { resolveAiAgentForConversation } from "./ai-generator";
 
 export async function handleInstagramWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -361,20 +362,17 @@ async function processIncomingMessage(params: any) {
       .limit(1)
       .maybeSingle();
 
-    // Check for default AI agent
-    const { data: defaultAgents } = await supabaseAdmin
-      .from("ai_agents")
-      .select("id, is_main_agent, active_by_default, name")
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .eq("is_main_agent", true)
-      .limit(1);
+    // Resolução inteligente e hierárquica do agente de IA
+    const resolution = await resolveAiAgentForConversation({
+      companyId,
+      instanceId,
+      unitId,
+      currentAgentId: resolvedConv?.ai_agent_id,
+    });
 
-    const defaultAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
-    const defaultAgentName =
-      defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].name : "IA";
-    const isActiveByDefault =
-      defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
+    const defaultAgentId = resolution.agent?.id ?? null;
+    const defaultAgentName = resolution.agent?.name ?? "IA";
+    const isActiveByDefault = resolution.aiActive;
 
     if (resolvedConv) {
       conversationId = resolvedConv.id;
@@ -389,7 +387,7 @@ async function processIncomingMessage(params: any) {
         ai_active: aiActive,
       };
       if (!isFromMe) updatePayload.ai_followup_count = 0;
-      if (aiActive && defaultAgentId) updatePayload.ai_agent_id = defaultAgentId;
+      if (defaultAgentId) updatePayload.ai_agent_id = defaultAgentId;
 
       await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
     } else {

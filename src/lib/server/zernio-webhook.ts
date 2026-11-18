@@ -18,6 +18,7 @@ import { conferirPorta } from "./webhook-auth";
 import { interpretarEventoZernio, type EventoZernioTraduzido } from "../canais/zernio/interpretar";
 import { downloadZernioMedia, ZernioClient } from "../canais/zernio/client";
 import { enqueueAiMessage, scheduleAiMessage } from "./ai-queue";
+import { resolveAiAgentForConversation } from "./ai-generator";
 import { getPhoneVariants } from "@/lib/utils";
 import { persistirAvatarContatoNoStorage } from "../avatar-storage";
 import { insertContactOrFindExisting } from "./whatsapp-lid";
@@ -485,26 +486,23 @@ async function processarMensagem(
       updatePayload.unread_count = (activeConv.unread_count || 0) + 1;
     }
 
+    // Resolução inteligente e hierárquica do Agente de IA para a instância/conversa
+    const resolution = await resolveAiAgentForConversation({
+      companyId,
+      instanceId: instance.id,
+      unitId,
+      currentAgentId: activeConv.ai_agent_id,
+    });
+    const resolvedAgentId = resolution.agent?.id ?? null;
+    aiActive = resolution.aiActive;
+
     // A conversa é achada pela thread do Instagram mesmo resolvida: mensagem da cliente reabre
     // como "aguardando" (ou "em atendimento" se a IA estava atendendo), igual ao WhatsApp
     if (activeConv.status === "resolved" && !isFromMe) {
-      let agentId = activeConv.ai_agent_id ?? null;
-      if (!agentId) {
-        const { data: defaultAgents } = await supabaseAdmin
-          .from("ai_agents")
-          .select("id")
-          .eq("company_id", companyId)
-          .eq("is_active", true)
-          .or("is_main_agent.eq.true,active_by_default.eq.true")
-          .order("is_main_agent", { ascending: false })
-          .limit(1);
-        agentId = defaultAgents?.[0]?.id ?? null;
-      }
-      aiActive = activeConv.ai_active ?? false;
       Object.assign(updatePayload, {
         status: aiActive ? "active" : "waiting",
         ai_active: aiActive,
-        ai_agent_id: agentId,
+        ai_agent_id: resolvedAgentId,
         assigned_agent_id: null,
         resolved_at: null,
         unread_count: 1,
@@ -514,25 +512,27 @@ async function processarMensagem(
         contact.id,
         instance.id,
         aiActive,
-        agentId,
+        resolvedAgentId,
       );
       if (sessionId) updatePayload.current_session_id = sessionId;
+    } else {
+      // Se a conversa já estava aberta mas não tinha agente ou o agente da instância é diferente:
+      if (resolvedAgentId && (!activeConv.ai_agent_id || activeConv.ai_agent_id !== resolvedAgentId)) {
+        updatePayload.ai_agent_id = resolvedAgentId;
+        updatePayload.ai_active = aiActive;
+      }
     }
 
     await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
   } else {
-    // Verificar agente de IA padrão da empresa
-    const { data: defaultAgents } = await supabaseAdmin
-      .from("ai_agents")
-      .select("id, is_main_agent, active_by_default, name")
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .eq("is_main_agent", true)
-      .limit(1);
-
-    const defaultAgent = defaultAgents?.[0];
-    const isAiDefault = defaultAgent?.active_by_default ?? false;
-    aiActive = isAiDefault;
+    // Resolução inteligente do Agente de IA para nova conversa nesta instância
+    const resolution = await resolveAiAgentForConversation({
+      companyId,
+      instanceId: instance.id,
+      unitId,
+    });
+    const defaultAgent = resolution.agent;
+    aiActive = resolution.aiActive;
 
     const { data: newConv, error: newConvErr } = await supabaseAdmin
       .from("conversations")
@@ -541,7 +541,7 @@ async function processarMensagem(
         whatsapp_instance_id: instance.id,
         unit_id: unitId,
         channel: redeFinal,
-        status: isFromMe ? "resolved" : isAiDefault ? "active" : "waiting",
+        status: isFromMe ? "resolved" : aiActive ? "active" : "waiting",
         started_at: nowIso,
         last_message_at: nowIso,
         last_message_preview: previewText,

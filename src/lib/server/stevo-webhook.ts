@@ -3,6 +3,7 @@ import { conferirPorta } from "./webhook-auth";
 import { atualizarStatusPeloWebhook } from "./whatsapp-conexao";
 import { getPhoneVariants } from "@/lib/utils";
 import { enqueueAiMessage, scheduleAiMessage } from "./ai-queue";
+import { resolveAiAgentForConversation } from "./ai-generator";
 import { extractExternalAdReply, processAndCacheAdPreview } from "./ad-preview-cache";
 import { dispatchAutomationEvent } from "./automation-engine";
 import { sendMetaCapiEvent } from "./meta-capi";
@@ -1329,15 +1330,12 @@ export async function processStevoWebhookBody(
 
           // Only look up default agent if there was no agent previously assigned
           if (!resolvedAgentId) {
-            const { data: defaultAgents } = await supabaseAdmin
-              .from("ai_agents")
-              .select("id, active_by_default")
-              .eq("company_id", company_id)
-              .eq("is_active", true)
-              .or("is_main_agent.eq.true,active_by_default.eq.true")
-              .order("is_main_agent", { ascending: false })
-              .limit(1);
-            resolvedAgentId = defaultAgents?.[0]?.id ?? null;
+            const resolution = await resolveAiAgentForConversation({
+              companyId: company_id,
+              instanceId: instance_id,
+              unitId: unit_id,
+            });
+            resolvedAgentId = resolution.agent?.id ?? null;
           }
 
           if (isGroup) {
@@ -1425,18 +1423,14 @@ export async function processStevoWebhookBody(
         await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
       } else {
         console.log(`[stevo-webhook] No existing conversation found. Creating new one.`);
-        // Check for default AI agent (prefer agent mapped to this instance)
-        const { data: defaultAgents } = await supabaseAdmin
-          .from("ai_agents")
-          .select("id, is_main_agent, active_by_default")
-          .eq("company_id", company_id)
-          .eq("is_active", true)
-          .eq("is_main_agent", true)
-          .limit(1);
-        const defaultAgentId =
-          defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
-        const isActiveByDefault =
-          defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
+        // Resolução inteligente e hierárquica do agente de IA
+        const resolution = await resolveAiAgentForConversation({
+          companyId: company_id,
+          instanceId: instance_id,
+          unitId: unit_id,
+        });
+        const defaultAgentId = resolution.agent?.id ?? null;
+        const isActiveByDefault = resolution.aiActive;
         if (isActiveByDefault && !isGroup) aiActive = true;
         if (isGroup) aiActive = false;
 
