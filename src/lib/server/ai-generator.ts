@@ -1656,6 +1656,20 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             }
           }
 
+          if (!targetUnitId && chamarNoWhatsappData.unidade_nome) {
+            const { data: dbMatched } = await supabaseAdmin
+              .from("units")
+              .select("id, name")
+              .eq("company_id", effectiveCompanyId)
+              .ilike("name", `%${chamarNoWhatsappData.unidade_nome.trim()}%`)
+              .limit(1)
+              .maybeSingle();
+            if (dbMatched) {
+              targetUnitId = dbMatched.id;
+              targetUnitName = dbMatched.name;
+            }
+          }
+
           if (!targetUnitId && fallbackUnitId) {
             targetUnitId = fallbackUnitId;
             const fallbackUnit = allCompanyUnits?.find((u) => u.id === fallbackUnitId);
@@ -1825,24 +1839,42 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           let whatsappConvId: string | null = null;
           const { data: existingWaConvs } = await supabaseAdmin
             .from("conversations")
-            .select("id, status")
-            .eq("contact_id", conv.contact_id)
+            .select("id, status, current_session_id")
             .eq("whatsapp_instance_id", targetInstanceId)
+            .or(`contact_id.eq.${conv.contact_id},remote_id.eq.${rawPhone}`)
             .order("last_message_at", { ascending: false })
             .limit(1);
 
           if (existingWaConvs && existingWaConvs.length > 0) {
             whatsappConvId = existingWaConvs[0].id;
+            const waUpdates: Record<string, any> = {
+              status: "active",
+              ai_active: true,
+              ai_agent_id: whatsAppAgentId,
+              unit_id: targetUnitId,
+              contact_id: conv.contact_id,
+              remote_id: rawPhone,
+              last_message_at: new Date().toISOString(),
+            };
+
+            if (existingWaConvs[0].status === "resolved") {
+              waUpdates.resolved_at = null;
+              const { data: reSession } = await supabaseAdmin
+                .from("conversation_sessions")
+                .insert({
+                  conversation_id: whatsappConvId,
+                  started_at: new Date().toISOString(),
+                })
+                .select("id")
+                .single();
+              if (reSession) {
+                waUpdates.current_session_id = reSession.id;
+              }
+            }
+
             await supabaseAdmin
               .from("conversations")
-              .update({
-                status: "active",
-                ai_active: true,
-                ai_agent_id: whatsAppAgentId,
-                unit_id: targetUnitId,
-                remote_id: rawPhone,
-                last_message_at: new Date().toISOString(),
-              })
+              .update(waUpdates)
               .eq("id", whatsappConvId);
           } else {
             const { data: newWaConv, error: newConvErr } = await supabaseAdmin
