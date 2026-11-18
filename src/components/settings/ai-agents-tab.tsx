@@ -13,6 +13,8 @@ import {
   BadgeDollarSign,
   HelpCircle,
   Ticket,
+  Wrench,
+  UserCheck,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -296,9 +298,9 @@ export function AiAgentsTab() {
         prompt_personality: promptPersonality,
         prompt_instructions: promptInstructions,
         prompt_extra_info: promptExtraInfo,
-        prompt_handoff: promptHandoff,
-        prompt_resolution: promptResolution,
-        prompt_receive_handoff: promptReceiveHandoff,
+        prompt_handoff: null,
+        prompt_resolution: null,
+        prompt_receive_handoff: null,
         is_active: isActive,
         active_by_default: activeByDefault,
         is_main_agent: isMainAgent,
@@ -307,11 +309,11 @@ export function AiAgentsTab() {
         allow_resolution: allowResolution,
         resolution_reason_id: resolutionReasonId === "none" ? null : resolutionReasonId,
         allow_tasks: allowTasks,
-        prompt_tasks: promptTasks,
+        prompt_tasks: null,
         allow_opportunities: allowOpportunities,
-        prompt_opportunities: promptOpportunities,
+        prompt_opportunities: null,
         allow_tickets: allowTickets,
-        prompt_tickets: promptTickets,
+        prompt_tickets: null,
         pipeline_id: pipelineId === "none" ? null : pipelineId,
         allowed_agent_ids: allowedAgentIds.length > 0 ? allowedAgentIds : null,
         allow_followup: allowFollowup,
@@ -394,7 +396,7 @@ export function AiAgentsTab() {
                   <TabsTrigger value="general">Geral</TabsTrigger>
                   <TabsTrigger value="behavior">Comportamento</TabsTrigger>
                   <TabsTrigger value="followup">Follow-ups</TabsTrigger>
-                  <TabsTrigger value="automation">Skills</TabsTrigger>
+                  <TabsTrigger value="automation">Ferramentas (Tools)</TabsTrigger>
                 </TabsList>
 
                 {/* Aba Geral */}
@@ -803,28 +805,63 @@ export function AiAgentsTab() {
                   </div>
                 </TabsContent>
 
-                {/* Aba Skills */}
+                {/* Aba Ferramentas (Tools) */}
                 <TabsContent value="automation" className="space-y-4">
-                  <div className="space-y-4">
-                    <div className="border rounded-md p-4 space-y-4 bg-muted/10">
-                      <div className="flex flex-col space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Bot className="h-4 w-4 text-primary" />
-                          <label className="text-sm font-medium">
-                            Delegação para Outros Agentes (Skills)
-                          </label>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Selecione quais outros agentes esta IA pode acessar e transferir o
-                          atendimento. Se nenhum for selecionado, ela não conhecerá os outros
-                          agentes da empresa.
-                        </p>
+                  <div className="rounded-lg border bg-muted/30 p-3.5 flex items-start gap-3">
+                    <div className="rounded-md bg-primary/10 p-2 text-primary shrink-0 mt-0.5">
+                      <Wrench className="h-4 w-4" />
+                    </div>
+                    <div className="text-xs space-y-1">
+                      <p className="font-semibold text-foreground">
+                        Ferramentas Nativas & Function Calling (Padrão MCP)
+                      </p>
+                      <p className="text-muted-foreground leading-relaxed">
+                        O agente executa ações através de ferramentas nativas estruturadas. Não é
+                        necessário escrever prompts para acioná-las: o modelo LLM decide
+                        autonomamente quando chamar cada ferramenta com base no contexto e nas
+                        definições do sistema.
+                      </p>
+                    </div>
+                  </div>
 
-                        <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t">
+                  <div className="space-y-3">
+                    {/* Tool: Delegação Multi-Agente */}
+                    <div className="border rounded-lg p-4 space-y-3 bg-card shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-md bg-primary/10 text-primary">
+                            <Bot className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">Delegação Multi-Agente</span>
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 px-1.5 border-primary/30 text-primary"
+                              >
+                                delegar_para_outro_agente_ia
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Permite ao agente transferir a conversa para outros agentes de IA
+                              especialistas da empresa.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t">
+                        <label className="text-xs font-medium text-muted-foreground block mb-2">
+                          Selecione os agentes colegas disponíveis para delegação:
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
                           {agents
                             ?.filter((a: any) => a.id !== editingId)
                             .map((a: any) => (
-                              <div key={a.id} className="flex items-center space-x-2">
+                              <div
+                                key={a.id}
+                                className="flex items-center space-x-2 border rounded-md p-2 bg-muted/20 hover:bg-muted/40 transition-colors"
+                              >
                                 <Checkbox
                                   id={`agent-${a.id}`}
                                   checked={allowedAgentIds.includes(a.id)}
@@ -840,38 +877,55 @@ export function AiAgentsTab() {
                                 />
                                 <label
                                   htmlFor={`agent-${a.id}`}
-                                  className="text-xs font-medium leading-none cursor-pointer"
+                                  className="text-xs font-medium leading-none cursor-pointer flex-1"
                                 >
                                   {a.name}{" "}
-                                  <span className="text-muted-foreground">({a.ai_type})</span>
+                                  <span className="text-muted-foreground font-normal">
+                                    ({a.ai_type})
+                                  </span>
                                 </label>
                               </div>
                             ))}
                           {agents?.filter((a: any) => a.id !== editingId).length === 0 && (
-                            <p className="text-xs text-muted-foreground col-span-2">
-                              Nenhum outro agente disponível na empresa.
+                            <p className="text-xs text-muted-foreground col-span-2 py-1">
+                              Nenhum outro agente cadastrado na empresa.
                             </p>
                           )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="border rounded-md p-4 space-y-4 bg-muted/10">
+                    {/* Tool: Transferência Humana (Handoff) */}
+                    <div className="border rounded-lg p-4 space-y-3 bg-card shadow-xs">
                       <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <label className="text-sm font-medium">
-                            Permitir Transferência (Handoff)
-                          </label>
-                          <p className="text-xs text-muted-foreground">
-                            A IA poderá transferir o atendimento para um humano caso não saiba
-                            responder.
-                          </p>
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                            <UserCheck className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">
+                                Transferência para Humano (Handoff)
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 px-1.5 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                              >
+                                transferir_atendimento
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Transfere o atendimento para atendentes humanos quando o cliente pedir
+                              ou o assunto fugir do escopo.
+                            </p>
+                          </div>
                         </div>
                         <Switch checked={allowHandoff} onCheckedChange={setAllowHandoff} />
                       </div>
+
                       {allowHandoff && (
-                        <>
-                          <div className="space-y-2 pt-2 border-t">
+                        <div className="pt-3 border-t">
+                          <div className="space-y-1.5">
                             <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                               <CornerDownRight className="h-3 w-3" />
                               Departamento de Destino
@@ -880,7 +934,7 @@ export function AiAgentsTab() {
                               value={handoffDepartmentId}
                               onValueChange={setHandoffDepartmentId}
                             >
-                              <SelectTrigger className="h-9">
+                              <SelectTrigger className="h-9 text-xs">
                                 <SelectValue placeholder="Mesmo departamento atual" />
                               </SelectTrigger>
                               <SelectContent>
@@ -893,89 +947,41 @@ export function AiAgentsTab() {
                               </SelectContent>
                             </Select>
                           </div>
-                          <div className="space-y-2 pt-2 border-t">
-                            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                              <CornerDownRight className="h-3 w-3" />
-                              Instruções para Transferência Humana
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs space-y-2 text-xs">
-                                  <p>
-                                    A IA transfere o atendimento nativamente para o departamento ou
-                                    fila de espera.
-                                  </p>
-                                  <p>
-                                    Instrua quando ela deve transferir (ex:{" "}
-                                    <em>
-                                      "Transfira apenas se o cliente pedir um atendente humano ou se
-                                      o problema for financeiro"
-                                    </em>
-                                    ).
-                                  </p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </label>
-                            <Textarea
-                              className="min-h-[120px] text-xs font-mono"
-                              placeholder="Ex: Se o cliente solicitar atendimento humano ou a solicitação for sobre cancelamento, transfira o atendimento..."
-                              value={promptHandoff}
-                              onChange={(e) => setPromptHandoff(e.target.value)}
-                            />
-                            <p className="text-[10px] text-muted-foreground">
-                              Deixe em branco para usar o comportamento padrão do sistema.
-                            </p>
-                          </div>
-
-                          <div className="space-y-2 pt-2 border-t">
-                            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                              <CornerDownRight className="h-3 w-3" />
-                              Instrução ao Receber Transferência
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs space-y-2 text-xs">
-                                  <p>
-                                    Instrução que a IA recebe no momento em que um colega transfere
-                                    um atendimento para ela.
-                                  </p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </label>
-                            <Textarea
-                              className="min-h-[100px] text-xs font-mono"
-                              placeholder="Ex: Um colega transferiu para você. Continue o atendimento da sua área de especialidade."
-                              value={promptReceiveHandoff}
-                              onChange={(e) => setPromptReceiveHandoff(e.target.value)}
-                            />
-                            <p className="text-[10px] text-muted-foreground">
-                              Deixe em branco para usar o comportamento padrão do sistema.
-                            </p>
-                          </div>
-                        </>
+                        </div>
                       )}
                     </div>
 
-                    <div className="border rounded-md p-4 space-y-4 bg-muted/10">
+                    {/* Tool: Encerramento de Atendimento */}
+                    <div className="border rounded-lg p-4 space-y-3 bg-card shadow-xs">
                       <div className="flex items-center justify-between">
-                        <div>
-                          <label className="text-sm font-medium flex items-center gap-2">
-                            <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-500" />
-                            Permitir Encerramento Automático
-                          </label>
-                          <p className="text-xs text-muted-foreground">
-                            A IA poderá finalizar o ticket sozinha se concluir a solicitação com
-                            sucesso.
-                          </p>
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-md bg-green-500/10 text-green-600 dark:text-green-500">
+                            <CheckCircle2 className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">
+                                Encerramento de Atendimento
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 px-1.5 border-green-500/30 text-green-600 dark:text-green-500"
+                              >
+                                encerrar_atendimento
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Encerra a sessão e finaliza o atendimento quando a dúvida for sanada
+                              ou o cliente se despedir.
+                            </p>
+                          </div>
                         </div>
                         <Switch checked={allowResolution} onCheckedChange={setAllowResolution} />
                       </div>
 
                       {allowResolution && (
-                        <>
-                          <div className="space-y-2 pt-2 border-t">
+                        <div className="pt-3 border-t">
+                          <div className="space-y-1.5">
                             <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                               <CornerDownRight className="h-3 w-3" />
                               Motivo de Encerramento (Sucesso)
@@ -984,11 +990,11 @@ export function AiAgentsTab() {
                               value={resolutionReasonId}
                               onValueChange={setResolutionReasonId}
                             >
-                              <SelectTrigger className="h-9">
+                              <SelectTrigger className="h-9 text-xs">
                                 <SelectValue placeholder="Selecione um motivo de encerramento" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="none">Padrão (Sem Motivo Especifico)</SelectItem>
+                                <SelectItem value="none">Padrão (Sem Motivo Específico)</SelectItem>
                                 {resolutionReasons?.map((reason: any) => (
                                   <SelectItem key={reason.id} value={reason.id}>
                                     {reason.label}
@@ -997,130 +1003,54 @@ export function AiAgentsTab() {
                               </SelectContent>
                             </Select>
                           </div>
-                          <div className="space-y-2 pt-2 border-t">
-                            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                              <CornerDownRight className="h-3 w-3" />
-                              Instruções para Encerramento de Atendimento
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs space-y-2 text-xs">
-                                  <p>A IA encerra o atendimento de forma nativa e segura.</p>
-                                  <p>
-                                    Oriente as condições em que o chamado deve ser finalizado (ex:{" "}
-                                    <em>
-                                      "Encerre apenas se o cliente confirmar que a dúvida foi
-                                      resolvida ou se despedir"
-                                    </em>
-                                    ).
-                                  </p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </label>
-                            <Textarea
-                              className="min-h-[120px] text-xs font-mono"
-                              placeholder="Ex: Encerre o chamado se o cliente agradecer, se despedir ou confirmar que não possui mais dúvidas..."
-                              value={promptResolution}
-                              onChange={(e) => setPromptResolution(e.target.value)}
-                            />
-                            <p className="text-[10px] text-muted-foreground">
-                              Deixe em branco para usar o comportamento padrão do sistema.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Tool: Oportunidades no CRM */}
+                    <div className="border rounded-lg p-4 space-y-3 bg-card shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-500">
+                            <BadgeDollarSign className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">
+                                Gestão de Oportunidades no CRM
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 px-1.5 border-emerald-500/30 text-emerald-600 dark:text-emerald-500"
+                              >
+                                criar_oportunidade / atualizar_oportunidade
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Cria e move cards no funil comercial assim que o lead demonstrar
+                              interesse ou pedir proposta.
                             </p>
                           </div>
-                        </>
-                      )}
-                    </div>
-
-                    <div className="border rounded-md p-4 space-y-4 bg-muted/10">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <label className="text-sm font-medium flex items-center gap-2">
-                            <CalendarCheck className="h-4 w-4 text-blue-600 dark:text-blue-500" />
-                            Permitir Criação de Tarefas
-                          </label>
-                          <p className="text-xs text-muted-foreground">
-                            A IA poderá criar tarefas de follow-up diretamente no CRM.
-                          </p>
-                        </div>
-                        <Switch checked={allowTasks} onCheckedChange={setAllowTasks} />
-                      </div>
-                      {allowTasks && (
-                        <div className="space-y-2 pt-2 border-t">
-                          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                            <CornerDownRight className="h-3 w-3" />
-                            Instruções para Criação de Tarefas
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
-                              </TooltipTrigger>
-                              <TooltipContent className="max-w-xs space-y-2 text-xs">
-                                <p>
-                                  A IA utiliza ferramenta nativa para agendar tarefas no CRM com
-                                  datas flexíveis (ex: <em>"amanhã às 14h"</em>,{" "}
-                                  <em>"em 2 dias"</em> ou <em>"2026-10-15 10:00"</em>).
-                                </p>
-                                <p>
-                                  Aqui você pode orientar quando ela deve criar uma tarefa para a
-                                  equipe comercial/suporte.
-                                </p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </label>
-                          <Textarea
-                            className="min-h-[100px] text-xs font-mono"
-                            placeholder="Ex: Quando o cliente pedir para ligar depois ou solicitar proposta formal, crie uma tarefa de retorno..."
-                            value={promptTasks}
-                            onChange={(e) => setPromptTasks(e.target.value)}
-                          />
-                          <p className="text-[10px] text-muted-foreground">
-                            Deixe em branco para usar o texto padrão do sistema.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="border rounded-md p-4 space-y-4 bg-muted/10">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <label className="text-sm font-medium flex items-center gap-2">
-                            <BadgeDollarSign className="h-4 w-4 text-amber-600 dark:text-amber-500" />
-                            Permitir Criação de Oportunidades
-                          </label>
-                          <p className="text-xs text-muted-foreground">
-                            A IA poderá criar oportunidades de negócio (vendas) no funil do contato.
-                          </p>
                         </div>
                         <Switch
                           checked={allowOpportunities}
                           onCheckedChange={setAllowOpportunities}
                         />
                       </div>
+
                       {allowOpportunities && (
-                        <>
-                          <div className="space-y-2 pt-2 border-t">
+                        <div className="pt-3 border-t">
+                          <div className="space-y-1.5">
                             <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
                               <CornerDownRight className="h-3 w-3" />
-                              Funil (Pipeline) do Agente
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs space-y-2 text-xs">
-                                  <p>Selecione em qual Funil este agente irá operar.</p>
-                                  <p>
-                                    O agente receberá as etapas deste funil para usar nas ações de
-                                    criação e movimentação de cards.
-                                  </p>
-                                </TooltipContent>
-                              </Tooltip>
+                              Funil (Pipeline) de Operação do Agente *
                             </label>
                             <Select value={pipelineId} onValueChange={setPipelineId}>
-                              <SelectTrigger className="h-9">
+                              <SelectTrigger className="h-9 text-xs">
                                 <SelectValue placeholder="Selecione o Funil" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="none">Nenhum (Sem Contexto de Funil)</SelectItem>
+                                <SelectItem value="none">Selecione um funil comercial</SelectItem>
                                 {pipelines?.map((pipe: any) => (
                                   <SelectItem key={pipe.id} value={pipe.id}>
                                     {pipe.name}
@@ -1129,85 +1059,66 @@ export function AiAgentsTab() {
                               </SelectContent>
                             </Select>
                           </div>
-                          <div className="space-y-2 pt-2 border-t">
-                            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                              <CornerDownRight className="h-3 w-3" />
-                              Instruções de Oportunidades
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs space-y-2 text-xs">
-                                  <p>A IA gerencia o funil de forma nativa e estruturada.</p>
-                                  <p>
-                                    Ela reconhece nomes das etapas (ex: <em>"Lead"</em>,{" "}
-                                    <em>"Proposta"</em>, <em>"Fechamento"</em>) e valores monetários
-                                    informados na conversa.
-                                  </p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </label>
-                            <Textarea
-                              className="min-h-[140px] text-xs font-mono"
-                              placeholder="Ex: Quando um lead demonstrar interesse ou pedir orçamento, crie uma oportunidade no funil na etapa inicial..."
-                              value={promptOpportunities}
-                              onChange={(e) => setPromptOpportunities(e.target.value)}
-                            />
-                            <p className="text-[10px] text-muted-foreground">
-                              Você pode usar variáveis no prompt como {`{{nome_cliente}}`} e{" "}
-                              {`{{telefone}}`}.
-                            </p>
-                          </div>
-                        </>
+                        </div>
                       )}
                     </div>
 
-                    <div className="border rounded-md p-4 space-y-4 bg-muted/10">
+                    {/* Tool: Criação de Tarefas no CRM */}
+                    <div className="border rounded-lg p-4 space-y-3 bg-card shadow-xs">
                       <div className="flex items-center justify-between">
-                        <div>
-                          <label className="text-sm font-medium flex items-center gap-2">
-                            <Ticket className="h-4 w-4 text-purple-600 dark:text-purple-400" />
-                            Permitir Abertura de Chamados (Tickets)
-                          </label>
-                          <p className="text-xs text-muted-foreground">
-                            A IA poderá abrir chamados quando detectar problemas técnicos, reclamações graves ou quando não conseguir resolver a solicitação do cliente.
-                          </p>
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-500">
+                            <CalendarCheck className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">
+                                Tarefas e Lembretes no CRM
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 px-1.5 border-blue-500/30 text-blue-600 dark:text-blue-500"
+                              >
+                                criar_tarefa
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Agenda tarefas e lembretes para a equipe com prazos flexíveis (ex:
+                              amanhã às 14h, em 2 dias).
+                            </p>
+                          </div>
                         </div>
-                        <Switch
-                          checked={allowTickets}
-                          onCheckedChange={setAllowTickets}
-                        />
+                        <Switch checked={allowTasks} onCheckedChange={setAllowTasks} />
                       </div>
-                      {allowTickets && (
-                        <div className="space-y-2 pt-2 border-t">
-                          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                            <CornerDownRight className="h-3 w-3" />
-                            Instruções Específicas para Abertura de Chamados
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Info className="h-3.5 w-3.5 text-muted-foreground cursor-pointer ml-1" />
-                              </TooltipTrigger>
-                              <TooltipContent className="max-w-xs space-y-2 text-xs">
-                                <p>
-                                  A IA já possui diretrizes de discernimento para evitar falsos positivos (ex: nunca abre chamado para perguntas simples de preços ou dúvidas frequentes).
-                                </p>
-                                <p>
-                                  Aqui você pode adicionar orientações customizadas (ex: <em>"Se o link da agenda estiver quebrado, abra com prioridade alta para o departamento Suporte"</em>).
-                                </p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </label>
-                          <Textarea
-                            className="min-h-[100px] text-xs font-mono"
-                            placeholder="Ex: Se o cliente relatar erro no sistema, link quebrado ou insatisfação com prazos, abra chamado detalhando o ocorrido..."
-                            value={promptTickets}
-                            onChange={(e) => setPromptTickets(e.target.value)}
-                          />
-                          <p className="text-[10px] text-muted-foreground">
-                            Deixe em branco para usar as regras e discernimento padrão do sistema.
-                          </p>
+                    </div>
+
+                    {/* Tool: Abertura de Tickets */}
+                    <div className="border rounded-lg p-4 space-y-3 bg-card shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                            <Ticket className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium">
+                                Abertura de Chamados (Tickets)
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] py-0 px-1.5 border-purple-500/30 text-purple-600 dark:text-purple-400"
+                              >
+                                abrir_ticket
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Abre tickets com prioridade e departamento para falhas técnicas, links
+                              com erro ou reclamações graves.
+                            </p>
+                          </div>
                         </div>
-                      )}
+                        <Switch checked={allowTickets} onCheckedChange={setAllowTickets} />
+                      </div>
                     </div>
                   </div>
                 </TabsContent>

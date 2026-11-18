@@ -308,7 +308,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     const { data: conv, error: convErr } = await supabaseAdmin
       .from("conversations")
       .select(
-        "id, ai_active, ai_agent_id, whatsapp_instance_id, contact_id, status, unit_id, current_session_id, contacts(name, phone, company_id, unit_id), whatsapp_instances(unit_id, company_id)",
+        "id, channel, ai_active, ai_agent_id, whatsapp_instance_id, contact_id, status, unit_id, current_session_id, contacts(name, phone, company_id, unit_id, instagram_username), whatsapp_instances(unit_id, company_id)",
       )
       .eq("id", conversationId)
       .single();
@@ -333,7 +333,11 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       companyId || conv.contacts?.company_id || (instData as any)?.company_id;
 
     // Verificar se já temos unidade específica vinculada à conversa, instância ou contato
-    const hasSpecificUnit = !!(conv.unit_id || (instData as any)?.unit_id || conv.contacts?.unit_id);
+    const hasSpecificUnit = !!(
+      conv.unit_id ||
+      (instData as any)?.unit_id ||
+      conv.contacts?.unit_id
+    );
     let effectiveUnitId =
       conv.unit_id || (instData as any)?.unit_id || conv.contacts?.unit_id || null;
 
@@ -577,23 +581,42 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         ? allCompanyUnits.map((u) => u.name).join(", ")
         : "Aracruz, Linhares, Mantena, São Mateus, Serra";
 
+    const channelNameMap: Record<string, string> = {
+      whatsapp: "WhatsApp",
+      instagram: "Instagram Direct",
+      messenger: "Facebook Messenger",
+      webchat: "Webchat",
+    };
+    const channelRaw = ((conv as any).channel as string) || "whatsapp";
+    const currentChannel = channelNameMap[channelRaw] || channelRaw;
+
     const contextHeader = [
       `=== CONTEXTO DO ATENDIMENTO ATUAL (DADOS AUTORITATIVOS DO SISTEMA) ===`,
       `DATA E HORA ATUAL: ${spNowStr} (Horário de Brasília - America/Sao_Paulo)`,
       `EMPRESA: ${companyName}`,
+      `CANAL DE COMUNICAÇÃO: ${currentChannel}`,
       hasSpecificUnit
         ? `UNIDADE ATUAL DE ATENDIMENTO: ${unitName}`
-        : `CANAL DE ATENDIMENTO: Central Geral da Rede (Unidade física ainda não vinculada)`,
+        : `LOCALIZAÇÃO: Central Geral da Rede (Unidade física ainda não vinculada)`,
       rawClientName
         ? `NOME DO CLIENTE: ${rawClientName} (Primeiro nome: ${clientFirstName})`
         : `NOME DO CLIENTE: Não informado ainda`,
       conv.contacts?.phone ? `TELEFONE DO CLIENTE: ${conv.contacts.phone}` : null,
+      channelRaw === "instagram" && (conv.contacts as any)?.instagram_username
+        ? `PERFIL DO INSTAGRAM: @${(conv.contacts as any).instagram_username.replace(/^@/, "")}`
+        : null,
       hasSpecificUnit
-        ? (unitData?.address ? `ENDEREÇO DA UNIDADE: ${unitData.address}` : null)
+        ? unitData?.address
+          ? `ENDEREÇO DA UNIDADE: ${unitData.address}`
+          : null
         : `UNIDADES DISPONÍVEIS NA REDE: ${availableUnitsList}`,
       hasSpecificUnit
-        ? (unitData?.business_hours ? `HORÁRIOS DA UNIDADE: ${unitData.business_hours}` : null)
-        : (company.business_hours ? `HORÁRIOS DA REDE: ${company.business_hours}` : null),
+        ? unitData?.business_hours
+          ? `HORÁRIOS DA UNIDADE: ${unitData.business_hours}`
+          : null
+        : company.business_hours
+          ? `HORÁRIOS DA REDE: ${company.business_hours}`
+          : null,
       `--- DIRETRIZES CRÍTICAS DE CONTEXTO E LOCALIZAÇÃO ---`,
       hasSpecificUnit
         ? `1. O cliente está em contato direto com a unidade '${unitName}'. Você está respondendo exclusivamente por esta filial. Não pergunte qual cidade ele prefere, pois a unidade já está definida como '${unitName}'.`
@@ -615,14 +638,14 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     systemPromptParts.push(`=== DIRETRIZES DE FERRAMENTAS E COMUNICAÇÃO ===
 1. Você dispõe de ferramentas nativas (tools/functions) para criar/atualizar oportunidades no CRM, agendar tarefas, agendar mensagens futuras ('agendar_mensagem'), definir unidade ('definir_unidade'), salvar nome do cliente ('atualizar_nome_cliente'), transferir o atendimento para equipe humana ou colegas, e encerrar o chamado. Chame SEMPRE a ferramenta correspondente nativamente quando o contexto exigir.
 2. É ESTRITAMENTE PROIBIDO escrever tags textuais como '[CRIAR_OPORTUNIDADE]', '[ATUALIZAR_OPORTUNIDADE]', '[TRANSFERIR]', '[TRANSFERIR_AGENTE]', '[ENCERRAR]', '[CRIAR_TAREFA]', '[AGENDAR_MENSAGEM]' ou qualquer comando em colchetes no texto enviado ao cliente.
-3. O cliente é uma pessoa real no WhatsApp e NUNCA deve ler comandos técnicos de bastidor. Qualquer tag exposta no texto é uma falha grave.
+3. O cliente é uma pessoa real conversando via ${currentChannel} e NUNCA deve ler comandos técnicos de bastidor. Qualquer tag exposta no texto é uma falha grave.
 4. Para ferramentas que interagem com o cliente (como transferir_atendimento, delegar_para_outro_agente_ia ou encerrar_atendimento), preencha o argumento 'aviso' ou 'despedida' com a mensagem calorosa, curta e natural que o cliente lerá.
 5. AÇÕES DO CRM (OPORTUNIDADES E TAREFAS): Quando o cliente demonstrar interesse em um serviço/procedimento, solicitar proposta, orçamento ou concordar em agendar/comprar, NÃO adie para depois: CHAME IMEDIATAMENTE a ferramenta 'criar_oportunidade' (ou 'atualizar_oportunidade' se já houver uma oportunidade aberta) nesta mesma resposta junto com a mensagem natural ao cliente.
 6. RETORNO / AGENDAMENTO DE MENSAGEM: Se o cliente pedir para chamá-lo mais tarde, amanhã, daqui a algumas horas ou em dia específico (ex: 'me chame amanhã às 10h', 'vou ver com meu marido e te respondo à noite'), use a ferramenta 'agendar_mensagem' com o texto a enviar e a data/horário.
-7. TAMANHO DE MENSAGEM NO WHATSAPP (MUITO IMPORTANTE - RESPOSTAS CURTAS):
+7. TAMANHO DE MENSAGEM NO CANAL (${currentChannel.toUpperCase()} - RESPOSTAS CURTAS):
 - NUNCA envie mensagens longas, prolixas ou 'textões'. NUNCA envie listas longas com dezenas de tópicos ou vários emojis por linha.
 - Cada mensagem deve ter no máximo de 2 a 3 frases/parágrafos curtíssimos (1 a 2 linhas cada).
-- Escreva exatamente como uma pessoa real digita no WhatsApp: direto ao ponto, caloroso, simpático e objetivo.
+- Escreva exatamente como uma pessoa real digita no ${currentChannel}: direto ao ponto, caloroso, simpático e objetivo.
 - Faça SEMPRE APENAS UMA pergunta direta e simples ao final para que o cliente responda com facilidade.
 8. DIVISÃO CLARA DE RESPONSABILIDADES (CADA IA FAZ APENAS UMA COISA):
 - Cada IA da empresa possui uma especialidade restrita. NUNCA tente abraçar o trabalho de outra IA:
@@ -630,6 +653,13 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
   * Vendas (Consultora / Closer): Conduz a proposta comercial, valores e fecha a oportunidade no CRM. Assim que o cliente aceitar e for agendar dia/horário, passa para a especialista de Agendamento. Não gerencia a grade de agendamentos.
   * Agendamento: Escolhe datas, horários e orienta o comparecimento. Não vende tratamentos nem negocia valores; se o cliente pedir novos procedimentos, passa para Vendas.
 - Quando a necessidade for de competência de outro colega, acione IMEDIATAMENTE 'delegar_para_outro_agente_ia'.
+9. FLUXO ESPECIAL DE MIGRAÇÃO PARA O WHATSAPP (INSTAGRAM DIRECT):
+- Quando estiver atendendo no Instagram Direct, o objetivo é acolher, qualificar e migrar o cliente para o WhatsApp da unidade mais próxima:
+  1) Descubra com simpatia o primeiro nome (se ainda não souber) e o procedimento/região de interesse.
+  2) Pergunte qual cidade/unidade física fica mais próxima para ela (Aracruz, Linhares, Mantena, São Mateus ou Serra).
+  3) Assim que ela indicar a cidade, use 'definir_unidade' e convide para o WhatsApp: explique que vai enviar fotos dos resultados, detalhes do protocolo e as condições especiais com valores direto no WhatsApp, pedindo o número com DDD.
+  4) Assim que o cliente fornecer o número de WhatsApp, chame IMEDIATAMENTE a ferramenta nativa 'chamar_no_whatsapp' informando o telefone, unidade e a mensagem inicial de acolhimento.
+  5) No texto enviado no Instagram, avise calorosamente que você já enviou uma mensagem para ela no WhatsApp pelo número oficial da unidade.
 ================================================`);
 
     if (agent.prompt_personality)
@@ -639,102 +669,40 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     if (agent.prompt_extra_info)
       systemPromptParts.push(cleanPromptDirective(applyVars(agent.prompt_extra_info)));
 
-    // Instruções orientativas (o modelo agora tem ferramentas nativas)
-    if (agent.allow_handoff) {
-      systemPromptParts.push(
-        cleanPromptDirective(applyVars(agent.prompt_handoff)) ||
-          `DIRETRIZ DE TRANSFERÊNCIA HUMANA:\nSe você não souber como resolver a solicitação do cliente após tentar ajudar ou se ele solicitar explicitamente atendimento humano, chame a ferramenta 'transferir_atendimento' informando o 'aviso' para o cliente e o 'motivo' interno.`,
-      );
-    }
-
-    if (agent.allow_resolution) {
-      systemPromptParts.push(
-        cleanPromptDirective(applyVars(agent.prompt_resolution)) ||
-          `DIRETRIZ DE ENCERRAMENTO:\nQuando o cliente tiver suas dúvidas sanadas, confirmar que deu tudo certo ou se despedir cordialmente, chame a ferramenta 'encerrar_atendimento' com a 'despedida' para ele e o 'resumo' do atendimento.`,
-      );
-    }
-
+    // Roster de colegas multi-agente disponíveis (contexto para a ferramenta delegar_para_outro_agente_ia)
     if (colleagues && colleagues.length > 0) {
       const colleaguesList = colleagues
         .map((c) => `- ${c.name} (${c.ai_type || "Geral"}): ${c.description || "Especialista"}`)
         .join("\n");
-      systemPromptParts.push(
-        `TRABALHO EM EQUIPE (MULTI-AGENTES):\nSe a solicitação for de competência de outro colega especialista, chame a ferramenta 'delegar_para_outro_agente_ia' informando o nome ou ID do colega e o 'aviso' anunciando a troca para o cliente.\nColegas disponíveis:\n${colleaguesList}`,
-      );
+      systemPromptParts.push(`EQUIPE DE COLEGAS DE IA DISPONÍVEIS:\n${colleaguesList}`);
     }
 
-    if (agent.allow_tasks) {
-      systemPromptParts.push(
-        cleanPromptDirective(applyVars(agent.prompt_tasks)) ||
-          `CRIAÇÃO DE TAREFAS NO CRM:\nVocê pode agendar tarefas e follow-ups para a equipe usando a ferramenta nativa 'criar_tarefa'. Informe título, descrição e data/hora prevista (ex: 'amanhã às 14:00', '2026-10-10 10:00').`,
-      );
-    }
-
-    if (agent.allow_opportunities) {
-      systemPromptParts.push(
-        cleanPromptDirective(applyVars(agent.prompt_opportunities)) ||
-          `OPORTUNIDADES DE VENDAS NO CRM:\nVocê tem acesso direto ao funil de vendas. Quando o cliente demonstrar interesse comercial ou solicitar orçamento/proposta, chame nativamente a ferramenta 'criar_oportunidade'. Para avançar de etapa no funil, chame 'atualizar_oportunidade'.`,
-      );
-
-      if (agent.pipeline_id) {
-        const { data: stages } = await supabaseAdmin
-          .from("pipeline_stages")
-          .select("id, name")
-          .eq("pipeline_id", agent.pipeline_id)
-          .order("order", { ascending: true });
-        if (stages && stages.length > 0) {
-          const stagesList = stages.map((s) => `- ${s.name} (ID: ${s.id})`).join("\n");
-          systemPromptParts.push(`ETAPAS DO FUNIL DESTE AGENTE:\n${stagesList}`);
-        }
-
-        const { data: opps } = await supabaseAdmin
-          .from("opportunities")
-          .select("id, title, value, stage_id, pipeline_stages(name)")
-          .eq("contact_id", conv.contact_id)
-          .eq("status", "open");
-        if (opps && opps.length > 0) {
-          const oppsList = opps
-            .map((o: any) => {
-              const stageName = o.pipeline_stages?.name || o.stage_id;
-              return `- Oportunidade ID: ${o.id} | Título: ${o.title} | Etapa Atual: ${stageName}`;
-            })
-            .join("\n");
-          systemPromptParts.push(
-            `OPORTUNIDADE ABERTA DO CLIENTE NO CRM:\n${oppsList}\nComo o cliente já possui oportunidade aberta, utilize 'atualizar_oportunidade' para avançar a etapa no funil conforme a conversa evolui.`,
-          );
-        } else {
-          systemPromptParts.push(
-            `STATUS NO CRM: O cliente ainda NÃO possui oportunidade aberta. Assim que ele demonstrar interesse, pedir valores ou solicitar proposta, chame 'criar_oportunidade' imediatamente.`,
-          );
-        }
+    // Contexto de Funil do CRM (etapas e oportunidades ativas para as ferramentas de CRM)
+    if (agent.allow_opportunities && agent.pipeline_id) {
+      const { data: stages } = await supabaseAdmin
+        .from("pipeline_stages")
+        .select("id, name")
+        .eq("pipeline_id", agent.pipeline_id)
+        .order("order", { ascending: true });
+      if (stages && stages.length > 0) {
+        const stagesList = stages.map((s) => `- ${s.name} (ID: ${s.id})`).join("\n");
+        systemPromptParts.push(`ETAPAS DO FUNIL DESTE AGENTE:\n${stagesList}`);
       }
-    }
 
-    if (agent.allow_tickets) {
-      const customTicketPrompt = cleanPromptDirective(applyVars(agent.prompt_tickets));
-      systemPromptParts.push(
-        `ABERTURA DE TICKETS / CHAMADOS DE SUPORTE:
-Você tem a capacidade de abrir um chamado formal na central de tickets da empresa usando a ferramenta nativa 'abrir_ticket'.
-IMPORTANTE: Utilize essa ferramenta com MUITO DISCERNIMENTO para evitar falsos positivos!
-
-QUANDO VOCÊ DEVE ABRIR TICKET:
-- Falhas técnicas ou operacionais relatadas pelo cliente (ex: link de agendamento quebrado ou dando erro, link de pagamento não funcionando, formulário com erro).
-- Reclamações graves de insatisfação sobre atendimento anterior, produto ou serviço com o qual você não consegue resolver diretamente.
-- Solicitações que exigem intervenção de um setor específico fora do chat imediato (ex: estornos financeiros, segunda via de contrato complexo, reanálise médica/administrativa).
-- Casos em que você já tentou orientar ou ajudar o cliente com as instruções disponíveis, mas a situação não pôde ser solucionada no canal.
-
-QUANDO VOCÊ NUNCA DEVE ABRIR TICKET:
-- Dúvidas rotineiras, perguntas sobre preços, catálogo de produtos, horários de funcionamento, endereços ou especialidades.
-- Clientes iniciando a conversa, dando saudações normais ou pedindo informações gerais.
-- Agendamentos normais que podem ser feitos via link ou fluxo de atendimento comum.
-- Pequenas dúvidas que você mesmo tem a resposta no seu contexto ou base de conhecimento.
-
-Ao abrir um chamado:
-1. Passe 'assunto' conciso e profissional.
-2. Passe 'descricao' detalhada do que o cliente relatou e o que foi tentado.
-3. Sugira o 'departamento_sugerido' (ex: 'Suporte', 'Financeiro', 'Agendamento', 'Recepção', etc.) e a 'prioridade' ('low', 'medium', 'high' ou 'urgent').
-4. Forneça o 'aviso_ao_cliente' informando com empatia que um chamado formal foi gerado e que a equipe responsável irá verificar.${customTicketPrompt ? `\n\nDIRETRIZES ESPECÍFICAS DA EMPRESA PARA TICKETS:\n${customTicketPrompt}` : ""}`,
-      );
+      const { data: opps } = await supabaseAdmin
+        .from("opportunities")
+        .select("id, title, value, stage_id, pipeline_stages(name)")
+        .eq("contact_id", conv.contact_id)
+        .eq("status", "open");
+      if (opps && opps.length > 0) {
+        const oppsList = opps
+          .map((o: any) => {
+            const stageName = o.pipeline_stages?.name || o.stage_id;
+            return `- Oportunidade ID: ${o.id} | Título: ${o.title} | Etapa Atual: ${stageName}`;
+          })
+          .join("\n");
+        systemPromptParts.push(`OPORTUNIDADE ABERTA DO CLIENTE NO CRM:\n${oppsList}`);
+      }
     }
 
     const systemPrompt = systemPromptParts.join("\n\n");
@@ -1048,6 +1016,37 @@ Ao abrir um chamado:
       },
     });
 
+    // Ferramenta nativa para Chamar no WhatsApp através da Unidade
+    tools.push({
+      type: "function",
+      function: {
+        name: "chamar_no_whatsapp",
+        description:
+          "Inicia o atendimento ativo no WhatsApp do cliente através da instância oficial da unidade física mais próxima (Aracruz, Linhares, Mantena, São Mateus ou Serra). Acione imediatamente assim que o cliente fornecer o número de WhatsApp no Instagram/Direct.",
+        parameters: {
+          type: "object",
+          properties: {
+            telefone: {
+              type: "string",
+              description:
+                "Número de WhatsApp com DDD informado pelo cliente (ex: '27999998888', '(27) 99888-7766').",
+            },
+            unidade_nome: {
+              type: "string",
+              description:
+                "Nome da cidade ou unidade física desejada pelo cliente ('Aracruz', 'Linhares', 'Mantena', 'São Mateus' ou 'Serra').",
+            },
+            mensagem_whatsapp: {
+              type: "string",
+              description:
+                "Primeira mensagem calorosa, personalizada e acolhedora que será enviada para o WhatsApp do cliente pelo número da unidade.",
+            },
+          },
+          required: ["telefone"],
+        },
+      },
+    });
+
     if (agent.allow_opportunities) {
       tools.push({
         type: "function",
@@ -1184,6 +1183,11 @@ Ao abrir um chamado:
       dueDate: string;
       reason?: string;
     } | null = null;
+    let chamarNoWhatsappData: {
+      telefone: string;
+      unidade_nome?: string | null;
+      mensagem_whatsapp?: string;
+    } | null = null;
     let openTicketData: {
       subject: string;
       description: string;
@@ -1241,6 +1245,12 @@ Ao abrir um chamado:
           setUnitData = args.unidade_nome || args.unidade_nome_ou_id || null;
         } else if (fnName === "atualizar_nome_cliente") {
           updateClientNameData = args.nome || null;
+        } else if (fnName === "chamar_no_whatsapp") {
+          chamarNoWhatsappData = {
+            telefone: args.telefone || "",
+            unidade_nome: args.unidade_nome || null,
+            mensagem_whatsapp: args.mensagem_whatsapp || "",
+          };
         } else if (fnName === "criar_oportunidade" && agent.allow_opportunities) {
           crmOppCreateData = {
             title: args.titulo || "Nova Oportunidade",
@@ -1395,13 +1405,25 @@ Ao abrir um chamado:
     // 7.5 Executar Definição de Unidade e Atualização de Nome do Cliente
     if (setUnitData && effectiveCompanyId) {
       const cleanUnitInput = setUnitData.trim();
-      const { data: matchedUnit } = await supabaseAdmin
-        .from("units")
-        .select("id, name")
-        .eq("company_id", effectiveCompanyId)
-        .ilike("name", `%${cleanUnitInput}%`)
-        .limit(1)
-        .maybeSingle();
+      const normalizeStr = (s: string) =>
+        s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      const searchNorm = normalizeStr(cleanUnitInput);
+
+      let matchedUnit = allCompanyUnits?.find((u) => {
+        const uNorm = normalizeStr(u.name);
+        return uNorm.includes(searchNorm) || searchNorm.includes(uNorm);
+      });
+
+      if (!matchedUnit) {
+        const { data: dbMatched } = await supabaseAdmin
+          .from("units")
+          .select("id, name")
+          .eq("company_id", effectiveCompanyId)
+          .ilike("name", `%${cleanUnitInput}%`)
+          .limit(1)
+          .maybeSingle();
+        if (dbMatched) matchedUnit = dbMatched as any;
+      }
 
       if (matchedUnit) {
         effectiveUnitId = matchedUnit.id;
@@ -1438,16 +1460,222 @@ Ao abrir um chamado:
     if (updateClientNameData && conv.contact_id) {
       const cleanName = updateClientNameData.trim();
       if (cleanName.length >= 2) {
-        await supabaseAdmin
-          .from("contacts")
-          .update({ name: cleanName })
-          .eq("id", conv.contact_id);
+        await supabaseAdmin.from("contacts").update({ name: cleanName }).eq("id", conv.contact_id);
 
         for (const call of toolCalls) {
           if (call.function?.name === "atualizar_nome_cliente") {
             toolExecutionResults[call.id] = {
               status: "success",
               message: `Nome do cliente salvo no CRM como '${cleanName}'.`,
+            };
+          }
+        }
+      }
+    }
+
+    // Execução da Ferramenta: Chamar no WhatsApp pela Instância da Unidade
+    if (chamarNoWhatsappData && conv.contact_id) {
+      try {
+        let rawPhone = String(chamarNoWhatsappData.telefone || "")
+          .replace(/\D/g, "")
+          .replace(/^0+/, ""); // Remove zeros à esquerda (ex: 027...)
+
+        if (rawPhone.length >= 10 && rawPhone.length <= 11) {
+          rawPhone = "55" + rawPhone;
+        }
+
+        if (rawPhone.length < 12) {
+          console.warn(
+            `[ai-generator] chamar_no_whatsapp: Telefone inválido (${chamarNoWhatsappData.telefone})`,
+          );
+          for (const call of toolCalls) {
+            if (call.function?.name === "chamar_no_whatsapp") {
+              toolExecutionResults[call.id] = {
+                status: "error",
+                error: "Número de telefone incompleto ou sem DDD. Peça o DDD para o cliente.",
+              };
+            }
+          }
+        } else {
+          const normalizeStr = (s: string) =>
+            s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+          // 1. Resolver unidade de destino
+          let targetUnitId = effectiveUnitId;
+          let targetUnitName = unitName;
+
+          if (chamarNoWhatsappData.unidade_nome && allCompanyUnits) {
+            const searchNorm = normalizeStr(chamarNoWhatsappData.unidade_nome);
+            const matched = allCompanyUnits.find((u) => {
+              const uNorm = normalizeStr(u.name);
+              return uNorm.includes(searchNorm) || searchNorm.includes(uNorm);
+            });
+            if (matched) {
+              targetUnitId = matched.id;
+              targetUnitName = matched.name;
+            }
+          }
+
+          if (!targetUnitId && fallbackUnitId) {
+            targetUnitId = fallbackUnitId;
+            const fallbackUnit = allCompanyUnits?.find((u) => u.id === fallbackUnitId);
+            if (fallbackUnit) targetUnitName = fallbackUnit.name;
+          }
+
+          // 2. Atualizar o telefone e unidade no contato
+          await supabaseAdmin
+            .from("contacts")
+            .update({
+              phone: rawPhone,
+              ...(targetUnitId ? { unit_id: targetUnitId } : {}),
+            })
+            .eq("id", conv.contact_id);
+
+          // 3. Buscar as instâncias de WhatsApp da empresa
+          let targetInstanceId: string | null = null;
+          let targetInstanceName: string | null = null;
+
+          const { data: companyInstances } = await supabaseAdmin
+            .from("whatsapp_instances")
+            .select("id, name, instance_name, unit_id, provider, network, status")
+            .eq("company_id", effectiveCompanyId)
+            .neq("provider", "instagram")
+            .neq("provider", "messenger");
+
+          if (companyInstances && companyInstances.length > 0) {
+            // Prioridade 1: instância de WhatsApp da unidade com status 'connected'
+            let matchedInst = companyInstances.find(
+              (i) => i.unit_id === targetUnitId && i.status === "connected",
+            );
+            // Prioridade 2: qualquer instância de WhatsApp da unidade
+            if (!matchedInst) {
+              matchedInst = companyInstances.find((i) => i.unit_id === targetUnitId);
+            }
+            // Prioridade 3: qualquer instância 'connected' de WhatsApp da empresa
+            if (!matchedInst) {
+              matchedInst = companyInstances.find((i) => i.status === "connected");
+            }
+            // Fallback: primeira instância de WhatsApp
+            if (!matchedInst) {
+              matchedInst = companyInstances[0];
+            }
+
+            targetInstanceId = matchedInst?.id || null;
+            targetInstanceName = matchedInst?.name || matchedInst?.instance_name || null;
+          }
+
+          if (!targetInstanceId) {
+            throw new Error("Nenhuma instância de WhatsApp disponível para envio.");
+          }
+
+          // 4. Buscar ou criar conversa de WhatsApp para este contato
+          let whatsappConvId: string | null = null;
+          const { data: existingWaConvs } = await supabaseAdmin
+            .from("conversations")
+            .select("id, status")
+            .eq("contact_id", conv.contact_id)
+            .eq("whatsapp_instance_id", targetInstanceId)
+            .order("last_message_at", { ascending: false })
+            .limit(1);
+
+          if (existingWaConvs && existingWaConvs.length > 0) {
+            whatsappConvId = existingWaConvs[0].id;
+            await supabaseAdmin
+              .from("conversations")
+              .update({
+                status: "active",
+                ai_active: true,
+                ai_agent_id: agent.id,
+                remote_id: rawPhone,
+                last_message_at: new Date().toISOString(),
+              })
+              .eq("id", whatsappConvId);
+          } else {
+            const { data: newWaConv, error: newConvErr } = await supabaseAdmin
+              .from("conversations")
+              .insert({
+                company_id: effectiveCompanyId,
+                contact_id: conv.contact_id,
+                whatsapp_instance_id: targetInstanceId,
+                unit_id: targetUnitId,
+                channel: "whatsapp",
+                remote_id: rawPhone,
+                status: "active",
+                ai_active: true,
+                ai_agent_id: agent.id,
+                started_at: new Date().toISOString(),
+                last_message_at: new Date().toISOString(),
+                last_message_preview: (
+                  chamarNoWhatsappData.mensagem_whatsapp || "Atendimento iniciado"
+                ).substring(0, 50),
+              })
+              .select("id")
+              .single();
+
+            if (newConvErr || !newWaConv) {
+              throw new Error(`Erro ao criar conversa no WhatsApp: ${newConvErr?.message}`);
+            }
+            whatsappConvId = newWaConv.id;
+
+            // Criar sessão correspondente em conversation_sessions
+            const { data: newSession } = await supabaseAdmin
+              .from("conversation_sessions")
+              .insert({
+                conversation_id: whatsappConvId,
+                started_at: new Date().toISOString(),
+              })
+              .select("id")
+              .single();
+
+            if (newSession) {
+              await supabaseAdmin
+                .from("conversations")
+                .update({ current_session_id: newSession.id })
+                .eq("id", whatsappConvId);
+            }
+          }
+
+          // 5. Preparar mensagem de abertura no WhatsApp
+          const firstName = clientFirstName || "";
+          const defaultWaMsg = `Olá${firstName ? `, ${firstName}` : ""}! Aqui é a ${agent.name} da Estética & Laser${targetUnitName ? ` de ${targetUnitName}` : ""} ✨ Conforme combinamos lá no Instagram, vim aqui te atender com todo carinho! Como posso te ajudar hoje?`;
+          const finalWaMsg = (chamarNoWhatsappData.mensagem_whatsapp || defaultWaMsg).trim();
+
+          // 6. Enviar a mensagem para o cliente no WhatsApp através da instância da filial
+          console.log(
+            `[ai-generator] Calling customer on WhatsApp (${rawPhone}) via instance ${targetInstanceName} (${targetUnitName})...`,
+          );
+          await sendPlatformMessage({
+            conversationId: whatsappConvId,
+            text: `*${agent.name}*:\n${finalWaMsg}`,
+            senderType: "agent",
+            aiAgentId: agent.id,
+          });
+
+          // 7. Inserir nota de auditoria no histórico da conversa do Instagram
+          await supabaseAdmin.from("messages").insert({
+            conversation_id: conversationId,
+            sender_type: "system",
+            content: `📱 Atendimento migrado para o WhatsApp com sucesso!\nNúmero: +${rawPhone}\nUnidade: ${targetUnitName || "Central"}\nInstância: ${targetInstanceName}`,
+            is_internal: true,
+            created_at: new Date().toISOString(),
+          });
+
+          for (const call of toolCalls) {
+            if (call.function?.name === "chamar_no_whatsapp") {
+              toolExecutionResults[call.id] = {
+                status: "success",
+                message: `Mensagem enviada com sucesso no WhatsApp (+${rawPhone}) pela filial de ${targetUnitName || "sua região"} através da instância '${targetInstanceName}'. Avise a cliente no Instagram com simpatia que você já chamou ela no WhatsApp para ela dar uma olhada!`,
+              };
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error(`[ai-generator] Erro ao chamar no WhatsApp:`, err);
+        for (const call of toolCalls) {
+          if (call.function?.name === "chamar_no_whatsapp") {
+            toolExecutionResults[call.id] = {
+              status: "error",
+              error: err.message || "Falha ao enviar mensagem no WhatsApp.",
             };
           }
         }
@@ -1861,7 +2089,9 @@ Ao abrir um chamado:
         }
 
         if (!targetUnitId) {
-          console.error(`[ai-generator] Não foi possível abrir ticket: nenhuma unidade encontrada para a empresa ${effectiveCompanyId}`);
+          console.error(
+            `[ai-generator] Não foi possível abrir ticket: nenhuma unidade encontrada para a empresa ${effectiveCompanyId}`,
+          );
           for (const call of toolCalls) {
             if (call.function?.name === "abrir_ticket") {
               toolExecutionResults[call.id] = {
@@ -1872,10 +2102,7 @@ Ao abrir um chamado:
           }
         } else {
           const priorityToUse = (openTicketData.priority || "medium") as
-            | "low"
-            | "medium"
-            | "high"
-            | "urgent";
+            "low" | "medium" | "high" | "urgent";
 
           const cleanSubject = openTicketData.subject?.replace(/\.$/, "") || "Atendimento";
           const formattedTitle = openTicketData.subject?.startsWith("[IA")
@@ -2016,13 +2243,17 @@ Ao abrir um chamado:
       }
     }
 
-    // Sanitização final rigorosa: NENHUMA tag ou comando em colchetes chega ao WhatsApp do cliente
+    // Sanitização final rigorosa: NENHUMA tag ou comando em colchetes chega ao cliente
     cleanResponse = sanitizeCustomerFacingText(cleanResponse);
 
     // 10. Enviar mensagem limpa para o cliente via Plataforma
     if (cleanResponse.length > 0) {
-      const finalMessageText = `*${agent.name}*:\n${cleanResponse}`;
-      console.log(`[ai-generator] Sending AI response via Platform Sender...`);
+      const isWhatsapp = !channelRaw || channelRaw === "whatsapp";
+      // No WhatsApp usamos *Nome*: para negrito nativo. Em outros canais (Instagram, Messenger) evitamos markdown que fica cru
+      const finalMessageText = isWhatsapp
+        ? `*${agent.name}*:\n${cleanResponse}`
+        : `${agent.name}:\n${cleanResponse}`;
+      console.log(`[ai-generator] Sending AI response via Platform Sender (${currentChannel})...`);
       await sendPlatformMessage({
         conversationId: conversationId,
         text: finalMessageText,

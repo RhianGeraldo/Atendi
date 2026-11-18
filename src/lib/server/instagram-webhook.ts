@@ -1,22 +1,22 @@
-import { supabaseAdmin } from '@/integrations/supabase/client.server';
-import { conferirPorta } from './webhook-auth';
-import { responderVerificacaoMeta } from './meta-webhook-verify';
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { conferirPorta } from "./webhook-auth";
+import { responderVerificacaoMeta } from "./meta-webhook-verify";
 
-import { enqueueAiMessage } from './ai-queue';
+import { enqueueAiMessage, scheduleAiMessage } from "./ai-queue";
 
 export async function handleInstagramWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
 
-  if (request.method === 'GET') {
-    return responderVerificacaoMeta(url, 'Instagram');
+  if (request.method === "GET") {
+    return responderVerificacaoMeta(url, "Instagram");
   }
 
-  if (request.method === 'POST') {
+  if (request.method === "POST") {
     try {
       // A tranca do POST. O `GET` de verificação já existia; o corpo que traz as
       // mensagens entrava sem conferência nenhuma.
       const porta = await conferirPorta(request, {
-        provedor: 'instagram',
+        provedor: "instagram",
         segredoDaAssinatura: process.env.META_APP_SECRET,
         exigirAssinatura: !!process.env.META_APP_SECRET,
       });
@@ -24,18 +24,18 @@ export async function handleInstagramWebhook(request: Request): Promise<Response
 
       const body = JSON.parse(porta.corpoBruto);
       await processInstagramWebhookBody(body);
-      return new Response('EVENT_RECEIVED', { status: 200 });
+      return new Response("EVENT_RECEIVED", { status: 200 });
     } catch (err) {
-      console.error('[Instagram Webhook] Erro:', err);
-      return new Response('ERROR', { status: 500 });
+      console.error("[Instagram Webhook] Erro:", err);
+      return new Response("ERROR", { status: 500 });
     }
   }
 
-  return new Response('Method Not Allowed', { status: 405 });
+  return new Response("Method Not Allowed", { status: 405 });
 }
 
 async function processInstagramWebhookBody(body: any): Promise<void> {
-  if (body.object === 'instagram' || body.object === 'page') {
+  if (body.object === "instagram" || body.object === "page") {
     if (body.entry && body.entry.length > 0) {
       for (const entry of body.entry) {
         const accountId = entry.id; // Pode ser IG Account ID ou Facebook Page ID
@@ -44,10 +44,10 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
         // Página (oficial_waba_id): um evento de Messenger dessa Página que caísse
         // aqui viraria conversa de Instagram.
         const { data: instance } = await supabaseAdmin
-          .from('whatsapp_instances')
-          .select('id, company_id, unit_id, provider, oficial_phone_number_id, oficial_waba_id')
-          .eq('provider', 'instagram')
-          .eq('oficial_phone_number_id', accountId)
+          .from("whatsapp_instances")
+          .select("id, company_id, unit_id, provider, oficial_phone_number_id, oficial_waba_id")
+          .eq("provider", "instagram")
+          .eq("oficial_phone_number_id", accountId)
           .limit(1)
           .maybeSingle();
 
@@ -66,11 +66,18 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
           if (!senderId || !recipientId) continue;
 
           // Se for is_echo ou o remetente for a própria conta IG ou Página, foi enviado por nós
-          const isFromMe = webhookEvent.message?.is_echo || senderId === instagramAccountId || senderId === accountId;
+          const isFromMe =
+            webhookEvent.message?.is_echo ||
+            senderId === instagramAccountId ||
+            senderId === accountId;
           const contactIgsid = isFromMe ? recipientId : senderId;
 
           if (webhookEvent.reaction) {
-            await updateMessageReaction(webhookEvent.reaction.mid, webhookEvent.reaction.action, webhookEvent.reaction.emoji);
+            await updateMessageReaction(
+              webhookEvent.reaction.mid,
+              webhookEvent.reaction.action,
+              webhookEvent.reaction.emoji,
+            );
             continue;
           }
 
@@ -80,67 +87,73 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
           }
 
           let messageId = null;
-          let textContent = '';
-          let mediaType = 'text';
+          let textContent = "";
+          let mediaType = "text";
           let mediaUrl = null;
           let isDeleted = false;
           let quotedMessageId = null;
 
           if (webhookEvent.postback) {
             messageId = webhookEvent.postback.mid || `pb_${timestamp}`;
-            textContent = webhookEvent.postback.title || webhookEvent.postback.payload || 'Opção selecionada';
+            textContent =
+              webhookEvent.postback.title || webhookEvent.postback.payload || "Opção selecionada";
           } else if (webhookEvent.referral) {
             messageId = `ref_${timestamp}`;
             textContent = `[Referência] ${webhookEvent.referral.source}: ${webhookEvent.referral.ref || webhookEvent.referral.ad_id}`;
           } else if (webhookEvent.message) {
             messageId = webhookEvent.message.mid;
-            textContent = webhookEvent.message.text || '';
+            textContent = webhookEvent.message.text || "";
             isDeleted = webhookEvent.message.is_deleted || false;
-            
+
             if (webhookEvent.message.reply_to) {
               quotedMessageId = webhookEvent.message.reply_to.mid;
             }
 
             if (webhookEvent.message.is_unsupported) {
               textContent = "⚠️ Mensagem não suportada pelo Instagram";
-              mediaType = 'text';
+              mediaType = "text";
             } else if (isDeleted) {
               textContent = "🚫 Mensagem apagada";
-              mediaType = 'text';
-            } else if (webhookEvent.message.attachments && webhookEvent.message.attachments.length > 0) {
+              mediaType = "text";
+            } else if (
+              webhookEvent.message.attachments &&
+              webhookEvent.message.attachments.length > 0
+            ) {
               const attachment = webhookEvent.message.attachments[0];
               const attType = attachment.type;
               mediaUrl = attachment.payload?.url;
 
-              if (['image', 'sticker'].includes(attType)) {
-                mediaType = 'image';
-              } else if (attType === 'story_mention') {
-                mediaType = 'image';
-                const mentionText = isFromMe ? "✨ Você mencionou o contato em um story" : "✨ Mencionou você em um story";
-                textContent = mentionText + (textContent ? `\n\n${textContent}` : '');
-              } else if (attType === 'ephemeral') {
-                mediaType = 'text';
+              if (["image", "sticker"].includes(attType)) {
+                mediaType = "image";
+              } else if (attType === "story_mention") {
+                mediaType = "image";
+                const mentionText = isFromMe
+                  ? "✨ Você mencionou o contato em um story"
+                  : "✨ Mencionou você em um story";
+                textContent = mentionText + (textContent ? `\n\n${textContent}` : "");
+              } else if (attType === "ephemeral") {
+                mediaType = "text";
                 textContent = "📷 Mídia temporária (visualização única)";
-              } else if (['video', 'reel', 'ig_reel'].includes(attType)) {
-                mediaType = 'video';
-              } else if (attType === 'audio') {
-                mediaType = 'audio';
-              } else if (attType === 'file') {
-                mediaType = 'document';
-              } else if (['post', 'ig_post', 'fallback'].includes(attType)) {
-                mediaType = 'text';
-                const attTitle = attachment.payload?.title || '';
-                const attUrl = attachment.payload?.url || '';
+              } else if (["video", "reel", "ig_reel"].includes(attType)) {
+                mediaType = "video";
+              } else if (attType === "audio") {
+                mediaType = "audio";
+              } else if (attType === "file") {
+                mediaType = "document";
+              } else if (["post", "ig_post", "fallback"].includes(attType)) {
+                mediaType = "text";
+                const attTitle = attachment.payload?.title || "";
+                const attUrl = attachment.payload?.url || "";
                 textContent = `${textContent}\n${attTitle} ${attUrl}`.trim();
               } else {
-                mediaType = 'text';
+                mediaType = "text";
                 textContent = `${textContent}\n[Anexo ${attType}]`.trim();
               }
             }
           }
 
           if (!messageId) continue;
-          if (!textContent && mediaType === 'text') continue;
+          if (!textContent && mediaType === "text") continue;
 
           await processIncomingMessage({
             companyId: instance.company_id,
@@ -154,7 +167,7 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
             timestamp,
             isFromMe,
             isDeleted,
-            quotedMessageId
+            quotedMessageId,
           });
         }
       }
@@ -163,7 +176,20 @@ async function processInstagramWebhookBody(body: any): Promise<void> {
 }
 
 async function processIncomingMessage(params: any) {
-  const { companyId, unitId, instanceId, contactIgsid, messageId, textContent, mediaType, mediaUrl, timestamp, isFromMe, isDeleted, quotedMessageId } = params;
+  const {
+    companyId,
+    unitId,
+    instanceId,
+    contactIgsid,
+    messageId,
+    textContent,
+    mediaType,
+    mediaUrl,
+    timestamp,
+    isFromMe,
+    isDeleted,
+    quotedMessageId,
+  } = params;
 
   // Eco do que o próprio Atendi enviou: o envio só grava a mensagem depois que a
   // Meta responde, e o eco pode chegar antes disso. Se o webhook gravasse primeiro,
@@ -172,9 +198,9 @@ async function processIncomingMessage(params: any) {
   if (isFromMe) {
     await new Promise((r) => setTimeout(r, 3000));
     const { data: jaGravada } = await supabaseAdmin
-      .from('messages')
-      .select('id')
-      .eq('remote_msg_id', messageId)
+      .from("messages")
+      .select("id")
+      .eq("remote_msg_id", messageId)
       .maybeSingle();
     if (jaGravada) return;
   }
@@ -182,9 +208,9 @@ async function processIncomingMessage(params: any) {
   // 1. Encontrar ou criar o contato pelo IGSID (Instagram Scoped ID), gravado em
   // instagram_id. Contatos antigos deste webhook guardavam o IGSID em whatsapp_lid.
   let { data: contact } = await supabaseAdmin
-    .from('contacts')
-    .select('id, name, merged_into_id')
-    .eq('company_id', companyId)
+    .from("contacts")
+    .select("id, name, merged_into_id")
+    .eq("company_id", companyId)
     .or(`instagram_id.eq.${contactIgsid},whatsapp_lid.eq.${contactIgsid}`)
     .limit(1)
     .maybeSingle();
@@ -193,11 +219,11 @@ async function processIncomingMessage(params: any) {
   // contato reaproveitado da Zernio, cujo instagram_id é o ID de lá.
   if (!contact) {
     const { data: convAnterior } = await supabaseAdmin
-      .from('conversations')
-      .select('contact_id, contacts(id, name, merged_into_id)')
-      .eq('whatsapp_instance_id', instanceId)
-      .eq('remote_id', contactIgsid)
-      .order('started_at', { ascending: false })
+      .from("conversations")
+      .select("contact_id, contacts(id, name, merged_into_id)")
+      .eq("whatsapp_instance_id", instanceId)
+      .eq("remote_id", contactIgsid)
+      .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     const c = (convAnterior as any)?.contacts;
@@ -212,28 +238,33 @@ async function processIncomingMessage(params: any) {
     // trocar o instagram_id dele: o canal Zernio continua usando o ID de lá.
     if (perfil.username) {
       const { data: porUsername } = await supabaseAdmin
-        .from('contacts')
-        .select('id, name, merged_into_id, profile_picture_url, instagram_id')
-        .eq('company_id', companyId)
-        .in('instagram_username', [perfil.username, `@${perfil.username}`])
+        .from("contacts")
+        .select("id, name, merged_into_id, profile_picture_url, instagram_id")
+        .eq("company_id", companyId)
+        .in("instagram_username", [perfil.username, `@${perfil.username}`])
         .limit(1)
         .maybeSingle();
 
       if (porUsername) {
         const updates: Record<string, string> = {};
         if (!porUsername.instagram_id) updates.instagram_id = contactIgsid;
-        if (perfil.pic && !porUsername.profile_picture_url) updates.profile_picture_url = perfil.pic;
+        if (perfil.pic && !porUsername.profile_picture_url)
+          updates.profile_picture_url = perfil.pic;
         if (Object.keys(updates).length > 0) {
-          await supabaseAdmin.from('contacts').update(updates).eq('id', porUsername.id);
+          await supabaseAdmin.from("contacts").update(updates).eq("id", porUsername.id);
         }
-        contact = { id: porUsername.id, name: porUsername.name, merged_into_id: porUsername.merged_into_id };
+        contact = {
+          id: porUsername.id,
+          name: porUsername.name,
+          merged_into_id: porUsername.merged_into_id,
+        };
       }
     }
 
     if (!contact) {
       const profileName = perfil.name || perfil.username || `Instagram User (${contactIgsid})`;
       const { data: newContact, error: contactError } = await supabaseAdmin
-        .from('contacts')
+        .from("contacts")
         .insert({
           company_id: companyId,
           unit_id: unitId,
@@ -241,30 +272,30 @@ async function processIncomingMessage(params: any) {
           profile_picture_url: perfil.pic,
           instagram_username: perfil.username,
           instagram_id: contactIgsid,
-          source: 'Instagram'
+          source: "Instagram",
         })
-        .select('id')
+        .select("id")
         .single();
 
       if (contactError) {
-        console.error('[Instagram Webhook] Erro ao criar contato:', contactError);
+        console.error("[Instagram Webhook] Erro ao criar contato:", contactError);
         return;
       }
       contact = { ...newContact, name: profileName, merged_into_id: null };
     }
-  } else if (contact.name && contact.name.startsWith('Instagram User (')) {
+  } else if (contact.name && contact.name.startsWith("Instagram User (")) {
     // Tenta atualizar o nome genérico se ele mandar mensagem novamente
     const perfil = await buscarPerfilInstagram(instanceId, contactIgsid);
     const newName = perfil.name || perfil.username;
     if (newName && newName !== contact.name) {
       await supabaseAdmin
-        .from('contacts')
+        .from("contacts")
         .update({
           name: newName,
           profile_picture_url: perfil.pic,
           ...(perfil.username ? { instagram_username: perfil.username } : {}),
         })
-        .eq('id', contact.id);
+        .eq("id", contact.id);
       contact.name = newName;
     }
   }
@@ -276,26 +307,26 @@ async function processIncomingMessage(params: any) {
 
   // 2. Encontrar conversa ativa na mesma instância (por contact_id ou remote_id)
   let { data: activeConv } = await supabaseAdmin
-    .from('conversations')
-    .select('id, status, assigned_agent_id, contact_id, ai_active')
-    .eq('whatsapp_instance_id', instanceId)
+    .from("conversations")
+    .select("id, status, assigned_agent_id, contact_id, ai_active")
+    .eq("whatsapp_instance_id", instanceId)
     .or(`contact_id.eq.${contact.id},remote_id.eq.${contactIgsid}`)
-    .in('status', ['waiting', 'active'])
-    .order('started_at', { ascending: false })
+    .in("status", ["waiting", "active"])
+    .order("started_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (!activeConv) {
     // Se não tem conversa ativa, verifica se tem alguma resolvida com esse remote_id para herdar o contact_id correto (mesclado)
     let { data: resolvedConv } = await supabaseAdmin
-      .from('conversations')
-      .select('contact_id')
-      .eq('whatsapp_instance_id', instanceId)
-      .eq('remote_id', contactIgsid)
-      .order('started_at', { ascending: false })
+      .from("conversations")
+      .select("contact_id")
+      .eq("whatsapp_instance_id", instanceId)
+      .eq("remote_id", contactIgsid)
+      .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-      
+
     if (resolvedConv && resolvedConv.contact_id !== contact.id) {
       contact.id = resolvedConv.contact_id;
     }
@@ -311,79 +342,79 @@ async function processIncomingMessage(params: any) {
     conversationId = activeConv.id;
     aiActive = activeConv.ai_active ?? false;
     await supabaseAdmin
-      .from('conversations')
+      .from("conversations")
       .update({
         last_message_at: new Date(timestamp).toISOString(),
         last_message_preview: textContent?.substring(0, 50),
-        remote_id: contactIgsid
+        remote_id: contactIgsid,
       })
-      .eq('id', conversationId);
+      .eq("id", conversationId);
   } else {
     // Busca se existe uma conversa resolvida para reaproveitar (manter histórico da IA)
     let { data: resolvedConv } = await supabaseAdmin
-      .from('conversations')
-      .select('id, contact_id, assigned_agent_id, ai_active')
-      .eq('contact_id', contact.id)
-      .eq('whatsapp_instance_id', instanceId)
-      .eq('status', 'resolved')
-      .order('started_at', { ascending: false })
+      .from("conversations")
+      .select("id, contact_id, assigned_agent_id, ai_active")
+      .eq("contact_id", contact.id)
+      .eq("whatsapp_instance_id", instanceId)
+      .eq("status", "resolved")
+      .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
     // Check for default AI agent
     const { data: defaultAgents } = await supabaseAdmin
-      .from('ai_agents')
-      .select('id, is_main_agent, active_by_default, name')
-      .eq('company_id', companyId)
-      .eq('is_active', true)
-      .eq('is_main_agent', true)
+      .from("ai_agents")
+      .select("id, is_main_agent, active_by_default, name")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .eq("is_main_agent", true)
       .limit(1);
-    
+
     const defaultAgentId = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].id : null;
-    const defaultAgentName = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].name : 'IA';
-    const isActiveByDefault = defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
-    
+    const defaultAgentName =
+      defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].name : "IA";
+    const isActiveByDefault =
+      defaultAgents && defaultAgents.length > 0 ? defaultAgents[0].active_by_default : false;
+
     if (resolvedConv) {
       conversationId = resolvedConv.id;
       aiActive = isActiveByDefault || (resolvedConv.ai_active ?? false);
-      
+
       const updatePayload: any = {
-        status: isFromMe ? 'resolved' : (isActiveByDefault ? 'active' : 'waiting'),
+        status: isFromMe ? "resolved" : isActiveByDefault ? "active" : "waiting",
         last_message_at: new Date(timestamp).toISOString(),
         last_message_preview: textContent?.substring(0, 50),
         remote_id: contactIgsid,
         resolved_at: isFromMe ? new Date(timestamp).toISOString() : null,
-        ai_active: aiActive
+        ai_active: aiActive,
       };
       if (!isFromMe) updatePayload.ai_followup_count = 0;
       if (aiActive && defaultAgentId) updatePayload.ai_agent_id = defaultAgentId;
 
-      await supabaseAdmin.from('conversations')
-        .update(updatePayload)
-        .eq('id', conversationId);
+      await supabaseAdmin.from("conversations").update(updatePayload).eq("id", conversationId);
     } else {
       if (isActiveByDefault) aiActive = true;
       // Cria nova conversa
       const { data: newConv, error: convError } = await supabaseAdmin
-        .from('conversations')
+        .from("conversations")
         .insert({
           contact_id: contact.id,
           remote_id: contactIgsid,
           whatsapp_instance_id: instanceId,
           unit_id: unitId,
-          status: isFromMe ? 'resolved' : (isActiveByDefault ? 'active' : 'waiting'),
+          status: isFromMe ? "resolved" : isActiveByDefault ? "active" : "waiting",
           started_at: new Date(timestamp).toISOString(),
           last_message_at: new Date(timestamp).toISOString(),
           last_message_preview: textContent?.substring(0, 50),
-          channel: 'instagram',
+          channel: "instagram",
           ai_active: isActiveByDefault,
-          ai_agent_id: defaultAgentId
+          ai_agent_id: defaultAgentId,
         })
-        .select('id')
+        .select("id")
         .single();
 
       if (convError) {
-        console.error('[Instagram Webhook] Erro ao criar conversa:', convError);
+        console.error("[Instagram Webhook] Erro ao criar conversa:", convError);
         return;
       }
       conversationId = newConv.id;
@@ -393,46 +424,67 @@ async function processIncomingMessage(params: any) {
   // Abre um novo ticket (sessão) se não for resolvido já na criação
   if (!isFromMe) {
     let sessionId = null;
-    let { data: existingSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
-    
+    let { data: existingSession } = await supabaseAdmin
+      .from("conversation_sessions")
+      .select("id")
+      .eq("conversation_id", conversationId)
+      .is("resolved_at", null)
+      .maybeSingle();
+
     if (existingSession) {
       sessionId = existingSession.id;
     } else {
-      const { data: newSession, error: sessionErr } = await supabaseAdmin.from('conversation_sessions').insert({
-        conversation_id: conversationId,
-        contact_id: contact.id,
-        whatsapp_instance_id: instanceId,
-        started_at: new Date(timestamp).toISOString()
-      }).select().single();
-      
+      const { data: newSession, error: sessionErr } = await supabaseAdmin
+        .from("conversation_sessions")
+        .insert({
+          conversation_id: conversationId,
+          contact_id: contact.id,
+          whatsapp_instance_id: instanceId,
+          started_at: new Date(timestamp).toISOString(),
+        })
+        .select()
+        .single();
+
       if (sessionErr) {
-        if (sessionErr.code === '23505') {
-          const { data: concSession } = await supabaseAdmin.from('conversation_sessions').select('id').eq('conversation_id', conversationId).is('resolved_at', null).maybeSingle();
+        if (sessionErr.code === "23505") {
+          const { data: concSession } = await supabaseAdmin
+            .from("conversation_sessions")
+            .select("id")
+            .eq("conversation_id", conversationId)
+            .is("resolved_at", null)
+            .maybeSingle();
           if (concSession) sessionId = concSession.id;
           existingSession = concSession;
         } else {
-          console.error('[Instagram Webhook] Erro ao criar sessão:', sessionErr);
+          console.error("[Instagram Webhook] Erro ao criar sessão:", sessionErr);
         }
       } else if (newSession) {
         sessionId = newSession.id;
-        await supabaseAdmin.from('conversations').update({ current_session_id: sessionId }).eq('id', conversationId);
+        await supabaseAdmin
+          .from("conversations")
+          .update({ current_session_id: sessionId })
+          .eq("id", conversationId);
       }
     }
 
     if (sessionId && !existingSession) {
-      const events: any[] = [{ session_id: sessionId, event_type: 'started' }];
+      const events: any[] = [{ session_id: sessionId, event_type: "started" }];
       if (aiActive) {
-        events.push({ session_id: sessionId, event_type: 'assigned', metadata: { by_ai: true, ai_agent_name: 'IA' } });
+        events.push({
+          session_id: sessionId,
+          event_type: "assigned",
+          metadata: { by_ai: true, ai_agent_name: "IA" },
+        });
       }
-      await supabaseAdmin.from('session_events').insert(events);
+      await supabaseAdmin.from("session_events").insert(events);
     }
   }
 
   // 3. Verifica se a mensagem já existe
   const { data: existingMsg } = await supabaseAdmin
-    .from('messages')
-    .select('id')
-    .eq('remote_msg_id', messageId)
+    .from("messages")
+    .select("id")
+    .eq("remote_msg_id", messageId)
     .maybeSingle();
 
   if (existingMsg) return; // Duplicada
@@ -442,43 +494,45 @@ async function processIncomingMessage(params: any) {
   let quotedContent = null;
   if (quotedMessageId) {
     const { data: qMsg } = await supabaseAdmin
-      .from('messages')
-      .select('id, content, media_type')
-      .eq('remote_msg_id', quotedMessageId)
+      .from("messages")
+      .select("id, content, media_type")
+      .eq("remote_msg_id", quotedMessageId)
       .maybeSingle();
-      
+
     if (qMsg) {
       internalQuotedId = qMsg.id;
-      quotedContent = qMsg.content ? qMsg.content.substring(0, 200) : `[${qMsg.media_type || 'Mídia'}]`;
+      quotedContent = qMsg.content
+        ? qMsg.content.substring(0, 200)
+        : `[${qMsg.media_type || "Mídia"}]`;
     }
   }
 
   // 4. Inserir mensagem
   const { data: msgData, error: msgError } = await supabaseAdmin
-    .from('messages')
+    .from("messages")
     .insert({
       conversation_id: conversationId,
-      sender_type: isFromMe ? 'agent' : 'contact',
-      content: textContent || '',
+      sender_type: isFromMe ? "agent" : "contact",
+      content: textContent || "",
       media_type: mediaType,
       media_url: mediaUrl,
       remote_msg_id: messageId,
       quoted_message_id: internalQuotedId,
       quoted_content: quotedContent,
       is_deleted: isDeleted,
-      created_at: new Date(timestamp).toISOString()
+      created_at: new Date(timestamp).toISOString(),
     })
-    .select('id')
+    .select("id")
     .single();
 
   if (msgError) {
-    console.error('[Instagram Webhook] Erro ao inserir mensagem:', msgError);
+    console.error("[Instagram Webhook] Erro ao inserir mensagem:", msgError);
     return;
   }
 
-  // Se não for do dono da página, enqueue para IA se necessário
+  // Se não for do dono da página, enqueue para IA se necessário (em background com buffer de 7s)
   if (!isFromMe && aiActive) {
-    await enqueueAiMessage(conversationId, msgData.id, companyId);
+    scheduleAiMessage(conversationId, msgData.id, companyId);
   }
 }
 
@@ -489,18 +543,25 @@ async function buscarPerfilInstagram(
   const vazio = { name: null, username: null, pic: null };
   try {
     const { data: instance } = await supabaseAdmin
-      .from('whatsapp_instances')
-      .select('oficial_access_token')
-      .eq('id', instanceId)
+      .from("whatsapp_instances")
+      .select("oficial_access_token")
+      .eq("id", instanceId)
       .single();
 
     const token = instance?.oficial_access_token;
     if (!token) return vazio;
 
-    const base = token.startsWith('IGA') ? 'https://graph.instagram.com/v20.0' : 'https://graph.facebook.com/v20.0';
-    const profileRes = await fetch(`${base}/${igsid}?fields=name,username,profile_pic&access_token=${token}`);
+    const base = token.startsWith("IGA")
+      ? "https://graph.instagram.com/v20.0"
+      : "https://graph.facebook.com/v20.0";
+    const profileRes = await fetch(
+      `${base}/${igsid}?fields=name,username,profile_pic&access_token=${token}`,
+    );
     if (!profileRes.ok) {
-      console.error('[Instagram Webhook] Erro na API do Graph ao buscar perfil:', await profileRes.text());
+      console.error(
+        "[Instagram Webhook] Erro na API do Graph ao buscar perfil:",
+        await profileRes.text(),
+      );
       return vazio;
     }
     const profileData = await profileRes.json();
@@ -510,36 +571,41 @@ async function buscarPerfilInstagram(
       pic: profileData.profile_pic || null,
     };
   } catch (e) {
-    console.error('[Instagram Webhook] Erro ao buscar perfil:', e);
+    console.error("[Instagram Webhook] Erro ao buscar perfil:", e);
     return vazio;
   }
 }
 
 async function updateMessageReaction(messageId: string, action: string, emoji?: string) {
   try {
-    const { data: msg } = await supabaseAdmin.from('messages').select('id, reactions').eq('remote_msg_id', messageId).maybeSingle();
+    const { data: msg } = await supabaseAdmin
+      .from("messages")
+      .select("id, reactions")
+      .eq("remote_msg_id", messageId)
+      .maybeSingle();
     if (!msg) return;
-    
+
     let reactions: Record<string, number> = msg.reactions || {};
-    if (action === 'react' && emoji) {
+    if (action === "react" && emoji) {
       reactions[emoji] = (reactions[emoji] || 0) + 1;
-    } else if (action === 'unreact' && emoji) {
+    } else if (action === "unreact" && emoji) {
       if (reactions[emoji]) reactions[emoji] -= 1;
       if (reactions[emoji] <= 0) delete reactions[emoji];
     }
-    
-    await supabaseAdmin.from('messages').update({ reactions }).eq('id', msg.id);
+
+    await supabaseAdmin.from("messages").update({ reactions }).eq("id", msg.id);
   } catch (e) {
-    console.error('[Instagram Webhook] Erro ao atualizar reação:', e);
+    console.error("[Instagram Webhook] Erro ao atualizar reação:", e);
   }
 }
 
 async function updateMessageReadStatus(messageId: string, timestamp: number) {
   try {
-    await supabaseAdmin.from('messages')
+    await supabaseAdmin
+      .from("messages")
       .update({ read_at: new Date(timestamp).toISOString() })
-      .eq('remote_msg_id', messageId);
+      .eq("remote_msg_id", messageId);
   } catch (e) {
-    console.error('[Instagram Webhook] Erro ao atualizar status de leitura:', e);
+    console.error("[Instagram Webhook] Erro ao atualizar status de leitura:", e);
   }
 }

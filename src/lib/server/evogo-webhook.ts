@@ -2,7 +2,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { conferirPorta } from "./webhook-auth";
 import { atualizarStatusPeloWebhook } from "./whatsapp-conexao";
 import { getPhoneVariants } from "@/lib/utils";
-import { enqueueAiMessage } from "./ai-queue";
+import { enqueueAiMessage, scheduleAiMessage } from "./ai-queue";
 import { syncContactProfile } from "@/lib/api/chat.functions";
 import { extractExternalAdReply, processAndCacheAdPreview } from "./ad-preview-cache";
 import { dispatchAutomationEvent } from "./automation-engine";
@@ -1948,11 +1948,11 @@ export async function processEvogoWebhookBody(
         !!originalTimestamp &&
         Date.now() - Date.parse(originalTimestamp) > RETRY_AI_MAX_AGE_MS;
       if (aiActive && newMessage && !isFromMe && !tooOldForAi && !isGroup) {
-        // Enqueue the AI message generator to allow for 10s buffer
+        // Enqueue the AI message generator to allow for 7s buffer
         console.log(
           `[evogo-webhook] Queueing AI response for conversation ${conversationId}, message ${newMessage.id}`,
         );
-        await enqueueAiMessage(conversationId, newMessage.id, instance.company_id);
+        scheduleAiMessage(conversationId, newMessage.id, instance.company_id);
       }
 
       return;

@@ -17,7 +17,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { conferirPorta } from "./webhook-auth";
 import { interpretarEventoZernio, type EventoZernioTraduzido } from "../canais/zernio/interpretar";
 import { downloadZernioMedia, ZernioClient } from "../canais/zernio/client";
-import { enqueueAiMessage } from "./ai-queue";
+import { enqueueAiMessage, scheduleAiMessage } from "./ai-queue";
 import { getPhoneVariants } from "@/lib/utils";
 import { persistirAvatarContatoNoStorage } from "../avatar-storage";
 import { insertContactOrFindExisting } from "./whatsapp-lid";
@@ -191,7 +191,7 @@ async function processarRecibo(evento: Extract<EventoZernioTraduzido, { tipo: "r
  */
 async function processarMensagem(
   evento: Extract<EventoZernioTraduzido, { tipo: "mensagem" }>,
-  company: any
+  company: any,
 ) {
   // 1. Encontrar instância pelo zernio_account_id
   const { data: instance, error: instErr } = await supabaseAdmin
@@ -210,7 +210,9 @@ async function processarMensagem(
   // Canal desativado (ex.: a conta migrou para a Graph direta): não abre conversa
   // em dobro com o canal novo.
   if (instance.status === "disconnected") {
-    console.log(`[zernio:webhook] Canal ${instance.name} desativado; evento de ${evento.accountId} ignorado`);
+    console.log(
+      `[zernio:webhook] Canal ${instance.name} desativado; evento de ${evento.accountId} ignorado`,
+    );
     return;
   }
 
@@ -237,7 +239,7 @@ async function processarMensagem(
     let query = supabaseAdmin.from("contacts").select("*").eq("company_id", companyId);
     if (evento.remetente.username) {
       query = query.or(
-        `instagram_id.eq.${contactIdOrPhone},instagram_username.eq.${evento.remetente.username}`
+        `instagram_id.eq.${contactIdOrPhone},instagram_username.eq.${evento.remetente.username}`,
       );
     } else {
       query = query.eq("instagram_id", contactIdOrPhone);
@@ -252,7 +254,9 @@ async function processarMensagem(
         .insert({
           company_id: companyId,
           unit_id: unitId,
-          name: evento.remetente.nome || (evento.remetente.username ? `@${evento.remetente.username}` : "Usuário Instagram"),
+          name:
+            evento.remetente.nome ||
+            (evento.remetente.username ? `@${evento.remetente.username}` : "Usuário Instagram"),
           instagram_id: contactIdOrPhone,
           instagram_username: evento.remetente.username || null,
           source: "instagram",
@@ -387,7 +391,9 @@ async function processarMensagem(
   if (evento.threadId) {
     const { data: convByThread } = await supabaseAdmin
       .from("conversations")
-      .select("id, status, assigned_agent_id, contact_id, ai_active, ai_agent_id, unread_count, provider_thread_id")
+      .select(
+        "id, status, assigned_agent_id, contact_id, ai_active, ai_agent_id, unread_count, provider_thread_id",
+      )
       .eq("whatsapp_instance_id", instance.id)
       .eq("provider_thread_id", evento.threadId)
       .maybeSingle();
@@ -400,7 +406,9 @@ async function processarMensagem(
   if (!activeConv) {
     const { data: convByContact } = await supabaseAdmin
       .from("conversations")
-      .select("id, status, assigned_agent_id, contact_id, ai_active, ai_agent_id, unread_count, provider_thread_id")
+      .select(
+        "id, status, assigned_agent_id, contact_id, ai_active, ai_agent_id, unread_count, provider_thread_id",
+      )
       .eq("whatsapp_instance_id", instance.id)
       .eq("contact_id", contact.id)
       .in("status", ["waiting", "active"])
@@ -420,26 +428,26 @@ async function processarMensagem(
   const validMediaType: "text" | "image" | "video" | "audio" | "document" = isSticker
     ? "image"
     : evento.anexo?.tipo === "image"
-    ? "image"
-    : evento.anexo?.tipo === "video"
-    ? "video"
-    : evento.anexo?.tipo === "audio"
-    ? "audio"
-    : evento.anexo
-    ? "document"
-    : "text";
+      ? "image"
+      : evento.anexo?.tipo === "video"
+        ? "video"
+        : evento.anexo?.tipo === "audio"
+          ? "audio"
+          : evento.anexo
+            ? "document"
+            : "text";
 
   const messageDefaultLabel = isSticker
     ? "🖼️ Figurinha"
     : evento.anexo?.tipo === "image"
-    ? "📷 Imagem"
-    : evento.anexo?.tipo === "video"
-    ? "🎥 Vídeo"
-    : evento.anexo?.tipo === "audio"
-    ? "🎵 Áudio"
-    : evento.anexo
-    ? "📄 Documento"
-    : "";
+      ? "📷 Imagem"
+      : evento.anexo?.tipo === "video"
+        ? "🎥 Vídeo"
+        : evento.anexo?.tipo === "audio"
+          ? "🎵 Áudio"
+          : evento.anexo
+            ? "📄 Documento"
+            : "";
 
   const messageContent = evento.texto || messageDefaultLabel;
   const previewText = (evento.texto || messageDefaultLabel || "Mensagem").substring(0, 50);
@@ -501,7 +509,13 @@ async function processarMensagem(
         resolved_at: null,
         unread_count: 1,
       });
-      const sessionId = await abrirSessao(conversationId, contact.id, instance.id, aiActive, agentId);
+      const sessionId = await abrirSessao(
+        conversationId,
+        contact.id,
+        instance.id,
+        aiActive,
+        agentId,
+      );
       if (sessionId) updatePayload.current_session_id = sessionId;
     }
 
@@ -543,10 +557,14 @@ async function processarMensagem(
 
     if (newConvErr || !newConv) {
       if (newConvErr?.code === "23505") {
-        console.warn("[zernio:webhook] Race condition ao criar conversa, buscando conversa criada em paralelo.");
+        console.warn(
+          "[zernio:webhook] Race condition ao criar conversa, buscando conversa criada em paralelo.",
+        );
         const { data: racedConv } = await supabaseAdmin
           .from("conversations")
-          .select("id, status, assigned_agent_id, contact_id, ai_active, ai_agent_id, unread_count, provider_thread_id")
+          .select(
+            "id, status, assigned_agent_id, contact_id, ai_active, ai_agent_id, unread_count, provider_thread_id",
+          )
           .eq("whatsapp_instance_id", instance.id)
           .eq("contact_id", contact.id)
           .in("status", ["waiting", "active"])
@@ -558,7 +576,10 @@ async function processarMensagem(
           conversationId = racedConv.id;
           aiActive = racedConv.ai_active ?? false;
         } else {
-          console.error("[zernio:webhook] Erro ao recuperar conversa da race condition:", newConvErr);
+          console.error(
+            "[zernio:webhook] Erro ao recuperar conversa da race condition:",
+            newConvErr,
+          );
           return;
         }
       } else {
@@ -575,7 +596,7 @@ async function processarMensagem(
         contact.id,
         instance.id,
         aiActive,
-        aiActive ? defaultAgent?.id ?? null : null,
+        aiActive ? (defaultAgent?.id ?? null) : null,
       );
       if (sessionId) {
         await supabaseAdmin
@@ -648,18 +669,14 @@ async function processarMensagem(
           unitId: canal.unit_id || null,
           content: evento.texto,
           senderType: "contact",
-        })
+        }),
       )
       .catch((e) => console.error("[zernio:webhook] Erro no radar de conversas:", e));
   }
 
-  // 6. Enfileirar resposta da IA se conversa ativa e recebida do cliente
+  // 6. Enfileirar resposta da IA se conversa ativa e recebida do cliente (em background com buffer de 7s)
   if (!isFromMe && aiActive) {
-    try {
-      await enqueueAiMessage(conversationId, insertedMsg.id, companyId);
-    } catch (aiErr) {
-      console.error("[zernio:webhook] Erro ao enfileirar IA:", aiErr);
-    }
+    scheduleAiMessage(conversationId, insertedMsg.id, companyId);
   }
 }
 
@@ -691,26 +708,22 @@ async function baixarEArmazenarMidiaZernio(params: {
   let uploadData = null;
   let uploadErr = null;
 
-  const uploadRes1 = await supabaseAdmin.storage
-    .from("media")
-    .upload(storagePath, buffer, {
-      contentType: mimeType,
-      upsert: true,
-      cacheControl: "31536000, must-revalidate",
-    });
+  const uploadRes1 = await supabaseAdmin.storage.from("media").upload(storagePath, buffer, {
+    contentType: mimeType,
+    upsert: true,
+    cacheControl: "31536000, must-revalidate",
+  });
 
   uploadData = uploadRes1.data;
   uploadErr = uploadRes1.error;
 
   if (uploadErr && uploadErr.message?.includes("Bucket not found")) {
     await supabaseAdmin.storage.createBucket("media", { public: true });
-    const uploadRes2 = await supabaseAdmin.storage
-      .from("media")
-      .upload(storagePath, buffer, {
-        contentType: mimeType,
-        upsert: true,
-        cacheControl: "31536000, must-revalidate",
-      });
+    const uploadRes2 = await supabaseAdmin.storage.from("media").upload(storagePath, buffer, {
+      contentType: mimeType,
+      upsert: true,
+      cacheControl: "31536000, must-revalidate",
+    });
     uploadData = uploadRes2.data;
     uploadErr = uploadRes2.error;
   }

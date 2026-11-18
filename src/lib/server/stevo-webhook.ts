@@ -2,7 +2,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { conferirPorta } from "./webhook-auth";
 import { atualizarStatusPeloWebhook } from "./whatsapp-conexao";
 import { getPhoneVariants } from "@/lib/utils";
-import { enqueueAiMessage } from "./ai-queue";
+import { enqueueAiMessage, scheduleAiMessage } from "./ai-queue";
 import { extractExternalAdReply, processAndCacheAdPreview } from "./ad-preview-cache";
 import { dispatchAutomationEvent } from "./automation-engine";
 import { sendMetaCapiEvent } from "./meta-capi";
@@ -1875,11 +1875,11 @@ export async function processStevoWebhookBody(
 
       // 7. Check if we need to queue AI response
       if (aiActive && newMessage && !isFromMe && !isGroup) {
-        // Enqueue the AI message generator to allow for 10s buffer
+        // Enqueue the AI message generator to allow for 7s buffer
         console.log(
           `[stevo-webhook] Queueing AI response for conversation ${conversationId}, message ${newMessage.id}`,
         );
-        await enqueueAiMessage(conversationId, newMessage.id, instance.company_id);
+        scheduleAiMessage(conversationId, newMessage.id, instance.company_id);
       }
 
       return;
