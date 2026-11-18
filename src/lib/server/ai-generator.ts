@@ -491,45 +491,25 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         .eq("id", conversationId);
     }
 
-    // 2. Buscar ou Re-resolver o Agente Ativo para este atendimento
+    // 2. Buscar ou Re-resolver o Agente Ativo para este atendimento usando resolução unificada e hierárquica
     let agent: any = null;
 
-    // Se já tinha um agentId, verifica se ele existe e continua ativo
-    if (conv.ai_agent_id) {
-      const { data: foundAgent } = await supabaseAdmin
+    const resolution = await resolveAiAgentForConversation({
+      companyId: effectiveCompanyId,
+      instanceId: conv.whatsapp_instance_id,
+      unitId: effectiveUnitId,
+      currentAgentId: conv.ai_agent_id,
+    });
+
+    if (resolution.agent) {
+      const { data: resolvedAgent } = await supabaseAdmin
         .from("ai_agents")
         .select("*")
-        .eq("id", conv.ai_agent_id)
-        .eq("is_active", true)
-        .maybeSingle();
+        .eq("id", resolution.agent.id)
+        .single();
 
-      // Só aceitamos o agente anterior se a instância NÃO tiver um agente dedicado diferente
-      if (foundAgent) {
-        if (!conv.whatsapp_instance_id || !foundAgent.instance_id || foundAgent.instance_id === conv.whatsapp_instance_id) {
-          agent = foundAgent;
-        }
-      }
-    }
-
-    // Se não há agente ou o anterior está inativo ou há um agente dedicado para a instância:
-    if (!agent) {
-      console.log(
-        `[ai-generator] Resolving best active AI agent for conversation ${conversationId} (instance: ${conv.whatsapp_instance_id})...`,
-      );
-      const resolution = await resolveAiAgentForConversation({
-        companyId: effectiveCompanyId,
-        instanceId: conv.whatsapp_instance_id,
-        unitId: effectiveUnitId,
-      });
-
-      if (resolution.agent) {
-        const { data: resolvedAgent } = await supabaseAdmin
-          .from("ai_agents")
-          .select("*")
-          .eq("id", resolution.agent.id)
-          .single();
-
-        agent = resolvedAgent;
+      agent = resolvedAgent;
+      if (agent && agent.id !== conv.ai_agent_id) {
         await supabaseAdmin
           .from("conversations")
           .update({ ai_agent_id: resolution.agent.id, ai_active: true })
@@ -1682,12 +1662,19 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           let targetInstanceId: string | null = null;
           let targetInstanceName: string | null = null;
 
-          const { data: companyInstances } = await supabaseAdmin
+          const { data: rawCompanyInstances } = await supabaseAdmin
             .from("whatsapp_instances")
             .select("id, name, instance_name, unit_id, provider, network, status")
-            .eq("company_id", effectiveCompanyId)
-            .neq("provider", "instagram")
-            .neq("provider", "messenger");
+            .eq("company_id", effectiveCompanyId);
+
+          const companyInstances = (rawCompanyInstances || []).filter(
+            (i) =>
+              (i.network === "whatsapp" ||
+                (!i.network && ["evogo", "stevo", "oficial"].includes(i.provider))) &&
+              i.provider !== "instagram" &&
+              i.provider !== "messenger" &&
+              i.provider !== "zernio",
+          );
 
           if (companyInstances && companyInstances.length > 0) {
             // Prioridade 1: instância de WhatsApp da unidade com status 'connected'
