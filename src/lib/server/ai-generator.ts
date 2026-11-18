@@ -30,6 +30,68 @@ function parseCurrencyValue(val: any): number {
 }
 
 /**
+ * Detecta se o nome cadastrado no contato é na verdade um username/handle de rede social,
+ * um identificador técnico, telefone ou placeholder (ex: "deh_machado", "@deh_machado",
+ * "rhiangeraldo_", "5533987182083", "Usuário Instagram").
+ */
+export function isPlaceholderOrUsername(
+  name: string | null | undefined,
+  instagramUsername?: string | null,
+  phone?: string | null,
+): boolean {
+  if (!name) return true;
+  const clean = name.trim();
+  if (!clean || clean.length < 2) return true;
+
+  // 1. Inicia com @ (ex: @deh_machado)
+  if (clean.startsWith("@")) return true;
+
+  // 2. Compara com instagram_username (com ou sem @, case-insensitive)
+  if (instagramUsername) {
+    const cleanIg = instagramUsername.replace(/^@/, "").toLowerCase().trim();
+    const cleanNameLower = clean.toLowerCase();
+    if (cleanNameLower === cleanIg || cleanNameLower === `@${cleanIg}`) return true;
+  }
+
+  // 3. Placeholders conhecidos de sistema / webhooks
+  const lower = clean.toLowerCase();
+  const placeholders = [
+    "usuário instagram",
+    "usuario instagram",
+    "instagram user",
+    "usuário",
+    "usuario",
+    "contato",
+    "lead",
+    "visitante",
+    "desconhecido",
+    "indefinido",
+    "sem nome",
+    "não informado",
+    "nao informado",
+    "cliente",
+  ];
+  if (placeholders.some((p) => lower === p || lower.startsWith(`${p} `))) return true;
+
+  // 4. É telefone ou sequência numérica (ex: "5533987182083", "+55 33 98718-2083", "(33) 98718-2083")
+  const digitsOnly = clean.replace(/\D/g, "");
+  if (digitsOnly.length >= 8 && clean.replace(/[\d\s+\-().]/g, "").length === 0) {
+    return true;
+  }
+  if (phone) {
+    const phoneDigits = phone.replace(/\D/g, "");
+    if (digitsOnly === phoneDigits && digitsOnly.length > 0) return true;
+  }
+
+  // 5. Handles de Instagram: geralmente não têm espaço e contêm '_' ou terminam com '_' ou números no meio/fim
+  // Nomes reais de pessoas em português não têm '_'
+  if (clean.includes("_")) return true;
+  if (!clean.includes(" ") && /[a-z]+[0-9]{2,}/i.test(clean)) return true;
+
+  return false;
+}
+
+/**
  * Sanitizador rigoroso para mensagens destinadas ao cliente (DLP).
  * Garante que nenhuma tag interna, comando em colchetes ou marcação de bastidor
  * seja enviada para o WhatsApp/canais de atendimento.
@@ -647,7 +709,12 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         }`.trim();
     }
 
-    const rawClientName = (conv.contacts?.name || "").trim();
+    const rawDbName = (conv.contacts?.name || "").trim();
+    const instagramUsername = (conv.contacts as any)?.instagram_username || null;
+    const contactPhone = conv.contacts?.phone || null;
+
+    const isNameInvalid = isPlaceholderOrUsername(rawDbName, instagramUsername, contactPhone);
+    const rawClientName = isNameInvalid ? "" : rawDbName;
     const clientFirstName = rawClientName ? rawClientName.split(/\s+/)[0] : "";
     const unitName = unitData?.name || "Matriz";
     const companyName = company.name || "";
@@ -660,9 +727,19 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         t = t.replace(/\{\{nome_cliente\}\}/g, rawClientName);
         t = t.replace(/\{\{cliente\}\}/g, rawClientName);
         t = t.replace(/\{\{nome\}\}/g, rawClientName);
+      } else {
+        t = t.replace(/,\s*\{\{nome_cliente\}\}/g, "");
+        t = t.replace(/\{\{nome_cliente\}\}\s*,?/g, "");
+        t = t.replace(/,\s*\{\{cliente\}\}/g, "");
+        t = t.replace(/\{\{cliente\}\}\s*,?/g, "");
+        t = t.replace(/,\s*\{\{nome\}\}/g, "");
+        t = t.replace(/\{\{nome\}\}\s*,?/g, "");
       }
       if (clientFirstName) {
         t = t.replace(/\{\{primeiro_nome\}\}/g, clientFirstName);
+      } else {
+        t = t.replace(/,\s*\{\{primeiro_nome\}\}/g, "");
+        t = t.replace(/\{\{primeiro_nome\}\}\s*,?/g, "");
       }
       if (conv.contacts?.phone) {
         t = t.replace(/\{\{telefone\}\}/g, conv.contacts.phone);
@@ -753,7 +830,11 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 - Assim que o cliente indicar a cidade (ex: 'Aracruz', 'Linhares', 'Mantena', 'São Mateus', 'Serra'), acione nativamente a ferramenta 'definir_unidade' para fixar o atendimento nesta filial.`,
       rawClientName
         ? `2. O nome do cliente já é conhecido (${rawClientName}). Trate-o com naturalidade e cordialidade chamando preferencialmente por ${clientFirstName}. NUNCA pergunte 'qual é o seu nome?' ou 'com quem estou falando?'.`
-        : `2. O nome do cliente ainda NÃO foi informado no sistema. Na mensagem inicial, cumprimente calorosamente e pergunte amigavelmente como pode chamá-lo(a) ou com quem está falando. Assim que ele disser o nome, chame a ferramenta 'atualizar_nome_cliente' para salvar no CRM.`,
+        : `2. O nome do cliente ainda NÃO foi informado no sistema ${
+            instagramUsername
+              ? `(o identificador '@${instagramUsername.replace(/^@/, "")}' é apenas o @ de perfil do Instagram, NUNCA chame o cliente por este username)`
+              : ""
+          }. Cumprimente com muita simpatia e PERGUNTE OBRIGATORIAMENTE o nome da pessoa na primeira oportunidade (ex: "Olá! Que alegria receber seu contato ✨ Como posso te chamar?"). Assim que ela disser o nome, acione IMEDIATAMENTE a ferramenta nativa 'atualizar_nome_cliente' para salvar no CRM.`,
       `======================================================================`,
     ]
       .filter(Boolean)
@@ -1599,7 +1680,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
     if (updateClientNameData && conv.contact_id) {
       const cleanName = updateClientNameData.trim();
-      if (cleanName.length >= 2) {
+      const igUsername = (conv.contacts as any)?.instagram_username || null;
+      if (cleanName.length >= 2 && !isPlaceholderOrUsername(cleanName, igUsername)) {
         await supabaseAdmin.from("contacts").update({ name: cleanName }).eq("id", conv.contact_id);
 
         for (const call of toolCalls) {
@@ -1685,9 +1767,10 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           if (targetUnitId) {
             contactUpdates.unit_id = targetUnitId;
           }
+          const igUsername = (conv.contacts as any)?.instagram_username || null;
           if (
             chamarNoWhatsappData.nome_cliente &&
-            (!clientFirstName || clientFirstName === "Desconhecido")
+            !isPlaceholderOrUsername(chamarNoWhatsappData.nome_cliente, igUsername, rawPhone)
           ) {
             contactUpdates.name = chamarNoWhatsappData.nome_cliente.trim();
           }
@@ -1923,14 +2006,28 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
           // 6. Preparar mensagem de abertura no WhatsApp (em nome da consultora especialista do WhatsApp)
           const cleanConsultantName = whatsAppAgentName.split(" - ")[0].trim();
-          const firstName =
-            chamarNoWhatsappData.nome_cliente || clientFirstName || "";
+          const igUser = (conv.contacts as any)?.instagram_username || null;
+          const candidateName = (chamarNoWhatsappData.nome_cliente || "").trim();
+          const validName =
+            candidateName && !isPlaceholderOrUsername(candidateName, igUser, rawPhone)
+              ? candidateName
+              : clientFirstName || "";
+          const firstName = validName ? validName.split(/\s+/)[0] : "";
           const interestText = chamarNoWhatsappData.procedimento_interesse
             ? ` sobre ${chamarNoWhatsappData.procedimento_interesse}`
             : "";
 
           const defaultWaMsg = `Olá${firstName ? `, ${firstName}` : ""}! Aqui é a ${cleanConsultantName}, consultora da Estética & Laser${targetUnitName ? ` de ${targetUnitName}` : ""} ✨ Nossa equipe me passou o seu contato do Instagram${interestText} e estou aqui para te passar as informações e condições especiais! Como posso te ajudar hoje?`;
-          const finalWaMsg = (chamarNoWhatsappData.mensagem_whatsapp || defaultWaMsg).trim();
+          let finalWaMsg = (chamarNoWhatsappData.mensagem_whatsapp || defaultWaMsg).trim();
+
+          // Sanitiza qualquer menção acidental ao handle do Instagram na mensagem do WhatsApp
+          if (igUser) {
+            const cleanIg = igUser.replace(/^@/, "").trim();
+            if (cleanIg) {
+              finalWaMsg = finalWaMsg.replace(new RegExp(`,?\\s*@?${cleanIg}\\b`, "gi"), "");
+              finalWaMsg = finalWaMsg.replace(/\s{2,}/g, " ");
+            }
+          }
 
           // 7. Enviar a mensagem para o cliente no WhatsApp através da instância da filial
           console.log(
