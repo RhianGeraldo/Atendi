@@ -12,6 +12,12 @@ const BUFFER_MS = 7000;
  */
 export function dispatchBackgroundTask(promise: Promise<unknown>, request?: Request | null) {
   try {
+    const ctx = (request as any)?.ctx;
+    if (ctx && typeof ctx.waitUntil === "function") {
+      ctx.waitUntil(promise);
+      return;
+    }
+
     const vercelCtx = (request as any)?.runtime?.vercel?.context;
     if (vercelCtx && typeof vercelCtx.waitUntil === "function") {
       vercelCtx.waitUntil(promise);

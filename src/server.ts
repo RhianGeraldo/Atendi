@@ -69,6 +69,12 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      if (ctx) {
+        (request as any).ctx = ctx;
+        if (typeof (ctx as any).waitUntil === "function") {
+          (request as any).waitUntil = (promise: Promise<unknown>) => (ctx as any).waitUntil(promise);
+        }
+      }
       const url = new URL(request.url);
       
       // API de Tickets / SAC e Integrações Externas

@@ -94,13 +94,13 @@ export async function handleZernioWebhook(request: Request): Promise<Response> {
 
   // 3. RETORNAR 200 IMEDIATO (§7.2, §7.3)
   // O Zernio aborta requisições após ~5 segundos; processamos em background
-  const processPromise = processarPayloadZernio(body, company).catch((err) => {
+  const processPromise = processarPayloadZernio(body, company, request).catch((err) => {
     console.error("[zernio:webhook] Erro no processamento assíncrono:", err);
   });
 
-  // Em ambientes Node.js com processamento assíncrono desatrelado
-  if (typeof (request as any).waitUntil === "function") {
-    (request as any).waitUntil(processPromise);
+  const waitUntilFn = (request as any).waitUntil || (request as any).ctx?.waitUntil;
+  if (typeof waitUntilFn === "function") {
+    waitUntilFn(processPromise);
   }
 
   return new Response(JSON.stringify({ ok: true, status: "received" }), {
@@ -112,7 +112,7 @@ export async function handleZernioWebhook(request: Request): Promise<Response> {
 /**
  * Processamento completo do evento Zernio em background.
  */
-async function processarPayloadZernio(payload: any, company: any) {
+async function processarPayloadZernio(payload: any, company: any, request?: Request) {
   const eventos = Array.isArray(payload) ? payload : [payload];
 
   for (const item of eventos) {
@@ -133,7 +133,7 @@ async function processarPayloadZernio(payload: any, company: any) {
     }
 
     if (traduzido.tipo === "mensagem") {
-      await processarMensagem(traduzido, company);
+      await processarMensagem(traduzido, company, request);
       continue;
     }
   }
@@ -193,6 +193,7 @@ async function processarRecibo(evento: Extract<EventoZernioTraduzido, { tipo: "r
 async function processarMensagem(
   evento: Extract<EventoZernioTraduzido, { tipo: "mensagem" }>,
   company: any,
+  request?: Request,
 ) {
   // 1. Encontrar instância pelo zernio_account_id
   const { data: instance, error: instErr } = await supabaseAdmin
@@ -676,7 +677,9 @@ async function processarMensagem(
 
   // 6. Enfileirar resposta da IA se conversa ativa e recebida do cliente (em background com buffer de 7s)
   if (!isFromMe && aiActive) {
-    scheduleAiMessage(conversationId, insertedMsg.id, companyId);
+    const aiJob = enqueueAiMessage(conversationId, insertedMsg.id, companyId);
+    dispatchBackgroundTask(aiJob, request);
+    await aiJob;
   }
 }
 
