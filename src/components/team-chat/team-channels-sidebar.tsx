@@ -272,7 +272,7 @@ function TeamConversationCard({
       className={cn(
         "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-all border-l-4 cursor-pointer",
         isSelected
-          ? "border-l-primary bg-primary/[0.08] dark:bg-primary/[0.18] shadow-xs"
+          ? "border-l-primary bg-primary/15 dark:bg-primary/25 shadow-xs"
           : "border-l-transparent hover:bg-accent/40"
       )}
     >

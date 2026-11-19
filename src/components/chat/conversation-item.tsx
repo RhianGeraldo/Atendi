@@ -60,6 +60,20 @@ export const ConversationItem = memo(function ConversationItem({
     return { text, isFromAgent };
   }, [conv.last_message_preview, conv.last_message]);
 
+  const isBreached = slaInfo.status === "breached";
+  const isWarning = slaInfo.status === "warning";
+  const isRadar = conv.radar_status === "active";
+
+  const cardStatusClasses = selected
+    ? "border-l-primary bg-primary/15 dark:bg-primary/25 shadow-xs"
+    : isRadar
+    ? "border-l-rose-600 bg-rose-500/10 dark:bg-rose-500/15"
+    : isBreached
+    ? "border-l-destructive bg-destructive/10 dark:bg-destructive/15"
+    : isWarning
+    ? "border-l-amber-500/80 bg-amber-500/10 dark:bg-amber-500/15"
+    : "border-l-transparent hover:bg-accent/40";
+
   return (
     <button
       onClick={onClick}
@@ -67,12 +81,7 @@ export const ConversationItem = memo(function ConversationItem({
       onTouchStart={onPrefetch}
       className={cn(
         "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-all border-l-4 cursor-pointer",
-        selected
-          ? "border-l-primary bg-primary/[0.08] dark:bg-primary/[0.18] shadow-xs"
-          : "border-l-transparent hover:bg-accent/40",
-        conv.radar_status === "active" && "border-l-rose-600 bg-rose-500/[0.06]",
-        slaInfo.status === "breached" && "border-l-destructive bg-destructive/[0.04]",
-        slaInfo.status === "warning" && "border-l-amber-500/80",
+        cardStatusClasses,
       )}
     >
       <div className="relative shrink-0">
