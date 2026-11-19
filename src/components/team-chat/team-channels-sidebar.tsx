@@ -270,8 +270,10 @@ function TeamConversationCard({
     <button
       onClick={onSelect}
       className={cn(
-        "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-colors hover:bg-accent/40 cursor-pointer",
-        isSelected && "bg-accent/60"
+        "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-all border-l-4 cursor-pointer",
+        isSelected
+          ? "border-l-primary bg-primary/[0.08] dark:bg-primary/[0.18] shadow-xs"
+          : "border-l-transparent hover:bg-accent/40"
       )}
     >
       {/* Avatar com badge de tipo/status no canto inferior */}
@@ -341,7 +343,8 @@ function TeamConversationCard({
         <div className="flex items-center gap-2 min-w-0">
           <span
             className={cn(
-              "truncate text-sm font-medium flex-1 min-w-0",
+              "truncate text-sm flex-1 min-w-0",
+              isSelected ? "text-primary font-semibold" : "font-medium text-foreground",
               hasUnread && "font-bold text-foreground"
             )}
           >

@@ -66,11 +66,13 @@ export const ConversationItem = memo(function ConversationItem({
       onMouseEnter={onPrefetch}
       onTouchStart={onPrefetch}
       className={cn(
-        "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-colors hover:bg-accent/40",
-        selected && "bg-accent/60",
-        conv.radar_status === "active" && "border-l-4 border-l-rose-600 bg-rose-500/[0.04]",
-        slaInfo.status === "breached" && "border-l-4 border-l-destructive bg-destructive/[0.02]",
-        slaInfo.status === "warning" && "border-l-2 border-l-amber-500/70",
+        "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-all border-l-4 cursor-pointer",
+        selected
+          ? "border-l-primary bg-primary/[0.08] dark:bg-primary/[0.18] shadow-xs"
+          : "border-l-transparent hover:bg-accent/40",
+        conv.radar_status === "active" && "border-l-rose-600 bg-rose-500/[0.06]",
+        slaInfo.status === "breached" && "border-l-destructive bg-destructive/[0.04]",
+        slaInfo.status === "warning" && "border-l-amber-500/80",
       )}
     >
       <div className="relative shrink-0">
@@ -91,7 +93,8 @@ export const ConversationItem = memo(function ConversationItem({
         <div className="flex items-center gap-2 min-w-0">
           <span
             className={cn(
-              "truncate text-sm font-medium flex-1 min-w-0",
+              "truncate text-sm flex-1 min-w-0",
+              selected ? "text-primary font-semibold" : "font-medium text-foreground",
               conv.unread_count && conv.unread_count > 0 && "font-bold text-foreground",
             )}
           >
