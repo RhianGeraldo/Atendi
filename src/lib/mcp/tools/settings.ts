@@ -900,11 +900,9 @@ export const settingsTools: McpToolDefinition[] = [
           provider,
           network,
           status,
-          phone_number,
+          owner_jid,
           unit_id,
-          ai_agent_id,
-          units(name, color),
-          ai_agents(name, ai_type, is_active)
+          units(name, color)
         `)
         .eq("company_id", context.companyId)
         .order("name", { ascending: true });
@@ -916,26 +914,40 @@ export const settingsTools: McpToolDefinition[] = [
       const { data: instances, error } = await query;
       if (error) throw new Error(`Erro ao listar conexões: ${error.message}`);
 
+      // Buscar agentes de IA para correlacionar com as instâncias
+      const { data: companyAgents } = await supabaseAdmin
+        .from("ai_agents")
+        .select("id, name, ai_type, is_active, instance_id, is_main_agent")
+        .eq("company_id", context.companyId);
+
       return {
         total: instances?.length || 0,
-        canais: (instances || []).map((inst: any) => ({
-          id: inst.id,
-          nome: inst.name || inst.instance_name,
-          rede: inst.network || "whatsapp",
-          provedor: inst.provider,
-          status: inst.status || "disconnected",
-          numero_telefone: inst.phone_number || null,
-          unidade: inst.units?.name || "Empresa Mãe (Geral)",
-          unidade_id: inst.unit_id,
-          agente_ia: inst.ai_agents
-            ? {
-                nome: inst.ai_agents.name,
-                tipo: inst.ai_agents.ai_type,
-                ativo: inst.ai_agents.is_active,
-              }
-            : null,
-          agente_ia_id: inst.ai_agent_id,
-        })),
+        canais: (instances || []).map((inst: any) => {
+          const phone = inst.owner_jid ? String(inst.owner_jid).replace(/@.*$/, "") : null;
+          const linkedAgent =
+            companyAgents?.find((a: any) => a.instance_id === inst.id) ||
+            companyAgents?.find((a: any) => a.is_main_agent) ||
+            null;
+
+          return {
+            id: inst.id,
+            nome: inst.name || inst.instance_name,
+            rede: inst.network || "whatsapp",
+            provedor: inst.provider,
+            status: inst.status || "disconnected",
+            numero_telefone: phone,
+            unidade: inst.units?.name || "Empresa Mãe (Geral)",
+            unidade_id: inst.unit_id,
+            agente_ia: linkedAgent
+              ? {
+                  id: linkedAgent.id,
+                  nome: linkedAgent.name,
+                  tipo: linkedAgent.ai_type,
+                  ativo: linkedAgent.is_active,
+                }
+              : null,
+          };
+        }),
       };
     },
   },
@@ -967,7 +979,7 @@ export const settingsTools: McpToolDefinition[] = [
         },
         agente_ia_id: {
           type: "string",
-          description: "UUID do agente de IA padrão para este canal, ou 'nenhum'/null para desvincular.",
+          description: "UUID do agente de IA que atenderá este canal, ou 'nenhum'/null para desvincular.",
         },
       },
       required: ["canal_id"],
@@ -975,7 +987,7 @@ export const settingsTools: McpToolDefinition[] = [
     handler: async (args: any, context: McpContext) => {
       const { data: inst, error: checkErr } = await supabaseAdmin
         .from("whatsapp_instances")
-        .select("id, name")
+        .select("id, name, unit_id")
         .eq("id", args.canal_id)
         .eq("company_id", context.companyId)
         .single();
@@ -987,24 +999,35 @@ export const settingsTools: McpToolDefinition[] = [
       if (args.unidade_id !== undefined) {
         updates.unit_id = args.unidade_id === "nenhum" || !args.unidade_id ? null : args.unidade_id;
       }
-      if (args.agente_ia_id !== undefined) {
-        updates.ai_agent_id =
-          args.agente_ia_id === "nenhum" || !args.agente_ia_id ? null : args.agente_ia_id;
+
+      if (Object.keys(updates).length > 0) {
+        const { error } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .update(updates)
+          .eq("id", args.canal_id);
+        if (error) throw new Error(`Erro ao atualizar canal: ${error.message}`);
       }
 
-      const { data: updated, error } = await supabaseAdmin
-        .from("whatsapp_instances")
-        .update(updates)
-        .eq("id", args.canal_id)
-        .select("id, name, unit_id, ai_agent_id")
-        .single();
-
-      if (error) throw new Error(`Erro ao atualizar canal: ${error.message}`);
+      if (args.agente_ia_id !== undefined) {
+        if (args.agente_ia_id === "nenhum" || !args.agente_ia_id) {
+          await supabaseAdmin
+            .from("ai_agents")
+            .update({ instance_id: null })
+            .eq("company_id", context.companyId)
+            .eq("instance_id", args.canal_id);
+        } else {
+          await supabaseAdmin
+            .from("ai_agents")
+            .update({ instance_id: args.canal_id })
+            .eq("company_id", context.companyId)
+            .eq("id", args.agente_ia_id);
+        }
+      }
 
       return {
         sucesso: true,
-        mensagem: `Canal "${updated.name}" atualizado com sucesso!`,
-        canal: updated,
+        mensagem: `Canal "${args.nome || inst.name}" configurado com sucesso!`,
+        canal_id: args.canal_id,
       };
     },
   },

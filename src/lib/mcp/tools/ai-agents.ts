@@ -14,6 +14,7 @@ function normalizeString(str: string): string {
  * Localiza um agente de IA pelo UUID ou pelo nome aproximado dentro da empresa
  */
 async function resolveAgent(companyId: string, idOrName: string) {
+  if (!idOrName || typeof idOrName !== "string" || !idOrName.trim()) return null;
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrName.trim());
 
   if (isUuid) {
@@ -94,7 +95,7 @@ export const aiAgentsTools: McpToolDefinition[] = [
           department_id,
           units(name, color),
           whatsapp_instances(name, provider, network),
-          departments(name),
+          departments:departments!ai_agents_department_id_fkey(name),
           created_at,
           updated_at
         `)
@@ -401,17 +402,31 @@ export const aiAgentsTools: McpToolDefinition[] = [
       if (args.permitir_encerramento !== undefined) updates.allow_resolution = Boolean(args.permitir_encerramento);
       if (args.permitir_tarefas_crm !== undefined) updates.allow_tasks = Boolean(args.permitir_tarefas_crm);
       if (args.permitir_oportunidades_crm !== undefined) updates.allow_opportunities = Boolean(args.permitir_oportunidades_crm);
-      if (args.funil_crm_id !== undefined) updates.pipeline_id = args.funil_crm_id === "none" || !args.funil_crm_id ? null : args.funil_crm_id;
+      if (args.funil_crm_id !== undefined) {
+        updates.pipeline_id =
+          args.funil_crm_id === "none" || args.funil_crm_id === "nenhum" || !args.funil_crm_id
+            ? null
+            : args.funil_crm_id;
+      }
       if (args.permitir_abertura_tickets !== undefined) updates.allow_tickets = Boolean(args.permitir_abertura_tickets);
 
       if (args.unidade_id !== undefined) {
-        updates.unit_id = args.unidade_id === "all" || !args.unidade_id ? null : args.unidade_id;
+        updates.unit_id =
+          args.unidade_id === "all" || args.unidade_id === "nenhum" || args.unidade_id === "none" || !args.unidade_id
+            ? null
+            : args.unidade_id;
       }
       if (args.instancia_id !== undefined) {
-        updates.instance_id = args.instancia_id === "all" || !args.instancia_id ? null : args.instancia_id;
+        updates.instance_id =
+          args.instancia_id === "all" || args.instancia_id === "nenhum" || args.instancia_id === "none" || !args.instancia_id
+            ? null
+            : args.instancia_id;
       }
       if (args.departamento_id !== undefined) {
-        updates.department_id = args.departamento_id === "all" || !args.departamento_id ? null : args.departamento_id;
+        updates.department_id =
+          args.departamento_id === "all" || args.departamento_id === "nenhum" || args.departamento_id === "none" || !args.departamento_id
+            ? null
+            : args.departamento_id;
       }
       if (args.colegas_ia_permitidos !== undefined) {
         updates.allowed_agent_ids = Array.isArray(args.colegas_ia_permitidos) && args.colegas_ia_permitidos.length > 0 ? args.colegas_ia_permitidos : null;
@@ -572,10 +587,19 @@ export const aiAgentsTools: McpToolDefinition[] = [
         allow_resolution: args.permitir_encerramento !== false,
         allow_tasks: args.permitir_tarefas_crm !== false,
         allow_opportunities: Boolean(args.permitir_oportunidades_crm),
-        pipeline_id: args.funil_crm_id || null,
+        pipeline_id:
+          args.funil_crm_id === "none" || args.funil_crm_id === "nenhum" || !args.funil_crm_id
+            ? null
+            : args.funil_crm_id,
         allow_tickets: args.permitir_abertura_tickets !== false,
-        unit_id: args.unidade_id || null,
-        instance_id: args.instancia_id || null,
+        unit_id:
+          args.unidade_id === "all" || args.unidade_id === "nenhum" || args.unidade_id === "none" || !args.unidade_id
+            ? null
+            : args.unidade_id,
+        instance_id:
+          args.instancia_id === "all" || args.instancia_id === "nenhum" || args.instancia_id === "none" || !args.instancia_id
+            ? null
+            : args.instancia_id,
       };
 
       const { data, error } = await supabaseAdmin
