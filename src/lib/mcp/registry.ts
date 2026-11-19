@@ -15,6 +15,7 @@ import { teamChatTools } from "./tools/team-chat";
 import { todooTools } from "./tools/todoo";
 import { ticketsTools } from "./tools/tickets";
 import { servicesTools } from "./tools/services";
+import { aiAgentsTools } from "./tools/ai-agents";
 
 export const allToolsList: McpToolDefinition[] = [
   ...unitsTools,
@@ -32,6 +33,7 @@ export const allToolsList: McpToolDefinition[] = [
   ...todooTools,
   ...ticketsTools,
   ...servicesTools,
+  ...aiAgentsTools,
 ];
 
 const toolsByName = new Map<string, McpToolDefinition>();

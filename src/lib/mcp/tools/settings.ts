@@ -871,4 +871,244 @@ export const settingsTools: McpToolDefinition[] = [
       };
     },
   },
+
+  // 11. Listar Canais e Conexões (WhatsApp e Instagram)
+  {
+    name: "listar_canais_conexao",
+    description:
+      "Lista todas as instâncias e conexões de WhatsApp e Instagram da empresa, status de conexão, unidade associada e qual IA atende o canal.",
+    security: {
+      requiredMenu: "settings",
+      minRole: "agent",
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        unidade_id: {
+          type: "string",
+          description: "Filtrar instâncias de uma filial específica. Opcional.",
+        },
+      },
+    },
+    handler: async (args: any, context: McpContext) => {
+      let query = supabaseAdmin
+        .from("whatsapp_instances")
+        .select(`
+          id,
+          name,
+          instance_name,
+          provider,
+          network,
+          status,
+          phone_number,
+          unit_id,
+          ai_agent_id,
+          units(name, color),
+          ai_agents(name, ai_type, is_active)
+        `)
+        .eq("company_id", context.companyId)
+        .order("name", { ascending: true });
+
+      if (args.unidade_id) {
+        query = query.or(`unit_id.is.null,unit_id.eq.${args.unidade_id}`);
+      }
+
+      const { data: instances, error } = await query;
+      if (error) throw new Error(`Erro ao listar conexões: ${error.message}`);
+
+      return {
+        total: instances?.length || 0,
+        canais: (instances || []).map((inst: any) => ({
+          id: inst.id,
+          nome: inst.name || inst.instance_name,
+          rede: inst.network || "whatsapp",
+          provedor: inst.provider,
+          status: inst.status || "disconnected",
+          numero_telefone: inst.phone_number || null,
+          unidade: inst.units?.name || "Empresa Mãe (Geral)",
+          unidade_id: inst.unit_id,
+          agente_ia: inst.ai_agents
+            ? {
+                nome: inst.ai_agents.name,
+                tipo: inst.ai_agents.ai_type,
+                ativo: inst.ai_agents.is_active,
+              }
+            : null,
+          agente_ia_id: inst.ai_agent_id,
+        })),
+      };
+    },
+  },
+
+  // 12. Configurar Canal / Conexão
+  {
+    name: "configurar_canal_conexao",
+    description:
+      "Altera o nome, a filial vinculada ou a IA responsável por uma conexão de WhatsApp ou Instagram.",
+    security: {
+      requiredMenu: "settings",
+      minRole: "manager",
+      isWriteAction: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        canal_id: {
+          type: "string",
+          description: "UUID da instância/canal a ser atualizado.",
+        },
+        nome: {
+          type: "string",
+          description: "Novo nome de identificação da conexão.",
+        },
+        unidade_id: {
+          type: "string",
+          description: "UUID da filial vinculada, ou 'nenhum'/null para tornar geral da empresa.",
+        },
+        agente_ia_id: {
+          type: "string",
+          description: "UUID do agente de IA padrão para este canal, ou 'nenhum'/null para desvincular.",
+        },
+      },
+      required: ["canal_id"],
+    },
+    handler: async (args: any, context: McpContext) => {
+      const { data: inst, error: checkErr } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .select("id, name")
+        .eq("id", args.canal_id)
+        .eq("company_id", context.companyId)
+        .single();
+
+      if (checkErr || !inst) throw new Error("Canal de conexão não encontrado ou acesso negado.");
+
+      const updates: Record<string, any> = {};
+      if (args.nome !== undefined && args.nome.trim()) updates.name = args.nome.trim();
+      if (args.unidade_id !== undefined) {
+        updates.unit_id = args.unidade_id === "nenhum" || !args.unidade_id ? null : args.unidade_id;
+      }
+      if (args.agente_ia_id !== undefined) {
+        updates.ai_agent_id =
+          args.agente_ia_id === "nenhum" || !args.agente_ia_id ? null : args.agente_ia_id;
+      }
+
+      const { data: updated, error } = await supabaseAdmin
+        .from("whatsapp_instances")
+        .update(updates)
+        .eq("id", args.canal_id)
+        .select("id, name, unit_id, ai_agent_id")
+        .single();
+
+      if (error) throw new Error(`Erro ao atualizar canal: ${error.message}`);
+
+      return {
+        sucesso: true,
+        mensagem: `Canal "${updated.name}" atualizado com sucesso!`,
+        canal: updated,
+      };
+    },
+  },
+
+  // 13. Gerenciar Departamentos (Criar ou Atualizar)
+  {
+    name: "gerenciar_departamento",
+    description:
+      "Cria, renomeia ou atualiza as informações de um departamento da empresa (ex: Comercial, Suporte, Financeiro).",
+    security: {
+      requiredMenu: "settings",
+      minRole: "admin_company",
+      isWriteAction: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        acao: {
+          type: "string",
+          enum: ["criar", "atualizar", "excluir"],
+          description: "Ação desejada: 'criar', 'atualizar' ou 'excluir'.",
+        },
+        departamento_id: {
+          type: "string",
+          description: "UUID do departamento (obrigatório para 'atualizar' e 'excluir').",
+        },
+        nome: {
+          type: "string",
+          description: "Nome do departamento (ex: 'Comercial & Vendas').",
+        },
+        descricao: {
+          type: "string",
+          description: "Descrição da função do departamento.",
+        },
+      },
+      required: ["acao"],
+    },
+    handler: async (args: any, context: McpContext) => {
+      const acao = args.acao;
+
+      if (acao === "criar") {
+        if (!args.nome?.trim()) throw new Error("Nome do departamento é obrigatório.");
+
+        const { data, error } = await supabaseAdmin
+          .from("departments")
+          .insert({
+            company_id: context.companyId,
+            name: args.nome.trim(),
+            description: args.descricao ? args.descricao.trim() : null,
+          })
+          .select()
+          .single();
+
+        if (error) throw new Error(`Erro ao criar departamento: ${error.message}`);
+
+        return {
+          sucesso: true,
+          mensagem: `Departamento "${data.name}" criado com sucesso!`,
+          departamento: data,
+        };
+      }
+
+      if (acao === "atualizar") {
+        if (!args.departamento_id) throw new Error("departamento_id é obrigatório para atualizar.");
+
+        const updates: Record<string, any> = {};
+        if (args.nome !== undefined) updates.name = args.nome.trim();
+        if (args.descricao !== undefined) updates.description = args.descricao.trim() || null;
+
+        const { data, error } = await supabaseAdmin
+          .from("departments")
+          .update(updates)
+          .eq("id", args.departamento_id)
+          .eq("company_id", context.companyId)
+          .select()
+          .single();
+
+        if (error) throw new Error(`Erro ao atualizar departamento: ${error.message}`);
+
+        return {
+          sucesso: true,
+          mensagem: `Departamento "${data.name}" atualizado com sucesso!`,
+          departamento: data,
+        };
+      }
+
+      if (acao === "excluir") {
+        if (!args.departamento_id) throw new Error("departamento_id é obrigatório para excluir.");
+
+        const { error } = await supabaseAdmin
+          .from("departments")
+          .delete()
+          .eq("id", args.departamento_id)
+          .eq("company_id", context.companyId);
+
+        if (error) throw new Error(`Erro ao excluir departamento: ${error.message}`);
+
+        return {
+          sucesso: true,
+          mensagem: "Departamento excluído com sucesso.",
+        };
+      }
+
+      throw new Error("Ação inválida. Use 'criar', 'atualizar' ou 'excluir'.");
+    },
+  },
 ];
