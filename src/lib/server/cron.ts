@@ -2,6 +2,7 @@
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { timingSafeEqual } from "node:crypto";
 import { enqueueAiMessage } from "./ai-queue";
+import { generateAndSendAiResponse } from "./ai-generator";
 
 function cronJson(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -185,15 +186,25 @@ export async function runCronFollowUps(): Promise<Response> {
       // Only follow up if client was the last to NOT send (i.e., AI or system sent last)
       if (!lastMsg || lastMsg.sender_type === "contact") continue;
 
-      // Use last contact message time as the inactivity baseline
-      // If there's no contact message yet, use conversation start
-      const baselineTime = lastContactMsg
-        ? new Date(lastContactMsg.created_at).getTime()
-        : new Date(conv.last_message_at || 0).getTime();
+      // Buscar a última mensagem externa enviada pelo atendente/IA para o cliente
+      const { data: lastAgentMsg } = await supabaseAdmin
+        .from("messages")
+        .select("created_at")
+        .eq("conversation_id", conv.id)
+        .eq("sender_type", "agent")
+        .eq("is_internal", false)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      const timeSinceClientMsg = now - baselineTime;
+      const lastAgentAt = lastAgentMsg ? new Date(lastAgentMsg.created_at).getTime() : 0;
+      const lastContactAt = lastContactMsg ? new Date(lastContactMsg.created_at).getTime() : 0;
 
-      if (timeSinceClientMsg >= timeoutMs) {
+      // O tempo de inatividade deve contar a partir da última interação real (pergunta feita pela IA ao cliente ou mensagem do cliente)
+      const baselineTime = Math.max(lastAgentAt, lastContactAt, new Date(conv.started_at || 0).getTime());
+      const timeSinceInactivity = now - baselineTime;
+
+      if (timeSinceInactivity >= timeoutMs) {
         const lastFollowupAt = (conv as any).ai_last_followup_at
           ? new Date((conv as any).ai_last_followup_at).getTime()
           : null;
@@ -290,11 +301,15 @@ export async function runCronFollowUps(): Promise<Response> {
             .select("id")
             .single();
 
-          const targetCompanyId = conv.contacts?.company_id;
+          const targetCompanyId = conv.contacts?.company_id || (conv as any).company_id;
           if (insertedMsg && targetCompanyId) {
-            // Trigger AI queue
-            enqueueAiMessage(conv.id, insertedMsg.id, targetCompanyId);
-            processedCount++;
+            try {
+              // Dispara a IA diretamente para gerar e enviar a mensagem de follow-up imediatamente
+              await generateAndSendAiResponse(conv.id, targetCompanyId);
+              processedCount++;
+            } catch (aiErr) {
+              console.error(`[cron] Error executing AI response for conv ${conv.id}:`, aiErr);
+            }
           }
         }
       }

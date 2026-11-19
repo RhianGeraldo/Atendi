@@ -671,11 +671,9 @@ async function processarMensagem(
       .catch((e) => console.error("[zernio:webhook] Erro no radar de conversas:", e));
   }
 
-  // 6. Enfileirar resposta da IA se conversa ativa e recebida do cliente (em background com buffer de 7s)
+  // 6. Enfileirar resposta da IA se conversa ativa e recebida do cliente (em background com buffer)
   if (!isFromMe && aiActive) {
-    const aiJob = enqueueAiMessage(conversationId, insertedMsg.id, companyId);
-    dispatchBackgroundTask(aiJob, request);
-    await aiJob;
+    scheduleAiMessage(conversationId, insertedMsg.id, companyId, request);
   }
 }
 

@@ -43,6 +43,7 @@ import {
   Share2,
   Compass,
   PhoneCall,
+  ShoppingBag,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -106,6 +107,7 @@ import { RolesTab } from "@/components/settings/roles-tab";
 import { LabelsTab } from "@/components/settings/labels-tab";
 import { CrmTab } from "@/components/settings/crm-tab";
 import { AiAgentsTab } from "@/components/settings/ai-agents-tab";
+import { ServicesCatalogTab } from "@/components/settings/services-tab";
 import { LeadRoutingSettings } from "@/components/settings/lead-routing-settings";
 import { AutomationsTab } from "@/components/settings/automations-tab";
 import { MetaCapiSettingsTab } from "@/components/settings/meta-capi-settings";
@@ -1668,6 +1670,13 @@ function SettingsPage() {
                 Agentes de IA
               </TabsTrigger>
               <TabsTrigger
+                value="services"
+                className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
+              >
+                <ShoppingBag className="mr-2 h-4 w-4 text-emerald-500" />
+                Catálogo de Serviços & Combos
+              </TabsTrigger>
+              <TabsTrigger
                 value="mcp"
                 className="w-full justify-start data-[state=active]:bg-muted/80 rounded-lg py-2"
               >
@@ -2164,7 +2173,12 @@ function SettingsPage() {
                 <AiAgentsTab />
               </TabsContent>
 
-              {/* Sub-aba 4: Servidor MCP */}
+              {/* Sub-aba 4: Catálogo de Serviços & Combos */}
+              <TabsContent value="services" className="mt-0 border-none p-0">
+                <ServicesCatalogTab />
+              </TabsContent>
+
+              {/* Sub-aba 5: Servidor MCP */}
               <TabsContent value="mcp" className="mt-0 border-none p-0">
                 <McpSettingsTab companyId={activeCompanyId} />
               </TabsContent>

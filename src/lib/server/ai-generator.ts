@@ -943,6 +943,72 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       }
     }
 
+    // Catálogo Comercial Inteligente de Serviços & Combos (com papéis estratégicos para vendas)
+    let servicesQuery = supabaseAdmin
+      .from("company_services_packages")
+      .select("*")
+      .eq("company_id", effectiveCompanyId)
+      .eq("is_active", true)
+      .order("order_index", { ascending: true });
+
+    if (effectiveUnitId) {
+      servicesQuery = servicesQuery.or(`unit_id.is.null,unit_id.eq.${effectiveUnitId}`);
+    }
+
+    const { data: servicesList } = await servicesQuery;
+    if (servicesList && servicesList.length > 0) {
+      const intermediateList = servicesList.filter((s) => s.strategic_role === "intermediate");
+      const upsellList = servicesList.filter((s) => s.strategic_role === "upsell");
+      const downsellList = servicesList.filter((s) => s.strategic_role === "downsell");
+      const crossSellList = servicesList.filter((s) => s.strategic_role === "cross_sell");
+
+      const formatPkg = (p: any) =>
+        `- ${p.name} (${p.sessions_count} sessões${p.areas?.length ? ` | Áreas: ${p.areas.join(", ")}` : ""}): ` +
+        `${p.installment_text ? `Parcelado em ${p.installment_text} (Cartão Recorrente sem travar limite)` : ""}` +
+        `${p.cash_price ? ` ou R$ ${Number(p.cash_price).toFixed(2)} à vista/PIX` : ""}` +
+        `${p.bonus_gift ? ` [BÔNUS: ${p.bonus_gift}]` : ""}` +
+        `${p.sales_pitch ? ` [DICA DE VENDA: ${p.sales_pitch}]` : ""}`;
+
+      let catalogPrompt = `=== CATÁLOGO OFICIAL DE SERVIÇOS & COMBOS PARA VENDA ===\n` +
+        `Você dispõe da tabela oficial de pacotes e combos abaixo para negociar com os clientes:\n\n`;
+
+      if (intermediateList.length > 0) {
+        catalogPrompt += `1. OPÇÃO INTERMEDIÁRIA (CARRO-CHEFE / ÂNCORA IDEAL - Ofereça sempre como primeira opção de negociação):\n` +
+          intermediateList.map(formatPkg).join("\n") + "\n\n";
+      }
+      if (downsellList.length > 0) {
+        catalogPrompt += `2. OPÇÃO DOWNSELL (SALVA-VENDA - Use com empatia se a cliente achar caro, hesitar no orçamento ou preferir começar menor/avulso):\n` +
+          downsellList.map(formatPkg).join("\n") + "\n\n";
+      }
+      if (upsellList.length > 0) {
+        catalogPrompt += `3. OPÇÃO UPSELL (TICKET MAIOR - Ofereça quando a cliente perguntar de pernas, mais áreas ou quiser o pacote completo com maior economia por área):\n` +
+          upsellList.map(formatPkg).join("\n") + "\n\n";
+      }
+      if (crossSellList.length > 0) {
+        catalogPrompt += `4. OPÇÃO CROSS-SELL (VENDA CRUZADA - Ofereça com 50% de desconto adicional se a cliente mencionar manchas escuras, foliculite ou queixas de pele):\n` +
+          crossSellList.map(formatPkg).join("\n") + "\n\n";
+      }
+
+      const salesStrategy = (company.custom_variables as any)?.sales_strategy;
+      if (salesStrategy) {
+        if (salesStrategy.campaign_active_name) {
+          catalogPrompt += `\n- CAMPANHA PROMOCIONAL ATIVA: ${salesStrategy.campaign_active_name}`;
+        }
+        if (salesStrategy.campaign_bonus_headline) {
+          catalogPrompt += `\n- BRINDE OFICIAL DE FECHAMENTO: ${salesStrategy.campaign_bonus_headline}`;
+        }
+        if (salesStrategy.consultative_pitch_guidelines) {
+          catalogPrompt += `\n- REGRAS DA GESTÃO: ${salesStrategy.consultative_pitch_guidelines}`;
+        }
+      }
+
+      catalogPrompt += `\n\nDIRETRIZ DE VENDA CONSULTIVA:
+- Use sempre os valores exatos de parcelamento recorrente acima (sempre mencione que o cartão recorrente não trava o limite total do cartão).
+- Respostas curtas de 1 a 2 linhas, terminando com apenas uma pergunta.`;
+
+      systemPromptParts.push(catalogPrompt);
+    }
+
     const systemPrompt = systemPromptParts.join("\n\n");
 
     const isFollowUpTrigger =
@@ -1303,6 +1369,31 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       },
     });
 
+    // Ferramenta nativa para Consultar Catálogo de Serviços e Combos
+    tools.push({
+      type: "function",
+      function: {
+        name: "buscar_servicos_combos",
+        description:
+          "Consulta o catálogo comercial de pacotes, sessões e combos com inteligência de vendas (opção intermediária recomendada, upsell para ticket maior, downsell se a cliente achar caro, e cross-sell para queixas de pele/manchas).",
+        parameters: {
+          type: "object",
+          properties: {
+            areas: {
+              type: "array",
+              items: { type: "string" },
+              description: "Áreas do corpo de interesse do cliente (ex: ['virilha', 'axilas']).",
+            },
+            estrategia: {
+              type: "string",
+              enum: ["apresentacao_inicial", "intermediario", "upsell", "downsell", "cross_sell"],
+              description: "Estratégia comercial do momento.",
+            },
+          },
+        },
+      },
+    });
+
     if (agent.allow_opportunities) {
       tools.push({
         type: "function",
@@ -1537,6 +1628,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           if (openTicketData.customerNotice) {
             openTicketNotice = openTicketData.customerNotice;
           }
+        } else if (fnName === "buscar_servicos_combos") {
+          console.log(`[ai-generator] Tool buscar_servicos_combos executed for conv ${conv.id}:`, args);
         }
       }
     }
@@ -1556,6 +1649,22 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       const transferAgentMatch = cleanResponse.match(/\[TRANSFERIR_?AGENTE:\s*(.*?)\]/i);
       if (transferAgentMatch) {
         transferAgentInput = transferAgentMatch[1].trim();
+      } else if (colleagues && colleagues.length > 0) {
+        // Fallback semântico: se a IA escreveu no texto que está transferindo para um colega disponível
+        for (const c of colleagues) {
+          const colleagueFirstName = c.name.split(/\s+/)[0];
+          const pattern = new RegExp(
+            `(?:vou\\s+transferir|transferindo|passando|vou\\s+passar)(?:\\s+voc[eê])?\\s+para\\s+(?:a\\s+|o\\s+)?(?:noss[ao]\\s+.*?\\s+)?(${c.name}|${colleagueFirstName})\\b`,
+            "i",
+          );
+          if (pattern.test(cleanResponse)) {
+            console.log(
+              `[ai-generator] Semantic fallback detected transfer to colleague: ${c.name}`,
+            );
+            transferAgentInput = c.name;
+            break;
+          }
+        }
       }
     }
 

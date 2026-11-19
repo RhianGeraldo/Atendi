@@ -57,11 +57,44 @@ export async function enqueueAiMessage(
     `[ai-queue] AI response queued for conversation ${conversationId}. Waiting ${BUFFER_MS / 1000}s for silence...`,
   );
 
-  // Aguarda a janela de silêncio de 7 segundos
+  // Aguarda a janela de silêncio (debounce)
   await new Promise((resolve) => setTimeout(resolve, BUFFER_MS));
 
   try {
-    // Após 7 segundos, verifica no banco se chegaram NOVAS mensagens de contato/atendimento (ignora notas internas)
+    // 1. Buscar a mensagem disparadora para identificar se é um evento de sistema ou mensagem do cliente
+    const { data: triggerMsg } = await supabaseAdmin
+      .from("messages")
+      .select("id, sender_type, is_internal, created_at")
+      .eq("id", messageId)
+      .single();
+
+    // 2. Se for mensagem de sistema (ex: follow-up do cron, transbordo entre agentes IA)
+    if (triggerMsg?.sender_type === "system") {
+      // Verifica se o cliente enviou alguma mensagem mais recente enquanto o trigger aguardava
+      const { data: newerContactMsg } = await supabaseAdmin
+        .from("messages")
+        .select("id")
+        .eq("conversation_id", conversationId)
+        .eq("sender_type", "contact")
+        .gt("created_at", triggerMsg.created_at)
+        .limit(1);
+
+      if (newerContactMsg && newerContactMsg.length > 0) {
+        console.log(
+          `[ai-queue] Client replied after system trigger in ${conversationId}. Skipping system trigger.`,
+        );
+        return;
+      }
+
+      console.log(
+        `[ai-queue] System trigger confirmed for conversation ${conversationId}. Triggering AI response...`,
+      );
+      await generateAndSendAiResponse(conversationId, companyId);
+      return;
+    }
+
+    // 3. Se for mensagem normal de contato/cliente:
+    // Após a janela de silêncio, verifica no banco se chegaram NOVAS mensagens de contato/atendimento (ignora notas internas)
     const { data: latestMsg } = await supabaseAdmin
       .from("messages")
       .select("id, is_internal")
@@ -73,7 +106,7 @@ export async function enqueueAiMessage(
       .single();
 
     // Se a mensagem mais recente no banco AINDA FOR esta, significa que o cliente
-    // parou de digitar por 7 segundos. A IA pode responder!
+    // parou de digitar. A IA pode responder!
     if (latestMsg && latestMsg.id === messageId) {
       console.log(
         `[ai-queue] Buffer of ${BUFFER_MS / 1000}s reached and no new messages. Triggering AI response...`,
