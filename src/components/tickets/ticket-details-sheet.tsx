@@ -41,6 +41,8 @@ interface Props {
   onEditTicket?: (ticket: any) => void;
 }
 
+const EMPTY_ARRAY: any[] = [];
+
 export function TicketDetailsSheet({
   ticketId,
   open,
@@ -81,7 +83,7 @@ export function TicketDetailsSheet({
   });
 
   // 2. Busca mensagens do Ticket
-  const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
+  const { data: messages = EMPTY_ARRAY, isLoading: isLoadingMessages } = useQuery({
     queryKey: ["ticket-messages", ticketId],
     enabled: open && !!ticketId,
     queryFn: async () => {
@@ -100,7 +102,7 @@ export function TicketDetailsSheet({
   });
 
   // 3. Membros da equipe para reatribuir
-  const { data: teamMembers = [] } = useQuery({
+  const { data: teamMembers = EMPTY_ARRAY } = useQuery({
     queryKey: ["ticket-sheet-team", effectiveCompanyId],
     enabled: open && !!effectiveCompanyId,
     queryFn: async () => {

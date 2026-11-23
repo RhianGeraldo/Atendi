@@ -465,7 +465,8 @@ async function processarMensagem(
 
   if (activeConv) {
     conversationId = activeConv.id;
-    aiActive = activeConv.ai_active ?? false;
+    const previouslyAiActive = activeConv.ai_active ?? false;
+    aiActive = previouslyAiActive;
 
     // Atualização obrigatória da thread e da janela de 24h (§4.3, §4.4)
     const updatePayload: Record<string, any> = {
@@ -491,7 +492,16 @@ async function processarMensagem(
       currentAgentId: activeConv.ai_agent_id,
     });
     const resolvedAgentId = resolution.agent?.id ?? null;
-    aiActive = resolution.aiActive;
+    
+    // Se a conversa já estava com IA ativa, preserva o estado ativo
+    if (previouslyAiActive) {
+      aiActive = true;
+    } else if (activeConv.assigned_agent_id) {
+      // Se possui atendente humano ativo atribuído, não força a IA
+      aiActive = false;
+    } else {
+      aiActive = resolution.aiActive;
+    }
 
     // A conversa é achada pela thread do Instagram mesmo resolvida: mensagem da cliente reabre
     // como "aguardando" (ou "em atendimento" se a IA estava atendendo), igual ao WhatsApp
@@ -516,7 +526,9 @@ async function processarMensagem(
       // Se a conversa já estava aberta mas não tinha agente ou o agente da instância é diferente:
       if (resolvedAgentId && (!activeConv.ai_agent_id || activeConv.ai_agent_id !== resolvedAgentId)) {
         updatePayload.ai_agent_id = resolvedAgentId;
-        updatePayload.ai_active = aiActive;
+      }
+      if (previouslyAiActive) {
+        updatePayload.ai_active = true;
       }
     }
 

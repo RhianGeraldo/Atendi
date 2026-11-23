@@ -56,6 +56,7 @@ import {
   salesCoachSuggestAction,
   resolveConversationAction,
   assignConversationAction,
+  toggleAiAction,
   listScheduledMessagesAction,
 } from "@/lib/api/chat.functions";
 import { ScheduledMessagesDialog } from "./scheduled-messages-dialog";
@@ -1323,11 +1324,7 @@ export function ChatPanel({
 
   const toggleAi = useMutation({
     mutationFn: async (active: boolean) => {
-      const { error } = await supabase
-        .from("conversations")
-        .update({ ai_active: active })
-        .eq("id", conv.id);
-      if (error) throw error;
+      return await toggleAiAction({ data: { conversationId: conv.id, active } });
     },
     onMutate: async (active) => {
       await qc.cancelQueries({ queryKey: ["conversations"] });
@@ -1341,7 +1338,14 @@ export function ChatPanel({
               return {
                 ...page,
                 rows: page.rows.map((r: any) =>
-                  r.id === conv.id ? { ...r, ai_active: active } : r,
+                  r.id === conv.id
+                    ? {
+                        ...r,
+                        ai_active: active,
+                        assigned_agent_id: active ? null : r.assigned_agent_id,
+                        assigned_agent: active ? null : r.assigned_agent,
+                      }
+                    : r,
                 ),
               };
             }),
@@ -1350,11 +1354,22 @@ export function ChatPanel({
         return oldData;
       });
       qc.setQueryData(["direct-conversation", conv.id], (old: any) =>
-        old ? { ...old, ai_active: active } : old,
+        old
+          ? {
+              ...old,
+              ai_active: active,
+              assigned_agent_id: active ? null : old.assigned_agent_id,
+              assigned_agent: active ? null : old.assigned_agent,
+            }
+          : old,
       );
     },
-    onSuccess: (_, active) => {
-      toast.success(active ? "IA ativada neste atendimento" : "IA pausada neste atendimento");
+    onSuccess: (data, active) => {
+      if (data?.triggeredAi) {
+        toast.success("IA ativada! O cliente estava aguardando e a IA já está formulando a resposta.");
+      } else {
+        toast.success(active ? "IA ativada neste atendimento" : "IA pausada neste atendimento");
+      }
       qc.invalidateQueries({ queryKey: ["conversations"] });
       qc.invalidateQueries({ queryKey: ["direct-conversation", conv.id] });
     },

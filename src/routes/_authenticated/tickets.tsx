@@ -44,6 +44,8 @@ import { TicketDialog } from "@/components/tickets/ticket-dialog";
 import { TicketDetailsSheet } from "@/components/tickets/ticket-details-sheet";
 import { formatTicketCode } from "@/lib/format";
 
+const EMPTY_ARRAY: any[] = [];
+
 export const Route = createFileRoute("/_authenticated/tickets")({
   component: () => (
     <ProtectedMenuRoute menuKey="tickets">
@@ -77,7 +79,7 @@ function TicketsPage() {
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   // Busca lista de tickets
-  const { data: tickets = [], isLoading } = useQuery({
+  const { data: tickets = EMPTY_ARRAY, isLoading } = useQuery({
     queryKey: ["tickets", effectiveCompanyId, selectedUnitId],
     enabled: !!effectiveCompanyId,
     queryFn: async () => {

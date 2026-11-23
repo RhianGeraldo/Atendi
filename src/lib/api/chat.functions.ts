@@ -52,6 +52,8 @@ import {
 import { getCompanyPlaybookSummary } from "./training.functions";
 import { ZernioClient } from "../canais/zernio/client";
 import { persistirAvatarContatoNoStorage } from "../avatar-storage";
+import { generateAndSendAiResponse } from "@/lib/server/ai-generator";
+import { dispatchBackgroundTask } from "@/lib/server/ai-queue";
 
 const chatJidCache = new Map<string, { jid: string; expiresAt: number }>();
 
@@ -1688,6 +1690,79 @@ export const assignConversationAction = createServerFn({ method: "POST" })
     }
 
     return { success: true };
+  });
+
+export const toggleAiAction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      conversationId: z.string().uuid(),
+      active: z.boolean(),
+    }),
+  )
+  .handler(async ({ data, context }) => {
+    await assertConversationAccess(context.userId, data.conversationId);
+
+    const updateData: any = {
+      ai_active: data.active,
+    };
+
+    // Ao ligar a IA, remove a atribuição humana para que a IA assuma livremente
+    if (data.active) {
+      updateData.assigned_agent_id = null;
+    }
+
+    const { error: updateErr } = await supabaseAdmin
+      .from("conversations")
+      .update(updateData)
+      .eq("id", data.conversationId);
+
+    if (updateErr) {
+      console.error("Failed to toggle AI:", updateErr);
+      throw new Error(`Erro ao alterar status da IA: ${updateErr.message}`);
+    }
+
+    // Se estiver ativando a IA, inspeciona se o cliente está aguardando resposta
+    let triggeredAi = false;
+    if (data.active) {
+      const { data: conv } = await supabaseAdmin
+        .from("conversations")
+        .select("id, company_id, contacts(company_id)")
+        .eq("id", data.conversationId)
+        .single();
+
+      if (conv) {
+        const effectiveCompanyId =
+          conv.company_id || (conv.contacts as any)?.company_id;
+
+        // Busca a última mensagem da conversa (ignorando notas internas)
+        const { data: latestMsg } = await supabaseAdmin
+          .from("messages")
+          .select("id, sender_type, is_internal, created_at")
+          .eq("conversation_id", data.conversationId)
+          .eq("is_internal", false)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        // Se a última mensagem partiu do cliente, ele está aguardando resposta!
+        if (latestMsg && latestMsg.sender_type === "contact") {
+          triggeredAi = true;
+          console.log(
+            `[toggleAiAction] Contact is waiting for response in ${data.conversationId}. Triggering AI response now...`,
+          );
+          dispatchBackgroundTask(
+            generateAndSendAiResponse(data.conversationId, effectiveCompanyId),
+          );
+        }
+      }
+    }
+
+    return {
+      success: true,
+      active: data.active,
+      triggeredAi,
+    };
   });
 
 export const transferConversationAction = createServerFn({ method: "POST" })

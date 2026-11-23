@@ -425,7 +425,10 @@ function SettingsPage() {
         {} as Record<string, string>,
       );
 
-      const currentCustom = (company?.custom_variables && typeof company.custom_variables === "object") ? company.custom_variables : {};
+      const currentCustom =
+        company?.custom_variables && typeof company.custom_variables === "object"
+          ? company.custom_variables
+          : {};
 
       const { error } = await supabase
         .from("companies")
@@ -2301,16 +2304,25 @@ function SettingsPage() {
                   <CardContent className="pt-6">
                     <div className="flex items-center justify-between space-x-4 border rounded-xl p-4 bg-muted/20">
                       <div className="space-y-0.5">
-                        <label className="text-sm font-semibold">Assinatura de Mensagem</label>
+                        <div className="flex items-center gap-2">
+                          <label className="text-sm font-semibold">Assinatura de Mensagem</label>
+                          <Badge
+                            variant="outline"
+                            className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-medium"
+                          >
+                            Ativo para toda a equipe
+                          </Badge>
+                        </div>
                         <p className="text-xs text-muted-foreground">
-                          Adicionar automaticamente seu nome ("*{profile?.name || "Seu Nome"}*:") ao
-                          início das mensagens enviadas aos clientes.
+                          Adiciona automaticamente seu nome ("*{profile?.name || "Seu Nome"}*:") ao
+                          início das mensagens enviadas aos clientes. Padrão obrigatório para
+                          identificação da equipe.
                         </p>
                       </div>
                       <Switch
-                        checked={useSignature}
-                        onCheckedChange={(v) => toggleSignature.mutate(v)}
-                        disabled={toggleSignature.isPending}
+                        checked={true}
+                        disabled={true}
+                        title="A assinatura é ativada por padrão e obrigatória para todos os usuários."
                       />
                     </div>
                   </CardContent>
@@ -2556,10 +2568,7 @@ function InstanceRow({
                 📁 {instance.departments.name}
               </Badge>
             ) : (
-              <Badge
-                variant="secondary"
-                className="text-[10px] px-2 py-0 text-muted-foreground"
-              >
+              <Badge variant="secondary" className="text-[10px] px-2 py-0 text-muted-foreground">
                 🌐 Geral (Todos)
               </Badge>
             )}

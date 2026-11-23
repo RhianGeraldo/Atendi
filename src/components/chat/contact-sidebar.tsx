@@ -58,6 +58,8 @@ interface ContactSidebarProps {
   onClose?: () => void;
 }
 
+const EMPTY_ARRAY: any[] = [];
+
 export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
   const qc = useQueryClient();
   const { selectedUnitId } = useUnit();
@@ -72,7 +74,7 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
   const [newTicketDialogOpen, setNewTicketDialogOpen] = useState(false);
 
   // Busca tickets ativos do contato
-  const { data: activeTickets = [] } = useQuery({
+  const { data: activeTickets = EMPTY_ARRAY } = useQuery({
     queryKey: ["contact-sidebar-active-tickets", conv.contact?.id],
     enabled: !!conv.contact?.id,
     queryFn: async () => {

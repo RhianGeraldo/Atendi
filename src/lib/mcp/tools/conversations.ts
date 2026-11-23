@@ -3,6 +3,8 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { notifyTransferReceiver } from "@/lib/server/transfer-notifications";
 import { loadSlaLastMessages } from "@/lib/server/sla-last-message";
 import { sendPlatformMessage } from "@/lib/server/message-sender";
+import { generateAndSendAiResponse } from "@/lib/server/ai-generator";
+import { dispatchBackgroundTask } from "@/lib/server/ai-queue";
 import {
   calculateConversationSla,
   DEFAULT_SLA_SETTINGS,
@@ -695,7 +697,7 @@ export const conversationsTools: McpToolDefinition[] = [
           media_url,
           transcription,
           created_at,
-          user_id,
+          sender_id,
           is_internal,
           metadata,
           profiles(name)
@@ -723,13 +725,13 @@ export const conversationsTools: McpToolDefinition[] = [
           origem = "sistema";
           autor = "Sistema / Automação";
         } else if (m.sender_type === "agent") {
-          if (m.user_id && m.profiles?.name) {
+          if (m.sender_id && m.profiles?.name) {
             origem = "humano";
             autor = m.profiles.name;
           } else if (m.metadata?.ai_agent_name || m.metadata?.ai_generated) {
             origem = "ia";
             autor = m.metadata.ai_agent_name || (conv.ai_agents as any)?.name || "IA de Atendimento";
-          } else if (!m.user_id) {
+          } else if (!m.sender_id) {
             origem = "ia";
             autor = (conv.ai_agents as any)?.name || "IA (Helena)";
           } else {
@@ -841,7 +843,7 @@ export const conversationsTools: McpToolDefinition[] = [
           media_type,
           transcription,
           created_at,
-          user_id,
+          sender_id,
           is_internal,
           metadata,
           profiles(name)
@@ -1208,6 +1210,7 @@ export const conversationsTools: McpToolDefinition[] = [
 
       if (args.ativar_ia) {
         updatePayload.ai_active = true;
+        updatePayload.assigned_agent_id = null;
       } else {
         updatePayload.ai_active = false;
         if (args.atendente_id) {
@@ -1222,6 +1225,26 @@ export const conversationsTools: McpToolDefinition[] = [
 
       if (error) {
         throw new Error(`Erro ao atribuir conversa: ${error.message}`);
+      }
+
+      if (args.ativar_ia) {
+        // Verificar se o cliente estava aguardando resposta
+        const { data: latestMsg } = await supabaseAdmin
+          .from("messages")
+          .select("id, sender_type")
+          .eq("conversation_id", convId)
+          .eq("is_internal", false)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (latestMsg && latestMsg.sender_type === "contact") {
+          const effectiveCompanyId =
+            conv.company_id || (conv.contacts as any)?.company_id || context.companyId;
+          dispatchBackgroundTask(
+            generateAndSendAiResponse(convId, effectiveCompanyId),
+          );
+        }
       }
 
       return {

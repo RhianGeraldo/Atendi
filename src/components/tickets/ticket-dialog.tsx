@@ -30,6 +30,8 @@ interface Props {
   ticketToEdit?: any;
 }
 
+const EMPTY_ARRAY: any[] = [];
+
 export function TicketDialog({
   open,
   onOpenChange,
@@ -66,7 +68,7 @@ export function TicketDialog({
   const [tags, setTags] = useState<string[]>([]);
 
   // 1. Busca unidades disponíveis da empresa
-  const { data: units = [] } = useQuery({
+  const { data: units = EMPTY_ARRAY } = useQuery({
     queryKey: ["ticket-units", effectiveCompanyId, profile?.id, isSuperAdmin],
     enabled: open && !!effectiveCompanyId,
     queryFn: async () => {
@@ -107,7 +109,7 @@ export function TicketDialog({
 
   // 2. Busca departamentos da unidade selecionada
   const activeUnitForDepts = targetUnitId || selectedUnitId;
-  const { data: departments = [] } = useQuery({
+  const { data: departments = EMPTY_ARRAY } = useQuery({
     queryKey: ["ticket-departments", activeUnitForDepts],
     enabled: open && !!activeUnitForDepts && activeUnitForDepts !== "all",
     queryFn: async () => {
@@ -123,7 +125,7 @@ export function TicketDialog({
   });
 
   // 3. Busca membros da equipe para atribuição
-  const { data: teamMembers = [] } = useQuery({
+  const { data: teamMembers = EMPTY_ARRAY } = useQuery({
     queryKey: ["ticket-team-members", effectiveCompanyId],
     enabled: open && !!effectiveCompanyId,
     queryFn: async () => {
@@ -154,7 +156,7 @@ export function TicketDialog({
   });
 
   // 5. Pesquisa dinâmica e em tempo real de contatos para clientes externos
-  const { data: contactSearchResults = [], isLoading: isLoadingContactSearch } = useQuery({
+  const { data: contactSearchResults = EMPTY_ARRAY, isLoading: isLoadingContactSearch } = useQuery({
     queryKey: ["ticket-contacts-search", effectiveCompanyId, contactSearch],
     enabled: open && scope === "external" && !requesterContactId && !!effectiveCompanyId,
     queryFn: async () => {
@@ -184,57 +186,51 @@ export function TicketDialog({
   const handleSelectContact = (contact: any) => {
     setRequesterContactId(contact.id);
     setContactSearch("");
-    if (contact.unit_id && canChooseUnit) {
+    if (contact.unit_id && canChooseUnit && contact.unit_id !== targetUnitId) {
       setTargetUnitId(contact.unit_id);
+      setDepartmentId("");
     }
   };
 
-  // Inicialização ao abrir modal
+  // Inicialização ao abrir modal ou trocar de chamado
   useEffect(() => {
-    if (open) {
-      if (ticketToEdit) {
-        setTitle(ticketToEdit.title || "");
-        setDescription(ticketToEdit.description || "");
-        setScope(ticketToEdit.scope || "internal");
-        setPriority(ticketToEdit.priority || "medium");
-        setTargetUnitId(ticketToEdit.unit_id || "");
-        setDepartmentId(ticketToEdit.department_id || "");
-        setAssignedToUserId(ticketToEdit.assigned_to_user_id || "");
-        setRequesterContactId(ticketToEdit.requester_contact_id || "");
-        setTags(ticketToEdit.tags || []);
-      } else {
-        const autoUnitId = defaultUnitId || (isInsideSpecificUnit ? selectedUnitId! : (units[0]?.id || ""));
-        setTitle("");
-        setDescription("");
-        setScope(defaultScope);
-        setPriority("medium");
+    if (!open) return;
+
+    if (ticketToEdit) {
+      setTitle(ticketToEdit.title || "");
+      setDescription(ticketToEdit.description || "");
+      setScope(ticketToEdit.scope || "internal");
+      setPriority(ticketToEdit.priority || "medium");
+      setTargetUnitId(ticketToEdit.unit_id || "");
+      setDepartmentId(ticketToEdit.department_id || "");
+      setAssignedToUserId(ticketToEdit.assigned_to_user_id || "");
+      setRequesterContactId(ticketToEdit.requester_contact_id || "");
+      setTags(ticketToEdit.tags || []);
+      setContactSearch("");
+    } else {
+      const autoUnitId = defaultUnitId || (isInsideSpecificUnit ? selectedUnitId! : (units[0]?.id || ""));
+      setTitle("");
+      setDescription("");
+      setScope(defaultScope);
+      setPriority("medium");
+      setTargetUnitId(autoUnitId);
+      setDepartmentId("");
+      setAssignedToUserId("");
+      setRequesterContactId(defaultContactId || "");
+      setTags([]);
+      setContactSearch("");
+    }
+  }, [open, ticketToEdit?.id, defaultScope, defaultContactId, defaultUnitId, selectedUnitId, isInsideSpecificUnit]);
+
+  // Se o modal for aberto em modo criação e as unidades terminarem de carregar após a abertura:
+  useEffect(() => {
+    if (open && !ticketToEdit && !targetUnitId && units.length > 0) {
+      const autoUnitId = defaultUnitId || (isInsideSpecificUnit ? selectedUnitId! : (units[0]?.id || ""));
+      if (autoUnitId) {
         setTargetUnitId(autoUnitId);
-        setDepartmentId("");
-        setAssignedToUserId("");
-        setRequesterContactId(defaultContactId || "");
-        setTags([]);
       }
     }
-  }, [open, ticketToEdit, defaultScope, defaultContactId, defaultUnitId, selectedUnitId, units, isInsideSpecificUnit]);
-
-  // Se o usuário não tiver permissão para escolher unidade ou já estiver dentro de uma unidade específica,
-  // garante que targetUnitId seja sempre a unidade atual
-  useEffect(() => {
-    if (open && !ticketToEdit && !canChooseUnit && units.length > 0) {
-      const fixedUnit = isInsideSpecificUnit ? selectedUnitId : (units[0]?.id || "");
-      if (fixedUnit && targetUnitId !== fixedUnit) {
-        setTargetUnitId(fixedUnit);
-      }
-    }
-  }, [open, canChooseUnit, isInsideSpecificUnit, selectedUnitId, units, targetUnitId, ticketToEdit]);
-
-  // Se a unidade mudar e o departamento atual não pertencer a ela, reseta o departamento
-  useEffect(() => {
-    if (departmentId && departments.length > 0) {
-      const exists = departments.some((d: any) => d.id === departmentId);
-      if (!exists) setDepartmentId("");
-    }
-  }, [targetUnitId, departments]);
+  }, [open, ticketToEdit, targetUnitId, units, defaultUnitId, isInsideSpecificUnit, selectedUnitId]);
 
   const addTag = () => {
     const trimmed = tagInput.trim().toLowerCase();
@@ -515,7 +511,10 @@ export function TicketDialog({
               </Label>
               <select
                 value={targetUnitId || ""}
-                onChange={(e) => setTargetUnitId(e.target.value)}
+                onChange={(e) => {
+                  setTargetUnitId(e.target.value);
+                  setDepartmentId("");
+                }}
                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
               >
                 <option value="">Selecione a unidade...</option>

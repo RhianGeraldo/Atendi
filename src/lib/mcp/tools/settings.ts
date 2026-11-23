@@ -717,6 +717,7 @@ export const settingsTools: McpToolDefinition[] = [
           email,
           role,
           active: true,
+          use_signature: true,
           has_matriz_access: hasMatriz,
           department_id: departmentId,
           custom_role_id: customRoleId,
@@ -893,7 +894,8 @@ export const settingsTools: McpToolDefinition[] = [
     handler: async (args: any, context: McpContext) => {
       let query = supabaseAdmin
         .from("whatsapp_instances")
-        .select(`
+        .select(
+          `
           id,
           name,
           instance_name,
@@ -903,7 +905,8 @@ export const settingsTools: McpToolDefinition[] = [
           owner_jid,
           unit_id,
           units(name, color)
-        `)
+        `,
+        )
         .eq("company_id", context.companyId)
         .order("name", { ascending: true });
 
@@ -979,7 +982,8 @@ export const settingsTools: McpToolDefinition[] = [
         },
         agente_ia_id: {
           type: "string",
-          description: "UUID do agente de IA que atenderá este canal, ou 'nenhum'/null para desvincular.",
+          description:
+            "UUID do agente de IA que atenderá este canal, ou 'nenhum'/null para desvincular.",
         },
       },
       required: ["canal_id"],
