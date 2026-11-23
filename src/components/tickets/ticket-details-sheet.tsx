@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Sheet,
@@ -25,6 +25,7 @@ import {
   Edit2,
   Calendar,
   Sparkles,
+  Paperclip,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -33,6 +34,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 import { formatTicketCode } from "@/lib/format";
+import {
+  TicketAttachment,
+  TicketAttachmentList,
+  detectFileType,
+} from "@/components/tickets/ticket-attachments";
 
 interface Props {
   ticketId: string | null;
@@ -58,6 +64,61 @@ export function TicketDetailsSheet({
 
   const [messageText, setMessageText] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
+  const [replyAttachments, setReplyAttachments] = useState<TicketAttachment[]>([]);
+  const [isUploadingReplyAttachments, setIsUploadingReplyAttachments] = useState(false);
+  const replyFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleReplyFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    if (replyAttachments.length + files.length > 5) {
+      toast.error("O limite máximo é de 5 arquivos por resposta.");
+      if (replyFileInputRef.current) replyFileInputRef.current.value = "";
+      return;
+    }
+
+    setIsUploadingReplyAttachments(true);
+    const uploadedList: TicketAttachment[] = [];
+
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > 15 * 1024 * 1024) {
+          toast.error(`O arquivo "${file.name}" excede o limite de 15MB.`);
+          continue;
+        }
+
+        const type = detectFileType(file);
+        const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+        const filePath = `tickets/${effectiveCompanyId}/${ticketId || "replies"}/${Date.now()}_${cleanName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("media")
+          .upload(filePath, file, { upsert: true });
+
+        if (uploadError) throw uploadError;
+
+        const { data: publicData } = supabase.storage.from("media").getPublicUrl(filePath);
+
+        uploadedList.push({
+          name: file.name,
+          url: publicData.publicUrl,
+          size: file.size,
+          type,
+        });
+      }
+
+      if (uploadedList.length > 0) {
+        setReplyAttachments((prev) => [...prev, ...uploadedList].slice(0, 5));
+        toast.success(`${uploadedList.length} arquivo(s) anexado(s)!`);
+      }
+    } catch (err: any) {
+      toast.error("Erro ao fazer upload: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setIsUploadingReplyAttachments(false);
+      if (replyFileInputRef.current) replyFileInputRef.current.value = "";
+    }
+  };
 
   // 1. Busca dados do Ticket completo
   const { data: ticket, isLoading: isLoadingTicket } = useQuery({
@@ -159,7 +220,9 @@ export function TicketDetailsSheet({
   // Mutação para enviar mensagem ou nota interna
   const sendMessageMutation = useMutation({
     mutationFn: async () => {
-      if (!messageText.trim()) throw new Error("Mensagem não pode ser vazia.");
+      if (!messageText.trim() && replyAttachments.length === 0) {
+        throw new Error("Digite uma mensagem ou anexe pelo menos um arquivo.");
+      }
       if (!ticketId) throw new Error("Ticket inválido.");
 
       const noteToSend = canManageTicket ? isInternalNote : false;
@@ -168,7 +231,8 @@ export function TicketDetailsSheet({
         ticket_id: ticketId,
         sender_user_id: profile?.id || null,
         is_internal_note: noteToSend,
-        content: messageText.trim(),
+        content: messageText.trim() || (replyAttachments.length > 0 ? "Arquivo(s) anexado(s)" : ""),
+        attachments: replyAttachments,
       });
       if (error) throw error;
 
@@ -188,6 +252,7 @@ export function TicketDetailsSheet({
     },
     onSuccess: () => {
       setMessageText("");
+      setReplyAttachments([]);
       qc.invalidateQueries({ queryKey: ["ticket-messages", ticketId] });
       qc.invalidateQueries({ queryKey: ["tickets"] });
       qc.invalidateQueries({ queryKey: ["ticket-details", ticketId] });
@@ -479,6 +544,16 @@ export function TicketDetailsSheet({
               </div>
             </div>
 
+            {/* Anexos do Ticket (se houver) */}
+            {ticket.attachments && Array.isArray(ticket.attachments) && ticket.attachments.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <Paperclip className="h-3.5 w-3.5" /> Anexos do Chamado ({ticket.attachments.length})
+                </span>
+                <TicketAttachmentList attachments={ticket.attachments} readOnly />
+              </div>
+            )}
+
             {/* Bloco de Triagem da Inteligência Artificial — Visível apenas para Suporte / Gestão */}
             {canManageTicket && (ticket.ai_priority_reason || ticket.ai_suggested_solution) && (
               <div className="space-y-2.5 p-3.5 rounded-xl border border-primary/25 bg-primary/5 text-xs">
@@ -584,6 +659,13 @@ export function TicketDetailsSheet({
                       <div className="whitespace-pre-wrap leading-relaxed text-sm">
                         {msg.content}
                       </div>
+
+                      {/* Anexos da Mensagem */}
+                      {msg.attachments && Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
+                        <div className="pt-1.5">
+                          <TicketAttachmentList attachments={msg.attachments} readOnly />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -635,6 +717,19 @@ export function TicketDetailsSheet({
               </div>
             )}
 
+            {/* Anexos da nova resposta */}
+            {replyAttachments.length > 0 && (
+              <div className="space-y-1.5 bg-muted/20 p-2.5 rounded-lg border border-dashed">
+                <span className="text-[11px] font-semibold text-muted-foreground flex items-center gap-1">
+                  <Paperclip className="h-3 w-3" /> Anexos da resposta ({replyAttachments.length}/5)
+                </span>
+                <TicketAttachmentList
+                  attachments={replyAttachments}
+                  onRemove={(idx) => setReplyAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                />
+              </div>
+            )}
+
             <div className="relative">
               <Textarea
                 rows={2}
@@ -647,7 +742,7 @@ export function TicketDetailsSheet({
                 }
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
-                className={`pr-12 text-sm ${
+                className={`pr-20 text-sm ${
                   isInternalNote ? "border-amber-500/40 focus-visible:ring-amber-500" : ""
                 }`}
                 onKeyDown={(e) => {
@@ -657,18 +752,50 @@ export function TicketDetailsSheet({
                   }
                 }}
               />
-              <Button
-                size="icon"
-                className="absolute right-2 bottom-2 h-7 w-7"
-                disabled={sendMessageMutation.isPending || !messageText.trim()}
-                onClick={() => sendMessageMutation.mutate()}
-              >
-                {sendMessageMutation.isPending ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Send className="h-3.5 w-3.5" />
-                )}
-              </Button>
+
+              <input
+                type="file"
+                ref={replyFileInputRef}
+                onChange={handleReplyFileUpload}
+                multiple
+                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                className="hidden"
+              />
+
+              <div className="absolute right-2 bottom-2 flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                  disabled={isUploadingReplyAttachments || replyAttachments.length >= 5}
+                  onClick={() => replyFileInputRef.current?.click()}
+                  title="Anexar imagens, PDFs ou documentos (máx. 5)"
+                >
+                  {isUploadingReplyAttachments ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Paperclip className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+
+                <Button
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={
+                    sendMessageMutation.isPending ||
+                    isUploadingReplyAttachments ||
+                    (!messageText.trim() && replyAttachments.length === 0)
+                  }
+                  onClick={() => sendMessageMutation.mutate()}
+                >
+                  {sendMessageMutation.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </div>
             </div>
             <p className="text-[11px] text-muted-foreground text-right">
               Pressione Ctrl+Enter para enviar

@@ -66,3 +66,4 @@ test-*
 
 # graphify
 graphify-out/
+.env*

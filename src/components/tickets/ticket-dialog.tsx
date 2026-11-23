@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -14,11 +14,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { Building2, User, Users, AlertCircle, Loader2, Tag, Search, Check } from "lucide-react";
+import { Building2, User, Users, AlertCircle, Loader2, Tag, Search, Check, Paperclip } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useUnit } from "@/lib/unit-context";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
+import {
+  TicketAttachment,
+  TicketAttachmentList,
+  detectFileType,
+} from "@/components/tickets/ticket-attachments";
 
 interface Props {
   open: boolean;
@@ -66,6 +71,63 @@ export function TicketDialog({
   // Tag rápida
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
+
+  // Anexos (até 5 arquivos)
+  const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
+  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    if (attachments.length + files.length > 5) {
+      toast.error("O limite máximo é de 5 arquivos por chamado.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    setIsUploadingAttachments(true);
+    const uploadedList: TicketAttachment[] = [];
+
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > 15 * 1024 * 1024) {
+          toast.error(`O arquivo "${file.name}" excede o limite de 15MB.`);
+          continue;
+        }
+
+        const type = detectFileType(file);
+        const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+        const filePath = `tickets/${effectiveCompanyId}/${Date.now()}_${cleanName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("media")
+          .upload(filePath, file, { upsert: true });
+
+        if (uploadError) throw uploadError;
+
+        const { data: publicData } = supabase.storage.from("media").getPublicUrl(filePath);
+
+        uploadedList.push({
+          name: file.name,
+          url: publicData.publicUrl,
+          size: file.size,
+          type,
+        });
+      }
+
+      if (uploadedList.length > 0) {
+        setAttachments((prev) => [...prev, ...uploadedList].slice(0, 5));
+        toast.success(`${uploadedList.length} arquivo(s) anexado(s)!`);
+      }
+    } catch (err: any) {
+      toast.error("Erro ao fazer upload: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setIsUploadingAttachments(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   // 1. Busca unidades disponíveis da empresa
   const { data: units = EMPTY_ARRAY } = useQuery({
@@ -206,6 +268,7 @@ export function TicketDialog({
       setAssignedToUserId(ticketToEdit.assigned_to_user_id || "");
       setRequesterContactId(ticketToEdit.requester_contact_id || "");
       setTags(ticketToEdit.tags || []);
+      setAttachments(ticketToEdit.attachments || []);
       setContactSearch("");
     } else {
       const autoUnitId = defaultUnitId || (isInsideSpecificUnit ? selectedUnitId! : (units[0]?.id || ""));
@@ -218,6 +281,7 @@ export function TicketDialog({
       setAssignedToUserId("");
       setRequesterContactId(defaultContactId || "");
       setTags([]);
+      setAttachments([]);
       setContactSearch("");
     }
   }, [open, ticketToEdit?.id, defaultScope, defaultContactId, defaultUnitId, selectedUnitId, isInsideSpecificUnit]);
@@ -275,6 +339,7 @@ export function TicketDialog({
         conversation_id: defaultConversationId || null,
         origin: "manual",
         tags,
+        attachments,
       };
 
       if (ticketToEdit?.id) {
@@ -290,6 +355,7 @@ export function TicketDialog({
             assigned_to_user_id: cleanAssignedToUserId,
             requester_contact_id: cleanRequesterContactId,
             tags,
+            attachments,
           })
           .eq("id", ticketToEdit.id);
         if (error) throw error;
@@ -546,6 +612,56 @@ export function TicketDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+
+          {/* Anexos (Imagens, PDFs e Documentos) - Até 5 arquivos */}
+          <div className="space-y-2 bg-muted/20 p-3 rounded-xl border border-dashed">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold flex items-center gap-1.5">
+                <Paperclip className="h-3.5 w-3.5 text-primary" /> Anexos do Chamado ({attachments.length}/5)
+              </Label>
+              {attachments.length < 5 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1.5"
+                  disabled={isUploadingAttachments}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {isUploadingAttachments ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Paperclip className="h-3.5 w-3.5" />
+                  )}
+                  {isUploadingAttachments ? "Enviando..." : "Adicionar Arquivo"}
+                </Button>
+              )}
+            </div>
+
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              multiple
+              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+              className="hidden"
+            />
+
+            {attachments.length > 0 ? (
+              <TicketAttachmentList
+                attachments={attachments}
+                onRemove={(idx) => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
+              />
+            ) : (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border border-dashed rounded-lg p-3 text-center cursor-pointer hover:bg-muted/40 transition-colors text-xs text-muted-foreground flex items-center justify-center gap-2"
+              >
+                <Paperclip className="h-4 w-4 text-muted-foreground" />
+                <span>Clique para anexar imagens, PDFs ou documentos (máx. 5 arquivos de até 15MB)</span>
+              </div>
+            )}
           </div>
 
           {/* Campos administrativos — Visíveis apenas na edição por gestor/atendente */}
