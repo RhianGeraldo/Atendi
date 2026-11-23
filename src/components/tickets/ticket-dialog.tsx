@@ -98,8 +98,9 @@ export function TicketDialog({
         }
 
         const type = detectFileType(file);
+        const companyFolder = effectiveCompanyId || profile?.company_id || "general";
         const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-        const filePath = `tickets/${effectiveCompanyId}/${Date.now()}_${cleanName}`;
+        const filePath = `tickets/${companyFolder}/${Date.now()}_${cleanName}`;
 
         const { error: uploadError } = await supabase.storage
           .from("media")
@@ -343,29 +344,63 @@ export function TicketDialog({
       };
 
       if (ticketToEdit?.id) {
+        const updatePayload: any = {
+          unit_id: targetUnitId,
+          origin_unit_id: cleanOriginUnitId,
+          department_id: cleanDepartmentId,
+          title: title.trim(),
+          description: description.trim(),
+          priority,
+          assigned_to_user_id: cleanAssignedToUserId,
+          requester_contact_id: cleanRequesterContactId,
+          tags,
+          attachments,
+        };
+
         const { error } = await (supabase as any)
           .from("tickets")
-          .update({
-            unit_id: targetUnitId,
-            origin_unit_id: cleanOriginUnitId,
-            department_id: cleanDepartmentId,
-            title: title.trim(),
-            description: description.trim(),
-            priority,
-            assigned_to_user_id: cleanAssignedToUserId,
-            requester_contact_id: cleanRequesterContactId,
-            tags,
-            attachments,
-          })
+          .update(updatePayload)
           .eq("id", ticketToEdit.id);
-        if (error) throw error;
+
+        if (error && (error.message?.includes("attachments") || error.code === "42703")) {
+          delete updatePayload.attachments;
+          const retry = await (supabase as any)
+            .from("tickets")
+            .update(updatePayload)
+            .eq("id", ticketToEdit.id);
+          if (retry.error) throw retry.error;
+        } else if (error) {
+          throw error;
+        }
       } else {
-        const { data: newTicket, error } = await (supabase as any)
+        let { data: newTicket, error } = await (supabase as any)
           .from("tickets")
           .insert(payload)
           .select("id")
           .single();
-        if (error) throw error;
+
+        if (error && (error.message?.includes("attachments") || error.code === "42703")) {
+          const { attachments: _, ...safePayload } = payload;
+          const retry = await (supabase as any)
+            .from("tickets")
+            .insert(safePayload)
+            .select("id")
+            .single();
+          if (retry.error) throw retry.error;
+          newTicket = retry.data;
+
+          if (newTicket?.id && attachments.length > 0) {
+            await (supabase as any).from("ticket_messages").insert({
+              ticket_id: newTicket.id,
+              sender_user_id: profile?.id || null,
+              content: "Anexo(s) enviado(s) na abertura do chamado",
+              attachments,
+              is_internal_note: false,
+            });
+          }
+        } else if (error) {
+          throw error;
+        }
 
         // Dispara triagem inteligente e diagnóstico por IA em background
         if (newTicket?.id && effectiveCompanyId) {
@@ -768,11 +803,11 @@ export function TicketDialog({
           </Button>
           <Button
             onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
+            disabled={saveMutation.isPending || isUploadingAttachments}
             className="gap-2"
           >
-            {saveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            {ticketToEdit ? "Salvar Alterações" : "Criar Ticket"}
+            {(saveMutation.isPending || isUploadingAttachments) && <Loader2 className="h-4 w-4 animate-spin" />}
+            {isUploadingAttachments ? "Enviando anexos..." : ticketToEdit ? "Salvar Alterações" : "Criar Ticket"}
           </Button>
         </DialogFooter>
       </DialogContent>

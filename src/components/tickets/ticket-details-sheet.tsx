@@ -89,8 +89,9 @@ export function TicketDetailsSheet({
         }
 
         const type = detectFileType(file);
+        const companyFolder = effectiveCompanyId || profile?.company_id || "general";
         const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-        const filePath = `tickets/${effectiveCompanyId}/${ticketId || "replies"}/${Date.now()}_${cleanName}`;
+        const filePath = `tickets/${companyFolder}/${ticketId || "replies"}/${Date.now()}_${cleanName}`;
 
         const { error: uploadError } = await supabase.storage
           .from("media")
