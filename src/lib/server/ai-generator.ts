@@ -145,7 +145,7 @@ function cleanPromptDirective(prompt: string | null | undefined): string {
  * Garante que agendamentos (amanhã às 10h, DD/MM/YYYY, termos relativos) sejam gravados no UTC correto,
  * independentemente do fuso horário da máquina ou servidor em nuvem (Vercel/Docker em UTC).
  */
-function parseTaskDueDate(rawDate: string | undefined | null): string {
+export function parseTaskDueDate(rawDate: string | undefined | null): string {
   const nowUtc = new Date();
   const spString = nowUtc.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" });
   const spNow = new Date(spString);
@@ -735,7 +735,10 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         ? clientPhoneDigits.slice(2)
         : clientPhoneDigits;
 
-    const encodedClientName = encodeURIComponent(rawClientName || clientFirstName || "").replace(/%20/g, "+");
+    const encodedClientName = encodeURIComponent(rawClientName || clientFirstName || "").replace(
+      /%20/g,
+      "+",
+    );
     const encodedClientEmail = encodeURIComponent(conv.contacts?.email || "");
     const defaultTreatment = "Depilação a Laser";
     const encodedTreatment = encodeURIComponent(defaultTreatment).replace(/%20/g, "+");
@@ -969,24 +972,33 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         `${p.bonus_gift ? ` [BÔNUS: ${p.bonus_gift}]` : ""}` +
         `${p.sales_pitch ? ` [DICA DE VENDA: ${p.sales_pitch}]` : ""}`;
 
-      let catalogPrompt = `=== CATÁLOGO OFICIAL DE SERVIÇOS & COMBOS PARA VENDA ===\n` +
+      let catalogPrompt =
+        `=== CATÁLOGO OFICIAL DE SERVIÇOS & COMBOS PARA VENDA ===\n` +
         `Você dispõe da tabela oficial de pacotes e combos abaixo para negociar com os clientes:\n\n`;
 
       if (intermediateList.length > 0) {
-        catalogPrompt += `1. OPÇÃO INTERMEDIÁRIA (CARRO-CHEFE / ÂNCORA IDEAL - Ofereça sempre como primeira opção de negociação):\n` +
-          intermediateList.map(formatPkg).join("\n") + "\n\n";
+        catalogPrompt +=
+          `1. OPÇÃO INTERMEDIÁRIA (CARRO-CHEFE / ÂNCORA IDEAL - Ofereça sempre como primeira opção de negociação):\n` +
+          intermediateList.map(formatPkg).join("\n") +
+          "\n\n";
       }
       if (downsellList.length > 0) {
-        catalogPrompt += `2. OPÇÃO DOWNSELL (SALVA-VENDA - Use com empatia se a cliente achar caro, hesitar no orçamento ou preferir começar menor/avulso):\n` +
-          downsellList.map(formatPkg).join("\n") + "\n\n";
+        catalogPrompt +=
+          `2. OPÇÃO DOWNSELL (SALVA-VENDA - Use com empatia se a cliente achar caro, hesitar no orçamento ou preferir começar menor/avulso):\n` +
+          downsellList.map(formatPkg).join("\n") +
+          "\n\n";
       }
       if (upsellList.length > 0) {
-        catalogPrompt += `3. OPÇÃO UPSELL (TICKET MAIOR - Ofereça quando a cliente perguntar de pernas, mais áreas ou quiser o pacote completo com maior economia por área):\n` +
-          upsellList.map(formatPkg).join("\n") + "\n\n";
+        catalogPrompt +=
+          `3. OPÇÃO UPSELL (TICKET MAIOR - Ofereça quando a cliente perguntar de pernas, mais áreas ou quiser o pacote completo com maior economia por área):\n` +
+          upsellList.map(formatPkg).join("\n") +
+          "\n\n";
       }
       if (crossSellList.length > 0) {
-        catalogPrompt += `4. OPÇÃO CROSS-SELL (VENDA CRUZADA - Ofereça com 50% de desconto adicional se a cliente mencionar manchas escuras, foliculite ou queixas de pele):\n` +
-          crossSellList.map(formatPkg).join("\n") + "\n\n";
+        catalogPrompt +=
+          `4. OPÇÃO CROSS-SELL (VENDA CRUZADA - Ofereça com 50% de desconto adicional se a cliente mencionar manchas escuras, foliculite ou queixas de pele):\n` +
+          crossSellList.map(formatPkg).join("\n") +
+          "\n\n";
       }
 
       const salesStrategy = (company.custom_variables as any)?.sales_strategy;
@@ -1355,8 +1367,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             },
             nome_cliente: {
               type: "string",
-              description:
-                "Nome informado pelo cliente na conversa (ex: 'Rhian', 'Mariana').",
+              description: "Nome informado pelo cliente na conversa (ex: 'Rhian', 'Mariana').",
             },
             mensagem_whatsapp: {
               type: "string",
@@ -1629,7 +1640,10 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             openTicketNotice = openTicketData.customerNotice;
           }
         } else if (fnName === "buscar_servicos_combos") {
-          console.log(`[ai-generator] Tool buscar_servicos_combos executed for conv ${conv.id}:`, args);
+          console.log(
+            `[ai-generator] Tool buscar_servicos_combos executed for conv ${conv.id}:`,
+            args,
+          );
         }
       }
     }
@@ -1773,7 +1787,11 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     if (setUnitData && effectiveCompanyId) {
       const cleanUnitInput = setUnitData.trim();
       const normalizeStr = (s: string) =>
-        s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+        s
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .trim();
       const searchNorm = normalizeStr(cleanUnitInput);
 
       let matchedUnit = allCompanyUnits?.find((u) => {
@@ -1866,7 +1884,11 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           }
         } else {
           const normalizeStr = (s: string) =>
-            s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+            s
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .trim();
 
           // 1. Resolver unidade de destino
           let targetUnitId = effectiveUnitId;
@@ -1920,10 +1942,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           ) {
             contactUpdates.name = chamarNoWhatsappData.nome_cliente.trim();
           }
-          await supabaseAdmin
-            .from("contacts")
-            .update(contactUpdates)
-            .eq("id", conv.contact_id);
+          await supabaseAdmin.from("contacts").update(contactUpdates).eq("id", conv.contact_id);
 
           // Atualizar unidade na conversa do Instagram também
           if (targetUnitId && (!conv.unit_id || conv.unit_id !== targetUnitId)) {
@@ -2101,10 +2120,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
               }
             }
 
-            await supabaseAdmin
-              .from("conversations")
-              .update(waUpdates)
-              .eq("id", whatsappConvId);
+            await supabaseAdmin.from("conversations").update(waUpdates).eq("id", whatsappConvId);
           } else {
             const { data: newWaConv, error: newConvErr } = await supabaseAdmin
               .from("conversations")
@@ -2800,10 +2816,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       const cleanIg = instagramUsername.replace(/^@/, "").trim();
       if (cleanIg) {
         const replacementName = clientFirstName || "";
-        cleanResponse = cleanResponse.replace(
-          new RegExp(`@?${cleanIg}\\b`, "gi"),
-          replacementName,
-        );
+        cleanResponse = cleanResponse.replace(new RegExp(`@?${cleanIg}\\b`, "gi"), replacementName);
         cleanResponse = cleanResponse.replace(/\s{2,}/g, " ").replace(/,\s*,/g, ",");
       }
     }

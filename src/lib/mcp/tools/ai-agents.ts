@@ -1,5 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { generateAndSendAiResponse, parseTaskDueDate } from "@/lib/server/ai-generator";
+import { dispatchBackgroundTask } from "@/lib/server/ai-queue";
+import {
+  scheduleMessage,
+  cancelScheduledMessagesForConversation,
+} from "@/lib/server/scheduled-messages";
 import type { McpContext, McpToolDefinition } from "../types";
 
 function normalizeString(str: string): string {
@@ -15,7 +21,9 @@ function normalizeString(str: string): string {
  */
 async function resolveAgent(companyId: string, idOrName: string) {
   if (!idOrName || typeof idOrName !== "string" || !idOrName.trim()) return null;
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrName.trim());
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    idOrName.trim(),
+  );
 
   if (isUuid) {
     const { data } = await supabaseAdmin
@@ -39,7 +47,9 @@ async function resolveAgent(companyId: string, idOrName: string) {
   const exact = agents.find((a) => normalizeString(a.name) === target);
   if (exact) return exact;
 
-  const partial = agents.find((a) => normalizeString(a.name).includes(target) || target.includes(normalizeString(a.name)));
+  const partial = agents.find(
+    (a) => normalizeString(a.name).includes(target) || target.includes(normalizeString(a.name)),
+  );
   return partial || null;
 }
 
@@ -59,7 +69,8 @@ export const aiAgentsTools: McpToolDefinition[] = [
       properties: {
         somente_ativos: {
           type: "boolean",
-          description: "Se true, filtra apenas agentes que estão ligados no momento. Padrão: false.",
+          description:
+            "Se true, filtra apenas agentes que estão ligados no momento. Padrão: false.",
           default: false,
         },
         unidade_id: {
@@ -71,7 +82,8 @@ export const aiAgentsTools: McpToolDefinition[] = [
     handler: async (args: any, context: McpContext) => {
       let query = supabaseAdmin
         .from("ai_agents")
-        .select(`
+        .select(
+          `
           id,
           name,
           ai_type,
@@ -90,6 +102,7 @@ export const aiAgentsTools: McpToolDefinition[] = [
           allow_tasks,
           allow_opportunities,
           allow_tickets,
+          allow_cadence,
           unit_id,
           instance_id,
           department_id,
@@ -98,7 +111,8 @@ export const aiAgentsTools: McpToolDefinition[] = [
           departments:departments!ai_agents_department_id_fkey(name),
           created_at,
           updated_at
-        `)
+        `,
+        )
         .eq("company_id", context.companyId)
         .order("created_at", { ascending: true });
 
@@ -132,6 +146,9 @@ export const aiAgentsTools: McpToolDefinition[] = [
             ativo: a.allow_followup,
             intervalo_minutos: a.followup_interval_minutes,
             max_tentativas: a.followup_max_attempts,
+          },
+          cadencia: {
+            ativa: a.allow_cadence ?? true,
           },
           autonomia: {
             transbordo_humano: a.allow_handoff,
@@ -174,19 +191,31 @@ export const aiAgentsTools: McpToolDefinition[] = [
       // Buscar nomes de unidades, instâncias e departamentos
       let unitName = "Todas as Unidades";
       if (agent.unit_id) {
-        const { data: u } = await supabaseAdmin.from("units").select("name").eq("id", agent.unit_id).maybeSingle();
+        const { data: u } = await supabaseAdmin
+          .from("units")
+          .select("name")
+          .eq("id", agent.unit_id)
+          .maybeSingle();
         if (u) unitName = u.name;
       }
 
       let instanceName = "Todos os Canais";
       if (agent.instance_id) {
-        const { data: inst } = await supabaseAdmin.from("whatsapp_instances").select("name").eq("id", agent.instance_id).maybeSingle();
+        const { data: inst } = await supabaseAdmin
+          .from("whatsapp_instances")
+          .select("name")
+          .eq("id", agent.instance_id)
+          .maybeSingle();
         if (inst) instanceName = inst.name;
       }
 
       let pipelineName = null;
       if (agent.pipeline_id) {
-        const { data: pipe } = await supabaseAdmin.from("pipelines").select("name").eq("id", agent.pipeline_id).maybeSingle();
+        const { data: pipe } = await supabaseAdmin
+          .from("pipelines")
+          .select("name")
+          .eq("id", agent.pipeline_id)
+          .maybeSingle();
         if (pipe) pipelineName = pipe.name;
       }
 
@@ -227,6 +256,8 @@ export const aiAgentsTools: McpToolDefinition[] = [
           prompt_instrucoes: agent.prompt_instructions,
           prompt_informacoes_extras: agent.prompt_extra_info,
           prompt_followup: agent.prompt_followup,
+          prompt_recebimento_transbordo: agent.prompt_receive_handoff,
+          prompt_cadencia: agent.prompt_cadence,
         },
         followup: {
           ativo: agent.allow_followup,
@@ -234,11 +265,16 @@ export const aiAgentsTools: McpToolDefinition[] = [
           max_tentativas: agent.followup_max_attempts,
           motivo_encerramento_id: agent.followup_resolution_reason_id,
         },
+        cadencia: {
+          ativo: agent.allow_cadence ?? true,
+          prompt_cadencia: agent.prompt_cadence,
+        },
         autonomia_ferramentas: {
           transbordo_humano: agent.allow_handoff,
           departamento_transbordo_id: agent.handoff_department_id,
           encerramento: agent.allow_resolution,
           motivo_encerramento_padrao_id: agent.resolution_reason_id,
+          motivo_encerramento_followup_id: agent.followup_resolution_reason_id,
           tarefas_crm: agent.allow_tasks,
           oportunidades_crm: agent.allow_opportunities,
           tickets: agent.allow_tickets,
@@ -267,9 +303,19 @@ export const aiAgentsTools: McpToolDefinition[] = [
           description: "ID (UUID) ou nome do agente a atualizar (ex: 'Helena').",
         },
         nome: { type: "string", description: "Novo nome do agente." },
-        tipo_funcao: { type: "string", description: "Nova função/tipo (ex: 'Vendedor / SDR', 'Suporte')." },
-        descricao: { type: "string", description: "Resumo da função em 1 frase para os colegas de IA saberem quando transferir." },
-        modelo: { type: "string", description: "Modelo LLM (ex: 'gpt-4o', 'gpt-4o-mini', 'llama-3.3-70b-versatile')." },
+        tipo_funcao: {
+          type: "string",
+          description: "Nova função/tipo (ex: 'Vendedor / SDR', 'Suporte').",
+        },
+        descricao: {
+          type: "string",
+          description:
+            "Resumo da função em 1 frase para os colegas de IA saberem quando transferir.",
+        },
+        modelo: {
+          type: "string",
+          description: "Modelo LLM (ex: 'gpt-4o', 'gpt-4o-mini', 'llama-3.3-70b-versatile').",
+        },
         provedor: {
           type: "string",
           enum: ["default", "openai", "groq", "openrouter"],
@@ -282,11 +328,13 @@ export const aiAgentsTools: McpToolDefinition[] = [
         },
         prompt_instrucoes: {
           type: "string",
-          description: "Diretrizes e instruções passo a passo de como conduzir a conversa, negociar e responder.",
+          description:
+            "Diretrizes e instruções passo a passo de como conduzir a conversa, negociar e responder.",
         },
         prompt_informacoes_extras: {
           type: "string",
-          description: "Informações sobre a empresa, diferenciais, localização e regras de negócio.",
+          description:
+            "Informações sobre a empresa, diferenciais, localização e regras de negócio.",
         },
         ativo: { type: "boolean", description: "Ligar ou pausar o agente." },
         assumir_conversas_padrao: {
@@ -303,7 +351,8 @@ export const aiAgentsTools: McpToolDefinition[] = [
         },
         intervalo_followup_minutos: {
           type: "number",
-          description: "Tempo de inatividade do cliente antes de disparar o follow-up (em minutos, ex: 15).",
+          description:
+            "Tempo de inatividade do cliente antes de disparar o follow-up (em minutos, ex: 15).",
         },
         maximo_tentativas_followup: {
           type: "number",
@@ -313,13 +362,43 @@ export const aiAgentsTools: McpToolDefinition[] = [
           type: "string",
           description: "Instruções específicas para as mensagens de follow-up da IA.",
         },
+        permitir_cadencia: {
+          type: "boolean",
+          description:
+            "Ativar ou desativar cadência de reengajamento D+1 a D+30 após encerramento por inatividade.",
+        },
+        prompt_cadencia: {
+          type: "string",
+          description:
+            "Instruções específicas para as mensagens disparadas na cadência de longo prazo (D+1 a D+30).",
+        },
+        prompt_recebimento_transbordo: {
+          type: "string",
+          description:
+            "Instruções específicas para quando este agente assume um atendimento transferido por outro colega de IA.",
+        },
         permitir_transbordo_humano: {
           type: "boolean",
           description: "Se a IA pode transferir para atendente humano quando solicitado.",
         },
+        departamento_transbordo_id: {
+          type: "string",
+          description:
+            "ID do departamento padrão para onde transferir atendimentos humanos (ou 'none' para o mesmo departamento atual).",
+        },
         permitir_encerramento: {
           type: "boolean",
           description: "Se a IA pode encerrar atendimentos concluídos.",
+        },
+        motivo_encerramento_id: {
+          type: "string",
+          description:
+            "ID do motivo de encerramento padrão quando o atendimento for concluído com sucesso (ou 'none' para sem motivo).",
+        },
+        motivo_encerramento_followup_id: {
+          type: "string",
+          description:
+            "ID do motivo de encerramento registrado quando o atendimento for finalizado por inatividade após follow-ups (ou 'none').",
         },
         permitir_tarefas_crm: {
           type: "boolean",
@@ -339,11 +418,13 @@ export const aiAgentsTools: McpToolDefinition[] = [
         },
         unidade_id: {
           type: "string",
-          description: "Vincular agente a uma filial específica, ou null/'all' para atender toda a empresa.",
+          description:
+            "Vincular agente a uma filial específica, ou null/'all' para atender toda a empresa.",
         },
         instancia_id: {
           type: "string",
-          description: "Vincular a uma conexão/instância de WhatsApp específica, ou null/'all' para atender todos os canais.",
+          description:
+            "Vincular a uma conexão/instância de WhatsApp específica, ou null/'all' para atender todos os canais.",
         },
         departamento_id: {
           type: "string",
@@ -352,7 +433,8 @@ export const aiAgentsTools: McpToolDefinition[] = [
         colegas_ia_permitidos: {
           type: "array",
           items: { type: "string" },
-          description: "Lista de IDs de outros agentes de IA que este agente tem permissão de consultar ou transferir.",
+          description:
+            "Lista de IDs de outros agentes de IA que este agente tem permissão de consultar ou transferir.",
         },
       },
       required: ["agente_id_ou_nome"],
@@ -374,12 +456,16 @@ export const aiAgentsTools: McpToolDefinition[] = [
       if (args.provedor !== undefined) updates.provider = args.provedor;
       if (args.max_tokens !== undefined) updates.max_tokens = Number(args.max_tokens) || 4096;
 
-      if (args.prompt_personalidade !== undefined) updates.prompt_personality = args.prompt_personalidade;
-      if (args.prompt_instrucoes !== undefined) updates.prompt_instructions = args.prompt_instrucoes;
-      if (args.prompt_informacoes_extras !== undefined) updates.prompt_extra_info = args.prompt_informacoes_extras;
+      if (args.prompt_personalidade !== undefined)
+        updates.prompt_personality = args.prompt_personalidade;
+      if (args.prompt_instrucoes !== undefined)
+        updates.prompt_instructions = args.prompt_instrucoes;
+      if (args.prompt_informacoes_extras !== undefined)
+        updates.prompt_extra_info = args.prompt_informacoes_extras;
 
       if (args.ativo !== undefined) updates.is_active = Boolean(args.ativo);
-      if (args.assumir_conversas_padrao !== undefined) updates.active_by_default = Boolean(args.assumir_conversas_padrao);
+      if (args.assumir_conversas_padrao !== undefined)
+        updates.active_by_default = Boolean(args.assumir_conversas_padrao);
 
       if (args.agente_principal !== undefined) {
         updates.is_main_agent = Boolean(args.agente_principal);
@@ -393,43 +479,88 @@ export const aiAgentsTools: McpToolDefinition[] = [
         }
       }
 
-      if (args.permitir_followup !== undefined) updates.allow_followup = Boolean(args.permitir_followup);
-      if (args.intervalo_followup_minutos !== undefined) updates.followup_interval_minutes = Number(args.intervalo_followup_minutos);
-      if (args.maximo_tentativas_followup !== undefined) updates.followup_max_attempts = Number(args.maximo_tentativas_followup);
+      if (args.permitir_followup !== undefined)
+        updates.allow_followup = Boolean(args.permitir_followup);
+      if (args.intervalo_followup_minutos !== undefined)
+        updates.followup_interval_minutes = Number(args.intervalo_followup_minutos);
+      if (args.maximo_tentativas_followup !== undefined)
+        updates.followup_max_attempts = Number(args.maximo_tentativas_followup);
       if (args.prompt_followup !== undefined) updates.prompt_followup = args.prompt_followup;
 
-      if (args.permitir_transbordo_humano !== undefined) updates.allow_handoff = Boolean(args.permitir_transbordo_humano);
-      if (args.permitir_encerramento !== undefined) updates.allow_resolution = Boolean(args.permitir_encerramento);
-      if (args.permitir_tarefas_crm !== undefined) updates.allow_tasks = Boolean(args.permitir_tarefas_crm);
-      if (args.permitir_oportunidades_crm !== undefined) updates.allow_opportunities = Boolean(args.permitir_oportunidades_crm);
+      if (args.permitir_cadencia !== undefined)
+        updates.allow_cadence = Boolean(args.permitir_cadencia);
+      if (args.prompt_cadencia !== undefined) updates.prompt_cadence = args.prompt_cadencia || null;
+      if (args.prompt_recebimento_transbordo !== undefined)
+        updates.prompt_receive_handoff = args.prompt_recebimento_transbordo || null;
+
+      if (args.permitir_transbordo_humano !== undefined)
+        updates.allow_handoff = Boolean(args.permitir_transbordo_humano);
+      if (args.departamento_transbordo_id !== undefined) {
+        updates.handoff_department_id =
+          args.departamento_transbordo_id === "none" || !args.departamento_transbordo_id
+            ? null
+            : args.departamento_transbordo_id;
+      }
+
+      if (args.permitir_encerramento !== undefined)
+        updates.allow_resolution = Boolean(args.permitir_encerramento);
+      if (args.motivo_encerramento_id !== undefined) {
+        updates.resolution_reason_id =
+          args.motivo_encerramento_id === "none" || !args.motivo_encerramento_id
+            ? null
+            : args.motivo_encerramento_id;
+      }
+      if (args.motivo_encerramento_followup_id !== undefined) {
+        updates.followup_resolution_reason_id =
+          args.motivo_encerramento_followup_id === "none" || !args.motivo_encerramento_followup_id
+            ? null
+            : args.motivo_encerramento_followup_id;
+      }
+      if (args.permitir_tarefas_crm !== undefined)
+        updates.allow_tasks = Boolean(args.permitir_tarefas_crm);
+      if (args.permitir_oportunidades_crm !== undefined)
+        updates.allow_opportunities = Boolean(args.permitir_oportunidades_crm);
       if (args.funil_crm_id !== undefined) {
         updates.pipeline_id =
           args.funil_crm_id === "none" || args.funil_crm_id === "nenhum" || !args.funil_crm_id
             ? null
             : args.funil_crm_id;
       }
-      if (args.permitir_abertura_tickets !== undefined) updates.allow_tickets = Boolean(args.permitir_abertura_tickets);
+      if (args.permitir_abertura_tickets !== undefined)
+        updates.allow_tickets = Boolean(args.permitir_abertura_tickets);
 
       if (args.unidade_id !== undefined) {
         updates.unit_id =
-          args.unidade_id === "all" || args.unidade_id === "nenhum" || args.unidade_id === "none" || !args.unidade_id
+          args.unidade_id === "all" ||
+          args.unidade_id === "nenhum" ||
+          args.unidade_id === "none" ||
+          !args.unidade_id
             ? null
             : args.unidade_id;
       }
       if (args.instancia_id !== undefined) {
         updates.instance_id =
-          args.instancia_id === "all" || args.instancia_id === "nenhum" || args.instancia_id === "none" || !args.instancia_id
+          args.instancia_id === "all" ||
+          args.instancia_id === "nenhum" ||
+          args.instancia_id === "none" ||
+          !args.instancia_id
             ? null
             : args.instancia_id;
       }
       if (args.departamento_id !== undefined) {
         updates.department_id =
-          args.departamento_id === "all" || args.departamento_id === "nenhum" || args.departamento_id === "none" || !args.departamento_id
+          args.departamento_id === "all" ||
+          args.departamento_id === "nenhum" ||
+          args.departamento_id === "none" ||
+          !args.departamento_id
             ? null
             : args.departamento_id;
       }
       if (args.colegas_ia_permitidos !== undefined) {
-        updates.allowed_agent_ids = Array.isArray(args.colegas_ia_permitidos) && args.colegas_ia_permitidos.length > 0 ? args.colegas_ia_permitidos : null;
+        updates.allowed_agent_ids =
+          Array.isArray(args.colegas_ia_permitidos) && args.colegas_ia_permitidos.length > 0
+            ? args.colegas_ia_permitidos
+            : null;
       }
 
       const { data: updated, error } = await supabaseAdmin
@@ -525,9 +656,19 @@ export const aiAgentsTools: McpToolDefinition[] = [
       type: "object",
       properties: {
         nome: { type: "string", description: "Nome do agente (ex: 'Helena', 'Lucas SDR')." },
-        tipo_funcao: { type: "string", description: "Tipo / Função (ex: 'Vendedor / SDR', 'Suporte Técnico', 'Pós-Venda')." },
-        descricao: { type: "string", description: "Resumo da função em 1 frase para outros agentes de IA." },
-        modelo: { type: "string", description: "Modelo LLM (ex: 'gpt-4o', 'gpt-4o-mini', 'llama-3.3-70b-versatile'). Padrão: 'gpt-4o'." },
+        tipo_funcao: {
+          type: "string",
+          description: "Tipo / Função (ex: 'Vendedor / SDR', 'Suporte Técnico', 'Pós-Venda').",
+        },
+        descricao: {
+          type: "string",
+          description: "Resumo da função em 1 frase para outros agentes de IA.",
+        },
+        modelo: {
+          type: "string",
+          description:
+            "Modelo LLM (ex: 'gpt-4o', 'gpt-4o-mini', 'llama-3.3-70b-versatile'). Padrão: 'gpt-4o'.",
+        },
         provedor: {
           type: "string",
           enum: ["default", "openai", "groq", "openrouter"],
@@ -536,23 +677,82 @@ export const aiAgentsTools: McpToolDefinition[] = [
         },
         max_tokens: { type: "number", description: "Limite de tokens de saída. Padrão: 4096." },
         prompt_personalidade: { type: "string", description: "Tom de voz e persona." },
-        prompt_instrucoes: { type: "string", description: "Instruções operacionais e regras de atendimento." },
-        prompt_informacoes_extras: { type: "string", description: "Informações sobre a clínica/empresa e diferenciais." },
+        prompt_instrucoes: {
+          type: "string",
+          description: "Instruções operacionais e regras de atendimento.",
+        },
+        prompt_informacoes_extras: {
+          type: "string",
+          description: "Informações sobre a clínica/empresa e diferenciais.",
+        },
         ativo: { type: "boolean", description: "Se o agente já inicia ativo. Padrão: true." },
-        assumir_conversas_padrao: { type: "boolean", description: "Se assume novas conversas automaticamente. Padrão: true." },
-        agente_principal: { type: "boolean", description: "Se é o agente principal da empresa/unidade." },
-        permitir_followup: { type: "boolean", description: "Se envia follow-up automático de clientes sumidos. Padrão: true." },
-        intervalo_followup_minutos: { type: "number", description: "Minutos de espera para follow-up. Padrão: 15." },
-        maximo_tentativas_followup: { type: "number", description: "Tentativas de follow-up. Padrão: 3." },
+        assumir_conversas_padrao: {
+          type: "boolean",
+          description: "Se assume novas conversas automaticamente. Padrão: true.",
+        },
+        agente_principal: {
+          type: "boolean",
+          description: "Se é o agente principal da empresa/unidade.",
+        },
+        permitir_followup: {
+          type: "boolean",
+          description: "Se envia follow-up automático de clientes sumidos. Padrão: true.",
+        },
+        intervalo_followup_minutos: {
+          type: "number",
+          description: "Minutos de espera para follow-up. Padrão: 15.",
+        },
+        maximo_tentativas_followup: {
+          type: "number",
+          description: "Tentativas de follow-up. Padrão: 3.",
+        },
         prompt_followup: { type: "string", description: "Instruções do follow-up." },
+        permitir_cadencia: {
+          type: "boolean",
+          description:
+            "Se o agente participa da cadência de reengajamento D+1 a D+30. Padrão: true.",
+        },
+        prompt_cadencia: {
+          type: "string",
+          description: "Instruções específicas para a cadência D+1 a D+30.",
+        },
+        prompt_recebimento_transbordo: {
+          type: "string",
+          description: "Instruções de recebimento de transbordo de colegas.",
+        },
         permitir_transbordo_humano: { type: "boolean", description: "Padrão: true." },
+        departamento_transbordo_id: {
+          type: "string",
+          description: "ID do departamento padrão para transbordo humano.",
+        },
         permitir_encerramento: { type: "boolean", description: "Padrão: true." },
+        motivo_encerramento_id: {
+          type: "string",
+          description: "ID do motivo de encerramento padrão quando concluído.",
+        },
+        motivo_encerramento_followup_id: {
+          type: "string",
+          description: "ID do motivo de encerramento por inatividade de follow-up.",
+        },
         permitir_tarefas_crm: { type: "boolean", description: "Padrão: true." },
         permitir_oportunidades_crm: { type: "boolean", description: "Padrão: false." },
         funil_crm_id: { type: "string", description: "ID do funil do CRM." },
         permitir_abertura_tickets: { type: "boolean", description: "Padrão: true." },
-        unidade_id: { type: "string", description: "ID da unidade física, ou null para toda a rede." },
-        instancia_id: { type: "string", description: "ID da instância de WhatsApp, ou null para todos os canais." },
+        unidade_id: {
+          type: "string",
+          description: "ID da unidade física, ou null para toda a rede.",
+        },
+        instancia_id: {
+          type: "string",
+          description: "ID da instância de WhatsApp, ou null para todos os canais.",
+        },
+        departamento_id: { type: "string", description: "ID do departamento vinculado." },
+        colegas_ia_permitidos: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Lista de IDs de outros agentes de IA permitidos para consulta/delegação mútua.",
+        },
       },
       required: ["nome", "tipo_funcao"],
     },
@@ -583,8 +783,23 @@ export const aiAgentsTools: McpToolDefinition[] = [
         followup_interval_minutes: Number(args.intervalo_followup_minutos) || 15,
         followup_max_attempts: Number(args.maximo_tentativas_followup) || 3,
         prompt_followup: args.prompt_followup || null,
+        allow_cadence: args.permitir_cadencia !== false,
+        prompt_cadence: args.prompt_cadencia || null,
+        prompt_receive_handoff: args.prompt_recebimento_transbordo || null,
         allow_handoff: args.permitir_transbordo_humano !== false,
+        handoff_department_id:
+          args.departamento_transbordo_id === "none" || !args.departamento_transbordo_id
+            ? null
+            : args.departamento_transbordo_id,
         allow_resolution: args.permitir_encerramento !== false,
+        resolution_reason_id:
+          args.motivo_encerramento_id === "none" || !args.motivo_encerramento_id
+            ? null
+            : args.motivo_encerramento_id,
+        followup_resolution_reason_id:
+          args.motivo_encerramento_followup_id === "none" || !args.motivo_encerramento_followup_id
+            ? null
+            : args.motivo_encerramento_followup_id,
         allow_tasks: args.permitir_tarefas_crm !== false,
         allow_opportunities: Boolean(args.permitir_oportunidades_crm),
         pipeline_id:
@@ -592,14 +807,31 @@ export const aiAgentsTools: McpToolDefinition[] = [
             ? null
             : args.funil_crm_id,
         allow_tickets: args.permitir_abertura_tickets !== false,
+        allowed_agent_ids:
+          Array.isArray(args.colegas_ia_permitidos) && args.colegas_ia_permitidos.length > 0
+            ? args.colegas_ia_permitidos
+            : null,
         unit_id:
-          args.unidade_id === "all" || args.unidade_id === "nenhum" || args.unidade_id === "none" || !args.unidade_id
+          args.unidade_id === "all" ||
+          args.unidade_id === "nenhum" ||
+          args.unidade_id === "none" ||
+          !args.unidade_id
             ? null
             : args.unidade_id,
         instance_id:
-          args.instancia_id === "all" || args.instancia_id === "nenhum" || args.instancia_id === "none" || !args.instancia_id
+          args.instancia_id === "all" ||
+          args.instancia_id === "nenhum" ||
+          args.instancia_id === "none" ||
+          !args.instancia_id
             ? null
             : args.instancia_id,
+        department_id:
+          args.departamento_id === "all" ||
+          args.departamento_id === "nenhum" ||
+          args.departamento_id === "none" ||
+          !args.departamento_id
+            ? null
+            : args.departamento_id,
       };
 
       const { data, error } = await supabaseAdmin
@@ -676,16 +908,22 @@ export const aiAgentsTools: McpToolDefinition[] = [
         followup_interval_minutes: source.followup_interval_minutes,
         followup_max_attempts: source.followup_max_attempts,
         prompt_followup: source.prompt_followup,
+        allow_cadence: source.allow_cadence ?? true,
+        prompt_cadence: source.prompt_cadence,
+        prompt_receive_handoff: source.prompt_receive_handoff,
         allow_handoff: source.allow_handoff,
         handoff_department_id: source.handoff_department_id,
         allow_resolution: source.allow_resolution,
         resolution_reason_id: source.resolution_reason_id,
+        followup_resolution_reason_id: source.followup_resolution_reason_id,
         allow_tasks: source.allow_tasks,
         allow_opportunities: source.allow_opportunities,
         pipeline_id: source.pipeline_id,
         allow_tickets: source.allow_tickets,
+        allowed_agent_ids: source.allowed_agent_ids,
         unit_id: args.unidade_destino_id !== undefined ? args.unidade_destino_id : source.unit_id,
         instance_id: args.instancia_destino_id !== undefined ? args.instancia_destino_id : null,
+        department_id: source.department_id,
       };
 
       const { data, error } = await supabaseAdmin
@@ -730,10 +968,7 @@ export const aiAgentsTools: McpToolDefinition[] = [
         throw new Error(`Agente de IA "${args.agente_id_ou_nome}" não encontrado.`);
       }
 
-      const { error } = await supabaseAdmin
-        .from("ai_agents")
-        .delete()
-        .eq("id", existing.id);
+      const { error } = await supabaseAdmin.from("ai_agents").delete().eq("id", existing.id);
 
       if (error) throw new Error(`Erro ao excluir agente: ${error.message}`);
 
@@ -863,6 +1098,627 @@ export const aiAgentsTools: McpToolDefinition[] = [
         sucesso: true,
         mensagem: "Configurações globais de IA da empresa atualizadas com sucesso!",
         provedor_ativo: updatedEngines.chatbot,
+      };
+    },
+  },
+
+  // 10. Alternar IA em Conversa Específica (Ligar / Pausar)
+  {
+    name: "alternar_ia_conversa",
+    description:
+      "Ativa ou pausa o atendimento por Inteligência Artificial em uma conversa específica. Se for ativada e o cliente estiver aguardando resposta, pode acionar a IA imediatamente.",
+    security: {
+      category: "ai_agents",
+      requiredMenu: "conversations",
+      minRole: "agent",
+      isWriteAction: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversa_id: {
+          type: "string",
+          description: "ID (UUID) da conversa.",
+        },
+        ativo: {
+          type: "boolean",
+          description: "true para ativar o atendimento por IA, false para pausar.",
+        },
+        disparar_se_aguardando: {
+          type: "boolean",
+          description:
+            "Se true e o cliente estiver aguardando resposta, aciona a IA imediatamente em segundo plano para responder. Padrão: true.",
+          default: true,
+        },
+      },
+      required: ["conversa_id", "ativo"],
+    },
+    handler: async (args: any, context: McpContext) => {
+      const convId = args.conversa_id;
+      const active = Boolean(args.ativo);
+
+      const { data: conv, error: convErr } = await supabaseAdmin
+        .from("conversations")
+        .select("id, unit_id, contacts!inner(company_id)")
+        .eq("id", convId)
+        .single();
+
+      if (convErr || !conv || conv.contacts?.company_id !== context.companyId) {
+        throw new Error("Conversa não encontrada ou acesso negado.");
+      }
+
+      if (context.unitId && conv.unit_id && conv.unit_id !== context.unitId) {
+        throw new Error("Acesso negado: a conversa pertence a outra filial.");
+      }
+
+      const updateData: Record<string, any> = {
+        ai_active: active,
+      };
+      if (active) {
+        updateData.assigned_agent_id = null;
+      }
+
+      const { error: updateErr } = await supabaseAdmin
+        .from("conversations")
+        .update(updateData)
+        .eq("id", convId);
+
+      if (updateErr) {
+        throw new Error(`Erro ao alterar status da IA na conversa: ${updateErr.message}`);
+      }
+
+      let triggeredAi = false;
+      if (active && args.disparar_se_aguardando !== false) {
+        const { data: latestMsg } = await supabaseAdmin
+          .from("messages")
+          .select("id, sender_type")
+          .eq("conversation_id", convId)
+          .eq("is_internal", false)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (latestMsg && latestMsg.sender_type === "contact") {
+          dispatchBackgroundTask(generateAndSendAiResponse(convId, context.companyId));
+          triggeredAi = true;
+        }
+      }
+
+      return {
+        sucesso: true,
+        conversa_id: convId,
+        ia_ativa: active,
+        resposta_disparada: triggeredAi,
+        mensagem: active
+          ? triggeredAi
+            ? "IA ativada com sucesso! O cliente estava aguardando e o agente de IA já começou a formular a resposta."
+            : "IA ativada com sucesso neste atendimento. Ela responderá às próximas mensagens do cliente."
+          : "IA pausada neste atendimento. Nenhuma resposta automática será enviada até que seja reativada.",
+      };
+    },
+  },
+
+  // 11. Definir / Delegar Agente de IA para uma Conversa
+  {
+    name: "definir_agente_ia_conversa",
+    description:
+      "Atribui ou transfere um atendimento para um agente de IA específico (ex: Helena, Sofia, SDR, Alice). Liga a IA na conversa, registra nota interna de transição e pode disparar a resposta imediata da nova IA.",
+    security: {
+      category: "ai_agents",
+      requiredMenu: "conversations",
+      minRole: "agent",
+      isWriteAction: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversa_id: {
+          type: "string",
+          description: "ID (UUID) da conversa a ser delegada.",
+        },
+        agente_id_ou_nome: {
+          type: "string",
+          description: "ID (UUID) ou nome do agente de IA desejado (ex: 'Helena', 'Sofia', 'SDR').",
+        },
+        aviso_transferencia: {
+          type: "string",
+          description:
+            "Motivo ou nota interna gravada nos bastidores da conversa explicando a transição de agente.",
+        },
+        disparar_resposta_imediata: {
+          type: "boolean",
+          description:
+            "Se true e o cliente estiver aguardando resposta, a nova IA formulará e enviará a resposta imediatamente. Padrão: true.",
+          default: true,
+        },
+      },
+      required: ["conversa_id", "agente_id_ou_nome"],
+    },
+    handler: async (args: any, context: McpContext) => {
+      const convId = args.conversa_id;
+
+      const { data: conv, error: convErr } = await supabaseAdmin
+        .from("conversations")
+        .select("id, unit_id, ai_agent_id, contacts!inner(company_id)")
+        .eq("id", convId)
+        .single();
+
+      if (convErr || !conv || conv.contacts?.company_id !== context.companyId) {
+        throw new Error("Conversa não encontrada ou acesso negado.");
+      }
+
+      if (context.unitId && conv.unit_id && conv.unit_id !== context.unitId) {
+        throw new Error("Acesso negado: a conversa pertence a outra filial.");
+      }
+
+      const agent = await resolveAgent(context.companyId, args.agente_id_ou_nome);
+      if (!agent) {
+        throw new Error(`Agente de IA "${args.agente_id_ou_nome}" não encontrado.`);
+      }
+
+      // Atualiza a conversa com o novo agente de IA e ativa a IA
+      const { error: updateErr } = await supabaseAdmin
+        .from("conversations")
+        .update({
+          ai_agent_id: agent.id,
+          ai_active: true,
+          assigned_agent_id: null,
+        })
+        .eq("id", convId);
+
+      if (updateErr) {
+        throw new Error(`Erro ao transferir para o agente de IA: ${updateErr.message}`);
+      }
+
+      // Registra nota interna de bastidores se fornecido motivo
+      if (args.aviso_transferencia) {
+        await supabaseAdmin.from("messages").insert({
+          conversation_id: convId,
+          sender_type: "system",
+          content: `Conversa transferida para o agente de IA: ${agent.name} (${agent.ai_type}). Motivo: ${args.aviso_transferencia.trim()}`,
+          is_internal: true,
+        });
+      }
+
+      let triggeredAi = false;
+      if (args.disparar_resposta_imediata !== false) {
+        const { data: latestMsg } = await supabaseAdmin
+          .from("messages")
+          .select("id, sender_type")
+          .eq("conversation_id", convId)
+          .eq("is_internal", false)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (latestMsg && latestMsg.sender_type === "contact") {
+          dispatchBackgroundTask(generateAndSendAiResponse(convId, context.companyId));
+          triggeredAi = true;
+        }
+      }
+
+      return {
+        sucesso: true,
+        conversa_id: convId,
+        agente_nome: agent.name,
+        agente_id: agent.id,
+        funcao_tipo: agent.ai_type,
+        ia_ativa: true,
+        resposta_disparada: triggeredAi,
+        mensagem: `Atendimento delegado com sucesso para ${agent.name} (${agent.ai_type}).${triggeredAi ? " A IA já está processando a resposta." : ""}`,
+      };
+    },
+  },
+
+  // 12. Forçar / Disparar Resposta da IA Sob Demanda
+  {
+    name: "disparar_resposta_ia",
+    description:
+      "Força o agente de IA da conversa a formular e enviar imediatamente a resposta para o cliente no WhatsApp/Instagram com base no histórico atual.",
+    security: {
+      category: "ai_agents",
+      requiredMenu: "conversations",
+      minRole: "agent",
+      isWriteAction: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversa_id: {
+          type: "string",
+          description: "ID (UUID) da conversa onde a IA deve responder.",
+        },
+      },
+      required: ["conversa_id"],
+    },
+    handler: async (args: any, context: McpContext) => {
+      const convId = args.conversa_id;
+
+      const { data: conv, error: convErr } = await supabaseAdmin
+        .from("conversations")
+        .select("id, unit_id, ai_active, ai_agent_id, status, contacts!inner(company_id)")
+        .eq("id", convId)
+        .single();
+
+      if (convErr || !conv || conv.contacts?.company_id !== context.companyId) {
+        throw new Error("Conversa não encontrada ou acesso negado.");
+      }
+
+      if (context.unitId && conv.unit_id && conv.unit_id !== context.unitId) {
+        throw new Error("Acesso negado: a conversa pertence a outra filial.");
+      }
+
+      if (conv.status === "resolved") {
+        throw new Error(
+          "Esta conversa já está encerrada/resolvida. Reabra-a antes de acionar a IA.",
+        );
+      }
+
+      // Garante que a IA está ativa na conversa
+      if (!conv.ai_active) {
+        await supabaseAdmin
+          .from("conversations")
+          .update({ ai_active: true, assigned_agent_id: null })
+          .eq("id", convId);
+      }
+
+      dispatchBackgroundTask(generateAndSendAiResponse(convId, context.companyId));
+
+      return {
+        sucesso: true,
+        conversa_id: convId,
+        mensagem: "Agente de IA engajado com sucesso! A resposta está sendo gerada e enviada.",
+      };
+    },
+  },
+
+  // 13. Agendar Mensagem Futura da IA no WhatsApp
+  {
+    name: "agendar_mensagem_ia",
+    description:
+      "Agenda uma mensagem para ser enviada automaticamente ao cliente no WhatsApp em data e horário futuros (ex: 'amanhã às 10:00', 'em 2 dias às 14:00', '2026-11-28 15:30', 'segunda-feira às 11:00').",
+    security: {
+      category: "ai_agents",
+      requiredMenu: "conversations",
+      minRole: "agent",
+      isWriteAction: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversa_id: {
+          type: "string",
+          description: "ID (UUID) da conversa do cliente.",
+        },
+        texto: {
+          type: "string",
+          description:
+            "Conteúdo acolhedor e natural que será enviado ao cliente no horário agendado.",
+        },
+        data_hora: {
+          type: "string",
+          description:
+            "Data e horário do envio futuro (ex: 'amanhã às 10:00', 'em 2 dias às 15h', '2026-11-25 14:30', 'quinta-feira às 09:30').",
+        },
+        agente_id_ou_nome: {
+          type: "string",
+          description: "ID ou nome do agente de IA que assina o agendamento (opcional).",
+        },
+        motivo: {
+          type: "string",
+          description: "Motivo ou lembrete interno do agendamento (opcional).",
+        },
+      },
+      required: ["conversa_id", "texto", "data_hora"],
+    },
+    handler: async (args: any, context: McpContext) => {
+      const convId = args.conversa_id;
+
+      const { data: conv, error: convErr } = await supabaseAdmin
+        .from("conversations")
+        .select("id, unit_id, contact_id, contacts!inner(company_id)")
+        .eq("id", convId)
+        .single();
+
+      if (convErr || !conv || conv.contacts?.company_id !== context.companyId) {
+        throw new Error("Conversa não encontrada ou acesso negado.");
+      }
+
+      if (context.unitId && conv.unit_id && conv.unit_id !== context.unitId) {
+        throw new Error("Acesso negado: a conversa pertence a outra filial.");
+      }
+
+      const parsedDue = parseTaskDueDate(args.data_hora);
+
+      let aiAgentId = null;
+      if (args.agente_id_ou_nome) {
+        const agent = await resolveAgent(context.companyId, args.agente_id_ou_nome);
+        if (agent) aiAgentId = agent.id;
+      }
+
+      const scheduled = await scheduleMessage({
+        companyId: context.companyId,
+        conversationId: convId,
+        contactId: conv.contact_id,
+        unitId: conv.unit_id,
+        creatorType: "agent",
+        aiAgentId,
+        content: String(args.texto).trim(),
+        scheduledAt: parsedDue,
+        metadata: {
+          reason: args.motivo ? String(args.motivo).trim() : "Agendamento via MCP",
+          created_by: context.userName || context.keyName,
+        },
+      });
+
+      return {
+        sucesso: true,
+        agendamento_id: scheduled.id,
+        conversa_id: convId,
+        data_agendada_utc: scheduled.scheduled_at,
+        data_agendada_brasilia: new Date(scheduled.scheduled_at).toLocaleString("pt-BR", {
+          timeZone: "America/Sao_Paulo",
+        }),
+        texto: scheduled.content,
+        mensagem: `Mensagem agendada com sucesso para ${new Date(scheduled.scheduled_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}!`,
+      };
+    },
+  },
+
+  // 14. Listar Mensagens Agendadas
+  {
+    name: "listar_mensagens_agendadas",
+    description:
+      "Lista mensagens agendadas para envio futuro no WhatsApp, com filtros por conversa e status ('pending', 'sent', 'cancelled', 'failed', 'all').",
+    security: {
+      category: "ai_agents",
+      requiredMenu: "conversations",
+      minRole: "agent",
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        conversa_id: {
+          type: "string",
+          description: "ID da conversa para filtrar agendamentos específicos. Opcional.",
+        },
+        status: {
+          type: "string",
+          enum: ["pending", "sent", "cancelled", "failed", "all"],
+          description: "Status das mensagens. Padrão: 'pending'.",
+          default: "pending",
+        },
+        limite: {
+          type: "number",
+          description: "Quantidade máxima de registros. Padrão: 20.",
+          default: 20,
+        },
+      },
+    },
+    handler: async (args: any, context: McpContext) => {
+      let query = (supabaseAdmin as any)
+        .from("scheduled_messages")
+        .select(
+          `
+          id,
+          conversation_id,
+          contact_id,
+          content,
+          scheduled_at,
+          status,
+          cancel_reason,
+          created_at,
+          ai_agents(name),
+          contacts(name, phone)
+        `,
+        )
+        .eq("company_id", context.companyId)
+        .order("scheduled_at", { ascending: true })
+        .limit(args.limite || 20);
+
+      if (args.conversa_id) {
+        query = query.eq("conversation_id", args.conversa_id);
+      }
+
+      if (args.status && args.status !== "all") {
+        query = query.eq("status", args.status);
+      }
+
+      if (context.unitId) {
+        query = query.or(`unit_id.is.null,unit_id.eq.${context.unitId}`);
+      }
+
+      const { data: messages, error } = await query;
+      if (error) {
+        throw new Error(`Erro ao listar mensagens agendadas: ${error.message}`);
+      }
+
+      return {
+        total: messages?.length || 0,
+        mensagens_agendadas: (messages || []).map((m: any) => ({
+          id: m.id,
+          conversa_id: m.conversation_id,
+          cliente: m.contacts?.name || "Desconhecido",
+          telefone: m.contacts?.phone || "",
+          agente_ia: m.ai_agents?.name || "IA Geral",
+          conteudo: m.content,
+          data_agendada_brasilia: new Date(m.scheduled_at).toLocaleString("pt-BR", {
+            timeZone: "America/Sao_Paulo",
+          }),
+          status: m.status,
+          motivo_cancelamento: m.cancel_reason,
+        })),
+      };
+    },
+  },
+
+  // 15. Cancelar Mensagem Agendada
+  {
+    name: "cancelar_mensagem_agendada",
+    description:
+      "Cancela o envio de mensagens agendadas pendentes (por ID específico ou cancelando todos os agendamentos pendentes de uma conversa).",
+    security: {
+      category: "ai_agents",
+      requiredMenu: "conversations",
+      minRole: "agent",
+      isWriteAction: true,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        agendamento_id: {
+          type: "string",
+          description: "ID (UUID) do agendamento específico a ser cancelado.",
+        },
+        conversa_id: {
+          type: "string",
+          description: "ID (UUID) da conversa para cancelar todos os agendamentos pendentes.",
+        },
+        motivo: {
+          type: "string",
+          description: "Motivo ou justificativa do cancelamento.",
+        },
+      },
+    },
+    handler: async (args: any, context: McpContext) => {
+      if (!args.agendamento_id && !args.conversa_id) {
+        throw new Error("Informe 'agendamento_id' ou 'conversa_id' para realizar o cancelamento.");
+      }
+
+      const reason = args.motivo?.trim() || "Cancelado via MCP";
+
+      if (args.agendamento_id) {
+        const { data: scheduled, error: fetchErr } = await (supabaseAdmin as any)
+          .from("scheduled_messages")
+          .select("id, status, company_id")
+          .eq("id", args.agendamento_id)
+          .eq("company_id", context.companyId)
+          .single();
+
+        if (fetchErr || !scheduled) {
+          throw new Error("Agendamento não encontrado ou acesso negado.");
+        }
+
+        if (scheduled.status !== "pending") {
+          return {
+            sucesso: false,
+            mensagem: `O agendamento já está com status '${scheduled.status}' e não pôde ser cancelado.`,
+          };
+        }
+
+        const { error: cancelErr } = await (supabaseAdmin as any)
+          .from("scheduled_messages")
+          .update({
+            status: "cancelled",
+            cancel_reason: reason,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", args.agendamento_id);
+
+        if (cancelErr) throw new Error(`Erro ao cancelar agendamento: ${cancelErr.message}`);
+
+        return {
+          sucesso: true,
+          agendamento_id: args.agendamento_id,
+          mensagem: "Mensagem agendada cancelada com sucesso.",
+        };
+      }
+
+      if (args.conversa_id) {
+        const cancelled = await cancelScheduledMessagesForConversation(
+          args.conversa_id,
+          reason,
+          "all",
+        );
+
+        return {
+          sucesso: true,
+          conversa_id: args.conversa_id,
+          total_canceladas: cancelled.length,
+          mensagem: `${cancelled.length} mensagem(ns) agendada(s) cancelada(s) nesta conversa.`,
+        };
+      }
+    },
+  },
+
+  // 16. Listar Alertas do Radar de Risco e Sentimento da IA
+  {
+    name: "listar_alertas_radar",
+    description:
+      "Lista atendimentos em que o Radar de IA detectou risco de insatisfação grave, ameaça de cancelamento (churn), incidente técnico crítico ou risco jurídico/reclamação formal.",
+    security: {
+      category: "ai_agents",
+      requiredMenu: "conversations",
+      minRole: "agent",
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        apenas_risco_critico: {
+          type: "boolean",
+          description:
+            "Se true, filtra apenas alertas classificados como risco alto ou crítico. Padrão: false.",
+          default: false,
+        },
+        limite: {
+          type: "number",
+          description: "Quantidade máxima de atendimentos retornados. Padrão: 20.",
+          default: 20,
+        },
+      },
+    },
+    handler: async (args: any, context: McpContext) => {
+      let query = supabaseAdmin
+        .from("conversations")
+        .select(
+          `
+          id,
+          status,
+          channel,
+          radar_status,
+          radar_last_alert_at,
+          last_message_preview,
+          last_message_at,
+          ai_active,
+          ai_agents(name),
+          contacts!inner(id, name, phone, company_id),
+          units(name)
+        `,
+        )
+        .eq("contacts.company_id", context.companyId)
+        .not("radar_status", "is", null)
+        .order("radar_last_alert_at", { ascending: false })
+        .limit(args.limite || 20);
+
+      if (args.apenas_risco_critico) {
+        query = query.in("radar_status", ["risk", "critical"]);
+      } else {
+        query = query.neq("radar_status", "normal");
+      }
+
+      if (context.unitId) {
+        query = query.or(`unit_id.is.null,unit_id.eq.${context.unitId}`);
+      }
+
+      const { data: convs, error } = await query;
+      if (error) {
+        throw new Error(`Erro ao buscar alertas do Radar: ${error.message}`);
+      }
+
+      return {
+        total: convs?.length || 0,
+        alertas: (convs || []).map((c: any) => ({
+          conversa_id: c.id,
+          cliente: c.contacts?.name,
+          telefone: c.contacts?.phone,
+          canal: c.channel,
+          unidade: c.units?.name || "Matriz",
+          status_conversa: c.status,
+          ia_responsavel: c.ai_agents?.name || (c.ai_active ? "IA Ativa" : "Pausada"),
+          gravidade_radar: c.radar_status,
+          ultimo_alerta_em: c.radar_last_alert_at,
+          ultima_mensagem: c.last_message_preview,
+        })),
       };
     },
   },
