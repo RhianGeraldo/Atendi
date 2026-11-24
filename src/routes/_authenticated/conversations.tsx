@@ -677,7 +677,39 @@ function ConversationsPage() {
     ],
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
+    placeholderData: (previousData) => previousData,
     queryFn: async () => {
+      const counts = {
+        waiting: { total: 0, unread: 0 },
+        active: { total: 0, unread: 0 },
+        resolved: { total: 0, unread: 0 },
+        groups: { total: 0, unread: 0 },
+      };
+
+      if (!activeCompanyId) return counts;
+
+      // 1. Tenta consulta agregada rápida (RPC) no banco para calcular em 5ms com suporte a filtros completos
+      try {
+        const { data: rpcData, error: rpcErr } = await (supabase as any).rpc(
+          "get_conversation_tab_counts",
+          {
+            p_company_id: activeCompanyId,
+            p_unit_id: selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null,
+            p_instance_id: instanceFilter && instanceFilter !== "all" ? instanceFilter : null,
+            p_department_id:
+              departmentFilter && departmentFilter !== "all" ? departmentFilter : null,
+            p_agent_id: agentFilter && agentFilter !== "all" ? agentFilter : null,
+            p_search: debouncedSearch ? debouncedSearch.trim() : null,
+            p_user_id: !isAdmin ? profile?.id : null,
+          },
+        );
+        if (!rpcErr && rpcData && typeof rpcData === "object" && "waiting" in rpcData) {
+          return rpcData as typeof counts;
+        }
+      } catch (e) {
+        console.warn("[Conversations] Falha na RPC get_conversation_tab_counts, fallback manual:", e);
+      }
+
       let selectString =
         "id, status, unread_count, department_id, assigned_agent_id, whatsapp_instance_id, contact:contacts!inner(id, phone, name, company_id, is_blocked), unit_id";
 
@@ -737,38 +769,6 @@ function ConversationsPage() {
         }
         return query;
       };
-
-      const counts = {
-        waiting: { total: 0, unread: 0 },
-        active: { total: 0, unread: 0 },
-        resolved: { total: 0, unread: 0 },
-        groups: { total: 0, unread: 0 },
-      };
-
-      // 1. Tenta consulta agregada rápida (RPC) caso seja administrador e não haja filtros específicos
-      if (
-        isAdmin &&
-        activeCompanyId &&
-        !debouncedSearch &&
-        (!agentFilter || agentFilter === "all") &&
-        (!departmentFilter || departmentFilter === "all") &&
-        (!instanceFilter || instanceFilter === "all")
-      ) {
-        try {
-          const { data: rpcData, error: rpcErr } = await (supabase as any).rpc(
-            "get_conversation_tab_counts",
-            {
-              p_company_id: activeCompanyId,
-              p_unit_id: selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null,
-            },
-          );
-          if (!rpcErr && rpcData && typeof rpcData === "object" && "waiting" in rpcData) {
-            return rpcData as typeof counts;
-          }
-        } catch {
-          // Fallback gracioso para o cálculo paginado se a RPC ainda não existir no banco
-        }
-      }
 
       try {
         const { data, error } = await fetchAllPages(build);
@@ -1199,9 +1199,64 @@ function ConversationsPage() {
       tabKey: "waiting" | "active" | "resolved" | "groups",
       totalDiff: number,
       unreadDiff: number,
+      matchingConv?: ConvRow | null,
     ) => {
-      qc.setQueriesData({ queryKey: ["unread-counts"] }, (oldData: any) => {
+      qc.setQueriesData({ queryKey: ["unread-counts"] }, (oldData: any, query: any) => {
         if (!oldData) return oldData;
+
+        // Se uma conversa foi especificada, valida se ela realmente pertence aos filtros ativos desta query específica
+        if (matchingConv && query?.queryKey) {
+          const qUnit = query.queryKey[2] as string | undefined;
+          const qInstance = query.queryKey[5] as string | undefined;
+          const qSearch = query.queryKey[6] as string | undefined;
+          const qDept = query.queryKey[7] as string | undefined;
+          const qAgent = query.queryKey[8] as string | undefined;
+
+          // Se a query filtra por unidade e a conversa não bate
+          if (qUnit && qUnit !== "all" && matchingConv.unit_id && matchingConv.unit_id !== qUnit) {
+            return oldData;
+          }
+
+          // Se a query filtra por instância e não bate
+          if (
+            qInstance &&
+            qInstance !== "all" &&
+            matchingConv.whatsapp_instance_id &&
+            matchingConv.whatsapp_instance_id !== qInstance
+          ) {
+            return oldData;
+          }
+
+          // Se a query filtra por busca e o contato não bate com o termo
+          if (qSearch && qSearch.trim()) {
+            const term = qSearch.toLowerCase().trim();
+            const name = matchingConv.contact?.name?.toLowerCase() || "";
+            const phone = matchingConv.contact?.phone || "";
+            if (!name.includes(term) && !phone.includes(term)) {
+              return oldData;
+            }
+          }
+
+          // Se a query filtra por departamento e não bate
+          if (
+            qDept &&
+            qDept !== "all" &&
+            matchingConv.department_id &&
+            matchingConv.department_id !== qDept
+          ) {
+            return oldData;
+          }
+
+          // Se a query filtra por atendente e não bate
+          if (qAgent && qAgent !== "all") {
+            if (qAgent === "unassigned") {
+              if (matchingConv.assigned_agent_id) return oldData;
+            } else if (matchingConv.assigned_agent_id !== qAgent) {
+              return oldData;
+            }
+          }
+        }
+
         const newData = { ...oldData };
         if (newData[tabKey]) {
           newData[tabKey] = {
@@ -1224,8 +1279,8 @@ function ConversationsPage() {
       const isGroup = isGroupConversation(conv);
       if (isGroup) return;
 
-      updateUnreadCountsInCache(oldStatus, -1, -(conv.unread_count || 0));
-      updateUnreadCountsInCache(newStatus, 1, conv.unread_count || 0);
+      updateUnreadCountsInCache(oldStatus, -1, -(conv.unread_count || 0), conv);
+      updateUnreadCountsInCache(newStatus, 1, conv.unread_count || 0, conv);
     },
     [updateUnreadCountsInCache],
   );
@@ -1318,7 +1373,7 @@ function ConversationsPage() {
                   (updatedConv.unread_count || 0) - ((oldConv as ConvRow).unread_count || 0);
                 if (unreadDiff !== 0) {
                   const tabKey = isGroup ? "groups" : updatedConv.status || "active";
-                  updateUnreadCountsInCache(tabKey, 0, unreadDiff);
+                  updateUnreadCountsInCache(tabKey, 0, unreadDiff, oldConv as ConvRow);
                 }
               } else {
                 // Conversa não estava no cache: busca de forma atômica e posiciona no topo
@@ -1330,7 +1385,7 @@ function ConversationsPage() {
                 fetchAndInjectConversation(newConv.id, newConv.status || "waiting").then(
                   (injected) => {
                     if (injected) {
-                      updateUnreadCountsInCache("waiting", 1, newConv.unread_count || 1);
+                      updateUnreadCountsInCache("waiting", 1, newConv.unread_count || 1, newConv);
                     }
                   },
                 );
@@ -1444,7 +1499,12 @@ function ConversationsPage() {
 
               if (unreadIncrement > 0) {
                 const tabKey = isGroup ? "groups" : targetStatus;
-                updateUnreadCountsInCache(tabKey, 0, unreadIncrement);
+                updateUnreadCountsInCache(
+                  tabKey,
+                  0,
+                  unreadIncrement,
+                  existingConv as ConvRow,
+                );
               }
             } else {
               // Conversa não estava carregada no cache: busca e injeta de forma atômica no topo de 'waiting'

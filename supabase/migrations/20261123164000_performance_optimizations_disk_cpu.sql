@@ -38,7 +38,12 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_scheduled_messages_pending_queue
 -- 5. RPC AGREGADA PARA CONTAGEM DAS ABAS DE CONVERSAS (Substitui fetchAllPages)
 CREATE OR REPLACE FUNCTION public.get_conversation_tab_counts(
   p_company_id UUID,
-  p_unit_id UUID DEFAULT NULL
+  p_unit_id UUID DEFAULT NULL,
+  p_instance_id UUID DEFAULT NULL,
+  p_department_id UUID DEFAULT NULL,
+  p_agent_id TEXT DEFAULT NULL,
+  p_search TEXT DEFAULT NULL,
+  p_user_id UUID DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -48,11 +53,23 @@ SET search_path = public
 AS $$
 DECLARE
   v_result JSONB;
+  v_is_admin BOOLEAN := false;
+  v_is_manager BOOLEAN := false;
+  v_user_dept UUID := NULL;
 BEGIN
   IF current_user NOT IN ('postgres', 'supabase_admin')
      AND auth.role() IS DISTINCT FROM 'service_role'
      AND NOT COALESCE(public.is_super_admin() OR p_company_id = public.current_company_id(), false) THEN
     RAISE EXCEPTION 'Acesso não autorizado para esta empresa' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_user_id IS NOT NULL THEN
+    SELECT (role = 'admin_company' OR role = 'super_admin'), (role = 'manager'), department_id
+    INTO v_is_admin, v_is_manager, v_user_dept
+    FROM public.profiles
+    WHERE id = p_user_id;
+  ELSE
+    v_is_admin := true;
   END IF;
 
   WITH counts AS (
@@ -72,6 +89,29 @@ BEGIN
     WHERE c.company_id = p_company_id
       AND ct.is_blocked IS NOT TRUE
       AND (p_unit_id IS NULL OR c.unit_id = p_unit_id)
+      AND (p_instance_id IS NULL OR c.whatsapp_instance_id = p_instance_id)
+      AND (p_department_id IS NULL OR c.department_id = p_department_id)
+      AND (
+        p_agent_id IS NULL 
+        OR (p_agent_id = 'unassigned' AND c.assigned_agent_id IS NULL)
+        OR (p_agent_id <> 'unassigned' AND c.assigned_agent_id::text = p_agent_id)
+      )
+      AND (
+        p_search IS NULL 
+        OR p_search = ''
+        OR ct.name ILIKE ('%' || p_search || '%')
+        OR ct.phone ILIKE ('%' || p_search || '%')
+        OR ct.whatsapp_lid ILIKE ('%' || p_search || '%')
+      )
+      AND (
+        v_is_admin
+        OR (
+          (c.status = 'waiting' AND (c.department_id IS NULL OR c.department_id = v_user_dept OR c.assigned_agent_id = p_user_id))
+          OR (c.status = 'active' AND (c.assigned_agent_id = p_user_id OR (v_is_manager AND c.department_id = v_user_dept) OR (c.assigned_agent_id IS NULL AND (c.department_id = v_user_dept OR c.department_id IS NULL))))
+          OR (c.status = 'resolved' AND (c.assigned_agent_id = p_user_id OR (v_is_manager AND c.department_id = v_user_dept)))
+          OR (c.channel::text = 'whatsapp_group' OR c.remote_id LIKE '%@g.us%' OR ct.phone LIKE '%@g.us%')
+        )
+      )
     GROUP BY 1
   )
   SELECT jsonb_build_object(
@@ -97,4 +137,4 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.get_conversation_tab_counts(UUID, UUID) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_conversation_tab_counts(UUID, UUID, UUID, UUID, TEXT, TEXT, UUID) TO authenticated, service_role;
