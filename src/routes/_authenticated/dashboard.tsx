@@ -1,7 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Clock, MessageCircle, CheckCircle2, Users, Timer } from "lucide-react";
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  Legend,
+} from "recharts";
 import { format, subDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -47,12 +58,20 @@ function DashboardPage() {
   const { data: metrics } = useQuery<Metrics>({
     queryKey: ["dashboard-metrics", activeCompanyId, selectedUnitId],
     queryFn: async () => {
-      let qWaiting = supabase.from("conversations").select("id, contact:contacts!inner(company_id)", { count: "exact", head: true }).eq("status", "waiting");
-      let qActive = supabase.from("conversations").select("id, contact:contacts!inner(company_id)", { count: "exact", head: true }).eq("status", "active");
-      let qResolved = supabase.from("conversations").select("id, started_at, resolved_at, contact:contacts!inner(company_id)")
+      let qWaiting = supabase
+        .from("conversations")
+        .select("id, contact:contacts!inner(company_id)", { count: "exact", head: true })
+        .eq("status", "waiting");
+      let qActive = supabase
+        .from("conversations")
+        .select("id, contact:contacts!inner(company_id)", { count: "exact", head: true })
+        .eq("status", "active");
+      let qResolved = supabase
+        .from("conversations")
+        .select("id, started_at, resolved_at, contact:contacts!inner(company_id)")
         .eq("status", "resolved")
         .gte("resolved_at", new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
-      
+
       if (activeCompanyId) {
         qWaiting = qWaiting.eq("contact.company_id", activeCompanyId);
         qActive = qActive.eq("contact.company_id", activeCompanyId);
@@ -65,7 +84,10 @@ function DashboardPage() {
         qResolved = qResolved.eq("unit_id", selectedUnitId);
       }
 
-      let qAgents = supabase.from("profiles").select("*", { count: "exact", head: true }).eq("online", true);
+      let qAgents = supabase
+        .from("profiles")
+        .select("*", { count: "exact", head: true })
+        .eq("online", true);
       if (activeCompanyId) qAgents = qAgents.eq("company_id", activeCompanyId);
 
       const [waiting, active, resolved, agents] = await Promise.all([
@@ -74,17 +96,17 @@ function DashboardPage() {
         qResolved,
         qAgents,
       ]);
-      
+
       const resolvedCount = resolved.data?.length ?? 0;
       let totalTime = 0;
-      resolved.data?.forEach(r => {
+      resolved.data?.forEach((r) => {
         if (r.started_at && r.resolved_at) {
           totalTime += new Date(r.resolved_at).getTime() - new Date(r.started_at).getTime();
         }
       });
       const avgTimeMs = resolvedCount > 0 ? totalTime / resolvedCount : 0;
       const tmaMinutes = Math.round(avgTimeMs / 60000);
-      
+
       return {
         waiting: waiting.count ?? 0,
         active: active.count ?? 0,
@@ -99,13 +121,16 @@ function DashboardPage() {
     queryKey: ["dashboard-chart", activeCompanyId, selectedUnitId],
     queryFn: async () => {
       const since = subDays(new Date(), 6);
-      
-      let qChart = supabase.from("conversations").select("started_at, contact:contacts!inner(company_id)").gte("started_at", since.toISOString());
+
+      let qChart = supabase
+        .from("conversations")
+        .select("started_at, contact:contacts!inner(company_id)")
+        .gte("started_at", since.toISOString());
       if (activeCompanyId) qChart = qChart.eq("contact.company_id", activeCompanyId);
       if (selectedUnitId) qChart = qChart.eq("unit_id", selectedUnitId);
 
       const { data } = await qChart;
-      
+
       const days = Array.from({ length: 7 }).map((_, i) => {
         const d = subDays(new Date(), 6 - i);
         return { day: format(d, "EEE", { locale: ptBR }), date: format(d, "yyyy-MM-dd"), total: 0 };
@@ -121,25 +146,38 @@ function DashboardPage() {
 
   const { data: hourlyChartData } = useQuery({
     queryKey: ["dashboard-hourly-chart", activeCompanyId, selectedUnitId],
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const since = subDays(new Date(), 6);
-      
-      let qConversations = supabase.from("conversations").select("started_at, contact:contacts!inner(company_id)").gte("started_at", since.toISOString());
-      if (activeCompanyId) qConversations = qConversations.eq("contact.company_id", activeCompanyId);
+
+      let qConversations = supabase
+        .from("conversations")
+        .select("started_at, contact:contacts!inner(company_id)")
+        .gte("started_at", since.toISOString());
+      if (activeCompanyId)
+        qConversations = qConversations.eq("contact.company_id", activeCompanyId);
       if (selectedUnitId) qConversations = qConversations.eq("unit_id", selectedUnitId);
 
       const { data: convsData } = await qConversations;
-      
-      let qMessages = supabase.from("messages").select("created_at, conversation:conversations!inner(unit_id, contact:contacts!inner(company_id))").eq("sender_type", "contact").gte("created_at", since.toISOString());
-      if (activeCompanyId) qMessages = qMessages.eq("conversation.contact.company_id", activeCompanyId);
+
+      let qMessages = supabase
+        .from("messages")
+        .select(
+          "created_at, conversation:conversations!inner(unit_id, contact:contacts!inner(company_id))",
+        )
+        .eq("sender_type", "contact")
+        .gte("created_at", since.toISOString());
+      if (activeCompanyId)
+        qMessages = qMessages.eq("conversation.contact.company_id", activeCompanyId);
       if (selectedUnitId) qMessages = qMessages.eq("conversation.unit_id", selectedUnitId);
 
       const { data: msgData } = await qMessages;
 
       const hours = Array.from({ length: 24 }).map((_, i) => ({
-        hour: `${i.toString().padStart(2, '0')}:00`,
+        hour: `${i.toString().padStart(2, "0")}:00`,
         conversas: 0,
-        mensagens: 0
+        mensagens: 0,
       }));
 
       convsData?.forEach((row) => {
@@ -158,6 +196,8 @@ function DashboardPage() {
 
   const { data: oldestWaiting } = useQuery({
     queryKey: ["oldest-waiting", activeCompanyId, selectedUnitId],
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       let qOldest = supabase
         .from("conversations")
@@ -177,7 +217,8 @@ function DashboardPage() {
   const { data: myTasks } = useQuery({
     queryKey: ["my-tasks-today", activeCompanyId, selectedUnitId],
     queryFn: async () => {
-      const end = new Date(); end.setHours(23, 59, 59, 999);
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
       let qTasks = supabase
         .from("tasks")
         .select("id,title,due_date,priority,status")
@@ -209,7 +250,11 @@ function DashboardPage() {
           alert={(metrics?.waiting ?? 0) > 5}
         />
         <MetricCard label="Em andamento" value={metrics?.active ?? 0} icon={MessageCircle} />
-        <MetricCard label="Resolvidos hoje" value={metrics?.resolvedToday ?? 0} icon={CheckCircle2} />
+        <MetricCard
+          label="Resolvidos hoje"
+          value={metrics?.resolvedToday ?? 0}
+          icon={CheckCircle2}
+        />
         <MetricCard label="TMA (Hoje)" value={formatTMA(metrics?.tmaMinutes ?? 0)} icon={Timer} />
         <MetricCard label="Agentes online" value={metrics?.agentsOnline ?? 0} icon={Users} />
       </div>
@@ -222,8 +267,19 @@ function DashboardPage() {
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData ?? []}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-                <XAxis dataKey="day" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
+                <XAxis
+                  dataKey="day"
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "var(--card)",
@@ -264,13 +320,26 @@ function DashboardPage() {
       <div className="grid gap-4 md:gap-6 xl:grid-cols-3">
         <Card className="xl:col-span-2 p-4 md:p-6">
           <h2 className="mb-1 text-sm font-semibold">Horários de Pico (Últimos 7 dias)</h2>
-          <p className="mb-4 text-xs text-muted-foreground">Conversas iniciadas e mensagens recebidas</p>
+          <p className="mb-4 text-xs text-muted-foreground">
+            Conversas iniciadas e mensagens recebidas
+          </p>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={hourlyChartData ?? []}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-                <XAxis dataKey="hour" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
+                <XAxis
+                  dataKey="hour"
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="var(--muted-foreground)"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "var(--card)",
@@ -280,8 +349,22 @@ function DashboardPage() {
                   }}
                 />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
-                <Line type="monotone" name="Novas Conversas" dataKey="conversas" stroke="var(--primary)" strokeWidth={2} dot={false} />
-                <Line type="monotone" name="Mensagens Recebidas" dataKey="mensagens" stroke="#10b981" strokeWidth={2} dot={false} />
+                <Line
+                  type="monotone"
+                  name="Novas Conversas"
+                  dataKey="conversas"
+                  stroke="var(--primary)"
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  name="Mensagens Recebidas"
+                  dataKey="mensagens"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  dot={false}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -345,15 +428,13 @@ function MetricCard({
           <Icon className="h-4 w-4" />
         </div>
       </div>
-      <div className={cn("mt-3 text-3xl font-semibold", alert && "text-destructive")}>
-        {value}
-      </div>
+      <div className={cn("mt-3 text-3xl font-semibold", alert && "text-destructive")}>{value}</div>
     </Card>
   );
 }
 
 function PriorityDot({ p }: { p: "low" | "medium" | "high" }) {
-  const cls = p === "high" ? "bg-destructive" : p === "medium" ? "bg-warning" : "bg-muted-foreground/40";
+  const cls =
+    p === "high" ? "bg-destructive" : p === "medium" ? "bg-warning" : "bg-muted-foreground/40";
   return <span className={cn("mt-1.5 h-2 w-2 rounded-full", cls)} />;
 }
-

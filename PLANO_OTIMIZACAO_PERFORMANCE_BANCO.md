@@ -40,12 +40,13 @@ Execute o script abaixo diretamente no **SQL Editor** do Supabase Dashboard (ou 
 -- =========================================================================
 
 -- -------------------------------------------------------------------------
--- 1. CORREÇÃO DE REPLICA IDENTITY (Redução maciça de gravação de WAL e Disk IO)
--- Como ambas as tabelas têm PRIMARY KEY (id), devem usar DEFAULT.
--- O FULL gravava a linha inteira a cada mensagem recebida/lida, exaurindo o disco.
+-- 1. CORREÇÃO DE REPLICA IDENTITY EM CONVERSATIONS
+-- Como a tabela tem PRIMARY KEY (id), deve usar DEFAULT.
+-- O FULL gravava a linha inteira a cada mensagem recebida/lida, exaurindo o disco/WAL.
+-- MANTEMOS 'messages' com FULL para garantir que filtros realtime com conversation_id
+-- continuem recebendo UPDATE e DELETE sem risco de falha na recepção de mensagens.
 -- -------------------------------------------------------------------------
 ALTER TABLE public.conversations REPLICA IDENTITY DEFAULT;
-ALTER TABLE public.messages REPLICA IDENTITY DEFAULT;
 
 -- -------------------------------------------------------------------------
 -- 2. ÍNDICES COMPOSTOS PARA CONVERSAS (Index-Only Scans para listagens e abas)
@@ -108,7 +109,10 @@ BEGIN
 
   WITH counts AS (
     SELECT 
-      c.status,
+      CASE 
+        WHEN c.channel = 'whatsapp_group' OR ct.phone LIKE '%@g.us' OR ct.phone LIKE '120363%' THEN 'groups'
+        ELSE c.status::TEXT
+      END AS status_group,
       COUNT(*)::INT AS total,
       COALESCE(SUM(c.unread_count), 0)::INT AS unread
     FROM public.conversations c
@@ -116,20 +120,24 @@ BEGIN
     WHERE c.company_id = p_company_id
       AND ct.is_blocked IS NOT TRUE
       AND (p_unit_id IS NULL OR c.unit_id = p_unit_id)
-    GROUP BY c.status
+    GROUP BY 1
   )
   SELECT jsonb_build_object(
     'waiting', jsonb_build_object(
-      'total', COALESCE((SELECT total FROM counts WHERE status = 'waiting'), 0),
-      'unread', COALESCE((SELECT unread FROM counts WHERE status = 'waiting'), 0)
+      'total', COALESCE((SELECT total FROM counts WHERE status_group = 'waiting'), 0),
+      'unread', COALESCE((SELECT unread FROM counts WHERE status_group = 'waiting'), 0)
     ),
     'active', jsonb_build_object(
-      'total', COALESCE((SELECT total FROM counts WHERE status = 'active'), 0),
-      'unread', COALESCE((SELECT unread FROM counts WHERE status = 'active'), 0)
+      'total', COALESCE((SELECT total FROM counts WHERE status_group = 'active'), 0),
+      'unread', COALESCE((SELECT unread FROM counts WHERE status_group = 'active'), 0)
     ),
     'resolved', jsonb_build_object(
-      'total', COALESCE((SELECT total FROM counts WHERE status = 'resolved'), 0),
-      'unread', COALESCE((SELECT unread FROM counts WHERE status = 'resolved'), 0)
+      'total', COALESCE((SELECT total FROM counts WHERE status_group = 'resolved'), 0),
+      'unread', COALESCE((SELECT unread FROM counts WHERE status_group = 'resolved'), 0)
+    ),
+    'groups', jsonb_build_object(
+      'total', COALESCE((SELECT total FROM counts WHERE status_group = 'groups'), 0),
+      'unread', COALESCE((SELECT unread FROM counts WHERE status_group = 'groups'), 0)
     )
   ) INTO v_result;
 

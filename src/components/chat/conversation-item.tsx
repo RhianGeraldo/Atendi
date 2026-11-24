@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState, useEffect } from "react";
+import React, { memo, useMemo } from "react";
 import { Users, Phone, Clock, AlertTriangle } from "lucide-react";
 import { ContactAvatar } from "./contact-avatar";
 import { Badge } from "@/components/ui/badge";
@@ -12,31 +12,26 @@ import { type ConvRow, isGroupConversation } from "./conversation-types";
 interface ConversationItemProps {
   conv: ConvRow;
   selected: boolean;
-  onClick: () => void;
-  onPrefetch?: () => void;
+  onClick?: () => void;
+  onSelect?: (conv: ConvRow) => void;
+  onPrefetch?: (convId: string) => void;
   currentUserId?: string;
   showUnitInfo?: boolean;
   slaSettings?: SlaSettings;
+  slaTick?: number;
 }
 
 export const ConversationItem = memo(function ConversationItem({
   conv,
   selected,
   onClick,
+  onSelect,
   onPrefetch,
   currentUserId,
   showUnitInfo,
   slaSettings,
+  slaTick: _slaTick,
 }: ConversationItemProps) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!slaSettings?.enabled || conv.status === "resolved") return;
-    const interval = setInterval(() => {
-      setTick((t) => t + 1);
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [slaSettings?.enabled, conv.status]);
-
   const isGroup = isGroupConversation(conv);
   const rawName = conv.contact?.name?.trim();
   const isPhoneOrJidName =
@@ -67,18 +62,27 @@ export const ConversationItem = memo(function ConversationItem({
   const cardStatusClasses = selected
     ? "border-l-primary bg-primary/15 dark:bg-primary/25 shadow-xs"
     : isRadar
-    ? "border-l-rose-600 bg-rose-500/10 dark:bg-rose-500/15"
-    : isBreached
-    ? "border-l-destructive bg-destructive/10 dark:bg-destructive/15"
-    : isWarning
-    ? "border-l-amber-500/80 bg-amber-500/10 dark:bg-amber-500/15"
-    : "border-l-transparent hover:bg-accent/40";
+      ? "border-l-rose-600 bg-rose-500/10 dark:bg-rose-500/15"
+      : isBreached
+        ? "border-l-destructive bg-destructive/10 dark:bg-destructive/15"
+        : isWarning
+          ? "border-l-amber-500/80 bg-amber-500/10 dark:bg-amber-500/15"
+          : "border-l-transparent hover:bg-accent/40";
+
+  const handleClick = () => {
+    if (onSelect) onSelect(conv);
+    else if (onClick) onClick();
+  };
+
+  const handlePrefetch = () => {
+    if (onPrefetch) onPrefetch(conv.id);
+  };
 
   return (
     <button
-      onClick={onClick}
-      onMouseEnter={onPrefetch}
-      onTouchStart={onPrefetch}
+      onClick={handleClick}
+      onMouseEnter={handlePrefetch}
+      onTouchStart={handlePrefetch}
       className={cn(
         "flex w-full max-w-full overflow-hidden items-start gap-3 border-b border-border pl-3 pr-4 py-3 text-left transition-all border-l-4 cursor-pointer",
         cardStatusClasses,

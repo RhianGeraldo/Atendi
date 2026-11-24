@@ -99,6 +99,24 @@ function triggerBrowserNotification({
  *    - Se for DM: notifica apenas o outro participante.
  * 3. Mensagens enviadas pelo próprio operador NUNCA tocam som.
  */
+interface CachedConversationDetail {
+  id: string;
+  unit_id: string | null;
+  channel: string | null;
+  status: string | null;
+  assigned_agent_id: string | null;
+  contact: {
+    id: string;
+    company_id: string;
+    name: string | null;
+    phone: string | null;
+    profile_picture_url: string | null;
+  } | null;
+}
+
+// Cache em memória para evitar consultas repetidas de conversas em picos de mensagens
+const globalConvCache = new Map<string, { data: CachedConversationDetail; expiresAt: number }>();
+
 export function useGlobalNotifications() {
   const { profile, session } = useAuth();
   const { activeCompanyId } = useActiveCompany();
@@ -252,33 +270,34 @@ export function useGlobalNotifications() {
           const convId = newMsg.conversation_id;
           if (!convId) return;
 
-          // Busca dados atuais da conversa para validar status e atendente atribuído
-          let convDetail: {
-            id: string;
-            unit_id: string | null;
-            channel: string | null;
-            status: string | null;
-            assigned_agent_id: string | null;
-            contact: {
-              id: string;
-              company_id: string;
-              name: string | null;
-              phone: string | null;
-              profile_picture_url: string | null;
-            } | null;
-          } | null = null;
+          // Busca dados atuais da conversa com cache local curto (45s) para poupar CPU/queries em rajadas
+          let convDetail: CachedConversationDetail | null = null;
 
-          try {
-            const { data } = await supabase
-              .from("conversations")
-              .select(
-                "id, unit_id, channel, status, assigned_agent_id, contact:contacts(id, company_id, name, phone, profile_picture_url)",
-              )
-              .eq("id", convId)
-              .single();
-            convDetail = data as any;
-          } catch (e) {
-            console.warn("[GlobalNotifications] Falha ao consultar conversa:", e);
+          const cachedConv = globalConvCache.get(convId);
+          if (cachedConv && cachedConv.expiresAt > Date.now()) {
+            convDetail = cachedConv.data;
+          } else {
+            try {
+              const { data } = await supabase
+                .from("conversations")
+                .select(
+                  "id, unit_id, channel, status, assigned_agent_id, contact:contacts(id, company_id, name, phone, profile_picture_url)",
+                )
+                .eq("id", convId)
+                .single();
+              convDetail = data as any;
+              if (convDetail && convDetail.contact) {
+                if (globalConvCache.size > 500) {
+                  globalConvCache.clear();
+                }
+                globalConvCache.set(convId, {
+                  data: convDetail,
+                  expiresAt: Date.now() + 20_000,
+                });
+              }
+            } catch (e) {
+              console.warn("[GlobalNotifications] Falha ao consultar conversa:", e);
+            }
           }
 
           if (!convDetail || !convDetail.contact) return;

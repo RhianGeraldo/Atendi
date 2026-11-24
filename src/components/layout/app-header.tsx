@@ -109,7 +109,7 @@ export function AppHeader({ onMobileMenuToggle }: { onMobileMenuToggle?: () => v
     if (!profile?.id || !activeCompanyId) return;
 
     const channel = supabase
-      .channel("schema-db-changes")
+      .channel(`user-notifications-${profile.id}`)
       .on(
         "postgres_changes",
         {

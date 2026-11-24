@@ -105,6 +105,9 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
 
   const { data: allLabels } = useQuery({
     queryKey: ["labels", activeCompanyId],
+    enabled: !!activeCompanyId,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       if (!activeCompanyId) return [];
       const { data } = await supabase
@@ -114,7 +117,6 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
         .order("name");
       return data || [];
     },
-    enabled: !!activeCompanyId,
   });
 
   const { data: contactLabels, isLoading: isLoadingContactLabels } = useQuery({
@@ -143,6 +145,8 @@ export function ContactSidebar({ conv, onClose }: ContactSidebarProps) {
   const { data: companyUnits } = useQuery({
     queryKey: ["units", activeCompanyId],
     enabled: !!activeCompanyId,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("units")

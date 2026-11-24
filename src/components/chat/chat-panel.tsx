@@ -327,9 +327,9 @@ export function ChatPanel({
         (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       );
     },
-    staleTime: 1000 * 2,
+    staleTime: 1000 * 30,
     gcTime: 1000 * 60 * 30,
-    refetchInterval: 3000,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
@@ -565,6 +565,8 @@ export function ChatPanel({
   const { data: quickMessageFolders } = useQuery({
     queryKey: ["quick-message-folders", targetCompanyId],
     enabled: !!targetCompanyId,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("quick_message_folders")
@@ -579,6 +581,8 @@ export function ChatPanel({
   const { data: quickMessages, isLoading: isLoadingQuickMessages } = useQuery({
     queryKey: ["quick-messages", targetCompanyId],
     enabled: !!targetCompanyId,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("quick_messages")
@@ -1223,6 +1227,8 @@ export function ChatPanel({
   const { data: resolutionReasons } = useQuery({
     queryKey: ["resolution-reasons", activeCompanyId],
     enabled: !!activeCompanyId,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("resolution_reasons" as any)
@@ -1366,7 +1372,9 @@ export function ChatPanel({
     },
     onSuccess: (data, active) => {
       if (data?.triggeredAi) {
-        toast.success("IA ativada! O cliente estava aguardando e a IA já está formulando a resposta.");
+        toast.success(
+          "IA ativada! O cliente estava aguardando e a IA já está formulando a resposta.",
+        );
       } else {
         toast.success(active ? "IA ativada neste atendimento" : "IA pausada neste atendimento");
       }

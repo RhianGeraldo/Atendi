@@ -22,6 +22,7 @@ import { resolveAiAgentForConversation } from "./ai-generator";
 import { getPhoneVariants } from "@/lib/utils";
 import { persistirAvatarContatoNoStorage } from "../avatar-storage";
 import { insertContactOrFindExisting } from "./whatsapp-lid";
+import { drainInbox, processWithInbox } from "./webhook-inbox";
 
 export async function handleZernioWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -92,12 +93,44 @@ export async function handleZernioWebhook(request: Request): Promise<Response> {
     });
   }
 
-  // 3. Processar payload de forma garantida para não ser congelado pelo runtime serverless
+  // 3. Processar payload passando pela caixa de entrada (webhook_inbox) e fila serializada por chat
   try {
-    await processarPayloadZernio(body, company, request);
+    const eventos = Array.isArray(body) ? body : [body];
+    for (const item of eventos) {
+      const traduzido = interpretarEventoZernio(item);
+      if (traduzido.tipo === "descarte") continue;
+
+      const externalId = "platformMessageId" in traduzido ? traduzido.platformMessageId : null;
+      const chatTarget =
+        "threadId" in traduzido
+          ? traduzido.threadId
+          : "accountId" in traduzido
+            ? traduzido.accountId
+            : null;
+      const chatKey = chatTarget ? `zernio:${company.id}:${chatTarget}` : `zernio:${company.id}`;
+
+      await processWithInbox(
+        "zernio",
+        item,
+        {
+          event: traduzido.tipo,
+          instanceName: "accountId" in traduzido ? traduzido.accountId : company.id,
+          externalId,
+          chatKey,
+        },
+        async (payloadItem) => {
+          await processarPayloadZernio(payloadItem, company, request);
+        },
+      );
+    }
   } catch (err) {
     console.error("[zernio:webhook] Erro no processamento:", err);
   }
+
+  // Drena itens pendentes ou em retry da fila zernio
+  drainInbox("zernio", async (payloadItem) => {
+    await processarPayloadZernio(payloadItem, company);
+  }).catch((err) => console.warn("[zernio:webhook] Falha ao drenar itens pendentes:", err));
 
   return new Response(JSON.stringify({ ok: true, status: "received" }), {
     status: 200,
@@ -108,7 +141,7 @@ export async function handleZernioWebhook(request: Request): Promise<Response> {
 /**
  * Processamento completo do evento Zernio em background.
  */
-async function processarPayloadZernio(payload: any, company: any, request?: Request) {
+export async function processarPayloadZernio(payload: any, company: any, request?: Request) {
   const eventos = Array.isArray(payload) ? payload : [payload];
 
   for (const item of eventos) {
@@ -224,6 +257,17 @@ async function processarMensagem(
 
   const companyId = instance.company_id;
   const unitId = instance.unit_id;
+
+  // Se company não foi fornecida (ex: reprocessamento da fila ou worker), busca agora
+  if (!company && companyId) {
+    const { data: compData } = await supabaseAdmin
+      .from("companies")
+      .select("id, zernio_api_key, zernio_base_url, zernio_webhook_secret, zernio_signature_secret")
+      .eq("id", companyId)
+      .maybeSingle();
+    company = compData;
+  }
+
   const isFromMe = evento.direcao === "saida";
   const contactIdOrPhone = evento.remetente.identificador;
   const redeFinal: "whatsapp" | "instagram" =
@@ -492,7 +536,7 @@ async function processarMensagem(
       currentAgentId: activeConv.ai_agent_id,
     });
     const resolvedAgentId = resolution.agent?.id ?? null;
-    
+
     // Se a conversa já estava com IA ativa, preserva o estado ativo
     if (previouslyAiActive) {
       aiActive = true;
@@ -524,7 +568,10 @@ async function processarMensagem(
       if (sessionId) updatePayload.current_session_id = sessionId;
     } else {
       // Se a conversa já estava aberta mas não tinha agente ou o agente da instância é diferente:
-      if (resolvedAgentId && (!activeConv.ai_agent_id || activeConv.ai_agent_id !== resolvedAgentId)) {
+      if (
+        resolvedAgentId &&
+        (!activeConv.ai_agent_id || activeConv.ai_agent_id !== resolvedAgentId)
+      ) {
         updatePayload.ai_agent_id = resolvedAgentId;
       }
       if (previouslyAiActive) {

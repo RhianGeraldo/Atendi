@@ -442,8 +442,8 @@ function ConversationsPage() {
 
       let rows = (data ?? []) as unknown as ConvRow[];
 
-      // Quem espera resposta fica parado e desce na lista: na primeira página vêm todas as
-      // conversas abertas esperando resposta, para o SLA e a ordem "quem espera mais" valerem
+      // Prioridade de atendimento: traz na primeira página as conversas mais críticas que aguardam resposta
+      // limitadas a um teto seguro (top 30) para evitar o download massivo de centenas de registros com 6 JOINs
       if (from === 0 && activeCompanyId && tab !== "groups" && tab !== "resolved") {
         const { data: awaiting, error: awaitingErr } = await (supabase as any).rpc(
           "conversations_awaiting_reply",
@@ -456,16 +456,31 @@ function ConversationsPage() {
           console.warn("[conversations] Erro ao buscar conversas esperando resposta:", awaitingErr);
         } else {
           const pageIds = new Set(rows.map((c) => c.id));
-          const missing = ((awaiting ?? []) as { conversation_id: string }[])
+          const awaitingSorted = (
+            (awaiting ?? []) as {
+              conversation_id: string;
+              last_contact_message_at?: string;
+            }[]
+          ).sort((a, b) => {
+            const ta = a.last_contact_message_at
+              ? new Date(a.last_contact_message_at).getTime()
+              : 0;
+            const tb = b.last_contact_message_at
+              ? new Date(b.last_contact_message_at).getTime()
+              : 0;
+            return ta - tb; // Quem aguarda há mais tempo primeiro
+          });
+
+          const missing = awaitingSorted
             .map((a) => a.conversation_id)
-            .filter((id) => !pageIds.has(id));
-          for (let i = 0; i < missing.length; i += 100) {
-            const { data: extra, error: extraErr } = await buildQuery().in(
-              "id",
-              missing.slice(i, i + 100),
-            );
-            if (extraErr) throw extraErr;
-            rows = rows.concat((extra ?? []) as unknown as ConvRow[]);
+            .filter((id) => !pageIds.has(id))
+            .slice(0, 30); // Limite das top 30 prioritárias
+
+          if (missing.length > 0) {
+            const { data: extra, error: extraErr } = await buildQuery().in("id", missing);
+            if (!extraErr && extra) {
+              rows = rows.concat(extra as unknown as ConvRow[]);
+            }
           }
         }
       }
@@ -498,7 +513,7 @@ function ConversationsPage() {
           .eq("is_internal", false)
           .in("sender_type", [...SLA_SENDER_TYPES])
           .order("created_at", { ascending: false })
-          .limit(convIds.length * 5);
+          .limit(convIds.length * 15);
 
         // Agrupa mensagens por conversa para identificar o turno contínuo sem resposta
         const msgsByConv = new Map<string, Array<{ sender_type: string; created_at: string }>>();
@@ -510,36 +525,38 @@ function ConversationsPage() {
               msgsByConv.set(msg.conversation_id, [
                 { sender_type: msg.sender_type, created_at: msg.created_at },
               ]);
-            } else {
+            } else if (arr.length < 5) {
               arr.push({ sender_type: msg.sender_type, created_at: msg.created_at });
             }
           }
         }
 
         // O limite do lote é dividido entre as conversas: uma muito movimentada pode deixar outras
-        // sem nenhuma mensagem carregada. Essas são buscadas individualmente.
+        // sem nenhuma mensagem carregada. Essas são buscadas em uma única requisição agrupada.
         const missingIds = convIds.filter((id) => !msgsByConv.has(id));
         if (missingIds.length > 0) {
-          const extra = await Promise.all(
-            missingIds.map((id) =>
-              supabase
-                .from("messages")
-                .select("conversation_id, sender_type, created_at")
-                .eq("conversation_id", id)
-                .eq("is_internal", false)
-                .in("sender_type", [...SLA_SENDER_TYPES])
-                .order("created_at", { ascending: false })
-                .limit(5),
-            ),
-          );
-          extra.forEach(({ data: msgs }, idx) => {
-            if (msgs && msgs.length > 0) {
-              msgsByConv.set(
-                missingIds[idx],
-                msgs.map((m) => ({ sender_type: m.sender_type, created_at: m.created_at })),
-              );
+          const { data: extraMsgs } = await supabase
+            .from("messages")
+            .select("conversation_id, sender_type, created_at")
+            .in("conversation_id", missingIds)
+            .eq("is_internal", false)
+            .in("sender_type", [...SLA_SENDER_TYPES])
+            .order("created_at", { ascending: false })
+            .limit(missingIds.length * 10);
+
+          if (extraMsgs) {
+            for (const m of extraMsgs) {
+              if (!m.conversation_id) continue;
+              const arr = msgsByConv.get(m.conversation_id);
+              if (!arr) {
+                msgsByConv.set(m.conversation_id, [
+                  { sender_type: m.sender_type, created_at: m.created_at },
+                ]);
+              } else if (arr.length < 5) {
+                arr.push({ sender_type: m.sender_type, created_at: m.created_at });
+              }
             }
-          });
+          }
         }
 
         rows = rows.map((c) => {
@@ -727,6 +744,31 @@ function ConversationsPage() {
         resolved: { total: 0, unread: 0 },
         groups: { total: 0, unread: 0 },
       };
+
+      // 1. Tenta consulta agregada rápida (RPC) caso seja administrador e não haja filtros específicos
+      if (
+        isAdmin &&
+        activeCompanyId &&
+        !debouncedSearch &&
+        (!agentFilter || agentFilter === "all") &&
+        (!departmentFilter || departmentFilter === "all") &&
+        (!instanceFilter || instanceFilter === "all")
+      ) {
+        try {
+          const { data: rpcData, error: rpcErr } = await (supabase as any).rpc(
+            "get_conversation_tab_counts",
+            {
+              p_company_id: activeCompanyId,
+              p_unit_id: selectedUnitId && selectedUnitId !== "all" ? selectedUnitId : null,
+            },
+          );
+          if (!rpcErr && rpcData && typeof rpcData === "object" && "waiting" in rpcData) {
+            return rpcData as typeof counts;
+          }
+        } catch {
+          // Fallback gracioso para o cálculo paginado se a RPC ainda não existir no banco
+        }
+      }
 
       try {
         const { data, error } = await fetchAllPages(build);
@@ -1473,15 +1515,16 @@ function ConversationsPage() {
         lastHidden = Date.now();
       } else if (document.visibilityState === "visible") {
         const timeAway = Date.now() - lastHidden;
-        if (timeAway > 20000) {
-          if (!ch || ch.state !== "joined") {
+        const isChannelDown = !ch || ch.state !== "joined";
+        if (isChannelDown || timeAway > 45000) {
+          if (isChannelDown) {
             connectRealtime();
           }
           qc.invalidateQueries({ queryKey: ["conversations"] });
           qc.invalidateQueries({ queryKey: ["unread-counts"] });
-          if (selectedIdRef.current) {
-            qc.invalidateQueries({ queryKey: ["messages", selectedIdRef.current] });
-          }
+        }
+        if (selectedIdRef.current && (isChannelDown || timeAway > 15000)) {
+          qc.invalidateQueries({ queryKey: ["messages", selectedIdRef.current] });
         }
       }
     };
@@ -1635,6 +1678,26 @@ function ConversationsPage() {
     }
     return null;
   }, [filtered, directSelectedConv, selectedId, lastSelectedConv]);
+
+  const handleSelectConversation = useCallback(
+    (c: ConvRow) => {
+      setSelectedId(c.id);
+      setLastSelectedConv(c);
+      navigate({ search: (prev: any) => ({ ...prev, c: c.id, tab }) });
+    },
+    [tab, navigate],
+  );
+
+  const handlePrefetchConversation = useCallback(
+    (convId: string) => {
+      qc.prefetchQuery({
+        queryKey: ["messages", convId],
+        queryFn: () => fetchConversationMessages(convId),
+        staleTime: 1000 * 60 * 5,
+      });
+    },
+    [qc],
+  );
 
   const attemptedSyncGroupsRef = useRef<Set<string>>(new Set());
 
@@ -2127,21 +2190,12 @@ function ConversationsPage() {
                   key={c.id}
                   conv={c}
                   selected={selectedId === c.id}
-                  onClick={() => {
-                    setSelectedId(c.id);
-                    setLastSelectedConv(c);
-                    navigate({ search: (prev: any) => ({ ...prev, c: c.id, tab }) });
-                  }}
-                  onPrefetch={() => {
-                    qc.prefetchQuery({
-                      queryKey: ["messages", c.id],
-                      queryFn: () => fetchConversationMessages(c.id),
-                      staleTime: 1000 * 60 * 5,
-                    });
-                  }}
+                  onSelect={handleSelectConversation}
+                  onPrefetch={handlePrefetchConversation}
                   currentUserId={profile?.id}
                   showUnitInfo={!selectedUnitId}
                   slaSettings={slaSettings}
+                  slaTick={slaTick}
                 />
               ))}
               {!filtered.length && !isConvFetching && (

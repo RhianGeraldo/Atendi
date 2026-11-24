@@ -3,10 +3,11 @@
 -- Instância: Supabase Small (2GB RAM / 2 vCPUs)
 -- =========================================================================
 
--- 1. CORREÇÃO DE REPLICA IDENTITY (Reduz gravação excessiva de WAL)
--- Ambas as tabelas têm PRIMARY KEY (id), portanto devem usar DEFAULT.
+-- 1. CORREÇÃO DE REPLICA IDENTITY EM CONVERSATIONS
+-- Reduz gravação maciça no WAL gerada a cada nova mensagem/update de status.
+-- MANTEMOS messages com FULL para garantir que filtros realtime com conversation_id
+-- continuem recebendo UPDATE e DELETE sem risco de falha na recepção de mensagens.
 ALTER TABLE public.conversations REPLICA IDENTITY DEFAULT;
-ALTER TABLE public.messages REPLICA IDENTITY DEFAULT;
 
 -- 2. ÍNDICES COMPOSTOS PARA LISTAGEM DE CONVERSAS (Index-Only Scans)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_conversations_company_status_last_msg 
@@ -31,7 +32,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_call_logs_cleanup
   WHERE status IN ('ACTIVE', 'RINGING');
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_scheduled_messages_pending_queue 
-  ON public.scheduled_messages (status, scheduled_for) 
+  ON public.scheduled_messages (status, scheduled_at) 
   WHERE status = 'pending';
 
 -- 5. RPC AGREGADA PARA CONTAGEM DAS ABAS DE CONVERSAS (Substitui fetchAllPages)
@@ -48,14 +49,22 @@ AS $$
 DECLARE
   v_result JSONB;
 BEGIN
-  IF auth.role() IS DISTINCT FROM 'service_role'
+  IF current_user NOT IN ('postgres', 'supabase_admin')
+     AND auth.role() IS DISTINCT FROM 'service_role'
      AND NOT COALESCE(public.is_super_admin() OR p_company_id = public.current_company_id(), false) THEN
     RAISE EXCEPTION 'Acesso não autorizado para esta empresa' USING ERRCODE = '42501';
   END IF;
 
   WITH counts AS (
     SELECT 
-      c.status,
+      CASE 
+        WHEN c.channel::text = 'whatsapp_group'
+             OR c.remote_id LIKE '%@g.us%'
+             OR ct.phone LIKE '%@g.us%'
+             OR ct.phone LIKE '120363%'
+             OR (ct.phone LIKE '%-%' AND length(ct.phone) > 18) THEN 'groups'
+        ELSE c.status::TEXT
+      END AS status_group,
       COUNT(*)::INT AS total,
       COALESCE(SUM(c.unread_count), 0)::INT AS unread
     FROM public.conversations c
@@ -63,20 +72,24 @@ BEGIN
     WHERE c.company_id = p_company_id
       AND ct.is_blocked IS NOT TRUE
       AND (p_unit_id IS NULL OR c.unit_id = p_unit_id)
-    GROUP BY c.status
+    GROUP BY 1
   )
   SELECT jsonb_build_object(
     'waiting', jsonb_build_object(
-      'total', COALESCE((SELECT total FROM counts WHERE status = 'waiting'), 0),
-      'unread', COALESCE((SELECT unread FROM counts WHERE status = 'unread'), 0)
+      'total', COALESCE((SELECT total FROM counts WHERE status_group = 'waiting'), 0),
+      'unread', COALESCE((SELECT unread FROM counts WHERE status_group = 'waiting'), 0)
     ),
     'active', jsonb_build_object(
-      'total', COALESCE((SELECT total FROM counts WHERE status = 'active'), 0),
-      'unread', COALESCE((SELECT unread FROM counts WHERE status = 'active'), 0)
+      'total', COALESCE((SELECT total FROM counts WHERE status_group = 'active'), 0),
+      'unread', COALESCE((SELECT unread FROM counts WHERE status_group = 'active'), 0)
     ),
     'resolved', jsonb_build_object(
-      'total', COALESCE((SELECT total FROM counts WHERE status = 'resolved'), 0),
-      'unread', COALESCE((SELECT unread FROM counts WHERE status = 'resolved'), 0)
+      'total', COALESCE((SELECT total FROM counts WHERE status_group = 'resolved'), 0),
+      'unread', COALESCE((SELECT unread FROM counts WHERE status_group = 'resolved'), 0)
+    ),
+    'groups', jsonb_build_object(
+      'total', COALESCE((SELECT total FROM counts WHERE status_group = 'groups'), 0),
+      'unread', COALESCE((SELECT unread FROM counts WHERE status_group = 'groups'), 0)
     )
   ) INTO v_result;
 

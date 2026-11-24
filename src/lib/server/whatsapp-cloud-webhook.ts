@@ -9,6 +9,7 @@ import { conferirPorta } from "./webhook-auth";
 import { dispatchAutomationEvent } from "./automation-engine";
 import { sendMetaCapiEvent } from "./meta-capi";
 import { insertContactOrFindExisting } from "./whatsapp-lid";
+import { drainInbox, processWithInbox } from "./webhook-inbox";
 
 export async function handleWhatsappCloudWebhook(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -58,8 +59,36 @@ export async function handleWhatsappCloudWebhook(request: Request): Promise<Resp
 
       const body = JSON.parse(porta.corpoBruto);
 
-      // Processa a persistência da mensagem no banco e responde 200 à Meta imediatamente
-      await processWhatsappCloudWebhookBody(body, request);
+      // Extrai metadados para deduplicação e chave de chat
+      const firstEntry = body.entry?.[0];
+      const firstChange = firstEntry?.changes?.[0]?.value;
+      const firstMsg = firstChange?.messages?.[0];
+      const firstStatus = firstChange?.statuses?.[0];
+      const externalId = firstMsg?.id || firstStatus?.id || null;
+      const chatTarget = firstMsg?.from || firstStatus?.recipient_id || null;
+      const instanceName =
+        firstChange?.metadata?.phone_number_id || firstEntry?.id || "whatsapp-cloud";
+      const chatKey = chatTarget ? `meta:${instanceName}:${chatTarget}` : `meta:${instanceName}`;
+
+      // Grava no webhook_inbox e processa de forma serializada por chat
+      await processWithInbox(
+        "whatsapp-cloud",
+        body,
+        {
+          event: firstMsg ? "messages" : firstStatus ? "statuses" : "general",
+          instanceName,
+          externalId,
+          chatKey,
+        },
+        async (payload) => {
+          await processWhatsappCloudWebhookBody(payload, request);
+        },
+      );
+
+      // Reprocessa carona se houver pendências
+      drainInbox("whatsapp-cloud", async (payload) => {
+        await processWhatsappCloudWebhookBody(payload);
+      }).catch((err) => console.warn("[whatsapp-cloud] Falha no drain:", err));
 
       return new Response("EVENT_RECEIVED", { status: 200 });
     } catch (err) {
@@ -71,7 +100,7 @@ export async function handleWhatsappCloudWebhook(request: Request): Promise<Resp
   return new Response("Method Not Allowed", { status: 405 });
 }
 
-async function processWhatsappCloudWebhookBody(body: any, request?: Request): Promise<void> {
+export async function processWhatsappCloudWebhookBody(body: any, request?: Request): Promise<void> {
   // Apenas processa webhooks do WhatsApp
   if (body.object !== "whatsapp_business_account") return;
 
