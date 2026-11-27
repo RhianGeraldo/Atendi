@@ -286,14 +286,35 @@ export function CampaignDetailsSheet({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-6 gap-6">
         {loadingDetails ? (
-          <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm">Carregando detalhes da campanha...</p>
-          </div>
+          <>
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                Carregando Detalhes da Campanha...
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                Buscando métricas de envio e destinatários da campanha...
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm">Carregando detalhes da campanha...</p>
+            </div>
+          </>
         ) : !campaign ? (
-          <p className="text-center py-12 text-sm text-muted-foreground">
-            Campanha não encontrada.
-          </p>
+          <>
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold text-destructive">
+                Campanha não encontrada
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                Não foi possível localizar os dados desta campanha de disparos.
+              </DialogDescription>
+            </DialogHeader>
+            <p className="text-center py-12 text-sm text-muted-foreground">
+              Campanha não encontrada ou você não possui permissão para acessá-la.
+            </p>
+          </>
         ) : (
           <div className="space-y-6">
             {/* Header Estilo Avisei */}

@@ -1,9 +1,23 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Ban, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -48,13 +62,27 @@ export function ContactBlockDialog({ contact }: { contact: any }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-muted" title={contact.is_blocked ? "Desbloquear" : "Bloquear"}>
-          <Ban className={`h-4 w-4 ${contact.is_blocked ? "text-destructive" : "text-muted-foreground"}`} />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full hover:bg-muted"
+          title={contact.is_blocked ? "Desbloquear" : "Bloquear"}
+        >
+          <Ban
+            className={`h-4 w-4 ${contact.is_blocked ? "text-destructive" : "text-muted-foreground"}`}
+          />
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>{contact.is_blocked ? "Desbloquear Contato" : "Bloquear Contato"}</DialogTitle>
+          <DialogTitle>
+            {contact.is_blocked ? "Desbloquear Contato" : "Bloquear Contato"}
+          </DialogTitle>
+          <DialogDescription>
+            {contact.is_blocked
+              ? "Confirme o desbloqueio para retomar o atendimento deste contato."
+              : "Defina o motivo e confirme o bloqueio das mensagens deste contato."}
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           {!contact.is_blocked && (
@@ -80,8 +108,8 @@ export function ContactBlockDialog({ contact }: { contact: any }) {
               {reason === "Outro" && (
                 <div className="space-y-2 pt-2">
                   <Label>Descreva o motivo</Label>
-                  <Input 
-                    placeholder="Especifique o motivo..." 
+                  <Input
+                    placeholder="Especifique o motivo..."
                     value={customReason}
                     onChange={(e) => setCustomReason(e.target.value)}
                     required
@@ -93,7 +121,8 @@ export function ContactBlockDialog({ contact }: { contact: any }) {
           {contact.is_blocked && (
             <div className="py-4 space-y-4">
               <p className="text-sm text-muted-foreground">
-                Este contato está bloqueado pelo seguinte motivo: <strong>{contact.block_reason}</strong>
+                Este contato está bloqueado pelo seguinte motivo:{" "}
+                <strong>{contact.block_reason}</strong>
               </p>
               <p className="text-sm text-muted-foreground">
                 Deseja desbloqueá-lo para que volte a receber e exibir mensagens nas listas?
@@ -101,10 +130,19 @@ export function ContactBlockDialog({ contact }: { contact: any }) {
             </div>
           )}
           <div className="flex justify-end gap-2 mt-4">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={loading}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpen(false)}
+              disabled={loading}
+            >
               Cancelar
             </Button>
-            <Button type="submit" variant={contact.is_blocked ? "default" : "destructive"} disabled={loading}>
+            <Button
+              type="submit"
+              variant={contact.is_blocked ? "default" : "destructive"}
+              disabled={loading}
+            >
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {contact.is_blocked ? "Desbloquear" : "Bloquear"}
             </Button>

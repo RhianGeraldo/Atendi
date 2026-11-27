@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -25,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ContactAvatar } from "./contact-avatar";
 import { StartConversationDialog } from "./start-conversation-dialog";
 import {
@@ -49,9 +50,8 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
-  const [activeCallParticipant, setActiveCallParticipant] = useState<WhatsAppGroupParticipant | null>(
-    null,
-  );
+  const [activeCallParticipant, setActiveCallParticipant] =
+    useState<WhatsAppGroupParticipant | null>(null);
 
   // Estados de edição de Nome e Descrição
   const [isEditingName, setIsEditingName] = useState(false);
@@ -338,10 +338,7 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
               ) : (
                 <>
                   <div className="flex items-center gap-1.5 group/title">
-                    <h3
-                      className="font-bold text-base text-foreground truncate"
-                      title={groupName}
-                    >
+                    <h3 className="font-bold text-base text-foreground truncate" title={groupName}>
                       {groupName}
                     </h3>
                     <Button
@@ -535,8 +532,7 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
               </div>
             ) : (
               filteredParticipants.map((p, idx) => {
-                const displayName =
-                  p.name || (p.phone ? formatPhone(p.phone) : "Participante");
+                const displayName = p.name || (p.phone ? formatPhone(p.phone) : "Participante");
                 const hasSeparatePushName =
                   p.pushName && p.pushName !== p.name && p.pushName !== displayName;
 
@@ -659,6 +655,10 @@ export function WhatsAppGroupSidebar({ conv, onClose }: WhatsAppGroupSidebarProp
       {photoPreviewOpen && avatarUrl && (
         <Dialog open={photoPreviewOpen} onOpenChange={setPhotoPreviewOpen}>
           <DialogContent className="max-w-md p-2 bg-background/95 backdrop-blur-sm border-border flex flex-col items-center justify-center">
+            <DialogTitle className="sr-only">Foto do Grupo</DialogTitle>
+            <DialogDescription className="sr-only">
+              {groupName || "Visualização de foto do grupo"}
+            </DialogDescription>
             <img
               src={avatarUrl}
               alt={groupName}

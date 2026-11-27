@@ -1,11 +1,26 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { Phone, MessageSquare, Video, CalendarClock, MoreHorizontal, User } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -13,22 +28,22 @@ import { useUnit } from "@/lib/unit-context";
 import { useAuth } from "@/lib/auth-context";
 import { useActiveCompany } from "@/lib/active-company-context";
 
-export function TaskDialog({ 
-  children, 
+export function TaskDialog({
+  children,
   contactId,
   opportunityId,
   defaultUnitId,
   taskToEdit,
   open: controlledOpen,
-  onOpenChange: setControlledOpen
-}: { 
-  children?: React.ReactNode, 
-  contactId?: string,
-  opportunityId?: string,
-  defaultUnitId?: string,
-  taskToEdit?: any,
-  open?: boolean,
-  onOpenChange?: (open: boolean) => void
+  onOpenChange: setControlledOpen,
+}: {
+  children?: React.ReactNode;
+  contactId?: string;
+  opportunityId?: string;
+  defaultUnitId?: string;
+  taskToEdit?: any;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : uncontrolledOpen;
@@ -66,7 +81,9 @@ export function TaskDialog({
       if (taskToEdit) {
         setTitle(taskToEdit.title || "");
         setTaskType(taskToEdit.task_type || "other");
-        setDueDate(taskToEdit.due_date ? new Date(taskToEdit.due_date).toISOString().slice(0, 16) : "");
+        setDueDate(
+          taskToEdit.due_date ? new Date(taskToEdit.due_date).toISOString().slice(0, 16) : "",
+        );
         setDescription(taskToEdit.description || "");
         setAssignedTo(taskToEdit.assigned_to || profile?.id || "");
       } else {
@@ -83,7 +100,7 @@ export function TaskDialog({
     mutationFn: async () => {
       if (!title.trim()) return;
       let unitId = selectedUnitId || defaultUnitId;
-      
+
       if (!taskToEdit && !unitId) {
         if (contactId) {
           const { data: convData } = await supabase
@@ -94,7 +111,7 @@ export function TaskDialog({
             .order("last_message_at", { ascending: false })
             .limit(1)
             .maybeSingle();
-            
+
           if (convData?.unit_id) {
             unitId = convData.unit_id;
           }
@@ -108,14 +125,14 @@ export function TaskDialog({
         status: taskToEdit?.status || "pending",
         due_date: dueDate ? new Date(dueDate).toISOString() : null,
         description: description || null,
-        assigned_to: assignedTo || profile?.id || null
+        assigned_to: assignedTo || profile?.id || null,
       };
 
       if (!taskToEdit) {
         payload.unit_id = unitId || null;
         if (contactId) payload.contact_id = contactId;
         if (opportunityId) payload.opportunity_id = opportunityId;
-        
+
         const { error } = await supabase.from("tasks").insert(payload);
         if (error) throw error;
       } else {
@@ -132,24 +149,29 @@ export function TaskDialog({
       qc.invalidateQueries({ queryKey: ["opportunities"] });
       qc.invalidateQueries({ queryKey: ["contact-opportunities"] });
     },
-    onError: (e) => toast.error("Erro", { description: (e as Error).message })
+    onError: (e) => toast.error("Erro", { description: (e as Error).message }),
   });
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      {children && (
-        <DialogTrigger asChild>
-          {children}
-        </DialogTrigger>
-      )}
+      {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>{taskToEdit ? "Editar Tarefa" : "Nova Tarefa"}</DialogTitle>
+          <DialogDescription>
+            {taskToEdit
+              ? "Altere os dados da tarefa selecionada."
+              : "Preencha os detalhes para agendar uma nova tarefa no CRM."}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 mt-2">
           <div className="space-y-2">
             <Label>Título da Tarefa</Label>
-            <Input placeholder="Ex: Ligar para confirmar proposta" value={title} onChange={e => setTitle(e.target.value)} />
+            <Input
+              placeholder="Ex: Ligar para confirmar proposta"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -159,23 +181,48 @@ export function TaskDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="call"><div className="flex items-center gap-2"><Phone className="h-4 w-4" /><span>Ligar</span></div></SelectItem>
-                  <SelectItem value="message"><div className="flex items-center gap-2"><MessageSquare className="h-4 w-4" /><span>Mensagem</span></div></SelectItem>
-                  <SelectItem value="meeting"><div className="flex items-center gap-2"><Video className="h-4 w-4" /><span>Reunião</span></div></SelectItem>
-                  <SelectItem value="follow_up"><div className="flex items-center gap-2"><CalendarClock className="h-4 w-4" /><span>Follow-up</span></div></SelectItem>
-                  <SelectItem value="other"><div className="flex items-center gap-2"><MoreHorizontal className="h-4 w-4" /><span>Outro</span></div></SelectItem>
+                  <SelectItem value="call">
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-4 w-4" />
+                      <span>Ligar</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="message">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4" />
+                      <span>Mensagem</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="meeting">
+                    <div className="flex items-center gap-2">
+                      <Video className="h-4 w-4" />
+                      <span>Reunião</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="follow_up">
+                    <div className="flex items-center gap-2">
+                      <CalendarClock className="h-4 w-4" />
+                      <span>Follow-up</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="other">
+                    <div className="flex items-center gap-2">
+                      <MoreHorizontal className="h-4 w-4" />
+                      <span>Outro</span>
+                    </div>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label>Data e Hora</Label>
-              <Input 
-                type="datetime-local" 
-                value={dueDate} 
-                onChange={e => setDueDate(e.target.value)}
+              <Input
+                type="datetime-local"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
                 onClick={(e) => {
                   try {
-                    if (typeof e.currentTarget.showPicker === 'function') {
+                    if (typeof e.currentTarget.showPicker === "function") {
                       e.currentTarget.showPicker();
                     }
                   } catch (err) {
@@ -211,17 +258,19 @@ export function TaskDialog({
           </div>
           <div className="space-y-2">
             <Label>Descrição (opcional)</Label>
-            <Textarea 
-              placeholder="Detalhes adicionais..." 
-              value={description} 
-              onChange={e => setDescription(e.target.value)} 
+            <Textarea
+              placeholder="Detalhes adicionais..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
               className="resize-none"
               rows={3}
             />
           </div>
         </div>
         <DialogFooter className="mt-4">
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Cancelar
+          </Button>
           <Button onClick={() => addTask.mutate()} disabled={!title.trim() || addTask.isPending}>
             Salvar Tarefa
           </Button>
@@ -230,4 +279,3 @@ export function TaskDialog({
     </Dialog>
   );
 }
-

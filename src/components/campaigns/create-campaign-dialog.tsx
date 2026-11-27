@@ -510,6 +510,18 @@ export function CreateCampaignDialog({
     [instances],
   );
 
+  // Auto-seleciona a primeira instância conectada se nenhuma foi selecionada
+  useEffect(() => {
+    if (selectedInstanceIds.length === 0 && connectedInstances.length > 0 && !activeDraftId) {
+      const unitInst =
+        unitId !== "all" ? connectedInstances.find((i) => i.unit_id === unitId) : null;
+      const defaultInst = unitInst || connectedInstances[0];
+      if (defaultInst) {
+        setSelectedInstanceIds([defaultInst.id]);
+      }
+    }
+  }, [connectedInstances, selectedInstanceIds.length, activeDraftId, unitId]);
+
   // Busca funis e etapas do CRM da empresa
   const { data: pipelines = [] } = useQuery({
     queryKey: ["campaign-pipelines", companyId],
@@ -785,7 +797,7 @@ export function CreateCampaignDialog({
     companyId,
   ]);
 
-  const calculateAudienceCount = async () => {
+  const calculateAudienceCount = async (): Promise<number> => {
     setIsCalculatingCount(true);
     try {
       const res = await previewAudienceCountAction({
@@ -794,9 +806,12 @@ export function CreateCampaignDialog({
           filters: getAudienceFiltersPayload(),
         },
       });
-      setAudienceCount(res.count);
+      const validCount = typeof res?.count === "number" ? res.count : 0;
+      setAudienceCount(validCount);
+      return validCount;
     } catch (e: any) {
       console.error("[campaigns] Erro ao calcular audiência:", e);
+      return audienceCount ?? 0;
     } finally {
       setIsCalculatingCount(false);
     }
@@ -1250,10 +1265,11 @@ export function CreateCampaignDialog({
           toast.error("Selecione ao menos 1 etapa do funil ou marque 'O Funil Todo'.");
           return;
         }
-        if (audienceCount === null) {
-          await calculateAudienceCount();
+        let resolvedCount = audienceCount;
+        if (resolvedCount === null || isCalculatingCount) {
+          resolvedCount = await calculateAudienceCount();
         }
-        if (audienceCount === 0) {
+        if (resolvedCount === 0) {
           toast.error("Nenhum contato qualificado encontrado com os critérios selecionados.");
           return;
         }
