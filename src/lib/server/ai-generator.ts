@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, no-useless-escape */
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { sendPlatformMessage } from "./message-sender";
 import { scheduleMessage, cancelScheduledMessagesForConversation } from "./scheduled-messages";
@@ -643,13 +644,13 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     if (provider === "groq") baseUrl = "https://api.groq.com/openai/v1/chat/completions";
     else if (provider === "openrouter") baseUrl = "https://openrouter.ai/api/v1/chat/completions";
 
-    // 4. Histórico recente de mensagens (35 mensagens para amplitude de contexto)
+    // 4. Histórico recente de mensagens (18 mensagens para manter o foco e evitar perda de contexto)
     const { data: messages } = await supabaseAdmin
       .from("messages")
       .select("content, sender_type, created_at, media_type, transcription")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: false })
-      .limit(35);
+      .limit(18);
 
     if (!messages || messages.length === 0) return;
     messages.reverse();
@@ -851,7 +852,12 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
         : company.business_hours
           ? `HORÁRIOS DA REDE: ${company.business_hours}`
           : null,
-      `LINK INTELIGENTE DE AVALIAÇÃO (PRÉ-PREENCHIDO): ${linkAvaliacao}`,
+      (agent.ai_type === "scheduling" ||
+        agent.name?.toLowerCase().includes("alice") ||
+        agent.allow_scheduling) &&
+      linkAvaliacao
+        ? `LINK INTELIGENTE DE AVALIAÇÃO (PRÉ-PREENCHIDO): ${linkAvaliacao}`
+        : null,
       `--- DIRETRIZES CRÍTICAS DE CONTEXTO E LOCALIZAÇÃO ---`,
       hasSpecificUnit
         ? `1. O cliente está em contato direto com a unidade '${unitName}'. Você está respondendo exclusivamente por esta filial. Não pergunte qual cidade ele prefere, pois a unidade já está definida como '${unitName}'.`
@@ -873,35 +879,20 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
     systemPromptParts.push(contextHeader);
 
-    // Diretriz Mandatória de Ferramentas Nativas, Tamanho de Mensagem e Especialização
+    // Diretrizes Concisas de Ferramentas Nativas e Comunicação Humana
     systemPromptParts.push(`=== DIRETRIZES DE FERRAMENTAS E COMUNICAÇÃO ===
-1. Você dispõe de ferramentas nativas (tools/functions) para criar/atualizar oportunidades no CRM, agendar tarefas, agendar mensagens futuras ('agendar_mensagem'), definir unidade ('definir_unidade'), salvar nome do cliente ('atualizar_nome_cliente'), transferir o atendimento para equipe humana ou colegas, e encerrar o chamado. Chame SEMPRE a ferramenta correspondente nativamente quando o contexto exigir.
-2. É ESTRITAMENTE PROIBIDO escrever tags textuais como '[CRIAR_OPORTUNIDADE]', '[ATUALIZAR_OPORTUNIDADE]', '[TRANSFERIR]', '[TRANSFERIR_AGENTE]', '[ENCERRAR]', '[CRIAR_TAREFA]', '[AGENDAR_MENSAGEM]' ou qualquer comando em colchetes no texto enviado ao cliente.
-3. O cliente é uma pessoa real conversando via ${currentChannel} e NUNCA deve ler comandos técnicos de bastidor. Qualquer tag exposta no texto é uma falha grave.
-4. Para ferramentas que interagem com o cliente (como transferir_atendimento, delegar_para_outro_agente_ia ou encerrar_atendimento), preencha o argumento 'aviso' ou 'despedida' com a mensagem calorosa, curta e natural que o cliente lerá.
-5. AÇÕES DO CRM (OPORTUNIDADES E TAREFAS): Quando o cliente demonstrar interesse em um serviço/procedimento, solicitar proposta, orçamento ou concordar em agendar/comprar, NÃO adie para depois: CHAME IMEDIATAMENTE a ferramenta 'criar_oportunidade' (ou 'atualizar_oportunidade' se já houver uma oportunidade aberta) nesta mesma resposta junto com a mensagem natural ao cliente.
-6. RETORNO / AGENDAMENTO DE MENSAGEM: Se o cliente pedir para chamá-lo mais tarde, amanhã, daqui a algumas horas ou em dia específico (ex: 'me chame amanhã às 10h', 'vou ver com meu marido e te respondo à noite'), use a ferramenta 'agendar_mensagem' com o texto a enviar e a data/horário.
-7. TAMANHO DE MENSAGEM NO CANAL (${currentChannel.toUpperCase()} - RESPOSTAS CURTAS E DIRETAS):
-- REGRA DE OURO DE EXTENSÃO: Na imensa maioria das mensagens (saudações, perguntas simples, triagem, pedidos de WhatsApp/cidade/nome, transições, confirmações ou respostas a 'Sim', 'Ok', 'Tarde'), suas mensagens devem ser SUPER CURTAS: no máximo 1 a 2 linhas (1 frase única ou 2 frases curtinhas)!
-- ÚNICA EXCEÇÃO PERMITIDA: Mensagens só podem ser longas e detalhadas (2 a 3 parágrafos) SE E SOMENTE SE o cliente tiver perguntado explicitamente como funciona um procedimento ou tiver dúvidas clínicas sobre o tratamento (ex: 'como funciona o laser de diodo?', 'dói muito?', 'quantas sessões?', 'clareia a pele?').
-- NUNCA envie blocos de texto ou mini-palestras sobre tecnologia quando estiver apenas coletando informações ou fazendo a triagem.
-- NUNCA envie listas longas com tópicos ou múltiplos emojis por linha. Use no máximo 1 emoji pontual.
-- Termine SEMPRE com apenas UMA pergunta direta e simples.
-8. DIVISÃO CLARA DE RESPONSABILIDADES (CADA IA FAZ APENAS UMA COISA):
-- Cada IA da empresa possui uma especialidade restrita. NUNCA tente abraçar o trabalho de outra IA:
-  * SDR (Triagem): Descobre rapidamente o interesse e intenção. Assim que souber o que o lead quer, passa para a especialista (Vendas ou Agendamento). Não vende nem agenda.
-  * Vendas (Consultora / Closer): Conduz a proposta comercial, valores e fecha a oportunidade no CRM. Assim que o cliente aceitar e for agendar dia/horário da avaliação, passe para a especialista de Agendamento (Alice) com 'delegar_para_outro_agente_ia' ou envie o Link Inteligente de Avaliação (${linkAvaliacao}). NUNCA afirme que o horário foi marcado no sistema sem o envio do link.
-  * Agendamento (Alice): Conduz o agendamento de avaliações enviando o Link Inteligente de Avaliação (${linkAvaliacao}), onde o cliente escolhe com total comodidade o dia/horário oficial na grade da unidade. Para sessões de pacotes já adquiridos, envia o portal https://agenda.esteticaelaser.com.br. Não vende tratamentos nem negocia valores; se o cliente pedir novos procedimentos, passa para Vendas.
-- Quando a necessidade for de competência de outro colega, acione IMEDIATAMENTE 'delegar_para_outro_agente_ia'.
-9. FLUXO ESPECIAL DE MIGRAÇÃO PARA O WHATSAPP (INSTAGRAM DIRECT):
-- Quando estiver atendendo no Instagram Direct, o seu papel é EXCLUSIVO de triagem e acolhimento. Você NÃO atende no WhatsApp e NÃO vende tratamentos nem passa valores no Direct:
-  1) Descubra com simpatia o primeiro nome (se ainda não souber) e o procedimento/região de interesse.
-  2) Pergunte qual cidade/unidade física fica mais próxima para ela (Aracruz, Linhares, Mantena, São Mateus ou Serra).
-  3) Assim que ela indicar a cidade, use 'definir_unidade' e convide para o WhatsApp: explique com carinho que vai passar o contato para as consultoras especialistas da unidade física no WhatsApp para enviar fotos de resultados, detalhes e condições especiais, pedindo o número com DDD.
-  4) REGRA INEGOCIÁVEL: NUNCA passe valores, preços numéricos, parcelas ou orçamentos no Direct do Instagram.
-  5) Assim que o cliente fornecer o número de WhatsApp, chame IMEDIATAMENTE a ferramenta nativa 'chamar_no_whatsapp' informando o telefone, a unidade, o procedimento de interesse e o nome.
-  6) No texto enviado no Instagram, avise calorosamente que você já passou o atendimento para a consultora da unidade de {{unidade}} e que ela já vai chamar a cliente no WhatsApp. O seu papel na conversa encerra aqui.
-================================================`);
+1. FERRAMENTAS NATIVAS: Você dispõe de ferramentas nativas (tools) para executar ações e consultar dados sob demanda (como 'buscar_servicos_combos', 'consultar_playbook', 'criar_oportunidade', 'atualizar_oportunidade', 'criar_tarefa', 'definir_unidade', 'atualizar_nome_cliente', 'transferir_atendimento', 'delegar_para_outro_agente_ia', 'encerrar_atendimento' e 'agendar_mensagem'). Chame SEMPRE a ferramenta correspondente nativamente quando o contexto exigir.
+2. SIGILO TÉCNICO RIGOROSO: É TERMINANTEMENTE PROIBIDO escrever tags textuais como '[CRIAR_OPORTUNIDADE]', '[ATUALIZAR_OPORTUNIDADE]', '[TRANSFERIR]', '[TRANSFERIR_AGENTE]', '[ENCERRAR]', '[CRIAR_TAREFA]', '[AGENDAR_MENSAGEM]' ou comandos entre colchetes no texto ao cliente. O cliente é uma pessoa real conversando via ${currentChannel} e deve receber exclusivamente mensagens naturais e acolhedoras.
+3. EXTENSÃO E ESTILO NO CANAL (${currentChannel.toUpperCase()}):
+- Mensagens super CURTAS e diretas: no máximo 1 a 2 linhas (1 a 2 frases curtas) na imensa maioria das interações.
+- NUNCA envie listas longas, blocos de texto ou palestras técnicas.
+- Termine SEMPRE com apenas UMA pergunta simples e direta para manter a conversa fluida.
+4. CONSULTA DINÂMICA SOB DEMANDA (SEM DADOS FIXOS NO PROMPT):
+- Se você precisar de planos, pacotes, combos ou valores de tratamentos, ACIONE a ferramenta 'buscar_servicos_combos'. Não invente valores nem planos que não foram consultados.
+- Se o cliente tiver dúvidas sobre procedimentos, dor, contraindicações ou dúvidas clínicas/comerciais, ACIONE a ferramenta 'consultar_playbook'.
+5. RESPEITO AO SEU PAPEL:
+- Siga estritamente o seu papel e objetivo configurados no seu perfil.
+- Se o seu papel for qualificar o cliente (SDR / Triagem), colete as informações necessárias (nome, procedimento/área de interesse e unidade/cidade) e transfira para a vendedora ou equipe humana sem tentar negociar ou fechar a venda.`);
 
     if (agent.prompt_personality)
       systemPromptParts.push(cleanPromptDirective(applyVars(agent.prompt_personality)));
@@ -946,80 +937,8 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       }
     }
 
-    // Catálogo Comercial Inteligente de Serviços & Combos (com papéis estratégicos para vendas)
-    let servicesQuery = supabaseAdmin
-      .from("company_services_packages")
-      .select("*")
-      .eq("company_id", effectiveCompanyId)
-      .eq("is_active", true)
-      .order("order_index", { ascending: true });
-
-    if (effectiveUnitId) {
-      servicesQuery = servicesQuery.or(`unit_id.is.null,unit_id.eq.${effectiveUnitId}`);
-    }
-
-    const { data: servicesList } = await servicesQuery;
-    if (servicesList && servicesList.length > 0) {
-      const intermediateList = servicesList.filter((s) => s.strategic_role === "intermediate");
-      const upsellList = servicesList.filter((s) => s.strategic_role === "upsell");
-      const downsellList = servicesList.filter((s) => s.strategic_role === "downsell");
-      const crossSellList = servicesList.filter((s) => s.strategic_role === "cross_sell");
-
-      const formatPkg = (p: any) =>
-        `- ${p.name} (${p.sessions_count} sessões${p.areas?.length ? ` | Áreas: ${p.areas.join(", ")}` : ""}): ` +
-        `${p.installment_text ? `Parcelado em ${p.installment_text} (Cartão Recorrente sem travar limite)` : ""}` +
-        `${p.cash_price ? ` ou R$ ${Number(p.cash_price).toFixed(2)} à vista/PIX` : ""}` +
-        `${p.bonus_gift ? ` [BÔNUS: ${p.bonus_gift}]` : ""}` +
-        `${p.sales_pitch ? ` [DICA DE VENDA: ${p.sales_pitch}]` : ""}`;
-
-      let catalogPrompt =
-        `=== CATÁLOGO OFICIAL DE SERVIÇOS & COMBOS PARA VENDA ===\n` +
-        `Você dispõe da tabela oficial de pacotes e combos abaixo para negociar com os clientes:\n\n`;
-
-      if (intermediateList.length > 0) {
-        catalogPrompt +=
-          `1. OPÇÃO INTERMEDIÁRIA (CARRO-CHEFE / ÂNCORA IDEAL - Ofereça sempre como primeira opção de negociação):\n` +
-          intermediateList.map(formatPkg).join("\n") +
-          "\n\n";
-      }
-      if (downsellList.length > 0) {
-        catalogPrompt +=
-          `2. OPÇÃO DOWNSELL (SALVA-VENDA - Use com empatia se a cliente achar caro, hesitar no orçamento ou preferir começar menor/avulso):\n` +
-          downsellList.map(formatPkg).join("\n") +
-          "\n\n";
-      }
-      if (upsellList.length > 0) {
-        catalogPrompt +=
-          `3. OPÇÃO UPSELL (TICKET MAIOR - Ofereça quando a cliente perguntar de pernas, mais áreas ou quiser o pacote completo com maior economia por área):\n` +
-          upsellList.map(formatPkg).join("\n") +
-          "\n\n";
-      }
-      if (crossSellList.length > 0) {
-        catalogPrompt +=
-          `4. OPÇÃO CROSS-SELL (VENDA CRUZADA - Ofereça com 50% de desconto adicional se a cliente mencionar manchas escuras, foliculite ou queixas de pele):\n` +
-          crossSellList.map(formatPkg).join("\n") +
-          "\n\n";
-      }
-
-      const salesStrategy = (company.custom_variables as any)?.sales_strategy;
-      if (salesStrategy) {
-        if (salesStrategy.campaign_active_name) {
-          catalogPrompt += `\n- CAMPANHA PROMOCIONAL ATIVA: ${salesStrategy.campaign_active_name}`;
-        }
-        if (salesStrategy.campaign_bonus_headline) {
-          catalogPrompt += `\n- BRINDE OFICIAL DE FECHAMENTO: ${salesStrategy.campaign_bonus_headline}`;
-        }
-        if (salesStrategy.consultative_pitch_guidelines) {
-          catalogPrompt += `\n- REGRAS DA GESTÃO: ${salesStrategy.consultative_pitch_guidelines}`;
-        }
-      }
-
-      catalogPrompt += `\n\nDIRETRIZ DE VENDA CONSULTIVA:
-- Use sempre os valores exatos de parcelamento recorrente acima (sempre mencione que o cartão recorrente não trava o limite total do cartão).
-- Respostas curtas de 1 a 2 linhas, terminando com apenas uma pergunta.`;
-
-      systemPromptParts.push(catalogPrompt);
-    }
+    // O catálogo comercial e procedimentos não são injetados estaticamente no prompt para evitar sobrecarga de contexto e perda de foco.
+    // O modelo utiliza as tools sob demanda ('buscar_servicos_combos' e 'consultar_playbook') exatamente como MCP/ReAct.
 
     const systemPrompt = systemPromptParts.join("\n\n");
 
@@ -1380,25 +1299,63 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       },
     });
 
-    // Ferramenta nativa para Consultar Catálogo de Serviços e Combos
+    // Ferramenta nativa para Consultar Catálogo de Serviços e Combos sob demanda
     tools.push({
       type: "function",
       function: {
         name: "buscar_servicos_combos",
         description:
-          "Consulta o catálogo comercial de pacotes, sessões e combos com inteligência de vendas (opção intermediária recomendada, upsell para ticket maior, downsell se a cliente achar caro, e cross-sell para queixas de pele/manchas).",
+          "Consulta sob demanda pacotes, valores, sessões e combos no catálogo comercial oficial com inteligência de vendas (opção intermediária recomendada, upsell para ticket maior, downsell se a cliente achar caro, e cross-sell para queixas de pele/manchas).",
         parameters: {
           type: "object",
           properties: {
             areas: {
               type: "array",
               items: { type: "string" },
-              description: "Áreas do corpo de interesse do cliente (ex: ['virilha', 'axilas']).",
+              description:
+                "Áreas do corpo de interesse do cliente (ex: ['virilha', 'axilas', 'pernas']).",
+            },
+            termo_busca: {
+              type: "string",
+              description:
+                "Termo de busca ou nome do serviço/pacote (ex: 'laser', 'clareamento', 'virilha').",
             },
             estrategia: {
               type: "string",
-              enum: ["apresentacao_inicial", "intermediario", "upsell", "downsell", "cross_sell"],
+              enum: [
+                "apresentacao_inicial",
+                "intermediario",
+                "upsell",
+                "downsell",
+                "cross_sell",
+                "todos",
+              ],
               description: "Estratégia comercial do momento.",
+            },
+          },
+        },
+      },
+    });
+
+    // Ferramenta nativa para Consultar Base de Conhecimento e Playbook sob demanda
+    tools.push({
+      type: "function",
+      function: {
+        name: "consultar_playbook",
+        description:
+          "Consulta sob demanda o Playbook Comercial e Base de Conhecimento da clínica para tirar dúvidas sobre procedimentos, regras clínicas, contraindicações, diferenciais técnicos ou scripts de objeção.",
+        parameters: {
+          type: "object",
+          properties: {
+            termo_busca: {
+              type: "string",
+              description:
+                "Termo ou dúvida do cliente para buscar no playbook (ex: 'dor', 'intervalo', 'contraindicações', 'sol', 'manchas').",
+            },
+            categoria: {
+              type: "string",
+              enum: ["all", "procedure", "faq", "pricing", "objection_script", "policy"],
+              description: "Categoria específica do playbook (opcional).",
             },
           },
         },
@@ -1554,6 +1511,7 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       customerNotice?: string | null;
     } | null = null;
     let openTicketNotice: string | null = null;
+    let hasQueryTools = false;
 
     // A. Processar Native Tool Calls
     if (toolCalls && toolCalls.length > 0) {
@@ -1639,11 +1597,6 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
           if (openTicketData.customerNotice) {
             openTicketNotice = openTicketData.customerNotice;
           }
-        } else if (fnName === "buscar_servicos_combos") {
-          console.log(
-            `[ai-generator] Tool buscar_servicos_combos executed for conv ${conv.id}:`,
-            args,
-          );
         }
       }
     }
@@ -1782,6 +1735,142 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
 
     // Dicionário de resultados das tools executadas para alimentar Turn 2 se necessário
     const toolExecutionResults: Record<string, any> = {};
+
+    // 7.4 Executar Ferramentas de Consulta Sob Demanda (Catálogo e Playbook)
+    if (toolCalls && toolCalls.length > 0) {
+      for (const call of toolCalls) {
+        const fnName = call.function?.name;
+        let args: any = {};
+        try {
+          args =
+            typeof call.function?.arguments === "string"
+              ? JSON.parse(call.function.arguments)
+              : call.function?.arguments || {};
+        } catch (e) {
+          console.error(`[ai-generator] Erro ao parsear args de query tool ${fnName}:`, e);
+        }
+
+        if (fnName === "buscar_servicos_combos") {
+          hasQueryTools = true;
+          const normalizeLocal = (s: string) =>
+            s
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .trim();
+
+          const inputAreas: string[] = Array.isArray(args.areas)
+            ? args.areas.map((a: string) => normalizeLocal(String(a))).filter(Boolean)
+            : [];
+          const searchTerm = args.termo_busca ? normalizeLocal(String(args.termo_busca)) : null;
+
+          let sQuery = supabaseAdmin
+            .from("company_services_packages")
+            .select(
+              "id, name, type, areas, sessions_count, anchor_price, installment_text, installment_value, cash_price, payment_methods, bonus_gift, sales_pitch, strategic_role",
+            )
+            .eq("company_id", effectiveCompanyId)
+            .eq("is_active", true)
+            .order("order_index", { ascending: true });
+
+          if (effectiveUnitId) {
+            sQuery = sQuery.or(`unit_id.is.null,unit_id.eq.${effectiveUnitId}`);
+          }
+
+          const { data: pkgs, error: sErr } = await sQuery;
+          if (sErr || !pkgs || pkgs.length === 0) {
+            toolExecutionResults[call.id] = {
+              encontrado: false,
+              mensagem: "Nenhum pacote ativo encontrado no catálogo para os critérios informados.",
+            };
+          } else {
+            const matched = pkgs.filter((p) => {
+              const pName = normalizeLocal(p.name || "");
+              const pAreas = (p.areas || []).map((a: string) => normalizeLocal(String(a)));
+
+              if (
+                searchTerm &&
+                (pName.includes(searchTerm) || pAreas.some((a: string) => a.includes(searchTerm)))
+              ) {
+                return true;
+              }
+              if (inputAreas.length > 0) {
+                return inputAreas.some(
+                  (ia) =>
+                    pName.includes(ia) ||
+                    pAreas.some((pa: string) => pa.includes(ia) || ia.includes(pa)),
+                );
+              }
+              return !searchTerm && inputAreas.length === 0;
+            });
+
+            const pool = matched.length > 0 ? matched : pkgs.slice(0, 5);
+            toolExecutionResults[call.id] = {
+              encontrado: true,
+              total_encontrados: pool.length,
+              pacotes: pool.map((p) => ({
+                nome: p.name,
+                tipo: p.type,
+                areas: p.areas,
+                sessoes: p.sessions_count,
+                parcelamento:
+                  p.installment_text ||
+                  (p.installment_value
+                    ? `12x de R$ ${Number(p.installment_value).toFixed(2)}`
+                    : null),
+                a_vista: p.cash_price ? `R$ ${Number(p.cash_price).toFixed(2)}` : null,
+                bonus: p.bonus_gift,
+                dica_venda: p.sales_pitch,
+                papel_estrategico: p.strategic_role,
+              })),
+            };
+            console.log(
+              `[ai-generator] Tool buscar_servicos_combos retornou ${pool.length} pacotes para conv ${conv.id}`,
+            );
+          }
+        } else if (fnName === "consultar_playbook") {
+          hasQueryTools = true;
+          let pbQuery = supabaseAdmin
+            .from("sales_playbook_procedures")
+            .select("title, category, content, key_points, target_audience")
+            .eq("company_id", effectiveCompanyId)
+            .eq("is_active", true)
+            .limit(4);
+
+          if (args.categoria && args.categoria !== "all") {
+            pbQuery = pbQuery.eq("category", args.categoria);
+          }
+          if (args.termo_busca && typeof args.termo_busca === "string" && args.termo_busca.trim()) {
+            const term = args.termo_busca.trim();
+            pbQuery = pbQuery.or(
+              `title.ilike.%${term}%,content.ilike.%${term}%,key_points.ilike.%${term}%`,
+            );
+          }
+
+          const { data: pbData, error: pbErr } = await pbQuery;
+          if (pbErr || !pbData || pbData.length === 0) {
+            toolExecutionResults[call.id] = {
+              encontrado: false,
+              mensagem:
+                "Nenhuma instrução específica encontrada no playbook para os critérios informados.",
+            };
+          } else {
+            toolExecutionResults[call.id] = {
+              encontrado: true,
+              procedimentos: pbData.map((d) => ({
+                titulo: d.title,
+                categoria: d.category,
+                conteudo: d.content,
+                pontos_chave: d.key_points,
+              })),
+            };
+            console.log(
+              `[ai-generator] Tool consultar_playbook retornou ${pbData.length} procedimentos para conv ${conv.id}`,
+            );
+          }
+        }
+      }
+    }
 
     // 7.5 Executar Definição de Unidade e Atualização de Nome do Cliente
     if (setUnitData && effectiveCompanyId) {
@@ -2735,18 +2824,19 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       }
     }
 
-    // 9. Se o modelo chamou ferramentas de CRM ou migração mas não gerou o texto do cliente, executar Turn 2
+    // 9. Se o modelo chamou ferramentas de consulta (ReAct) ou CRM mas precisa formular a resposta ao cliente, executar Turn 2
     const hasTransferToWa = toolCalls?.some((tc) => tc.function?.name === "chamar_no_whatsapp");
-    if (
+    const shouldRunTurn2 =
       toolCalls &&
       toolCalls.length > 0 &&
       !isHandoff &&
       !transferAgentInput &&
       (!isResolve || hasTransferToWa) &&
-      (!cleanResponse || cleanResponse.trim().length === 0)
-    ) {
+      (hasQueryTools || !cleanResponse || cleanResponse.trim().length === 0);
+
+    if (shouldRunTurn2) {
       console.log(
-        `[ai-generator] LLM called CRM tools without customer text. Executing Turn 2 for response...`,
+        `[ai-generator] Executing Turn 2 (hasQueryTools=${hasQueryTools}, cleanResponseEmpty=${!cleanResponse})...`,
       );
       const followUpMessages = [
         ...formattedMessages,
