@@ -1736,7 +1736,83 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
     // Dicionário de resultados das tools executadas para alimentar Turn 2 se necessário
     const toolExecutionResults: Record<string, any> = {};
 
-    // 7.4 Executar Ferramentas de Consulta Sob Demanda (Catálogo e Playbook)
+    // 7.4 Executar Definição de Unidade e Atualização de Nome do Cliente (prioridade para contexto local)
+    if (setUnitData && effectiveCompanyId) {
+      const cleanUnitInput = setUnitData.trim();
+      const normalizeStr = (s: string) =>
+        s
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .trim();
+      const searchNorm = normalizeStr(cleanUnitInput);
+
+      let matchedUnit = allCompanyUnits?.find((u) => {
+        const uNorm = normalizeStr(u.name);
+        return uNorm.includes(searchNorm) || searchNorm.includes(uNorm);
+      });
+
+      if (!matchedUnit) {
+        const { data: dbMatched } = await supabaseAdmin
+          .from("units")
+          .select("id, name")
+          .eq("company_id", effectiveCompanyId)
+          .ilike("name", `%${cleanUnitInput}%`)
+          .limit(1)
+          .maybeSingle();
+        if (dbMatched) matchedUnit = dbMatched as any;
+      }
+
+      if (matchedUnit) {
+        effectiveUnitId = matchedUnit.id;
+        await supabaseAdmin
+          .from("conversations")
+          .update({ unit_id: matchedUnit.id })
+          .eq("id", conversationId);
+
+        if (conv.contact_id) {
+          await supabaseAdmin
+            .from("contacts")
+            .update({ unit_id: matchedUnit.id })
+            .eq("id", conv.contact_id);
+        }
+
+        await supabaseAdmin.from("messages").insert({
+          conversation_id: conversationId,
+          sender_type: "agent",
+          is_internal: true,
+          content: `📍 Unidade definida pela IA: ${matchedUnit.name}`,
+        });
+
+        for (const call of toolCalls) {
+          if (call.function?.name === "definir_unidade") {
+            toolExecutionResults[call.id] = {
+              status: "success",
+              message: `Unidade vinculada com sucesso: '${matchedUnit.name}'.`,
+            };
+          }
+        }
+      }
+    }
+
+    if (updateClientNameData && conv.contact_id) {
+      const cleanName = updateClientNameData.trim();
+      const igUsername = (conv.contacts as any)?.instagram_username || null;
+      if (cleanName.length >= 2 && !isPlaceholderOrUsername(cleanName, igUsername)) {
+        await supabaseAdmin.from("contacts").update({ name: cleanName }).eq("id", conv.contact_id);
+
+        for (const call of toolCalls) {
+          if (call.function?.name === "atualizar_nome_cliente") {
+            toolExecutionResults[call.id] = {
+              status: "success",
+              message: `Nome do cliente salvo no CRM como '${cleanName}'.`,
+            };
+          }
+        }
+      }
+    }
+
+    // 7.5 Executar Ferramentas de Consulta Sob Demanda (Catálogo e Playbook)
     if (toolCalls && toolCalls.length > 0) {
       for (const call of toolCalls) {
         const fnName = call.function?.name;
@@ -1867,82 +1943,6 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
             console.log(
               `[ai-generator] Tool consultar_playbook retornou ${pbData.length} procedimentos para conv ${conv.id}`,
             );
-          }
-        }
-      }
-    }
-
-    // 7.5 Executar Definição de Unidade e Atualização de Nome do Cliente
-    if (setUnitData && effectiveCompanyId) {
-      const cleanUnitInput = setUnitData.trim();
-      const normalizeStr = (s: string) =>
-        s
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .trim();
-      const searchNorm = normalizeStr(cleanUnitInput);
-
-      let matchedUnit = allCompanyUnits?.find((u) => {
-        const uNorm = normalizeStr(u.name);
-        return uNorm.includes(searchNorm) || searchNorm.includes(uNorm);
-      });
-
-      if (!matchedUnit) {
-        const { data: dbMatched } = await supabaseAdmin
-          .from("units")
-          .select("id, name")
-          .eq("company_id", effectiveCompanyId)
-          .ilike("name", `%${cleanUnitInput}%`)
-          .limit(1)
-          .maybeSingle();
-        if (dbMatched) matchedUnit = dbMatched as any;
-      }
-
-      if (matchedUnit) {
-        effectiveUnitId = matchedUnit.id;
-        await supabaseAdmin
-          .from("conversations")
-          .update({ unit_id: matchedUnit.id })
-          .eq("id", conversationId);
-
-        if (conv.contact_id) {
-          await supabaseAdmin
-            .from("contacts")
-            .update({ unit_id: matchedUnit.id })
-            .eq("id", conv.contact_id);
-        }
-
-        await supabaseAdmin.from("messages").insert({
-          conversation_id: conversationId,
-          sender_type: "agent",
-          is_internal: true,
-          content: `📍 Unidade definida pela IA: ${matchedUnit.name}`,
-        });
-
-        for (const call of toolCalls) {
-          if (call.function?.name === "definir_unidade") {
-            toolExecutionResults[call.id] = {
-              status: "success",
-              message: `Unidade vinculada com sucesso: '${matchedUnit.name}'.`,
-            };
-          }
-        }
-      }
-    }
-
-    if (updateClientNameData && conv.contact_id) {
-      const cleanName = updateClientNameData.trim();
-      const igUsername = (conv.contacts as any)?.instagram_username || null;
-      if (cleanName.length >= 2 && !isPlaceholderOrUsername(cleanName, igUsername)) {
-        await supabaseAdmin.from("contacts").update({ name: cleanName }).eq("id", conv.contact_id);
-
-        for (const call of toolCalls) {
-          if (call.function?.name === "atualizar_nome_cliente") {
-            toolExecutionResults[call.id] = {
-              status: "success",
-              message: `Nome do cliente salvo no CRM como '${cleanName}'.`,
-            };
           }
         }
       }
@@ -2840,7 +2840,11 @@ export async function generateAndSendAiResponse(conversationId: string, companyI
       );
       const followUpMessages = [
         ...formattedMessages,
-        messageObj,
+        {
+          role: "assistant" as const,
+          content: messageObj?.content || null,
+          tool_calls: toolCalls,
+        },
         ...toolCalls.map((tc) => ({
           role: "tool" as const,
           tool_call_id: tc.id,
